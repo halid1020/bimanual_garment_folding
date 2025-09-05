@@ -20,13 +20,35 @@ class RandomPickAndFling(Agent):
             return actions
 
         def single_act(self, state):
+
+            mask = state['observation']['mask']
+            if len(mask.shape) == 3:
+                mask = mask[:, :, 0]
             
-            normalized_action = np.random.uniform(-1, 1, size=(4))
+            mask_coords = np.argwhere(mask)
+            if len(mask_coords) == 0:
+                return {
+                    'pick_0': normalized_action[:2],
+                    'pick_1': normalized_action[2:]
+                }
+                
+            pick0_pixel = mask_coords[np.random.randint(len(mask_coords))]
+            pick0_pixel = pick0_pixel.astype(np.float32)
+            pick0_pixel[0] = pick0_pixel[0] / mask.shape[0] * 2 - 1
+            pick0_pixel[1] = pick0_pixel[1] / mask.shape[1] * 2 - 1
+
+            pick1_pixel = mask_coords[np.random.randint(len(mask_coords))]
+            pick1_pixel = pick1_pixel.astype(np.float32)
+            pick1_pixel[0] = pick1_pixel[0] / mask.shape[0] * 2 - 1
+            pick1_pixel[1] = pick1_pixel[1] / mask.shape[1] * 2 - 1
             
-            return {
-                'pick_0': normalized_action[:2],
-                'pick_1': normalized_action[2:]
+            
+            action = {
+                'pick_0': pick0_pixel,
+                'pick_1': pick1_pixel,
             }
+
+            return action
             
             
         def get_phase(self):

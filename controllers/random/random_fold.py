@@ -2,7 +2,7 @@ from agent_arena import Agent
 import numpy as np
 import cv2
 
-class RandomPickAndPlace(Agent):
+class RandomFold(Agent):
     
     def __init__(self, config):
         super().__init__(config)

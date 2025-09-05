@@ -2,7 +2,7 @@ from agent_arena import Agent
 import numpy as np
 import cv2
 
-class RandomPickAndPlace(Agent):
+class RandomPickAndDrag(Agent):
     
     def __init__(self, config):
         super().__init__(config)
@@ -27,7 +27,6 @@ class RandomPickAndPlace(Agent):
                 'pick_0': np.random.uniform(-1, 1, 2),
                 'place_0': np.random.uniform(-1, 1, 2),
                 'pick_1': np.random.uniform(-1, 1, 2),
-                'place_1': np.random.uniform(-1, 1, 2)
             }
         
         pick0_pixel = mask_coords[np.random.randint(len(mask_coords))]
@@ -46,7 +45,6 @@ class RandomPickAndPlace(Agent):
             'pick_0': pick0_pixel,
             'place_0': np.random.uniform(-1, 1, 2),
             'pick_1': pick1_pixel,
-            'place_1': np.random.uniform(-1, 1, 2)
         }
       
         

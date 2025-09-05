@@ -5,6 +5,8 @@ import random
 
 from .random_pick_and_place import RandomPickAndPlace
 from .random_pick_and_fling import RandomPickAndFling
+from .random_pick_and_drag import RandomPickAndDrag
+from .random_fold import RandomFold
 
 class RandomMultiPrimitive(Agent):
     
@@ -13,11 +15,15 @@ class RandomMultiPrimitive(Agent):
         super().__init__(config)
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
-            "norm-pixel-pick-and-place"
+            "norm-pixel-pick-and-place",
+            "norm-pixel-pick-and-drag",
+            "norm-pixel-fold",
         ]
         self.primitive_instances = [
             RandomPickAndFling(config),
-            RandomPickAndPlace(config)]
+            RandomPickAndPlace(config),
+            RandomPickAndDrag(config),
+            RandomFold(config)]
     
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
@@ -36,6 +42,8 @@ class RandomMultiPrimitive(Agent):
         actions = []
         for info in info_list:
             actions.append(self.single_act(info))
+        
+        print('random action', actions[0])
         
         return actions
     

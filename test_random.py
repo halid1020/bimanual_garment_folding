@@ -5,17 +5,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from dotmap import DotMap
 
-from controllers.human.human_multi_primitive import HumanMultiPrimitive
+from controllers.random.random_multi_primitive import RandomMultiPrimitive
 
 def main():
 
    
     arena_name = 'softgym|domain:clothfunnels-realadapt-longsleeve,task:flattening,horizon:10'
-    agent_name = 'human-pixel-pick-and-place-1'
 
 
     arena = ag_ar.build_arena(arena_name + ',disp:True')
-    agent = HumanMultiPrimitive(DotMap())
+    agent = RandomMultiPrimitive(DotMap())
     #logger = ag_ar.build_logger(arena.logger_name, config.save_dir)
 
     res = perform_single(arena, agent, mode='eval', 

@@ -4,19 +4,26 @@ import cv2
 
 from .pick_and_place.pixel_human_two_picker import PixelHumanTwoPicker
 from .pick_and_fling.pixel_human import PixelHumanFling
+from .human_pick_and_drag import HumanPickAndDrag
+from .human_fold import HumanFold
 
-class PixelMultiPrimitive(Agent):
+class HumanMultiPrimitive(Agent):
     
     def __init__(self, config):
         
         super().__init__(config)
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
-            "norm-pixel-pick-and-place"
+            "norm-pixel-pick-and-place",
+            "norm-pixel-pick-and-drag",
+            "norm-pixel-fold",
         ]
         self.primitive_instances = [
             PixelHumanFling(config),
-            PixelHumanTwoPicker(config)]
+            PixelHumanTwoPicker(config),
+            HumanPickAndDrag(config),
+            HumanFold(config)
+        ]
     
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
@@ -46,24 +53,25 @@ class PixelMultiPrimitive(Agent):
         """
 
         # Extract the RGB and goal images
+                    ## make it bgr to rgb using cv2
         rgb = state['observation']['rgb']
         goal_rgb = state['goal']['rgb']
 
-        # Ensure both are in correct format (uint8 BGR for OpenCV)
-        if rgb.dtype != np.uint8:
-            rgb = (rgb * 255).astype(np.uint8)
-        if goal_rgb.dtype != np.uint8:
-            goal_rgb = (goal_rgb * 255).astype(np.uint8)
+        rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+        goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
 
-        # Convert RGB to BGR for OpenCV display
-        rgb_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        goal_bgr = cv2.cvtColor(goal_rgb, cv2.COLOR_RGB2BGR)
+        ## resize
+        rgb = cv2.resize(rgb, (512, 512))
+        goal_rgb = cv2.resize(goal_rgb, (512, 512))
+        
+        # Create a copy of the image to draw on
+        img = rgb.copy()
 
-        # Combine images side by side
-        combined = np.hstack((rgb_bgr, goal_bgr))
+        # put img and goal_img side by side
+        img = np.concatenate([img, goal_rgb], axis=1)
 
         # Show window
-        cv2.imshow("Current RGB (left) | Goal RGB (right)", combined)
+        cv2.imshow("Current RGB (left) | Goal RGB (right)", img)
         cv2.waitKey(1)  # Keeps the window responsive
 
         chosen_primitive = None

@@ -10,7 +10,7 @@ from controllers.human.human_multi_primitive import HumanMultiPrimitive
 def main():
 
    
-    arena_name = 'softgym|domain:clothfunnels-realadapt-longsleeve,task:flattening,horizon:10'
+    arena_name = 'softgym|domain:clothfunnels-longsleeve,task:flattening,horizon:10'
     agent_name = 'human-pixel-pick-and-place-1'
 
 
@@ -19,7 +19,7 @@ def main():
     #logger = ag_ar.build_logger(arena.logger_name, config.save_dir)
 
     res = perform_single(arena, agent, mode='eval', 
-        episode_config=None, collect_frames=False)
+        episode_config={'eid':0, 'save_video': False}, collect_frames=False)
     
     
 

@@ -42,9 +42,11 @@ class DomainBuilder():
         config = DotMap(config)
         if task == 'flattening':
             task = GarmentFlatteningTask()
-        else task == 'center-sleeve-fold':
+        elif task == 'center-sleeve-fold':
             assert 'tshirt' in 'domain'
             task = CentreSleeveFoldingTask()
+        else:
+            raise NotImplementedError
         
         if ray:
             env = ClothFunnelEnvRay.remote(config)

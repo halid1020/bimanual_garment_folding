@@ -12,19 +12,18 @@ from tqdm import tqdm
 
 
 from agent_arena.arena.softgym.picker_action_wrappers.hybrid_action_primitive import HybridActionPrimitive
-from .garment_env_logger import ClothFunnelLogger
-from .clothfunnel_utils import set_scene, \
+from .garment_env_logger import GarmentEnvLogger
+from .utils.env_utils import set_scene, \
     get_max_IoU, calculate_iou
 from .camera_utils import get_camera_matrix
 
 import ray
 
-global CLOTH_FUNNEL_ENV_NUM
-CLOTH_FUNNEL_ENV_NUM = 0
+global ENV_NUM
+ENV_NUM = 0
 
 # @ray.remote
-class SingleTshirtEnv(Arena):
-    name = 'cloth_funnel_env'
+class SingleTshirtFixedInitialEnv(Arena):
     
     def __init__(self, config):
         self.config = config
@@ -34,7 +33,7 @@ class SingleTshirtEnv(Arena):
         self.logger = GarmentEnvLogger()
         self.random_reset = False
         self.set_id(0)
-        self.name =f'single-tshirt-env'
+        self.name =f'single-tshirt-fixed-init-env'
         
         # Softgym Setup
         self._get_sim_config()
@@ -66,7 +65,8 @@ class SingleTshirtEnv(Arena):
         self._observation_image_shape = config.observation_image_shape \
             if 'observation_image_shape' in config else (480, 480, 3)
 
-        
+        self.init_state_path = # TODO
+        self.object = 'longsleeve'
         self._get_init_state_keys()
 
         
@@ -97,7 +97,7 @@ class SingleTshirtEnv(Arena):
         self.camera_size = self.camera_config['cam_size']
 
     def _get_sim_config(self):
-        from .clothfunnel_utils import get_default_config
+        from .utils.env_utils import get_default_config
         self.default_config = get_default_config()
 
     def set_task(self, task):
@@ -112,7 +112,6 @@ class SingleTshirtEnv(Arena):
        
     ## TODO: if eid is out of range, we need to raise an error.   
     def reset(self, episode_config=None):
-        #print('reset')
         if episode_config == None:
             episode_config = {
                 'eid': None,
@@ -121,15 +120,7 @@ class SingleTshirtEnv(Arena):
         if 'save_video' not in episode_config:
             episode_config['save_video'] = False
         
-        if 'eid' not in episode_config or episode_config['eid'] is None:
-
-            # randomly select an episode whose 
-            # eid equals to the number of episodes%CLOTH_FUNNEL_ENV_NUM = self.id
-            if self.mode == 'train':
-                episode_config['eid'] = np.random.randint(self.num_train_tasks)
-            else:
-                episode_config['eid'] = np.random.randint(self.num_eval_tasks)
-           
+        episode_config['eid'] = 0 
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
 
@@ -213,11 +204,6 @@ class SingleTshirtEnv(Arena):
             'arena_id': self.id,
             'action_space': self.get_action_space(),
         })
-
-        ## plot observation rgb
-        # rgb = info['observation']['rgb']   
-        # import matplotlib.pyplot as plt
-        # plt.imsave('obs.png', rgb)
 
         for k, v in info['goal'].items():
             info['observation'][f'goal-{k}'] = v
@@ -379,9 +365,6 @@ class SingleTshirtEnv(Arena):
     
     def _get_normalised_coverage(self):
         res = self._get_coverage() / self.flatten_coverage
-        #print('flatten coverage', self.flatten_coverage)
-        #print('coverage', self._get_coverage())
-        # clip between 0 and 1
         return np.clip(res, 0, 1)
 
 
@@ -427,12 +410,6 @@ class SingleTshirtEnv(Arena):
     def _get_picker_position(self):
         pos = self._get_picker_pos()
         return pos[:, :3].copy()
-    
-    # def _reset_end_effectors(self):
-    #     self.action_tool.movep(
-    #         self,
-    #         self.config.picker_initial_pos, 
-    #         vel=0.1)
         
     def _step_sim(self):
         pyflex.step()
@@ -456,16 +433,12 @@ class SingleTshirtEnv(Arena):
 
     
     def _render(self, mode='rgb', camera_name='default_camera', resolution=None, background=False):
-        #self._update_camera(camera_name)
-        #pyflex.step()
-        #print('pyflex render start')
+
         if not background:
             img, depth_img = pyflex.render_cloth()
         else:
             img, depth_img = pyflex.render()
-        ## print statistics of depth image
-        #print('depth stats', depth_img.min(), depth_img.max(), depth_img.mean(), depth_img.std())
-        #print('pyflex render done')#
+
         CAMERA_WIDTH = self.camera_config['cam_size'][0]
         CAMERA_HEIGHT = self.camera_config['cam_size'][1]
 
@@ -506,8 +479,6 @@ class SingleTshirtEnv(Arena):
         return rgb.sum(axis=2) > 0
     
     def _get_init_keys_helper(self, hdf5_path, key_file, difficulties=['hard', 'easy']):
-        # print('hdf5_path', hdf5_path)
-        # print('key_file', key_file)
 
         if os.path.exists(key_file):
             with open(key_file, 'r') as f:
@@ -539,10 +510,7 @@ class SingleTshirtEnv(Arena):
                     if cloth_mask.sum() > 500:
                         
                         keys.append(key)
-                        # if 6 <= len(keys) <= 10:
-                        #     print(f"eid {len(keys) - 1}, keys {keys[-1]}, sum of mask {cloth_mask.sum()}")
-                        #     from matplotlib import pyplot as plt
-                        #     plt.imsave(f'cloth_mask_{len(keys) - 1}.png', cloth_mask)
+                        
             # save the keys
             with open(key_file, 'w') as f:
                 json.dump(keys, f)
@@ -550,43 +518,30 @@ class SingleTshirtEnv(Arena):
 
     def _get_init_state_keys(self):
         
-        eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-eval.hdf5')
-        train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-train.hdf5')
+        path = os.path.join(self.init_state_path, f'multi-{self.object}-eval.hdf5')
+        #train_path = os.path.join(self.init_state_path, f'multi-{self.object}-train.hdf5')
 
-        eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
-        train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
+        key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
+        #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')
 
-        self.eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
-        self.train_keys = self._get_init_keys_helper(train_path, train_key_file)
+        self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
         
         # print len of keys
-        self.num_eval_tasks = len(self.eval_keys)
-        self.num_train_tasks = len(self.train_keys)
-        print(f'Number of eval trials: {self.num_eval_tasks}')
-        print(f'Number of train trials: {self.num_train_tasks}')
+        self.num_trials = 1 #len(self.eval_keys)
 
     def _get_init_state_params(self, eid):
-        if self.mode == 'train':
-            keys = self.train_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-train.hdf5')
-        else:
-            keys = self.eval_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-eval.hdf5')
-
-        key = keys[eid]
+            
+        hdf5_path = os.path.join(self.init_state_path, f'multi-{self.object}-eval.hdf5')
+        key = self.keys[eid]
         with h5py.File(hdf5_path, 'r') as init_states:
-            # print(hdf5_path, key)
-            # Convert group to dict
+
             group = init_states[key]
             episode_params = dict(group.attrs)
             
-            # If there are datasets in the group, add them to the dictionary
-            #print('group keys', group.keys())
             for dataset_name in group.keys():
                 episode_params[dataset_name] = group[dataset_name][()]
 
             self.episode_params = episode_params
-            #print('episode_params', episode_params.keys())
 
         return episode_params
     

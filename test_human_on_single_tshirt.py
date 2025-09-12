@@ -13,7 +13,7 @@ def main():
 
 
     arena = DomainBuilder.build_from_config(
-        domain='single-tshirt',
+        domain='single-tshirt-fixed-initial',
         task='center-sleeve-folding',
         horizon=10,
         disp=True,

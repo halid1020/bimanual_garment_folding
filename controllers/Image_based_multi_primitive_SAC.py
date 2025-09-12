@@ -1,19 +1,3 @@
-"""
-SAC-based RL agent implementing the project's TrainableAgent interface.
-
-This version integrates both environment interaction (with a single Arena instance)
-and network training. The agent collects transitions by rolling out in the arena,
-adds them to the replay buffer, and then performs SAC gradient updates.
-
-Design summary:
-- Input: N context images from arena info dict (key: 'context_images').
-- Encoder: CNN producing encoding vector z.
-- Actors: K actor networks producing candidate actions.
-- Critics: K critic networks evaluating (z, action) pairs.
-- Action selection: choose action from actor whose critic gives max Q.
-- Training: collect rollouts in `arena[0]`, push to replay buffer, update networks.
-"""
-
 from __future__ import annotations
 
 import math
@@ -28,6 +12,8 @@ import torch.nn.functional as F
 from ..utilities.types import ActionType, InformationType
 from .trainable_agent import TrainableAgent
 from dotmap import DotMap
+from .networks import *
+from .replay_buffer import ReplayBuffer
 
 # ------------------------------ Utilities ----------------------------------
 
@@ -129,17 +115,13 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
 
     def act(self, info_list: List[InformationType], update: bool = False) -> List[ActionType]:
-        
         self.set_eval()
         with torch.no_grad():
             return [self._select_action(info, stochastic=False) for info in info_list]
 
 
     def explore_act(self, info_list: List[InformationType]) -> List[ActionType]:
-        self.encoder.eval()
-        for a in self.actors: a.eval()
-        for c in self.critics: c.eval()
-
+        self.set_eval()
         with torch.no_grad():
             return [self._select_action(info, stochastic=True) for info in info_list]
 
@@ -213,8 +195,6 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         self.replay.add(img_obs, action, reward, next_img_obs, done)
         self.total_act_steps += 1
-
-        
 
     def train(self, update_steps: int, arenas: Optional[List[Any]] = None) -> bool:
         if arenas is None or len(arenas) == 0:

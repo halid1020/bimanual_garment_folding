@@ -13,3 +13,4 @@ python env/generate_initial_states.py     \
 ```
 
 1. Fix the problem for `generate_initial_states.py`
+2. mask-biased exploration might be needed for reducing the exploration space.

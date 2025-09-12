@@ -26,8 +26,8 @@ def default_config() -> DotMap:
     cfg.encoder.kernel = 3
     cfg.encoder.pool = 2
 
-    cfg.num_context = 4
-    cfg.image_shape = (3, 64, 64)
+    cfg.context_horizon = 5
+    cfg.each_image_shape = (3, 64, 64) # RGB
     cfg.action_dim = 6
     cfg.num_primitives = 5
     cfg.hidden_dim = 256
@@ -45,14 +45,6 @@ def default_config() -> DotMap:
     cfg.save_dir = None
     return cfg
 
-
-
-
-
-
-
-# ------------------------------ SACAgent ----------------------------------
-
 class ImageBasedMultiPrimitiveSAC(TrainableAgent):
     def __init__(self, config: Optional[DotMap] = None):
         cfg = default_config() if config is None else config
@@ -62,7 +54,8 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.device = torch.device(cfg.device)
 
         C, H, W = cfg.image_shape
-        self.encoder = ConvEncoder(C, cfg.encoder.cnn_channels, cfg.encoder.out_dim).to(self.device)
+        self.input_channel = cfg.context_horizon*C
+        self.encoder = ConvEncoder(self.input_channel, cfg.encoder.cnn_channels, cfg.encoder.out_dim).to(self.device)
         enc_dim = cfg.encoder.out_dim
 
         self.K = int(cfg.num_primitives)
@@ -81,7 +74,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
         self.target_entropy = float(cfg.target_entropy)
 
-        self.replay = ReplayBuffer(cfg.replay_capacity, cfg.image_shape, cfg.num_context, self.action_dim, self.device)
+        self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.action_dim, self.device)
         self.total_update_steps = 0
         self.loaded = False
 

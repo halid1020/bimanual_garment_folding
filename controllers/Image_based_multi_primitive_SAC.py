@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
+import wandb
 
 import numpy as np
 import torch
@@ -43,7 +44,32 @@ def default_config() -> DotMap:
     cfg.target_entropy = -cfg.action_dim
     cfg.max_grad_norm = 10.0
     cfg.save_dir = None
+
+    cfg.num_primitives = 5
+    cfg.action_dims = [2, 3, 4, 6, 8]
+
     return cfg
+
+class WandbLogger:
+    def __init__(self, project: str = "rl-project", name: Optional[str] = None, config: Optional[dict] = None):
+        self.project = project
+        self.name = name
+        self.config = config or {}
+        self.run = wandb.init(project=self.project, name=self.name, config=self.config)
+        self.logdir = None
+
+    def set_log_dir(self, logdir: str) -> None:
+        """Set log directory (also saves W&B files there)."""
+        self.logdir = logdir
+        os.makedirs(logdir, exist_ok=True)
+        wandb.run.config.update({"logdir": logdir}, allow_val_change=True)
+
+    def log(self, metrics: dict, step: Optional[int] = None) -> None:
+        """Log a dictionary of metrics to W&B."""
+        wandb.log(metrics, step=step)
+
+    def finish(self):
+        wandb.finish()
 
 class ImageBasedMultiPrimitiveSAC(TrainableAgent):
     def __init__(self, config: Optional[DotMap] = None):
@@ -61,11 +87,17 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.K = int(cfg.num_primitives)
         self.action_dim = int(cfg.action_dim)
 
-        self.actors = nn.ModuleList([MLPActor(enc_dim, self.action_dim, cfg.hidden_dim) for _ in range(self.K)]).to(self.device)
-        self.critics = nn.ModuleList([Critic(enc_dim + self.action_dim, cfg.hidden_dim) for _ in range(self.K)]).to(self.device)
-        self.critics_target = nn.ModuleList([Critic(enc_dim + self.action_dim, cfg.hidden_dim) for _ in range(self.K)]).to(self.device)
-        for tgt, src in zip(self.critics_target, self.critics):
-            tgt.load_state_dict(src.state_dict())
+        self.actors = nn.ModuleList([
+            MLPActor(enc_dim, cfg.action_dims[k], cfg.hidden_dim) for k in range(self.K)
+        ]).to(self.device)
+
+        self.critics = nn.ModuleList([
+            Critic(enc_dim + cfg.action_dims[k], cfg.hidden_dim) for k in range(self.K)
+        ]).to(self.device)
+
+        self.critics_target = nn.ModuleList([
+            Critic(enc_dim + cfg.action_dims[k], cfg.hidden_dim) for k in range(self.K)
+        ]).to(self.device)
 
         self.actor_optimizers = [torch.optim.Adam(a.parameters(), lr=cfg.actor_lr) for a in self.actors]
         self.critic_optim = torch.optim.Adam(self.critics.parameters(), lr=cfg.critic_lr)
@@ -77,6 +109,11 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.action_dim, self.device)
         self.total_update_steps = 0
         self.loaded = False
+        self.logger = WandbLogger(
+            project="multi-primitive-sac",
+            name=self.name,
+            config=dict(cfg)
+        )
 
     def _select_action(self, info: InformationType, stochastic: bool) -> np.ndarray:
         obs =  info["observation"]["image"]
@@ -130,6 +167,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         z_next = self.encoder(next_context)
         alpha = self.log_alpha.exp()
 
+        # -------- critic update --------
         with torch.no_grad():
             next_qs, next_logps = [], []
             for k in range(self.K):
@@ -137,11 +175,14 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
                 q_next = self.critics_target[k](torch.cat([z_next, a_next], dim=-1))
                 next_qs.append(q_next)
                 next_logps.append(logp_next)
+
             next_qs_stacked = torch.stack(next_qs, dim=0).squeeze(-1)
             next_logp_stacked = torch.stack(next_logps, dim=0).squeeze(-1)
             best_next_q, best_idx = next_qs_stacked.max(dim=0)
             best_next_logp = next_logp_stacked[best_idx, torch.arange(context.size(0))]
-            target_q = reward + (1 - done) * cfg.gamma * (best_next_q.unsqueeze(-1) - alpha * best_next_logp.unsqueeze(-1))
+            target_q = reward + (1 - done) * cfg.gamma * (
+                best_next_q.unsqueeze(-1) - alpha * best_next_logp.unsqueeze(-1)
+            )
 
         critic_inputs = torch.cat([z, action], dim=-1)
         q_preds = [self.critics[k](critic_inputs) for k in range(self.K)]
@@ -154,6 +195,12 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         nn.utils.clip_grad_norm_(self.critics.parameters(), cfg.max_grad_norm)
         self.critic_optim.step()
 
+        # Log per-critic loss
+        for k, q_pred in enumerate(q_preds):
+            indiv_loss = F.mse_loss(q_pred, target_q).item()
+            self.logger.log({"critic_loss/primitive_{}".format(k): indiv_loss})
+
+        # -------- actor update --------
         for k in range(self.K):
             a_sample, logp, _ = self.actors[k].sample(z)
             q_val = self.critics[k](torch.cat([z, a_sample], dim=-1))
@@ -163,6 +210,10 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             nn.utils.clip_grad_norm_(self.actors[k].parameters(), cfg.max_grad_norm)
             self.actor_optimizers[k].step()
 
+            # Log per-actor loss
+            self.logger.log({"actor_loss/primitive_{}".format(k): actor_loss.item()})
+
+        # -------- alpha update --------
         logp_for_alpha = [self.actors[k].sample(z)[1] for k in range(self.K)]
         logp_mean = torch.cat(logp_for_alpha, dim=1).mean()
         alpha_loss = -(self.log_alpha * (logp_mean + self.target_entropy)).mean()
@@ -170,13 +221,25 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         alpha_loss.backward()
         self.alpha_optim.step()
 
+        # Log alpha
+        self.logger.log({"alpha": self.log_alpha.exp().item()})
+
+        # -------- soft update --------
         for k in range(self.K):
             self._soft_update(self.critics[k], self.critics_target[k], cfg.tau)
 
     def _collect_from_arena(self, arena):
         if self.last_done:
             info = arena.reset()
-        
+           
+            self.logger.log({
+                "train/episode_return": self.episode_return,
+                "train/episode_length": self.episode_length,
+            })
+
+            self.episode_return = 0.0
+            self.episode_length = 0
+
         img_obs = info['observation']['image']
         action = self.act([info])[0]
         next_info = arena.step(action)
@@ -188,6 +251,10 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         self.replay.add(img_obs, action, reward, next_img_obs, done)
         self.total_act_steps += 1
+
+        # Track episodic return
+        self.episode_return += reward
+        self.episode_length += 1
 
     def train(self, update_steps: int, arenas: Optional[List[Any]] = None) -> bool:
         if arenas is None or len(arenas) == 0:

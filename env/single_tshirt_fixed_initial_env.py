@@ -15,9 +15,7 @@ from agent_arena.arena.softgym.picker_action_wrappers.hybrid_action_primitive im
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene, \
     get_max_IoU, calculate_iou
-from .camera_utils import get_camera_matrix
-
-import ray
+from .utils.camera_utils import get_camera_matrix
 
 global ENV_NUM
 ENV_NUM = 0
@@ -65,7 +63,7 @@ class SingleTshirtFixedInitialEnv(Arena):
         self._observation_image_shape = config.observation_image_shape \
             if 'observation_image_shape' in config else (480, 480, 3)
 
-        self.init_state_path = # TODO
+        self.init_state_path = config.init_state_path
         self.object = 'longsleeve'
         self._get_init_state_keys()
 

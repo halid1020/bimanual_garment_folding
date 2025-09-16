@@ -1,6 +1,6 @@
 ## These semantics are borrowed from CLASP paper
 
-KEPOINT_SEMANTICS = {
+KEYPOINT_SEMANTICS = {
     'longsleeve':[
         'left_shoulder',
         'right_shoulder',

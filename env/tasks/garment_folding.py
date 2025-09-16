@@ -11,7 +11,8 @@ from ..utils.keypoint_gui import KeypointGUI
 class GarmentFoldingTask(Task):
     def __init__(self, config):
         self.num_goals = config.num_goals
-        self.task_name = 'folding'
+        self.task_name = config.task_name
+        self.asset_dir = config.asset_dir
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
         
         self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
@@ -25,7 +26,7 @@ class GarmentFoldingTask(Task):
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""
-        self.goal_dir = self._get_goal_path(arena.get_name(), self.task_name, arena.get_episode_id(), arena.get_mode())
+        self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), self.task_name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
         os.makedirs(self.goal_dir, exist_ok=True)
 
         # Load or create semantic keypoints
@@ -57,13 +58,13 @@ class GarmentFoldingTask(Task):
             return np.load(keypoint_file, allow_pickle=True).item()
 
         # Get flattened garment observation
-        flatten_obs = arena.get_flatten_observation()
+        flatten_obs = arena.get_flattened_obs()
         flatten_rgb = flatten_obs["rgb"]
         particle_positions = flatten_obs["particle_position"]  # (N, 3)
 
         # Ask user to click semantic keypoints
         keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
-
+        print('annotated keypoints', keypoints_pixel)
         # Project all garment particles
         pixels, visible = arena.get_visibility(particle_positions)
 
@@ -98,14 +99,14 @@ class GarmentFoldingTask(Task):
             goal_particles = goal["particles"]
             aligned_dist = self._compute_particle_distance(cur_particles, goal_particles)
             particle_distances.append(aligned_dist)
-        min_particle_distance = min(particle_distances)
+        mean_particle_distance = min(particle_distances)
 
         # Evaluate semantic keypoints
         cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
         semantic_dist = self._compute_keypoint_distance(cur_keypoints, self.keypoints)
 
         return {
-            "min_particle_distance": min_particle_distance,
+            "mean_particle_distance": mean_particle_distance,
             "semantic_keypoint_distance": semantic_dist
         }
 
@@ -145,3 +146,15 @@ class GarmentFoldingTask(Task):
 
 
         return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
+    
+    def reward(self): # TODO: implement this with keypoint distance and particle distance.
+        return {
+            'dummy': 0
+        }
+    
+    def get_goal(self):
+        return self.goals
+    
+    def success(self):
+        cur_eval = self.evaluate()
+        return cur_eval['mean_particle_distance'] < 0.01

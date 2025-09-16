@@ -102,6 +102,9 @@ class SingleGarmentFixedInitialEnv(Arena):
     def set_task(self, task):
         self.task = task
 
+    def get_goal(self):
+        return self.task.get_goal()
+
     def set_logdir(self, log_dir):
         self.logger.set_log_dir(log_dir)
 
@@ -119,7 +122,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         if 'save_video' not in episode_config:
             episode_config['save_video'] = False
         
-        episode_config['eid'] = 0 
+        episode_config['eid'] = 0
+        self.eid = 0
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
 
@@ -135,6 +139,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         set_scene(
             config=init_state_params, 
             state=init_state_params)
+
+        
         #print('set scene done')
         #print('pciker initial pos', self.picker_initial_pos)
         self.pickers.reset(self.picker_initial_pos)
@@ -148,6 +154,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.info = {}
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
+
+        self.task.reset(self)
 
         self.evaluate_result = None
         self.last_info = None
@@ -369,7 +377,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         info['observation']['depth'] = cv2.resize(info['observation']['depth'], (H, W), interpolation=cv2.INTER_LINEAR).reshape(H, W, -1)
         info['observation']['mask'] = self._get_cloth_mask(resolution=(H, W))
         
-        info['normalised_coverage'] = self._get_normalised_coverage()
+        #info['normalised_coverage'] = self._get_normalised_coverage()
         return info
 
     

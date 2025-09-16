@@ -2,22 +2,6 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Rotation
 
-# def get_camera_matrix(cam_pos, cam_angle, cam_size, cam_fov):
-#     focal_length_v1 = cam_size[0] / 2 / np.tan(cam_fov / 2)
-#     focal_length_v2 = cam_size[1] / 2 / np.tan(cam_fov / 2)
-
-
-#     cam_intrinsics = np.array([[focal_length, 0, float(cam_size[1])/2],
-#                                [0, focal_length, float(cam_size[0])/2],
-#                                [0, 0, 1]])
-#     cam_extrinsics = np.eye(4)
-#     #rotation_matrix = Rotation.from_euler('xyz', [cam_angle[1], np.pi - cam_angle[0], np.pi], degrees=False).as_matrix()
-#     rotation_matrix = Rotation.from_euler('xyz', cam_angle, degrees=False).as_matrix()
-#     cam_extrinsics[:3, :3] = rotation_matrix
-#     cam_extrinsics[:3, 3] = cam_pos
-
-#     return cam_intrinsics, cam_extrinsics
-
 
 def get_camera_matrix(cam_pos, cam_angle, cam_size, cam_fov):
     # Assuming cam_fov is vertical FOV

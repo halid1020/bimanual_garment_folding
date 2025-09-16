@@ -21,7 +21,7 @@ global ENV_NUM
 ENV_NUM = 0
 
 # @ray.remote
-class SingleTshirtFixedInitialEnv(Arena):
+class SingleGarmentFixedInitialEnv(Arena):
     
     def __init__(self, config):
         self.config = config
@@ -31,7 +31,7 @@ class SingleTshirtFixedInitialEnv(Arena):
         self.logger = GarmentEnvLogger()
         self.random_reset = False
         self.set_id(0)
-        self.name =f'single-tshirt-fixed-init-env'
+        self.name =f'single-garment-fixed-init-env'
         
         # Softgym Setup
         self._get_sim_config()
@@ -40,14 +40,15 @@ class SingleTshirtFixedInitialEnv(Arena):
         self.scene_config = self.default_config['scene_config']
         self.workspace_mask = None
         
-        #print('disp', config.disp)
         headless = not config.disp
-        #print('headless', headless)
-        pyflex.init(headless, 
-                    True, 
-                    self.camera_config['cam_size'][0], 
-                    self.camera_config['cam_size'][1],
-                    )
+
+        pyflex.init(
+            headless, 
+            True, 
+            self.camera_config['cam_size'][0], 
+            self.camera_config['cam_size'][1],
+        )
+        
         self.pickers = Picker(
             2, picker_radius=self.config.picker_radius, 
             particle_radius=self.scene_config['radius'],
@@ -140,8 +141,8 @@ class SingleTshirtFixedInitialEnv(Arena):
         #print('picker reset done')
 
         self.init_coverae = self._get_coverage()
-        self.goal_obs = None
-        self.get_goal()
+        self.flattened_obs = None
+        self.get_flattened_obs()
         #self.flatten_coverage = init_state_params['flatten_area']
         
         self.info = {}
@@ -158,25 +159,6 @@ class SingleTshirtFixedInitialEnv(Arena):
     
     def get_episode_config(self):
         return self.episode_config
-
-    def _get_max_IoU(self):
-
-        cur_mask = self._get_cloth_mask()
-        goal_mask = self.get_goal()['rgb'].sum(axis=2) > 0
-
-        # print('cur_mask', cur_mask.shape)
-        # print('goal_mask', goal_mask.shape)
-
-        IoU, matched_IoU = get_max_IoU(cur_mask, goal_mask)
-        
-        return IoU
-
-    def _get_canon_IoU(self):
-        cur_mask = self._get_cloth_mask()
-        goal_mask = self.get_goal()['rgb'].sum(axis=2) > 0
-        IoU = calculate_iou(cur_mask, goal_mask)
-        return IoU
-
     
     def get_id(self):
         return self.id
@@ -197,15 +179,14 @@ class SingleTshirtFixedInitialEnv(Arena):
             'evaluation': self.evaluate(),
             'success': self.success(),
             'observation': self._get_obs(),
-            'goal': self.get_goal(),
+            'flattened_obs': self.get_flattened_obs(),
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
         })
 
-        for k, v in info['goal'].items():
-            info['observation'][f'goal-{k}'] = v
-            #print(f'goal_{k}', v.shape)
+        for k, v in info['flattened_obs'].items():
+            info['observation'][f'flattened-{k}'] = v
 
         if 'done' not in info:
             info['done'] = False
@@ -229,18 +210,18 @@ class SingleTshirtFixedInitialEnv(Arena):
     def get_frames(self):
         return self.video_frames.copy()
     
-    def get_goal(self):
+    def get_flattened_obs(self):
         
-        if self.goal_obs == None:
+        if self.flattened_obs == None:
             current_particl_pos = pyflex.get_positions()
             pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
             self.wait_until_stable()
-            self.goal_obs = self._get_obs()
+            self.flattened_obs = self._get_obs()
             self.flatten_coverage = self._get_coverage()
             pyflex.set_positions(current_particl_pos)
             self.wait_until_stable()
         
-        return self.goal_obs
+        return self.flattened_obs
     
     def get_eval_configs(self):
         eval_configs = [
@@ -275,7 +256,7 @@ class SingleTshirtFixedInitialEnv(Arena):
     def observation_shape(self):
         return {'rgb': self._observation_image_shape, 
                 'depth': self._observation_image_shape}
-#
+
     def sample_random_action(self):
         return self.action_tool.sample_random_action()
 
@@ -287,11 +268,6 @@ class SingleTshirtFixedInitialEnv(Arena):
     def get_picker_position(self):
         p = self._get_picker_position()
         # swap y and z
-        p[:, [1, 2]] = p[:, [2, 1]]
-        return p
-
-    def get_particle_positions(self):
-        p = self._get_particle_positions()
         p[:, [1, 2]] = p[:, [2, 1]]
         return p
     
@@ -344,11 +320,6 @@ class SingleTshirtFixedInitialEnv(Arena):
                 curr_vel = curr_vell
 
             self._step_sim()
-            # if self.save_control_step_info:
-            #     if 'control_signal' not in self.control_step_info:
-            #         self.control_step_info['control_signal'] = []
-            #     self.control_step_info['control_signal'].append(np.zeros((self.num_picker, 4)))
-                
             if stable_step > 10:
                 break
             if np.max(curr_vel) < stable_vel_threshold:
@@ -358,44 +329,16 @@ class SingleTshirtFixedInitialEnv(Arena):
 
             last_pos = cur_pos
             
-        #print('wait steps', t)
         return t
     
-    def _get_normalised_coverage(self):
-        res = self._get_coverage() / self.flatten_coverage
-        return np.clip(res, 0, 1)
-
-
-    def _get_normalised_impovement(self):
-        res = (self._get_coverage() - self.init_coverae) / (max(self.flatten_coverage - self.init_coverae, 0) + 1e-3)
-        return np.clip(res, 0, 1)
     
-    
-    
-    def _set_to_flatten(self, config, cloth_particle_radius=0.00625):
-        cloth_dimx, cloth_dimz = config['cloth_size']
-        N = cloth_dimx * cloth_dimz
-        px = np.linspace(
-            0, cloth_dimx * cloth_particle_radius, cloth_dimx)
-        py = np.linspace(
-            0, cloth_dimz * cloth_particle_radius, cloth_dimz)
-        xx, yy = np.meshgrid(px, py)
-        new_pos = np.empty(shape=(N, 4), dtype=np.float)
-        new_pos[:, 0] = xx.flatten()
-        new_pos[:, 1] = cloth_particle_radius
-        new_pos[:, 2] = yy.flatten()
-        new_pos[:, 3] = 1.
-        new_pos[:, :3] -= np.mean(new_pos[:, :3], axis=0)
-        pyflex.set_positions(new_pos.flatten())
-        return self._get_coverage()
-
     def _get_coverage(self):
         particle_positions = self._get_particle_positions()
         # swap y and z
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
         return get_coverage(particle_positions, self.particle_radius)
 
-    def _get_particle_positions(self):
+    def _get_particle_positions(self): # standard x y z
         pos = pyflex.get_positions().reshape(-1, 4)[:, :3].copy()
         # swap y and z
         pos[:, [1, 2]] = pos[:, [2, 1]]
@@ -543,11 +486,42 @@ class SingleTshirtFixedInitialEnv(Arena):
 
         return episode_params
     
-    def get_canon_particle_position(self):
-        pos = self.episode_params['init_particle_pos'].reshape(-1, 4)[:,:3].copy()
-        # swap y and z
-        pos[:, [1, 2]] = pos[:, [2, 1]]
-        return pos
+    def get_visibility(self, particle_positions):
+        """
+        Project world-space particle positions into image pixels
+        and check if each particle is visible in the current camera view.
 
-    def get_cloth_area(self):
-        return self.episode_params['cloth_height'] * self.episode_params['cloth_width']
+        Args:
+            particle_positions (np.ndarray): (N, 3) world-space particle positions
+
+        Returns:
+            pixels (np.ndarray): (N, 2) array of (u, v) pixel coordinates
+            visible (np.ndarray): (N,) boolean array, True if visible
+        """
+        assert particle_positions.shape[1] == 3, "particle_positions must be (N, 3)"
+
+        # ---- World → Camera ----
+        N = particle_positions.shape[0]
+        ones = np.ones((N, 1), dtype=np.float32)
+        particles_world_h = np.hstack([particle_positions, ones])  # (N, 4)
+
+        # Inverse extrinsic: world → camera
+        T_cam_world = np.linalg.inv(self.camera_extrinsic_matrix)
+        cam_pts_h = (T_cam_world @ particles_world_h.T).T  # (N, 4)
+        cam_pts = cam_pts_h[:, :3]  # (N, 3)
+
+        # ---- Camera → Pixel ----
+        proj = (self.camera_intrinsic_matrix @ cam_pts.T).T  # (N, 3)
+        z = proj[:, 2]
+        # avoid div by zero
+        z_safe = np.where(z == 0, 1e-6, z)
+        pixels = proj[:, :2] / z_safe[:, None]
+
+        # ---- Visibility ----
+        H, W = self.camera_size
+        u, v = pixels[:, 0], pixels[:, 1]
+
+        # Conditions: in front of camera and inside image bounds
+        visible = (z > 0) & (u >= 0) & (u < W) & (v >= 0) & (v < H)
+
+        return pixels, visible

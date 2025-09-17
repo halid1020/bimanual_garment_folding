@@ -17,7 +17,7 @@ class GarmentFoldingTask(Task):
         
         self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
 
-        self.keypoints = None # This needs to be loaded or annotated
+        self.semkey2pid = None # This needs to be loaded or annotated
         self.goals = [] # This needs to be loaded  or generated
 
         self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
@@ -30,18 +30,34 @@ class GarmentFoldingTask(Task):
         os.makedirs(self.goal_dir, exist_ok=True)
 
         # Load or create semantic keypoints
-        self.keypoints = self._load_or_create_keypoints(arena)
+        self.semkey2pid = self._load_or_create_keypoints(arena)
 
         # Generate goals (10 small variations)
         self.goals = self._generate_goals(arena, self.num_goals)
 
-        return {"goals": self.goals, "keypoints": self.keypoints}
+        return {"goals": self.goals, "keypoints": self.semkey2pid}
+
+    def _generate_a_goal(self, arena):
+        
+        particle_pos = arena.get_particle_positions()
+        info = arena.set_to_flatten()
+        self.demonstrator.reset([arena.id])
+        while not self.demonstrator.terminate()[arena.id]: ## The demonstrator does not need update and init function
+            print('here!')
+            action = self.demonstrator.single_act(info) # Fold action
+            print('action', action)
+            info = arena.step(action)
+        
+        arena.set_particle_positions(particle_pos)
+
+        return info
+
 
     def _generate_goals(self, arena, num_goals):
         """Generate multiple folding goals with variations and save them."""
         goals = []
         for i in range(num_goals):
-            goal = arena.generate_folding_goal(variation=i, keypoints=self.keypoints)  # You need to implement this in arena
+            goal = self._generate_a_goal(arena)  # You need to implement this in arena
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
             os.makedirs(goal_path, exist_ok=True)
             plt.imsave(os.path.join(goal_path, "rgb.png"), goal["rgb"])
@@ -55,12 +71,14 @@ class GarmentFoldingTask(Task):
         keypoint_file = os.path.join(self.goal_dir, "keypoints.npy")
 
         if os.path.exists(keypoint_file):
+            keypoints = np.load(keypoint_file, allow_pickle=True).item()
+            print('annotated keypoint ids', keypoints)
             return np.load(keypoint_file, allow_pickle=True).item()
 
         # Get flattened garment observation
         flatten_obs = arena.get_flattened_obs()
-        flatten_rgb = flatten_obs["rgb"]
-        particle_positions = flatten_obs["particle_position"]  # (N, 3)
+        flatten_rgb = flatten_obs['observation']["rgb"]
+        particle_positions = flatten_obs['observation']["particle_position"]  # (N, 3)
 
         # Ask user to click semantic keypoints
         keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
@@ -84,6 +102,7 @@ class GarmentFoldingTask(Task):
 
             keypoints[name] = particle_id
 
+        print('annotated keypoint ids', keypoints)
         # Save particle IDs instead of pixel coords
         np.save(keypoint_file, keypoints)
         return keypoints
@@ -91,7 +110,7 @@ class GarmentFoldingTask(Task):
 
     def evaluate(self, arena):
         """Evaluate folding quality using particle alignment and semantic keypoints."""
-        cur_particles = arena._get_particle_positions()
+        cur_particles = arena.get_particle_positions()
 
         # Evaluate particle alignment against each goal
         particle_distances = []
@@ -103,7 +122,7 @@ class GarmentFoldingTask(Task):
 
         # Evaluate semantic keypoints
         cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
-        semantic_dist = self._compute_keypoint_distance(cur_keypoints, self.keypoints)
+        semantic_dist = self._compute_keypoint_distance(cur_keypoints, self.semkey2pid)
 
         return {
             "mean_particle_distance": mean_particle_distance,

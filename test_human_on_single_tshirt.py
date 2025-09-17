@@ -10,6 +10,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
+from controllers.demonstrators.centre_sleeve_folding_policy import CentreSleeveFoldingPolicy
 
 def main():
 
@@ -24,12 +25,12 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': False,
+        'disp': True,
         'ray_id': 0,
         'horizon': 10,
     }
     
-    demonstrator = RandomMultiPrimitive(DotMap()) # TODO: create demonstrator for 'centre-sleeve-folding'
+    demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
     
     task_config = {
         'num_goals': 10,

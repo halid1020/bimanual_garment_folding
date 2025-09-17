@@ -68,7 +68,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.object = 'longsleeve'
         self._get_init_state_keys()
 
-        
+        self.evaluate_result = None
     
 
     def _setup_camera(self):
@@ -182,23 +182,29 @@ class SingleGarmentFixedInitialEnv(Arena):
     def get_info(self):
         return self.info
     
-    def _process_info(self, info):
+    def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
-            'evaluation': self.evaluate(),
-            'success': self.success(),
+           
             'observation': self._get_obs(),
-            'flattened_obs': self.get_flattened_obs(),
+            
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
         })
 
-        for k, v in info['flattened_obs'].items():
-            info['observation'][f'flattened-{k}'] = v
+        if flatten_obs:
+            info['flattened_obs'] = self.get_flattened_obs()
+
+            for k, v in info['flattened_obs'].items():
+                info['observation'][f'flattened-{k}'] = v
 
         if 'done' not in info:
             info['done'] = False
-        info['reward'] = self.task.reward(self.last_info, None, info)
+        
+        if task_related:
+            info['evaluation'] = self.evaluate(),
+            info['success'] =  self.success(),
+            info['reward'] = self.task.reward(self.last_info, None, info)
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
@@ -217,14 +223,20 @@ class SingleGarmentFixedInitialEnv(Arena):
     
     def get_frames(self):
         return self.video_frames.copy()
+
+    def set_to_flatten(self):
+        pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
+        self.wait_until_stable()
+        self.info = self._process_info({}, task_related=False, flatten_obs=False)
+        return self.info
     
     def get_flattened_obs(self):
         
         if self.flattened_obs == None:
             current_particl_pos = pyflex.get_positions()
-            pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
-            self.wait_until_stable()
-            self.flattened_obs = self._get_obs()
+            # pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
+            # self.wait_until_stable()
+            self.flattened_obs = self.set_to_flatten()
             self.flatten_coverage = self._get_coverage()
             pyflex.set_positions(current_particl_pos)
             self.wait_until_stable()
@@ -341,17 +353,21 @@ class SingleGarmentFixedInitialEnv(Arena):
     
     
     def _get_coverage(self):
-        particle_positions = self._get_particle_positions()
+        particle_positions = self.get_particle_positions()
         # swap y and z
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
         return get_coverage(particle_positions, self.particle_radius)
 
-    def _get_particle_positions(self): # standard x y z
+    def get_particle_positions(self): # standard x y z
         pos = pyflex.get_positions().reshape(-1, 4)[:, :3].copy()
         # swap y and z
         pos[:, [1, 2]] = pos[:, [2, 1]]
         #print('pos', pos[0])
         return pos
+    
+    def set_partciel_positions(self, particle_positions):
+        particle_positions[:, [1, 2]] = particle_positions[:, [1, 2]]
+        pyflex.set_positions(particle_positions.flatten())
     
     def _get_picker_pos(self):
         return self.pickers.get_picker_pos()
@@ -419,7 +435,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         obs['rgb'] = self._render(mode='rgb')
         obs['depth'] = self._render(mode='d')
         obs['mask'] = self._get_cloth_mask()
-        obs['particle_position'] = self._get_particle_positions()
+        obs['particle_position'] = self.get_particle_positions()
+        obs['semkey2pid'] = self.task.semkey2pid
         return obs
 
     def _get_cloth_mask(self, camera_name='default_camera', resolution=None):
@@ -527,6 +544,7 @@ class SingleGarmentFixedInitialEnv(Arena):
 
         # ---- Visibility ----
         H, W = self.camera_size
+        print('visiblity, H, W', H, W)
         u, v = pixels[:, 0], pixels[:, 1]
 
         # Conditions: in front of camera and inside image bounds

@@ -47,7 +47,7 @@ class CentreSleeveFoldingPolicy(Agent):
             pid = semkey2pid[key]
             idx = keypids.index(pid)
             pixel = key_pixels[idx].astype(int).copy()
-            pixel[0], pixel[1] = pixel[1], pixel[0]
+            # pixel[0], pixel[1] = pixel[1], pixel[0]
             return pixel
 
         # get key garment landmarks
@@ -62,17 +62,18 @@ class CentreSleeveFoldingPolicy(Agent):
         if self.config.debug:
 
              # find left shoulder pixel
-            left_shoulder_pid = semkey2pid['left_sleeve']
-            idx = keypids.index(left_shoulder_pid)           # map back to key_pixels
-            target_pixel = key_pixels[idx].astype(int)       # (u,v)
+            for name in ['left_sleeve', 'right_sleeve', 'left_hem', 'right_hem']:
+                left_shoulder_pid = semkey2pid[name]
+                idx = keypids.index(left_shoulder_pid)           # map back to key_pixels
+                target_pixel = key_pixels[idx].astype(int)       # (u,v)
 
-            debug_img = rgb.copy()
-            u, v = int(target_pixel[0]), int(target_pixel[1])
-            cv2.circle(debug_img, (u, v), radius=6, color=(0, 0, 255), thickness=-1)
+                debug_img = rgb.copy()
+                u, v = int(target_pixel[0]), int(target_pixel[1])
+                cv2.circle(debug_img, (v, u), radius=6, color=(0, 0, 255), thickness=-1)
 
-            os.makedirs("./tmp", exist_ok=True)
-            out_path = os.path.join("./tmp", f"target_pixel_step_{self.internal_states[arena_id]['step']}.png")
-            cv2.imwrite(out_path, debug_img)
+                os.makedirs("./tmp", exist_ok=True)
+                out_path = os.path.join("./tmp", f"target_pixel_step_{self.internal_states[arena_id]['step']}_{name}.png")
+                cv2.imwrite(out_path, debug_img)
 
         # image center
         H, W, _ = rgb.shape
@@ -101,10 +102,12 @@ class CentreSleeveFoldingPolicy(Agent):
         else:
             self.internal_states[arena_id]['step'] += 1
             return {
-                'pick_0': np.random.uniform(-1, 1, 2),
-                'place_0': np.random.uniform(-1, 1, 2),
-                'pick_1': np.random.uniform(-1, 1, 2),
-                'place_1': np.random.uniform(-1, 1, 2)
+                'norm-pixel-fold': {
+                    'pick_0': np.random.uniform(-1, 1, 2),
+                    'place_0': np.random.uniform(-1, 1, 2),
+                    'pick_1': np.random.uniform(-1, 1, 2),
+                    'place_1': np.random.uniform(-1, 1, 2)
+                }
             }
             
 
@@ -115,4 +118,4 @@ class CentreSleeveFoldingPolicy(Agent):
         # }
 
     def terminate(self):
-        return {arena_id: (self.internal_states[arena_id]['step'] >= 1) for arena_id in self.internal_states.keys()}
+        return {arena_id: (self.internal_states[arena_id]['step'] >= 2) for arena_id in self.internal_states.keys()}

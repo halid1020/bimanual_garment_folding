@@ -13,6 +13,7 @@ class GarmentFoldingTask(Task):
         self.num_goals = config.num_goals
         self.task_name = config.task_name
         self.asset_dir = config.asset_dir
+        self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
         
         self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
@@ -26,7 +27,8 @@ class GarmentFoldingTask(Task):
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""
-        self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), self.task_name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
+        self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), \
+                                     self.task_name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
         os.makedirs(self.goal_dir, exist_ok=True)
 
         # Load or create semantic keypoints
@@ -47,6 +49,10 @@ class GarmentFoldingTask(Task):
             action = self.demonstrator.single_act(info) # Fold action
             print('action', action)
             info = arena.step(action)
+
+            if self.config.debug:
+                rgb = info['observation']['rgb']
+                cv2.imwrite("tmp/step_rgb.png", rgb)
         
         arena.set_particle_positions(particle_pos)
 
@@ -85,24 +91,51 @@ class GarmentFoldingTask(Task):
         print('annotated keypoints', keypoints_pixel)
         # Project all garment particles
         pixels, visible = arena.get_visibility(particle_positions)
+        
+        if self.config.debug:
+            H, W = (480, 480)
+
+            # Make sure tmp folder exists
+            os.makedirs("tmp", exist_ok=True)
+
+            # Start with black canvases
+            non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+            visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+
+            for pix, vis in zip(pixels, visible):
+                x, y = pix  # assuming pix = (x, y)
+                x = int(x)
+                y = int(y)
+                if not vis:
+                    # non-visible -> gray pixel
+                    non_visible_img[x, y] = (128, 128, 128)
+                else:
+                    # visible -> white pixel
+                    visible_img[x, y] = (255, 255, 255)
+
+            # Save both images
+            cv2.imwrite("tmp/non-visible.png", non_visible_img)
+            cv2.imwrite("tmp/visible.png", visible_img)
+
 
         keypoints = {}
         for name, pix in keypoints_pixel.items():
-            # Only consider visible particles
-            visible_pixels = pixels[visible]
-            visible_ids = np.where(visible)[0]
-
-            if len(visible_pixels) == 0:
-                raise RuntimeError("No visible particles to assign keypoints.")
-
-            # Find nearest visible particle in pixel space
-            dists = np.linalg.norm(visible_pixels - np.array(pix), axis=1)
-            nearest_idx = np.argmin(dists)
-            particle_id = visible_ids[nearest_idx]
-
+            y, x = pix
+            dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
+            particle_id = np.argmin(dists)
             keypoints[name] = particle_id
+        
+        if self.config.debug:
+            annotated = np.zeros((H, W, 3), dtype=np.uint8)
+            for pid in keypoints.values():
+                x, y = pixels[pid]
+                x = int(x)
+                y = int(y)
+                annotated[x, y] = (255, 255, 255)
+            cv2.imwrite("tmp/annotated.png", annotated)
 
-        print('annotated keypoint ids', keypoints)
+
+        #print('annotated keypoint ids', keypoints)
         # Save particle IDs instead of pixel coords
         np.save(keypoint_file, keypoints)
         return keypoints
@@ -110,6 +143,8 @@ class GarmentFoldingTask(Task):
 
     def evaluate(self, arena):
         """Evaluate folding quality using particle alignment and semantic keypoints."""
+        if len(self.goals) == 0:
+            return {}
         cur_particles = arena.get_particle_positions()
 
         # Evaluate particle alignment against each goal
@@ -166,7 +201,7 @@ class GarmentFoldingTask(Task):
 
         return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
     
-    def reward(self): # TODO: implement this with keypoint distance and particle distance.
+    def reward(self, last_info, action, info): # TODO: implement this with keypoint distance and particle distance.
         return {
             'dummy': 0
         }
@@ -174,6 +209,8 @@ class GarmentFoldingTask(Task):
     def get_goal(self):
         return self.goals
     
-    def success(self):
-        cur_eval = self.evaluate()
+    def success(self, arena):
+        cur_eval = self.evaluate(arena)
+        if cur_eval == {}:
+            return False
         return cur_eval['mean_particle_distance'] < 0.01

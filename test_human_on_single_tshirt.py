@@ -25,7 +25,7 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': True,
+        'disp': False,
         'ray_id': 0,
         'horizon': 10,
     }
@@ -37,7 +37,8 @@ def main():
         'demonstrator': demonstrator,
         'object': 'longsleeve',
         'asset_dir': 'assets',
-        'task_name': 'centre-sleeve-folding' # TODO: indicate what kinds of folding
+        'task_name': 'centre-sleeve-folding', # TODO: indicate what kinds of folding,
+        'debug': True
     }
 
     arena_config = DotMap(arena_config)

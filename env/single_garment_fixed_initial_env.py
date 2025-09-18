@@ -416,7 +416,7 @@ class SingleGarmentFixedInitialEnv(Arena):
 
         elif mode == 'rgb':
             pass
-        elif mode == 'd':
+        elif mode == 'depth':
             img = depth_img
         else:
             raise NotImplementedError
@@ -433,7 +433,7 @@ class SingleGarmentFixedInitialEnv(Arena):
     def _get_obs(self):
         obs = {}
         obs['rgb'] = self._render(mode='rgb')
-        obs['depth'] = self._render(mode='d')
+        obs['depth'] = self._render(mode='depth')
         obs['mask'] = self._get_cloth_mask()
         obs['particle_position'] = self.get_particle_positions()
         obs['semkey2pid'] = self.task.semkey2pid
@@ -540,14 +540,35 @@ class SingleGarmentFixedInitialEnv(Arena):
         z = proj[:, 2]
         # avoid div by zero
         z_safe = np.where(z == 0, 1e-6, z)
-        pixels = proj[:, :2] / z_safe[:, None]
+        pixels = proj[:, :2] / z_safe[:, None]  # (u, v) = (x/z, y/z)
 
         # ---- Visibility ----
         H, W = self.camera_size
-        print('visiblity, H, W', H, W)
         u, v = pixels[:, 0], pixels[:, 1]
+
+        # Rendered depth map (same size as camera)
+        depth_img = self._render('depth').reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds
         visible = (z > 0) & (u >= 0) & (u < W) & (v >= 0) & (v < H)
+
+       # Convert (u,v) to integer pixel indices
+        u_int = np.round(u).astype(int)
+        v_int = np.round(v).astype(int)
+        u_int = np.clip(u_int, 0, W - 1)
+        v_int = np.clip(v_int, 0, H - 1)
+
+        # Depth from depth buffer (closest surface)
+        depth_buffer = depth_img[v_int, u_int]
+
+        
+        # Particle depth = Euclidean distance in world space
+        cam_world_pos = self.camera_extrinsic_matrix[:3, 3]  # (3,)
+        particle_depth = np.linalg.norm(particle_positions - cam_world_pos, axis=1)
+
+        # Occlusion check: particle must not be behind depth buffer
+        eps = 1e-6
+        visible &= (particle_depth - self.particle_radius) < (depth_buffer - eps)
+
 
         return pixels, visible

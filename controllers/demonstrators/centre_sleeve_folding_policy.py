@@ -51,18 +51,16 @@ class CentreSleeveFoldingPolicy(Agent):
             return pixel
 
         # get key garment landmarks
-        left_sleeve = get_pixel("left_sleeve")
-        right_sleeve = get_pixel("right_sleeve")
-        left_hem = get_pixel("left_hem")
-        right_hem = get_pixel("right_hem")
+        left_sleeve = get_pixel("higher_left_sleeve")
+        right_sleeve = get_pixel("higher_right_sleeve")
+        
         centre = get_pixel("centre")
 
 
         # --- Debug visualization ---
         if self.config.debug:
-
              # find left shoulder pixel
-            for name in ['left_sleeve', 'right_sleeve', 'left_hem', 'right_hem']:
+            for name in ['higher_left_sleeve', 'lower_right_sleeve', 'left_hem', 'right_hem']:
                 left_shoulder_pid = semkey2pid[name]
                 idx = keypids.index(left_shoulder_pid)           # map back to key_pixels
                 target_pixel = key_pixels[idx].astype(int)       # (u,v)
@@ -77,7 +75,6 @@ class CentreSleeveFoldingPolicy(Agent):
 
         # image center
         H, W, _ = rgb.shape
-        print('single act H, W', H, W)
         mid_x, mid_y = W // 2, H // 2
 
         if self.internal_states[arena_id]['step'] == 0:
@@ -101,21 +98,29 @@ class CentreSleeveFoldingPolicy(Agent):
             return action
         else:
             self.internal_states[arena_id]['step'] += 1
-            return {
+            left_hem = get_pixel("left_hem")
+            right_hem = get_pixel("right_hem")
+            left_collar = get_pixel("left_collar")
+            right_collar = get_pixel("right_collar")
+
+            left_pick = left_hem / np.asarray([H, W]) * 2 - 1
+            right_pick = right_hem / np.asarray([H, W]) * 2 - 1
+
+            ## the x axis should be the same as the one of hems
+            ## the y axis should be the same as the one of collars
+            # Places: keep x from hem, y from collar
+            left_place = np.array([left_collar[0]-50, left_hem[1]]) / np.asarray([H, W]) * 2 - 1
+            right_place = np.array([right_collar[0]-50, right_hem[1]]) / np.asarray([H, W]) * 2 - 1
+
+            action = {
                 'norm-pixel-fold': {
-                    'pick_0': np.random.uniform(-1, 1, 2),
-                    'place_0': np.random.uniform(-1, 1, 2),
-                    'pick_1': np.random.uniform(-1, 1, 2),
-                    'place_1': np.random.uniform(-1, 1, 2)
+                    'pick_0': left_pick,
+                    'pick_1': right_pick,
+                    'place_0': left_place,
+                    'place_1': right_place
                 }
             }
-            
-
-        # TODO: convert pick/place into your action format.
-        # For now: placeholder fold action
-        # return {
-        #     'norm-pixel-fold': [u, v, u, v]   # pick and place the same pixel (dummy)
-        # }
+            return action
 
     def terminate(self):
         return {arena_id: (self.internal_states[arena_id]['step'] >= 2) for arena_id in self.internal_states.keys()}

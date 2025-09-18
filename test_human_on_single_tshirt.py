@@ -28,6 +28,7 @@ def main():
         'disp': False,
         'ray_id': 0,
         'horizon': 10,
+        'track_semkey_on_frames': True
     }
     
     demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
@@ -52,7 +53,7 @@ def main():
     agent = HumanMultiPrimitive(DotMap())
     
     res = perform_single(arena, agent, mode='eval', 
-        episode_config={'eid':0, 'save_video': False}, collect_frames=False)
+        episode_config={'eid':0, 'save_video': True}, collect_frames=False)
     
     
 

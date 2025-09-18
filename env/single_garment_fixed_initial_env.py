@@ -69,6 +69,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self._get_init_state_keys()
 
         self.evaluate_result = None
+        self.track_semkey_on_frames = self.config.track_semkey_on_frames
     
 
     def _setup_camera(self):
@@ -378,10 +379,42 @@ class SingleGarmentFixedInitialEnv(Arena):
         
     def _step_sim(self):
         pyflex.step()
-        a = self._render('rgb', background=True)
+        rgb = self._render('rgb', background=True)
+
         if self.save_video:
-            self.video_frames.append(a)
+            
+            if self.track_semkey_on_frames and self.task.semkey2pid:
+                # --- Track semantic keypoints ---
+                particle_pos = self.get_particle_positions()          # (N, 3)
+                semkey2pid = self.task.semkey2pid                     # dict {name: pid}
+                keypids = list(semkey2pid.values())
+                keynames = list(semkey2pid.keys())
+
+                key_particles = particle_pos[keypids]                 # (K, 3)
+                key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+
+                # Assign unique colors to each keypoint (HSV evenly spaced)
+                K = len(keynames)
+                hsv_colors = [(int(i * 180 / K), 255, 255) for i in range(K)]  # HSV values
+                bgr_colors = [cv2.cvtColor(np.uint8([[c]]), cv2.COLOR_HSV2BGR)[0,0].tolist()
+                            for c in hsv_colors]
+
+                # Overlay keypoints
+                debug_frame = rgb.copy()
+                for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
+                    color = tuple(map(int, color))  # ensure int
+                    
+                    cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
+                    cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                self.video_frames.append(debug_frame)
+
+            else:
+                # just save plain RGB frame
+                self.video_frames.append(rgb)
+
         self.sim_step += 1
+
 
 
     def _process_info_(self, info):

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from scipy.spatial.distance import cdist
 from agent_arena import Task
+from agent_arena import save_video
 from ..utils.garment_utils import KEYPOINT_SEMANTICS
 from ..utils.keypoint_gui import KeypointGUI
 
@@ -45,14 +46,16 @@ class GarmentFoldingTask(Task):
         info = arena.set_to_flatten()
         self.demonstrator.reset([arena.id])
         while not self.demonstrator.terminate()[arena.id]: ## The demonstrator does not need update and init function
-            print('here!')
+            #print('here!')
             action = self.demonstrator.single_act(info) # Fold action
-            print('action', action)
+            #print('action', action)
             info = arena.step(action)
 
             if self.config.debug:
                 rgb = info['observation']['rgb']
                 cv2.imwrite("tmp/step_rgb.png", rgb)
+        
+        save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos.mp4')
         
         arena.set_particle_positions(particle_pos)
 

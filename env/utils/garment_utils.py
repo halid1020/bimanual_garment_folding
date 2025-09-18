@@ -2,13 +2,20 @@
 
 KEYPOINT_SEMANTICS = {
     'longsleeve':[
+        'left_collar',
+        'right_collar',
         'left_shoulder',
         'right_shoulder',
-        'left_sleeve',
-        'right_sleeve',
+        'higher_left_sleeve',
+        'higher_right_sleeve',
+        'lower_left_sleeve',
+        'lower_right_sleeve',
+        'left_armpit',
+        'right_armpit',
         'centre',
         'left_hem',
-        'right_hem'
+        'right_hem',
+        'centre_hem'
     ],
 
     'pants': [

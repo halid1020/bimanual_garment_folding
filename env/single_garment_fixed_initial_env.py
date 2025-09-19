@@ -158,6 +158,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self._step_sim()
 
         self.task.reset(self)
+        self.action_step = 0
 
         self.evaluate_result = None
         self.last_info = None
@@ -207,6 +208,12 @@ class SingleGarmentFixedInitialEnv(Arena):
             info['evaluation'] = self.evaluate(),
             info['success'] =  self.success(),
             info['reward'] = self.task.reward(self.last_info, None, info)
+
+            goal = self.task.get_goals()[0]
+            info['goal'] = {}
+            for k, v in goal['observation'].items():
+                info['goal'][k] = v
+
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
@@ -214,6 +221,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.evaluate_result = None
         info = self.action_tool.step(self, action)
         self.info = self._process_info(info)
+        self.action_step += 1
         return self.info
     
 

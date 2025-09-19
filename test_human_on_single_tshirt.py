@@ -39,7 +39,8 @@ def main():
         'object': 'longsleeve',
         'asset_dir': 'assets',
         'task_name': 'centre-sleeve-folding', # TODO: indicate what kinds of folding,
-        'debug': True
+        'debug': True,
+        'alignment': 'simple_rigid'
     }
 
     arena_config = DotMap(arena_config)

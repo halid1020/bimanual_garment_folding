@@ -217,14 +217,15 @@ class GarmentFoldingTask(Task):
         # Evaluate particle alignment against each goal
         particle_distances = []
         for goal in self.goals:
-            goal_particles = goal["particles"]
-            aligned_dist = self._compute_particle_distance(cur_particles, goal_particles)
+            goal_particles = goal['observation']["particle_positions"]
+            aligned_dist = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(aligned_dist)
         mean_particle_distance = min(particle_distances)
+        print('MPD', mean_particle_distance)
 
         # Evaluate semantic keypoints
-        cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
-        semantic_dist = self._compute_keypoint_distance(cur_keypoints, self.semkey2pid)
+        #cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
+        semantic_dist = self._compute_keypoint_distance(cur_particles, goal_particles)
 
         return {
             "mean_particle_distance": mean_particle_distance,
@@ -236,22 +237,48 @@ class GarmentFoldingTask(Task):
         Align cur points to goal points using Procrustes rigid alignment.
         Returns aligned points and mean distance.
         """
-        # Center both sets
-        cur_centered = cur - np.mean(cur, axis=0)
-        goal_centered = goal - np.mean(goal, axis=0)
+        if self.config.alignment == 'simple_rigid':
+            # Center both sets
+            cur_centered = cur - np.mean(cur, axis=0)
+            goal_centered = goal - np.mean(goal, axis=0)
 
-        # Compute optimal rotation via SVD
-        H = cur_centered.T @ goal_centered
-        U, _, Vt = np.linalg.svd(H)
-        R = U @ Vt
-        aligned = cur_centered @ R
+            # Compute optimal rotation via SVD
+            H = cur_centered.T @ goal_centered
+            U, _, Vt = np.linalg.svd(H)
+            R = U @ Vt
+            aligned = cur_centered @ R
 
-        return aligned, goal_centered
+            return aligned, goal_centered
+        else:
+            raise NotImplementedError
 
-    def _compute_particle_distance(self, cur, goal):
+    def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
-        aligned, goal_centered = self._align_points(cur, goal)
-        return np.mean(np.linalg.norm(aligned - goal_centered, axis=1))
+        aligned_curr, aligned_goal = self._align_points(cur, goal)
+        if self.config.debug:
+            project_aligned, _ = arena.get_visibility(aligned_curr)
+            project_goal, _ = arena.get_visibility(aligned_goal)
+            canvas =  np.zeros((480, 480, 3), dtype=np.uint8)
+
+            for p in project_aligned:
+                x, y = p  # assuming pix = (x, y)
+                x = int(x)
+                y = int(y)
+                #print(p)
+                canvas[x, y] = (255, 255, 255)
+
+            for p in project_goal:
+                x, y = p  # assuming pix = (x, y)
+                x = int(x)
+                y = int(y)
+                canvas[x, y] = (0, 255, 0)
+
+            # Save both images
+            cv2.imwrite(f"tmp/alignment_{arena.action_step}.png", canvas)
+            #cv2.imwrite("tmp/visible.png", visible_img)
+
+
+        return np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
 
     def _compute_keypoint_distance(self, cur, goal):
         """Align semantic keypoints and compute mean distance."""
@@ -260,10 +287,12 @@ class GarmentFoldingTask(Task):
         
         cur_pts = []
         goal_pts = []
-        for name, pid in self.semantic_keypoints.items():
+        for name, pid in self.semkey2pid.items():
             
             cur_pts.append(aligned_cur[pid])
             goal_pts.append(aligned_goal[pid])
+        cur_pts = np.stack(cur_pts)
+        goal_pts = np.stack(goal_pts)
 
 
         return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
@@ -273,8 +302,11 @@ class GarmentFoldingTask(Task):
             'dummy': 0
         }
     
-    def get_goal(self):
+    def get_goals(self):
         return self.goals
+
+    def get_goal(self):
+        return self.goals[0]
     
     def success(self, arena):
         cur_eval = self.evaluate(arena)

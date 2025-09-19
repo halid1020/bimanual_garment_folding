@@ -10,7 +10,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
-from controllers.demonstrators.centre_sleeve_folding_policy import CentreSleeveFoldingPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 
 def main():
 
@@ -31,7 +31,7 @@ def main():
         'track_semkey_on_frames': True
     }
     
-    demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
+    demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
     
     task_config = {
         'num_goals': 10,

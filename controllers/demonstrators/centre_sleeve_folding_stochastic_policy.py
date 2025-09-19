@@ -152,7 +152,7 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
     def single_act(self, info, update=False):
         arena_id = info['arena_id']
         semkey2pid = info['observation']['semkey2pid']
-        particle_pos = info['observation']['particle_position']
+        particle_pos = info['observation']['particle_positions']
         rgb = info['observation']['rgb']
         cloth_mask = info['observation']['mask']
         arena = info['arena']

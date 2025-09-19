@@ -124,4 +124,3 @@ class CentreSleeveFoldingPolicy(Agent):
 
     def terminate(self):
         return {arena_id: (self.internal_states[arena_id]['step'] >= 2) for arena_id in self.internal_states.keys()}
-    

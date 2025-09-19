@@ -2,12 +2,54 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+from tqdm import tqdm
 
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
 from ..utils.garment_utils import KEYPOINT_SEMANTICS
 from ..utils.keypoint_gui import KeypointGUI
+
+def save_point_cloud_ply(path, points):
+    N = points.shape[0]
+    header = f"""ply
+            format ascii 1.0
+            element vertex {N}
+            property float x
+            property float y
+            property float z
+            end_header
+            """
+    
+    with open(path, "w") as f:
+        f.write(header)
+        for p in points:
+            f.write(f"{p[0]} {p[1]} {p[2]}\n")
+
+
+def load_point_cloud_ply(path):
+    with open(path, "r") as f:
+        lines = f.readlines()
+
+    # find end of header robustly
+    end_header_idx = None
+    for idx, line in enumerate(lines):
+        if line.strip() == "end_header":
+            end_header_idx = idx + 1
+            break
+    if end_header_idx is None:
+        raise ValueError(f"No 'end_header' found in PLY file: {path}")
+
+    points = []
+    for line in lines[end_header_idx:]:
+        parts = line.strip().split()
+        if len(parts) < 3:
+            continue
+        x, y, z = map(float, parts[:3])
+        points.append([x, y, z])
+    return np.array(points)
+
 
 class GarmentFoldingTask(Task):
     def __init__(self, config):
@@ -23,20 +65,22 @@ class GarmentFoldingTask(Task):
         self.goals = [] # This needs to be loaded  or generated
 
         self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
-        
+        self.keypoint_dir = os.path.join(self.asset_dir, 'keypoints')
+        os.makedirs(self.keypoint_dir, exist_ok=True)
         
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""
         self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), \
                                      self.task_name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
+        
         os.makedirs(self.goal_dir, exist_ok=True)
 
         # Load or create semantic keypoints
         self.semkey2pid = self._load_or_create_keypoints(arena)
 
         # Generate goals (10 small variations)
-        self.goals = self._generate_goals(arena, self.num_goals)
+        self.goals = self._load_or_generate_goals(arena, self.num_goals)
 
         return {"goals": self.goals, "keypoints": self.semkey2pid}
 
@@ -55,39 +99,60 @@ class GarmentFoldingTask(Task):
                 rgb = info['observation']['rgb']
                 cv2.imwrite("tmp/step_rgb.png", rgb)
         
-        save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos.mp4')
+        if self.config.debug:
+            save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos')
         
         arena.set_particle_positions(particle_pos)
 
         return info
 
 
-    def _generate_goals(self, arena, num_goals):
-        """Generate multiple folding goals with variations and save them."""
+    def _load_or_generate_goals(self, arena, num_goals):
         goals = []
-        for i in range(num_goals):
-            goal = self._generate_a_goal(arena)  # You need to implement this in arena
+        for i in tqdm(range(num_goals), desc="Generating goals"):
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
-            os.makedirs(goal_path, exist_ok=True)
-            plt.imsave(os.path.join(goal_path, "rgb.png"), goal["rgb"])
-            np.save(os.path.join(goal_path, "depth.npy"), goal["depth"])
-            np.save(os.path.join(goal_path, "particles.npy"), goal["particles"])
-            goals.append(goal)
+            if not os.path.exists(goal_path):
+                goal = self._generate_a_goal(arena)
+                os.makedirs(goal_path, exist_ok=True)
+
+                # Save RGB
+                plt.imsave(os.path.join(goal_path, "rgb.png"), goal['observation']['rgb'])
+
+                # Save particles as PLY
+                save_point_cloud_ply(os.path.join(goal_path, "particles.ply"),
+                                    goal['observation']["particle_positions"])
+
+                goals.append(goal)
+            else:
+                # Load existing goal
+                rgb = plt.imread(os.path.join(goal_path, "rgb.png"))
+                particles = load_point_cloud_ply(os.path.join(goal_path, "particles.ply"))
+                goal = {
+                    'observation': {
+                        'rgb': rgb,
+                        'particle_positions': particles
+                    }
+                }
+                goals.append(goal)
         return goals
+
 
     def _load_or_create_keypoints(self, arena):
         """Load semantic keypoints if they exist, otherwise ask user to assign them."""
-        keypoint_file = os.path.join(self.goal_dir, "keypoints.npy")
+
+        mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
+        keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
 
         if os.path.exists(keypoint_file):
-            keypoints = np.load(keypoint_file, allow_pickle=True).item()
-            print('annotated keypoint ids', keypoints)
-            return np.load(keypoint_file, allow_pickle=True).item()
+            with open(keypoint_file, "r") as f:
+                keypoints = json.load(f)
+            print("annotated keypoint ids", keypoints)
+            return keypoints
 
         # Get flattened garment observation
         flatten_obs = arena.get_flattened_obs()
         flatten_rgb = flatten_obs['observation']["rgb"]
-        particle_positions = flatten_obs['observation']["particle_position"]  # (N, 3)
+        particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
 
         # Ask user to click semantic keypoints
         keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
@@ -126,7 +191,7 @@ class GarmentFoldingTask(Task):
             y, x = pix
             dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
             particle_id = np.argmin(dists)
-            keypoints[name] = particle_id
+            keypoints[name] = int(particle_id)
         
         if self.config.debug:
             annotated = np.zeros((H, W, 3), dtype=np.uint8)
@@ -138,9 +203,8 @@ class GarmentFoldingTask(Task):
             cv2.imwrite("tmp/annotated.png", annotated)
 
 
-        #print('annotated keypoint ids', keypoints)
-        # Save particle IDs instead of pixel coords
-        np.save(keypoint_file, keypoints)
+        with open(keypoint_file, "w") as f:
+            json.dump(keypoints, f, indent=2)
         return keypoints
 
 

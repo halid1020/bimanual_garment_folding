@@ -6,6 +6,7 @@ class KeypointGUI:
     def __init__(self, semantics):
         self.semantics = list(semantics)
         self.colors = plt.cm.tab10(np.linspace(0, 1, max(1, len(self.semantics))))
+        self.current_prompt = None 
 
     def run(self, rgb):
         # reset state each time
@@ -21,6 +22,14 @@ class KeypointGUI:
         self.ax = self.fig.add_subplot(1, 1, 1)
         self.ax.imshow(rgb)
         self.ax.set_title("Click to assign semantic keypoints")
+
+         # --- add initial annotation prompt ---
+        self.current_prompt = self.ax.text(
+            0.5, 0.97, f"Next: {self.semantics[0]}",
+            transform=self.ax.transAxes, ha='center', va='top',
+            fontsize=12, color='red',
+            bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.3')
+        )
 
         # Put the legend in its own fixed axes so it never moves
         # Adjust [left, bottom, width, height] to taste.
@@ -71,6 +80,12 @@ class KeypointGUI:
 
         self.click_order += 1
 
+        # update prompt text
+        if self.click_order < len(self.semantics):
+            self.current_prompt.set_text(f"Next: {self.semantics[self.click_order]}")
+        else:
+            self.current_prompt.set_text("All keypoints assigned! Click Finish.")
+
         # If there was a warning, clear it now that user acted
         self.clear_warning()
         self.fig.canvas.draw_idle()
@@ -86,11 +101,13 @@ class KeypointGUI:
         removed_name = self.semantics[self.click_order]
         self.keypoints.pop(removed_name, None)
         self.points.pop()
+        self.current_prompt.set_text(f"Next: {self.semantics[self.click_order]}")
         self.redraw()
         print(f"Undid {removed_name}")
 
     def reset(self, event):
         self.click_order = 0
+        self.current_prompt.set_text(f"Next: {self.semantics[0]}")
         self.keypoints.clear()
         self.points.clear()
         self.warning_message = None
@@ -152,4 +169,17 @@ class KeypointGUI:
                 ha='center', va='bottom',
                 bbox=dict(facecolor='yellow', alpha=0.9, boxstyle='round,pad=0.4')
             )
+
+        # re-add prompt
+        if self.click_order < len(self.semantics):
+            prompt_text = f"Next: {self.semantics[self.click_order]}"
+        else:
+            prompt_text = "All keypoints assigned! Click Finish."
+        self.current_prompt = self.ax.text(
+            0.5, 0.97, prompt_text,
+            transform=self.ax.transAxes, ha='center', va='top',
+            fontsize=12, color='red',
+            bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.3')
+        )
+        
         self.fig.canvas.draw_idle()

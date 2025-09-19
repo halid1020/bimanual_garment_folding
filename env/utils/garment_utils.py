@@ -4,6 +4,7 @@ KEYPOINT_SEMANTICS = {
     'longsleeve':[
         'left_collar',
         'right_collar',
+        'centre_collar',
         'left_shoulder',
         'right_shoulder',
         'higher_left_sleeve',

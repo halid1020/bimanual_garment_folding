@@ -140,6 +140,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         set_scene(
             config=init_state_params, 
             state=init_state_params)
+        self.init_state_params = init_state_params
 
         
         #print('set scene done')
@@ -366,7 +367,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         #print('pos', pos[0])
         return pos
     
-    def set_partciel_positions(self, particle_positions):
+    def set_particle_positions(self, particle_positions):
         particle_positions[:, [1, 2]] = particle_positions[:, [1, 2]]
         pyflex.set_positions(particle_positions.flatten())
     
@@ -468,7 +469,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         obs['rgb'] = self._render(mode='rgb')
         obs['depth'] = self._render(mode='depth')
         obs['mask'] = self._get_cloth_mask()
-        obs['particle_position'] = self.get_particle_positions()
+        obs['particle_positions'] = self.get_particle_positions()
         obs['semkey2pid'] = self.task.semkey2pid
         return obs
 
@@ -535,7 +536,9 @@ class SingleGarmentFixedInitialEnv(Arena):
         with h5py.File(hdf5_path, 'r') as init_states:
 
             group = init_states[key]
+            
             episode_params = dict(group.attrs)
+            #print('episode_params', episode_params)
             
             for dataset_name in group.keys():
                 episode_params[dataset_name] = group[dataset_name][()]

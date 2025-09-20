@@ -8,7 +8,7 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
-from ..utils.garment_utils import KEYPOINT_SEMANTICS
+from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, simple_rigid_align
 from ..utils.keypoint_gui import KeypointGUI
 
 def save_point_cloud_ply(path, points):
@@ -100,7 +100,9 @@ class GarmentFoldingTask(Task):
                 cv2.imwrite("tmp/step_rgb.png", rgb)
         
         if self.config.debug:
-            save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos')
+            frames = arena.get_frames()
+            if len(frames) > 0:
+                save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos')
         
         arena.set_particle_positions(particle_pos)
 
@@ -125,7 +127,8 @@ class GarmentFoldingTask(Task):
                 goals.append(goal)
             else:
                 # Load existing goal
-                rgb = plt.imread(os.path.join(goal_path, "rgb.png"))
+                rgb = (plt.imread(os.path.join(goal_path, "rgb.png"))*255).astype(np.uint8)
+                print('max rgb', np.max(rgb))
                 particles = load_point_cloud_ply(os.path.join(goal_path, "particles.ply"))
                 goal = {
                     'observation': {
@@ -225,20 +228,21 @@ class GarmentFoldingTask(Task):
 
         # Evaluate semantic keypoints
         #cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
-        semantic_dist = self._compute_keypoint_distance(cur_particles, goal_particles)
+        semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
 
         return {
             "mean_particle_distance": mean_particle_distance,
             "semantic_keypoint_distance": semantic_dist
         }
 
-    def _align_points(self, cur, goal):
+    def _align_points(self, arena, cur, goal):
         """
         Align cur points to goal points using Procrustes rigid alignment.
         Returns aligned points and mean distance.
         """
         if self.config.alignment == 'simple_rigid':
             # Center both sets
+            aligned_curr, aligned_goal = simple_rigid_align(cur, goal, arena.get_cloth_area())
             cur_centered = cur - np.mean(cur, axis=0)
             goal_centered = goal - np.mean(goal, axis=0)
 
@@ -246,44 +250,73 @@ class GarmentFoldingTask(Task):
             H = cur_centered.T @ goal_centered
             U, _, Vt = np.linalg.svd(H)
             R = U @ Vt
-            aligned = cur_centered @ R
+            aligned_curr = cur_centered @ R
+            aligned_goal = goal_centered
 
-            return aligned, goal_centered
+            #return aligned, goal_centered
+        elif self.config.alignment == 'complex_rigid':
+            aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
+        elif self.config.alignment == 'deform':
+            aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
         else:
             raise NotImplementedError
+        
+        # 🔒 Safety check for NaNs
+        assert not (np.isnan(aligned_curr).any() or np.isnan(aligned_goal).any()), \
+            "NaN values detected after point alignment!"
+        
+        return aligned_curr, aligned_goal
 
     def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
-        aligned_curr, aligned_goal = self._align_points(cur, goal)
+        aligned_curr, aligned_goal = self._align_points(arena, cur, goal)
+        mdp = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
+
         if self.config.debug:
-            project_aligned, _ = arena.get_visibility(aligned_curr)
-            project_goal, _ = arena.get_visibility(aligned_goal)
-            canvas =  np.zeros((480, 480, 3), dtype=np.uint8)
+            for align_type in ['simple_rigid', 'complex_rigid', 'deform']:
+                if align_type == 'simple_rigid':
+                    aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
+                elif align_type == 'complex_rigid':
+                    aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
+                elif align_type == 'deform':
+                    aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
+                mdp_ = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
+                project_aligned, _ = arena.get_visibility(aligned_curr)
+                project_goal, _ = arena.get_visibility(aligned_goal)
+                canvas = np.zeros((480, 480, 3), dtype=np.uint8)
 
-            for p in project_aligned:
-                x, y = p  # assuming pix = (x, y)
-                x = int(x)
-                y = int(y)
-                #print(p)
-                canvas[x, y] = (255, 255, 255)
+                for p in project_aligned:
+                    x, y = map(int, p)
+                    canvas[x, y] = (255, 255, 255)
 
-            for p in project_goal:
-                x, y = p  # assuming pix = (x, y)
-                x = int(x)
-                y = int(y)
-                canvas[x, y] = (0, 255, 0)
+                for p in project_goal:
+                    x, y = map(int, p)
+                    canvas[x, y] = (0, 255, 0)
 
-            # Save both images
-            cv2.imwrite(f"tmp/alignment_{arena.action_step}.png", canvas)
-            #cv2.imwrite("tmp/visible.png", visible_img)
+                # Save both images
+                combined = np.hstack((canvas, arena.info['observation']['rgb']))
+
+                # 🔹 Overlay mdp value on combined image
+                cv2.putText(
+                    combined,
+                    f"MDP: {mdp_:.4f}",
+                    (10, 30),  # position (x, y)
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,       # font scale
+                    (0, 0, 255),  # color (red)
+                    2,         # thickness
+                    cv2.LINE_AA
+                )
+                cv2.imwrite(f"tmp/{align_type}_combined_{arena.action_step}.png", combined)
+
+        return mdp
 
 
-        return np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
 
-    def _compute_keypoint_distance(self, cur, goal):
+    def _compute_keypoint_distance(self, arena, cur, goal):
         """Align semantic keypoints and compute mean distance."""
 
-        aligned_cur, aligned_goal = self._align_points(cur, goal)
+        aligned_cur, aligned_goal = self._align_points(arena, cur, goal)
         
         cur_pts = []
         goal_pts = []

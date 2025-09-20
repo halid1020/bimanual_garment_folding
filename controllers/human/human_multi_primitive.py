@@ -71,8 +71,7 @@ class HumanMultiPrimitive(Agent):
         img = np.concatenate([img, goal_rgb], axis=1)
 
         # Show window
-        cv2.imshow("Current RGB (left) | Goal RGB (right)", img)
-        cv2.waitKey(1)  # Keeps the window responsive
+        cv2.imwrite("tmp/human_rgb.png", img)
 
         chosen_primitive = None
         while True:
@@ -92,7 +91,7 @@ class HumanMultiPrimitive(Agent):
                 print("Invalid input. Please enter a number.")
 
         # Close OpenCV window once a valid choice is made
-        cv2.destroyAllWindows()
+        # cv2.destroyAllWindows()
 
         # Delegate action
         action = self.current_primitive.single_act(state)

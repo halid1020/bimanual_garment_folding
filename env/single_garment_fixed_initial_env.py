@@ -24,6 +24,7 @@ ENV_NUM = 0
 class SingleGarmentFixedInitialEnv(Arena):
     
     def __init__(self, config):
+        super().__init__()
         self.config = config
         self.info = {}
         self.sim_step = 0
@@ -70,6 +71,8 @@ class SingleGarmentFixedInitialEnv(Arena):
 
         self.evaluate_result = None
         self.track_semkey_on_frames = self.config.track_semkey_on_frames
+        self.action_step = 0
+        self.last_info = None
     
 
     def _setup_camera(self):
@@ -209,10 +212,12 @@ class SingleGarmentFixedInitialEnv(Arena):
             info['success'] =  self.success(),
             info['reward'] = self.task.reward(self.last_info, None, info)
 
-            goal = self.task.get_goals()[0]
-            info['goal'] = {}
-            for k, v in goal['observation'].items():
-                info['goal'][k] = v
+            goals = self.task.get_goals()
+            if len(goals) > 0:
+                goal = goals[0]
+                info['goal'] = {}
+                for k, v in goal['observation'].items():
+                    info['goal'][k] = v
 
         return info
     
@@ -220,8 +225,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.last_info = self.info
         self.evaluate_result = None
         info = self.action_tool.step(self, action)
-        self.info = self._process_info(info)
         self.action_step += 1
+        self.info = self._process_info(info)
         return self.info
     
 
@@ -234,10 +239,12 @@ class SingleGarmentFixedInitialEnv(Arena):
     def get_frames(self):
         return self.video_frames.copy()
 
-    def set_to_flatten(self):
+    def set_to_flatten(self, re_process_info=False):
         pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
         self.wait_until_stable()
         self.info = self._process_info({}, task_related=False, flatten_obs=False)
+        if re_process_info:
+            self.info = self._process_info({}, task_related=True, flatten_obs=False)
         return self.info
     
     def get_flattened_obs(self):
@@ -616,3 +623,6 @@ class SingleGarmentFixedInitialEnv(Arena):
 
 
         return pixels, visible
+    
+    def get_cloth_area(self):
+        return self.episode_params['cloth_height'] * self.episode_params['cloth_width']

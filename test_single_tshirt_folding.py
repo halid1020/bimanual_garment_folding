@@ -34,7 +34,7 @@ def main():
     demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
     
     task_config = {
-        'num_goals': 10,
+        'num_goals': 1,
         'demonstrator': demonstrator,
         'object': 'longsleeve',
         'asset_dir': 'assets',

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
-from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, simple_rigid_align
+from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, simple_rigid_align, chamfer_alignment_with_rotation
 from ..utils.keypoint_gui import KeypointGUI
 
 def save_point_cloud_ply(path, points):
@@ -215,12 +215,16 @@ class GarmentFoldingTask(Task):
         """Evaluate folding quality using particle alignment and semantic keypoints."""
         if len(self.goals) == 0:
             return {}
-        cur_particles = arena.get_particle_positions()
+        cur_particles = arena.get_mesh_particles_positions()
 
         # Evaluate particle alignment against each goal
         particle_distances = []
         for goal in self.goals:
-            goal_particles = goal['observation']["particle_positions"]
+            goal_particles = goal['observation']["particle_positions"][:arena.num_mesh_particles]
+            # print('max z', np.max(goal_particles[:, 2]))
+            # print('min z', np.min(goal_particles[:, 2]))
+            # print('max y', np.max(goal_particles[:, 1]))
+            # print('min y', np.min(goal_particles[:, 1]))
             aligned_dist = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(aligned_dist)
         mean_particle_distance = min(particle_distances)
@@ -243,16 +247,6 @@ class GarmentFoldingTask(Task):
         if self.config.alignment == 'simple_rigid':
             # Center both sets
             aligned_curr, aligned_goal = simple_rigid_align(cur, goal, arena.get_cloth_area())
-            cur_centered = cur - np.mean(cur, axis=0)
-            goal_centered = goal - np.mean(goal, axis=0)
-
-            # Compute optimal rotation via SVD
-            H = cur_centered.T @ goal_centered
-            U, _, Vt = np.linalg.svd(H)
-            R = U @ Vt
-            aligned_curr = cur_centered @ R
-            aligned_goal = goal_centered
-
             #return aligned, goal_centered
         elif self.config.alignment == 'complex_rigid':
             aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
@@ -261,7 +255,7 @@ class GarmentFoldingTask(Task):
         else:
             raise NotImplementedError
         
-        # 🔒 Safety check for NaNs
+        # Safety check for NaNs
         assert not (np.isnan(aligned_curr).any() or np.isnan(aligned_goal).any()), \
             "NaN values detected after point alignment!"
         
@@ -269,17 +263,24 @@ class GarmentFoldingTask(Task):
 
     def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
-        aligned_curr, aligned_goal = self._align_points(arena, cur, goal)
+        print('len cur', len(cur))
+        aligned_curr, aligned_goal = self._align_points(arena, cur.copy(), goal.copy())
         mdp = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
+        
 
         if self.config.debug:
-            for align_type in ['simple_rigid', 'complex_rigid', 'deform']:
+            save_point_cloud_ply(os.path.join('tmp', f"cur_particles_step_{arena.action_step}.ply"), cur)
+            save_point_cloud_ply(os.path.join('tmp', "goal_particles.ply"), goal)
+            for align_type in ['simple_rigid', 'complex_rigid', 'deform', 'chamfer_rotation']:
                 if align_type == 'simple_rigid':
                     aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
                 elif align_type == 'complex_rigid':
+                    print('Cloth Area', arena.get_cloth_area())
                     aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
                 elif align_type == 'deform':
                     aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
+                # elif align_type == 'chamfer_rotation':
+                #     aligned_curr, aligned_goal = chamfer_alignment_with_rotation(cur, goal)
                 mdp_ = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
                 project_aligned, _ = arena.get_visibility(aligned_curr)
                 project_goal, _ = arena.get_visibility(aligned_goal)
@@ -287,10 +288,14 @@ class GarmentFoldingTask(Task):
 
                 for p in project_aligned:
                     x, y = map(int, p)
+                    if x >= 480 or y> 480:
+                        continue
                     canvas[x, y] = (255, 255, 255)
 
                 for p in project_goal:
                     x, y = map(int, p)
+                    if x >= 480 or y> 480:
+                        continue
                     canvas[x, y] = (0, 255, 0)
 
                 # Save both images

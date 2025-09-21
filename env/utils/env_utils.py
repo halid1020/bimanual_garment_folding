@@ -126,7 +126,8 @@ def set_scene(config,
     # print('scene_config:', config['scene_config'])
 
     pyflex.set_scene_from_dict(config['scene_config']['scene_id'], config['scene_config'])
-
+    # print('len verts', len(config['mesh_verts']))
+    # print('len particle pos', len(state['particle_pos'].reshape(-1, 4)))
     pyflex.add_cloth_mesh(
         position=config['cloth_pos'], 
         verts=config['mesh_verts'], 

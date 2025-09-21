@@ -77,6 +77,8 @@ def load_cloth(path):
                 bend_edge = tuple(sorted([neighbour_list[i], neighbour_list[j]]))
                 if bend_edge not in shear_edges:
                     bend_edges.add(bend_edge)
+    
+    #print('len vertices', len(vertices))
 
     return np.array(vertices), np.array(triangle_faces), np.array(list(stretch_edges)), np.array(list(bend_edges)), np.array(list(shear_edges))
 

@@ -143,6 +143,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         set_scene(
             config=init_state_params, 
             state=init_state_params)
+        self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
         self.init_state_params = init_state_params
 
         
@@ -370,7 +371,7 @@ class SingleGarmentFixedInitialEnv(Arena):
     
     
     def _get_coverage(self):
-        particle_positions = self.get_particle_positions()
+        particle_positions = self.get_mesh_particles_positions()
         # swap y and z
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
         return get_coverage(particle_positions, self.particle_radius)
@@ -379,8 +380,13 @@ class SingleGarmentFixedInitialEnv(Arena):
         pos = pyflex.get_positions().reshape(-1, 4)[:, :3].copy()
         # swap y and z
         pos[:, [1, 2]] = pos[:, [2, 1]]
+        #print('len particles', len(pos))
         #print('pos', pos[0])
         return pos
+    
+    def get_mesh_particles_positions(self):
+        particles = self.get_particle_positions()
+        return particles[:self.num_mesh_particles]
     
     def set_particle_positions(self, particle_positions):
         particle_positions[:, [1, 2]] = particle_positions[:, [1, 2]]
@@ -401,7 +407,7 @@ class SingleGarmentFixedInitialEnv(Arena):
             
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
-                particle_pos = self.get_particle_positions()          # (N, 3)
+                particle_pos = self.get_mesh_particles_positions()          # (N, 3)
                 semkey2pid = self.task.semkey2pid                     # dict {name: pid}
                 keypids = list(semkey2pid.values())
                 keynames = list(semkey2pid.keys())
@@ -484,7 +490,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         obs['rgb'] = self._render(mode='rgb')
         obs['depth'] = self._render(mode='depth')
         obs['mask'] = self._get_cloth_mask()
-        obs['particle_positions'] = self.get_particle_positions()
+        obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
         return obs
 

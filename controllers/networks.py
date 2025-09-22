@@ -1,7 +1,9 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 class ConvEncoder(nn.Module):
-    def __init__(self, in_channels: int, cnn_channels: List[int], out_dim: int, kernel: int = 3, pool: int = 2):
+    def __init__(self, in_channels, cnn_channels, out_dim, kernel=3, pool=2):
         super().__init__()
         layers = []
         prev = in_channels
@@ -24,21 +26,22 @@ class ConvEncoder(nn.Module):
             self._project = nn.Sequential(nn.Flatten(), nn.Linear(sz, self.out_dim), nn.ReLU()).to(x.device)
             self._initialized = True
 
-    def forward(self, contexts: torch.Tensor) -> torch.Tensor:
+    def forward(self, contexts):
         if contexts.dim() == 4:
             contexts = contexts.unsqueeze(0)
         B, N, C, H, W = contexts.shape
-        contexts_flat = contexts.view(B * N, C, H, W)
+        contexts_flat = contexts.reshape(B, N * C, H, W)
+        #print(contexts_flat.shape)
         self._ensure_init(contexts_flat)
         features = self.cnn(contexts_flat)
         features = features.view(features.size(0), -1)
         projected = self._project(features)
-        projected = projected.view(B, N, -1)
-        return projected.mean(dim=1)
+        projected = projected.view(B, -1)
+        return projected #.mean(dim=1)
 
 
 class MLPActor(nn.Module):
-    def __init__(self, input_dim: int, action_dim: int, hidden_dim: int):
+    def __init__(self, input_dim, action_dim, hidden_dim):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim), nn.ReLU(),
@@ -67,7 +70,7 @@ class MLPActor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int):
+    def __init__(self, input_dim, hidden_dim):
         super().__init__()
         self.q = nn.Sequential(
             nn.Linear(input_dim, hidden_dim), nn.ReLU(),

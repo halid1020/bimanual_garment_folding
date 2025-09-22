@@ -9,9 +9,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import cv2
+from collections import deque
 
-from ..utilities.types import ActionType, InformationType
-from .trainable_agent import TrainableAgent
+from agent_arena import TrainableAgent
 from dotmap import DotMap
 from .networks import *
 from .replay_buffer import ReplayBuffer
@@ -20,16 +21,16 @@ from .replay_buffer import ReplayBuffer
 
 def default_config() -> DotMap:
     cfg = DotMap()
-    cfg.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    cfg.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     cfg.encoder = DotMap()
     cfg.encoder.out_dim = 256
     cfg.encoder.cnn_channels = [32, 64, 128]
     cfg.encoder.kernel = 3
     cfg.encoder.pool = 2
+    cfg.obs_key = 'rgb'
 
-    cfg.context_horizon = 5
+    cfg.context_horizon = 3
     cfg.each_image_shape = (3, 64, 64) # RGB
-    cfg.action_dim = 6
     cfg.num_primitives = 5
     cfg.hidden_dim = 256
 
@@ -38,15 +39,23 @@ def default_config() -> DotMap:
     cfg.alpha_lr = 3e-4
     cfg.tau = 0.005
     cfg.gamma = 0.99
-    cfg.batch_size = 256
+    cfg.batch_size = 16 #256
 
-    cfg.replay_capacity = int(1e6)
-    cfg.target_entropy = -cfg.action_dim
+    cfg.replay_capacity = int(1e5)
+    #cfg.target_entropy = -cfg.max_action_dim
     cfg.max_grad_norm = 10.0
     cfg.save_dir = None
 
-    cfg.num_primitives = 5
-    cfg.action_dims = [2, 3, 4, 6, 8]
+    cfg.num_primitives = 4
+    cfg.action_dims = [4, 8, 6, 8]
+    cfg.primitive_param = [
+        ("norm-pixel-pick-and-fling", [("pick_0", 2), ("pick_1", 2)]),
+        ('norm-pixel-pick-and-place', [("pick_0", 2), ("pick_1", 2), ("place_0", 2), ("place_1", 2)]),
+        ('norm-pixel-pick-and-drag', [("pick_0", 2), ("pick_1", 2), ("place_0", 2)]),
+        ('norm-pixel-fold',  [("pick_0", 2), ("pick_1", 2), ("place_0", 2), ("place_1", 2)])
+    ]
+
+    cfg.reward_key = 'multi_stage_reward'
 
     return cfg
 
@@ -78,14 +87,16 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.config = cfg
         self.name = "sac-agent"
         self.device = torch.device(cfg.device)
+        self.context_horizon = cfg.context_horizon 
+        self.each_image_shape = cfg.each_image_shape
 
-        C, H, W = cfg.image_shape
+        C, H, W = cfg.each_image_shape
         self.input_channel = cfg.context_horizon*C
         self.encoder = ConvEncoder(self.input_channel, cfg.encoder.cnn_channels, cfg.encoder.out_dim).to(self.device)
         enc_dim = cfg.encoder.out_dim
 
         self.K = int(cfg.num_primitives)
-        self.action_dim = int(cfg.action_dim)
+        self.max_action_dim = max([cfg.action_dims[k] for k in range(self.K)]) + 1
 
         self.actors = nn.ModuleList([
             MLPActor(enc_dim, cfg.action_dims[k], cfg.hidden_dim) for k in range(self.K)
@@ -104,9 +115,9 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         self.log_alpha = torch.tensor(math.log(0.1), requires_grad=True, device=self.device)
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
-        self.target_entropy = float(cfg.target_entropy)
+        self.target_entropy = float(-self.max_action_dim)
 
-        self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.action_dim, self.device)
+        self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.max_action_dim, self.device)
         self.total_update_steps = 0
         self.loaded = False
         self.logger = WandbLogger(
@@ -114,15 +125,56 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             name=self.name,
             config=dict(cfg)
         )
+        self.obs_key = cfg.obs_key
+        self.primitive_param = cfg.primitive_param
+        self.last_done = True
+        self.episode_return = 0
+        self.episode_length = 0
+        self.reward_key = cfg.reward_key
+        self.total_act_steps = 0
 
-    def _select_action(self, info: InformationType, stochastic: bool) -> np.ndarray:
-        obs =  info["observation"]["image"]
-        obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
-        if obs_t.dim() == 4:
-            obs_t = obs_t.unsqueeze(0)  # (1, N, C, H, W)
+    def pre_process(self, rgb):
+        """
+        Preprocess an RGB image.
+        - Input: H x W x C (uint8 or float)
+        - Resize to 64x64
+        - Normalize to [-0.5, 0.5], C x H x W
+        """
+        # TODO: this process can be customised to each types of obs
+        # ensure uint8 -> float32
+        if rgb.dtype != np.float32:
+            rgb = rgb.astype(np.float32)
+
+        # resize (cv2 expects W,H order)
+        rgb_resized = cv2.resize(rgb, (64, 64), interpolation=cv2.INTER_AREA)
+
+        # normalize to [-0.5, 0.5]
+        rgb_norm = rgb_resized / 255.0 - 0.5
+
+        return rgb_norm.transpose(2, 0, 1)
+
+    def _select_action(self, info, stochastic=False):
+        obs = info["observation"][self.obs_key]
+        obs = self.pre_process(obs)
+        
+        aid = info['arena_id']
+        self.internal_states[aid]['obs_que'].append(obs)
+        while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
+            self.internal_states[aid]['obs_que'].append(obs)
+        #print('len que', len(self.internal_states[aid]['obs_que']))
+        
+        # take last context_horizon frames
+        obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
+
+        # stack into array (N, C, H, W) or (N, H, W, C) depending on your obs format
+        obs_np = np.stack(obs_list, axis=0)   # (N, ...)
+
+        # convert to torch
+        obs_t = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device).unsqueeze(0) # (1, N, C, H, W)
+
         z = self.encoder(obs_t)
 
-        best_q, best_action = None, None
+        best_q, best_action, best_k = None, None, None
         for k in range(self.K):
             if stochastic:
                 action, _, _ = self.actors[k].sample(z)
@@ -133,7 +185,27 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             if (best_q is None) or (q.item() > best_q):
                 best_q = q.item()
                 best_action = action
-        return best_action.cpu().numpy().squeeze(0)
+                best_k = k
+
+        # Convert to numpy
+        best_action = best_action.detach().cpu().numpy().squeeze(0)
+        #print('best action', best_action)
+        
+
+        # Build dictionary for chosen primitive
+        primitive_name, params = self.primitive_param[best_k]
+        out_dict = {primitive_name: {}}
+
+        idx = 0
+        for param_name, dim in params:
+            out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
+            idx += dim
+
+        best_action = np.array([best_k] + best_action.tolist())
+
+
+        return out_dict, best_action
+
 
     def set_eval(self):
         if self.mode == 'eval':
@@ -144,13 +216,16 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.mode = 'eval'
 
 
-    def act(self, info_list: List[InformationType], update: bool = False) -> List[ActionType]:
+    def act(self, info_list, updates):
         self.set_eval()
         with torch.no_grad():
-            return [self._select_action(info, stochastic=False) for info in info_list]
+            return [self._select_action(info, stochastic=False)[0] for info in info_list]
+
+    def single_act(self, info, update=False):
+        return self._select_action(info)[0]
 
 
-    def explore_act(self, info_list: List[InformationType]) -> List[ActionType]:
+    def explore_act(self, info_list):
         self.set_eval()
         with torch.no_grad():
             return [self._select_action(info, stochastic=True) for info in info_list]
@@ -230,7 +305,9 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
     def _collect_from_arena(self, arena):
         if self.last_done:
-            info = arena.reset()
+            self.info = arena.reset()
+            self.set_train()
+            self.reset([arena.id])
            
             self.logger.log({
                 "train/episode_return": self.episode_return,
@@ -240,23 +317,44 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             self.episode_return = 0.0
             self.episode_length = 0
 
-        img_obs = info['observation']['image']
-        action = self.act([info])[0]
-        next_info = arena.step(action)
+        # img_obs = info['observation'][self.obs_key]
+        # self.internal_states[aid]['obs_queue'].append(img_obs)
+        # while len(self.internal_states[aid]['obs_queue']) < self.context_horizon:
+        #     self.internal_states[aid]['obs_queue'].append(img_obs)
 
-        next_img_obs = next_info['observation']['image']
-        reward = next_info.get("reward", 0.0)
+        #img_obs = self.pre_process(img_obs)
+        dict_action, vector_action = self._select_action(self.info, stochastic=True)
+        
+        #self.act([info], updates=[False])[0]
+        next_info = arena.step(dict_action)
+
+        next_img_obs = next_info['observation'][self.obs_key]
+        reward = next_info.get("reward", 0.0)[self.reward_key]
         done = next_info.get("done", False)
+        self.info = next_info
         self.last_done = done
+        self.episode_return = 0
+        aid = arena.id
+        img_obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
+        img_obs = np.stack(img_obs_list).reshape(self.context_horizon*self.each_image_shape[0], *self.each_image_shape[1:])
+        
+        img_obs_list.append(self.pre_process(next_img_obs))
+        next_img_obs =  np.stack(img_obs_list)[-self.context_horizon:].reshape(self.context_horizon*self.each_image_shape[0], *self.each_image_shape[1:])
 
+        
+        action = np.zeros(self.max_action_dim, dtype=np.float32)
+        #print('vector_action', vector_action)
+        action[:len(vector_action)] = vector_action
+        #print('action', action)
         self.replay.add(img_obs, action, reward, next_img_obs, done)
+        
         self.total_act_steps += 1
 
         # Track episodic return
         self.episode_return += reward
         self.episode_length += 1
 
-    def train(self, update_steps: int, arenas: Optional[List[Any]] = None) -> bool:
+    def train(self, update_steps, arenas) -> bool:
         if arenas is None or len(arenas) == 0:
             raise ValueError("SACAgent.train requires at least one Arena.")
         arena = arenas[0]
@@ -286,9 +384,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             path: Save directory.
             checkpoint_id: Optional ID for checkpoint (e.g. total update step).
         """
-        path = path or self.config.save_dir
-        if path is None:
-            raise ValueError("No save path provided")
+        path = os.path(self.save_dir, "checkpoints")
         os.makedirs(path, exist_ok=True)
 
         state = {
@@ -331,9 +427,9 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         Returns:
             int: The total update step at which the model was saved, or -1 if loading failed.
         """
-        path = path or self.config.save_dir
-        if path is None:
-            raise ValueError("No load path provided")
+        path = path or self.save_dir
+        # if path is None:
+        #     raise ValueError("No load path provided")
 
         model_file = os.path.join(path, "last_model.pt")
         replay_file = os.path.join(path, "last_replay_buffer.pkl")
@@ -441,3 +537,12 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         for c in self.critics: 
             c.train()
         self.mode = 'train'
+
+    def reset(self, arena_ids):
+        for aid in arena_ids:
+            self.internal_states[aid] = {}
+            self.internal_states[aid]['obs_que'] = deque()
+
+    def set_log_dir(self, log_dir):
+        self.save_dir = log_dir
+        self.logger.set_log_dir(log_dir)

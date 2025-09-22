@@ -1,9 +1,9 @@
 import torch
+import numpy as np
 
 class ReplayBuffer:
-    def __init__(self, capacity: int, image_shape: Tuple[int, int, int], num_context: int, action_dim: int, device: str):
+    def __init__(self, capacity, image_shape, max_action_dim, device):
         self.capacity = int(capacity)
-        self.num_context = num_context
         C, H, W = image_shape
         self.device = device
 
@@ -11,12 +11,12 @@ class ReplayBuffer:
         self.size = 0
 
         self.observation = np.zeros((self.capacity, C, H, W), dtype=np.float32)
-        self.actions = np.zeros((self.capacity, action_dim), dtype=np.float32)
+        self.actions = np.zeros((self.capacity, max_action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.capacity,), dtype=np.float32)
         self.next_observation = np.zeros((self.capacity, C, H, W), dtype=np.float32)
         self.dones = np.zeros((self.capacity,), dtype=np.float32)
 
-    def add(self, observation: np.ndarray, action: np.ndarray, reward: float, next_observation: np.ndarray, done: bool):
+    def add(self, observation, action, reward, next_observation, done):
         self.observation[self.ptr] = observation
         self.actions[self.ptr] = action
         self.rewards[self.ptr] = reward

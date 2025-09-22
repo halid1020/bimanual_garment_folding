@@ -159,13 +159,14 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.info = {}
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
-
+        
+        self.last_flattened_step = -100
         self.task.reset(self)
         self.action_step = 0
 
         self.evaluate_result = None
         self.last_info = None
-        self.last_flattened_step = -100
+       
         
         self.info = self._process_info({})
 
@@ -216,7 +217,8 @@ class SingleGarmentFixedInitialEnv(Arena):
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
             info['success'] =  self.success()
-            info['reward'] = self.task.reward(self.last_info, None, info)
+            if info['evaluation'] != {}:
+                info['reward'] = self.task.reward(self.last_info, None, info)
             
 
             goals = self.task.get_goals()
@@ -533,8 +535,7 @@ class SingleGarmentFixedInitialEnv(Arena):
                     set_scene(
                         config=episode_params, 
                         state=episode_params)
-                    # self.pickers.reset(self.picker_initial_pos)
-                    # self.action_tool.reset(self) # get out of camera view, and open the gripper
+                    
                     pyflex.step()
                     cloth_mask = self._get_cloth_mask()
                     if self.workspace_mask is not None:

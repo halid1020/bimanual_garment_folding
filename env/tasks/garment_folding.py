@@ -255,7 +255,7 @@ class GarmentFoldingTask(Task):
 
         if self.config.alignment == 'simple_rigid':
             # Center both sets
-            aligned_curr, aligned_goal = simple_rigid_align(cur, goal, arena.get_cloth_area())
+            aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
             #return aligned, goal_centered
         elif self.config.alignment == 'complex_rigid':
             aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
@@ -299,13 +299,13 @@ class GarmentFoldingTask(Task):
 
                 for p in project_aligned:
                     x, y = map(int, p)
-                    if x >= 480 or y> 480:
+                    if x > 480 or y> 480:
                         continue
                     canvas[x, y] = (255, 255, 255)
 
                 for p in project_goal:
                     x, y = map(int, p)
-                    if x >= 480 or y> 480:
+                    if x > 480 or y> 480:
                         continue
                     canvas[x, y] = (0, 255, 0)
 

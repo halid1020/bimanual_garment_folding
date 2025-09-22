@@ -8,8 +8,11 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
-from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, simple_rigid_align, chamfer_alignment_with_rotation
+from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
+    simple_rigid_align, chamfer_alignment_with_rotation
 from ..utils.keypoint_gui import KeypointGUI
+from .utils import get_max_IoU
+from .folding_rewards import *
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
@@ -82,6 +85,8 @@ class GarmentFoldingTask(Task):
         # Generate goals (10 small variations)
         self.goals = self._load_or_generate_goals(arena, self.num_goals)
 
+        self.aligned_pairs = []
+
         return {"goals": self.goals, "keypoints": self.semkey2pid}
 
     def _generate_a_goal(self, arena):
@@ -128,11 +133,12 @@ class GarmentFoldingTask(Task):
             else:
                 # Load existing goal
                 rgb = (plt.imread(os.path.join(goal_path, "rgb.png"))*255).astype(np.uint8)
-                print('max rgb', np.max(rgb))
+                #print('max rgb', np.max(rgb))
+                #print('rgb', rgb.shape)
                 particles = load_point_cloud_ply(os.path.join(goal_path, "particles.ply"))
                 goal = {
                     'observation': {
-                        'rgb': rgb,
+                        'rgb': rgb[:, :, :3],
                         'particle_positions': particles
                     }
                 }
@@ -159,12 +165,15 @@ class GarmentFoldingTask(Task):
 
         # Ask user to click semantic keypoints
         keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
-        print('annotated keypoints', keypoints_pixel)
+        
         # Project all garment particles
         pixels, visible = arena.get_visibility(particle_positions)
         
         if self.config.debug:
             H, W = (480, 480)
+
+
+            print('annotated keypoints', keypoints_pixel)
 
             # Make sure tmp folder exists
             os.makedirs("tmp", exist_ok=True)
@@ -221,22 +230,19 @@ class GarmentFoldingTask(Task):
         particle_distances = []
         for goal in self.goals:
             goal_particles = goal['observation']["particle_positions"][:arena.num_mesh_particles]
-            # print('max z', np.max(goal_particles[:, 2]))
-            # print('min z', np.min(goal_particles[:, 2]))
-            # print('max y', np.max(goal_particles[:, 1]))
-            # print('min y', np.min(goal_particles[:, 1]))
             aligned_dist = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(aligned_dist)
         mean_particle_distance = min(particle_distances)
-        print('MPD', mean_particle_distance)
+        #print('MPD', mean_particle_distance)
 
-        # Evaluate semantic keypoints
-        #cur_keypoints = arena.get_keypoints()  # Arena should provide detected keypoints
         semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
 
         return {
             "mean_particle_distance": mean_particle_distance,
-            "semantic_keypoint_distance": semantic_dist
+            "semantic_keypoint_distance": semantic_dist,
+            'max_IoU': self._get_max_IoU(arena),
+            'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
+            'normalised_coverage': self._get_normalised_coverage(arena)
         }
 
     def _align_points(self, arena, cur, goal):
@@ -244,6 +250,9 @@ class GarmentFoldingTask(Task):
         Align cur points to goal points using Procrustes rigid alignment.
         Returns aligned points and mean distance.
         """
+        if len(self.aligned_pairs) == arena.action_step + 1:
+            return self.aligned_pairs[-1]
+
         if self.config.alignment == 'simple_rigid':
             # Center both sets
             aligned_curr, aligned_goal = simple_rigid_align(cur, goal, arena.get_cloth_area())
@@ -259,11 +268,13 @@ class GarmentFoldingTask(Task):
         assert not (np.isnan(aligned_curr).any() or np.isnan(aligned_goal).any()), \
             "NaN values detected after point alignment!"
         
+        self.aligned_pairs.append((aligned_curr, aligned_goal))
+        
         return aligned_curr, aligned_goal
 
     def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
-        print('len cur', len(cur))
+        #print('len cur', len(cur))
         aligned_curr, aligned_goal = self._align_points(arena, cur.copy(), goal.copy())
         mdp = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
         
@@ -275,7 +286,7 @@ class GarmentFoldingTask(Task):
                 if align_type == 'simple_rigid':
                     aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
                 elif align_type == 'complex_rigid':
-                    print('Cloth Area', arena.get_cloth_area())
+                    #print('Cloth Area', arena.get_cloth_area())
                     aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
                 elif align_type == 'deform':
                     aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
@@ -335,11 +346,21 @@ class GarmentFoldingTask(Task):
 
         return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
     
-    def reward(self, last_info, action, info): # TODO: implement this with keypoint distance and particle distance.
+    def reward(self, last_info, action, info): 
+        mpd = info['evaluation']['mean_particle_distance']
+        mkd = info['evaluation']["semantic_keypoint_distance"]
+        
+        multi_stage_reward = coverage_alignment_reward(last_info, action, info) - 1 
+        if info['observation']['action_step'] - info['observation']['last_flattened_step'] <= 3:
+            multi_stage_reward = particle_distance_reward(mpd) # 0 to 1
+            
         return {
-            'dummy': 0
+            'particle_distance': particle_distance_reward(mpd),
+            'keypoint_distance': particle_distance_reward(mkd),
+            'multi_stage_reward': multi_stage_reward,
         }
     
+
     def get_goals(self):
         return self.goals
 
@@ -351,3 +372,27 @@ class GarmentFoldingTask(Task):
         if cur_eval == {}:
             return False
         return cur_eval['mean_particle_distance'] < 0.01
+    
+    def _get_max_IoU(self, arena):
+        cur_mask = arena._get_cloth_mask()
+        max_IoU = 0
+        for goal in self.goals[:1]:
+            goal_mask = goal['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
+            
+            IoU, matched_IoU = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
+            if IoU > max_IoU:
+                max_IoU = IoU
+        
+        return IoU
+    
+    def _get_max_IoU_to_flattened(self, arena):
+        cur_mask = arena._get_cloth_mask()
+        IoU, matched_IoU = get_max_IoU(cur_mask, arena.get_flattened_obs()['observation']['mask'], debug=self.config.debug)
+        
+        return IoU
+    
+    def _get_normalised_coverage(self, arena):
+        res = arena._get_coverage() / arena.flatten_coverage
+        
+        # clip between 0 and 1
+        return np.clip(res, 0, 1)

@@ -3,6 +3,123 @@
 import numpy as np
 import open3d as o3d
 from copy import deepcopy
+from skimage.measure import label, regionprops
+from scipy.ndimage import rotate, shift
+import cv2
+import os
+
+def calculate_iou(mask1, mask2):
+    if mask1.shape[0] > 128:
+        mask1 = cv2.resize(mask1.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
+        mask1 = (mask1 > 0.5).astype(bool)
+        
+
+    if mask2.shape[0] > 128:
+        mask2 = cv2.resize(mask2.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
+        mask2 = (mask2 > 0.5).astype(bool)
+
+    intersection = np.logical_and(mask1, mask2).sum()
+    union = np.logical_or(mask1, mask2).sum()
+    return intersection / union if union > 0 else 0
+
+def get_max_IoU(mask1, mask2, debug=False):
+    """
+    Calculate the maximum IoU between two binary mask images,
+    allowing for rotation and translation of mask1.
+    
+    :param mask1: First binary mask (numpy array)
+    :param mask2: Second binary mask (numpy array)
+    :return: Tuple of (Maximum IoU value, Matched mask)
+    """
+
+    ## if mask is rectangular, make it square by padding
+    if mask1.shape[0] > mask1.shape[1]:
+        pad = (mask1.shape[0] - mask1.shape[1]) // 2
+        mask1 = np.pad(mask1, ((0, 0), (pad, pad)), mode='constant')
+    elif mask1.shape[1] > mask1.shape[0]:
+        pad = (mask1.shape[1] - mask1.shape[0]) // 2
+        mask1 = np.pad(mask1, ((pad, pad), (0, 0)), mode='constant')
+    
+    if mask2.shape[0] > mask2.shape[1]:
+        pad = (mask2.shape[0] - mask2.shape[1]) // 2
+        mask2 = np.pad(mask2, ((0, 0), (pad, pad)), mode='constant')
+    elif mask2.shape[1] > mask2.shape[0]:
+        pad = (mask2.shape[1] - mask2.shape[0]) // 2
+        mask2 = np.pad(mask2, ((pad, pad), (0, 0)), mode='constant')
+    
+    # print('mask1 shape:', mask1.shape)
+    # print('mask2 shape:', mask2.shape)
+
+    # if resolution above 128, we need to resize the mask to 128
+    if mask1.shape[0] > 128:
+        mask1 = cv2.resize(mask1.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
+        mask1 = (mask1 > 0.5).astype(np.uint8)
+        
+
+    if mask2.shape[0] > 128:
+        mask2 = cv2.resize(mask2.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
+        mask2 = (mask2 > 0.5).astype(np.uint8)
+    
+    
+
+    # Get the properties of mask2
+    props = regionprops(label(mask2))[0]
+    center_y, center_x = props.centroid
+
+    max_iou = 0
+    best_mask = None
+    
+    # Define rotation angles to try
+    angles = range(0, 360, 1)  # Rotate from 0 to 350 degrees in 10-degree steps
+    
+    for angle in angles:
+        # Rotate mask1
+        rotated_mask = rotate(mask1, angle, reshape=False)
+
+        # if the mask is blank, skip
+        if np.sum(rotated_mask) == 0:
+            continue
+        
+        # Get properties of rotated mask
+        rotated_props = regionprops(label(rotated_mask))[0]
+        rotated_center_y, rotated_center_x = rotated_props.centroid
+        
+        # Calculate translation
+        dy = center_y - rotated_center_y
+        dx = center_x - rotated_center_x
+        
+        # Translate rotated mask
+        translated_mask = shift(rotated_mask, (dy, dx))
+
+        if debug:
+            os.makedirs("tmp", exist_ok=True)
+
+            # Normalize to 0–255 for saving
+            rotated_vis = (rotated_mask > 0.5).astype(np.uint8) * 255
+            translated_vis = (translated_mask > 0.5).astype(np.uint8) * 255
+            mask2_vis = (mask2 > 0.5).astype(np.uint8) * 255
+
+            cv2.imwrite(f"tmp/rotated.png", rotated_vis)
+            cv2.imwrite(f"tmp/translated.png", translated_vis)
+            cv2.imwrite(f"tmp/mask2_ref.png", mask2_vis)
+                
+        #translated_mask = (translated_mask > 0.1).astype(int)
+        # Calculate IoU
+        iou = calculate_iou(translated_mask, mask2)
+        
+        # Update max_iou and best_mask if necessary
+        if iou > max_iou:
+            max_iou = iou
+            best_mask = translated_mask
+
+    # Ensure the best_mask is binary
+    if best_mask is None:
+        return 0, None
+    
+    best_mask = (best_mask > 0.5).astype(int)
+
+    return max_iou, best_mask
+
 
 
 def rigid_transform_3D(A, B):

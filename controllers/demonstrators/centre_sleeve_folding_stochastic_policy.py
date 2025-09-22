@@ -111,7 +111,7 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
 
     def act_step1(self, arena_id, key_pixels, semkey2pid, keypids, cloth_mask):
         """Hem folding step."""
-        print('Demo step 2')
+        #print('Demo step 2')
         left_hem = self.get_pixel("left_hem", semkey2pid, keypids, key_pixels)
         right_hem = self.get_pixel("right_hem", semkey2pid, keypids, key_pixels)
         left_collar = self.get_pixel("left_collar", semkey2pid, keypids, key_pixels)
@@ -144,6 +144,19 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
 
         self.internal_states[arena_id]['step'] += 1
         return action
+    
+    def no_op(self):
+        action = {
+            'norm-pixel-fold': {
+                'pick_0': np.ones(2),
+                'pick_1': np.ones(2),
+                'place_0': np.ones(2),
+                'place_1': np.ones(2)
+            }
+        }
+
+        return action
+
 
     # --------------------------
     # ---- Main Control --------
@@ -166,8 +179,10 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
 
         if step == 0:
             return self.act_step0(arena_id, key_pixels, semkey2pid, keypids, cloth_mask)
-        else:
+        elif step == 1:
             return self.act_step1(arena_id, key_pixels, semkey2pid, keypids, cloth_mask)
+        else:
+            return self.no_op()
 
     def terminate(self):
         return {arena_id: (self.internal_states[arena_id]['step'] >= 2)

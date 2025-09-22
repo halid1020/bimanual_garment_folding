@@ -13,8 +13,7 @@ from tqdm import tqdm
 
 from agent_arena.arena.softgym.picker_action_wrappers.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
-from .utils.env_utils import set_scene, \
-    get_max_IoU, calculate_iou
+from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
 
 global ENV_NUM
@@ -166,6 +165,7 @@ class SingleGarmentFixedInitialEnv(Arena):
 
         self.evaluate_result = None
         self.last_info = None
+        self.last_flattened_step = -100
         
         self.info = self._process_info({})
 
@@ -209,9 +209,15 @@ class SingleGarmentFixedInitialEnv(Arena):
             info['done'] = False
         
         if task_related:
-            info['evaluation'] = self.evaluate(),
-            info['success'] =  self.success(),
+            info['evaluation'] = self.evaluate()
+            if info['evaluation'].get('normalised_coverage', 0) > 0.9:
+                self.last_flattened_step = self.action_step
+           
+            info['observation']['last_flattened_step'] = self.last_flattened_step
+            
+            info['success'] =  self.success()
             info['reward'] = self.task.reward(self.last_info, None, info)
+            
 
             goals = self.task.get_goals()
             if len(goals) > 0:
@@ -256,6 +262,7 @@ class SingleGarmentFixedInitialEnv(Arena):
             # self.wait_until_stable()
             self.flattened_obs = self.set_to_flatten()
             self.flatten_coverage = self._get_coverage()
+            print('flatten coverage', self._get_coverage())
             pyflex.set_positions(current_particl_pos)
             self.wait_until_stable()
         
@@ -283,7 +290,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         pass
 
     def evaluate(self):
-        if self.evaluate_result is None:
+        if (self.evaluate_result is None) or (self.action_step == 0):
             self.evaluate_result = self.task.evaluate(self)
         return self.evaluate_result
         
@@ -374,7 +381,9 @@ class SingleGarmentFixedInitialEnv(Arena):
         particle_positions = self.get_mesh_particles_positions()
         # swap y and z
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
-        return get_coverage(particle_positions, self.particle_radius)
+        coverage = get_coverage(particle_positions, self.particle_radius)
+        #print('coverage', get_coverage(particle_positions, self.particle_radius))
+        return coverage
 
     def get_particle_positions(self): # standard x y z
         pos = pyflex.get_positions().reshape(-1, 4)[:, :3].copy()
@@ -492,6 +501,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         obs['mask'] = self._get_cloth_mask()
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
+        obs['action_step'] = self.action_step
+
         return obs
 
     def _get_cloth_mask(self, camera_name='default_camera', resolution=None):

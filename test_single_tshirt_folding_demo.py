@@ -55,9 +55,13 @@ def main():
 
     agent = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False}))
     agent.reset([arena.id])
+    print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+    print(f"\nstep {arena.action_step} reward {info['reward']}")
     while not info['done']:
         action = agent.single_act(info)
         info = arena.step(action)
+        print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+        print(f"\nstep {arena.action_step} reward {info['reward']}")
     
 
 if __name__ == '__main__':

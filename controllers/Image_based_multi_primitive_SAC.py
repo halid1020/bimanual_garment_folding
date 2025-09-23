@@ -11,6 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import cv2
 from collections import deque
+from tqdm import tqdm
+import pickle
+
 
 from agent_arena import TrainableAgent
 from dotmap import DotMap
@@ -94,7 +97,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.input_channel = cfg.context_horizon*C
         self.encoder = ConvEncoder(self.input_channel, cfg.encoder.cnn_channels, cfg.encoder.out_dim).to(self.device)
         enc_dim = cfg.encoder.out_dim
-
+        self.action_dims = cfg.action_dims
         self.K = int(cfg.num_primitives)
         self.max_action_dim = max([cfg.action_dims[k] for k in range(self.K)]) + 1
 
@@ -110,10 +113,15 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             Critic(enc_dim + cfg.action_dims[k], cfg.hidden_dim) for k in range(self.K)
         ]).to(self.device)
 
-        self.actor_optimizers = [torch.optim.Adam(a.parameters(), lr=cfg.actor_lr) for a in self.actors]
+        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
+        self.actor_optim = torch.optim.Adam(self.actors.parameters(), lr=cfg.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critics.parameters(), lr=cfg.critic_lr)
+       
 
-        self.log_alpha = torch.tensor(math.log(0.1), requires_grad=True, device=self.device)
+        self.log_alpha = torch.nn.Parameter(
+            torch.tensor(math.log(0.1), requires_grad=True, device=self.device, dtype=torch.float32))
+            # math.log(0.1), device=self.device, dtype=torch.float32)
+        #torch.tensor(math.log(0.1), requires_grad=True, device=self.device)
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
         self.target_entropy = float(-self.max_action_dim)
 
@@ -132,6 +140,9 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.episode_length = 0
         self.reward_key = cfg.reward_key
         self.total_act_steps = 0
+        self.initial_act_steps = cfg.initial_act_steps
+        self.act_steps_per_update = cfg.act_steps_per_update
+        self.checkpoint_interval = cfg.checkpoint_interval
 
     def pre_process(self, rgb):
         """
@@ -238,8 +249,13 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
     def _update_networks(self, batch):
         cfg = self.config
         context, action, reward, next_context, done = batch.values()
-        z = self.encoder(context)
-        z_next = self.encoder(next_context)
+        B = context.shape[0]
+        C = self.each_image_shape[0]
+        N = self.context_horizon
+        H, W = self.each_image_shape[1:]
+        #print('context shape', context.shape)
+        z = self.encoder(context.reshape(B, C, N, H, W))
+        z_next = self.encoder(next_context.reshape(B, C, N, H, W))
         alpha = self.log_alpha.exp()
 
         # -------- critic update --------
@@ -251,45 +267,68 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
                 next_qs.append(q_next)
                 next_logps.append(logp_next)
 
-            next_qs_stacked = torch.stack(next_qs, dim=0).squeeze(-1)
+            next_qs_stacked = torch.stack(next_qs, dim=0).squeeze(-1) # K * B
+            #print('next_qs_stacked shape', next_qs_stacked.shape)
             next_logp_stacked = torch.stack(next_logps, dim=0).squeeze(-1)
             best_next_q, best_idx = next_qs_stacked.max(dim=0)
             best_next_logp = next_logp_stacked[best_idx, torch.arange(context.size(0))]
             target_q = reward + (1 - done) * cfg.gamma * (
                 best_next_q.unsqueeze(-1) - alpha * best_next_logp.unsqueeze(-1)
             )
+            #print('target_q shape', target_q.shape)
 
-        critic_inputs = torch.cat([z, action], dim=-1)
-        q_preds = [self.critics[k](critic_inputs) for k in range(self.K)]
-        q_preds_cat = torch.cat(q_preds, dim=1)
-        target_q_rep = target_q.repeat(1, self.K)
-        critic_loss = F.mse_loss(q_preds_cat, target_q_rep)
+        ks = action[:, 0].long()  # primitive id (assumed stored in first dim)
+        total_critic_loss, q_preds = 0, []
 
-        self.critic_optim.zero_grad()
-        critic_loss.backward()
-        nn.utils.clip_grad_norm_(self.critics.parameters(), cfg.max_grad_norm)
-        self.critic_optim.step()
-
-        # Log per-critic loss
-        for k, q_pred in enumerate(q_preds):
-            indiv_loss = F.mse_loss(q_pred, target_q).item()
-            self.logger.log({"critic_loss/primitive_{}".format(k): indiv_loss})
-
-        # -------- actor update --------
         for k in range(self.K):
-            a_sample, logp, _ = self.actors[k].sample(z)
-            q_val = self.critics[k](torch.cat([z, a_sample], dim=-1))
+            mask = (ks == k)
+            if mask.sum() == 0:
+                continue  # no samples for this primitive in batch
+
+            z_k = z[mask]
+            action_k = action[mask, 1 : 1 + self.action_dims[k]]  # skip primitive id
+            critic_inputs_k = torch.cat([z_k, action_k], dim=-1)
+            q_pred_k = self.critics[k](critic_inputs_k)
+
+            target_q_k = target_q[mask]
+            loss_k = F.mse_loss(q_pred_k, target_q_k)
+
+            total_critic_loss += loss_k
+            q_preds.append(q_pred_k)
+            
+            self.logger.log({f"critic_loss/primitive_{k}": loss_k.item()})
+
+
+        # -------- actor update -------- #
+        total_actor_loss = 0
+        for k in range(self.K):
+            a_sample, logp, _ = self.actors[k].sample(z.detach())
+            q_val = self.critics[k](torch.cat([z.detach(), a_sample], dim=-1))
             actor_loss = (alpha * logp - q_val).mean()
-            self.actor_optimizers[k].zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actors[k].parameters(), cfg.max_grad_norm)
-            self.actor_optimizers[k].step()
+            self.actor_optim.zero_grad()
+            total_actor_loss += actor_loss
+            # actor_loss.backward()
+            # nn.utils.clip_grad_norm_(self.actors[k].parameters(), cfg.max_grad_norm)
+            # self.actor_optim.step()
 
             # Log per-actor loss
             self.logger.log({"actor_loss/primitive_{}".format(k): actor_loss.item()})
 
+        
+        # Optimize each critic separately
+        self.critic_optim.zero_grad()
+        self.actor_optim.zero_grad()
+        total_critic_loss.backward()
+        total_actor_loss.backward()
+        nn.utils.clip_grad_norm_(self.critics.parameters(), cfg.max_grad_norm)
+        nn.utils.clip_grad_norm_(self.actors.parameters(), cfg.max_grad_norm)
+        nn.utils.clip_grad_norm_(self.encoder.parameters(), cfg.max_grad_norm)
+        self.critic_optim.step()
+        self.actor_optim.step()
+        self.encoder_optim.step()
+
         # -------- alpha update --------
-        logp_for_alpha = [self.actors[k].sample(z)[1] for k in range(self.K)]
+        logp_for_alpha = [self.actors[k].sample(z.detach())[1].detach() for k in range(self.K)]
         logp_mean = torch.cat(logp_for_alpha, dim=1).mean()
         alpha_loss = -(self.log_alpha * (logp_mean + self.target_entropy)).mean()
         self.alpha_optim.zero_grad()
@@ -358,21 +397,43 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         if arenas is None or len(arenas) == 0:
             raise ValueError("SACAgent.train requires at least one Arena.")
         arena = arenas[0]
+        self.set_train()
 
-        while self.replay.size < self.config.batch_size or self.replay.size < self.initial_act_steps:
-            self._collect_from_arena(arena)
-
-        for _ in range(update_steps): ## this is for updating network
-            batch = self.replay.sample(self.config.batch_size)
-            self._update_networks(batch)
-            self.total_update_steps += 1
-            
-            for _ in range(self.act_steps_per_update):
+        with tqdm(total=update_steps, desc="Current Round of Training", initial=0) as pbar:
+            pbar.set_postfix(
+                    phase="start",
+                    env_step=self.total_act_steps,
+                    total_updates=self.total_update_steps
+            )
+            while self.replay.size < self.config.batch_size or self.replay.size < self.initial_act_steps:
                 self._collect_from_arena(arena)
-            
-            # Save checkpoint periodically
-            if self.total_update_steps % self.checkpoint_interval == 0:
-                self.save(self.config.save_dir, checkpoint_id=self.total_update_steps)
+                pbar.set_postfix(
+                    phase="pre-collecting",
+                    env_step=self.total_act_steps,
+                    total_updates=self.total_update_steps
+                )
+
+        
+            for _ in range(update_steps):  # network updates
+                batch = self.replay.sample(self.config.batch_size)
+                self._update_networks(batch)
+                self.total_update_steps += 1
+
+                for _ in range(self.act_steps_per_update):
+                    self._collect_from_arena(arena)
+                    pbar.set_postfix(
+                        phase="training",
+                        env_step=self.total_act_steps,
+                        total_updates=self.total_update_steps,
+                    )
+
+                # Save checkpoint periodically
+                if self.total_update_steps % self.checkpoint_interval == 0:
+                    self.save(self.config.save_dir, checkpoint_id=self.total_update_steps)
+
+                # Update progress bar with global counter
+                # pbar.set_postfix(total_updates=self.total_update_steps)
+                pbar.update(1)
 
         return True
 
@@ -384,17 +445,18 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             path: Save directory.
             checkpoint_id: Optional ID for checkpoint (e.g. total update step).
         """
-        path = os.path(self.save_dir, "checkpoints")
+        path = os.path.join(self.save_dir, "checkpoints")
         os.makedirs(path, exist_ok=True)
 
         state = {
             'encoder': self.encoder.state_dict(),
-            'actors': [a.state_dict() for a in self.actors],
-            'critics': [c.state_dict() for c in self.critics],
-            'critics_target': [c.state_dict() for c in self.critics_target],
-            'actor_optimizers': [opt.state_dict() for opt in self.actor_optimizers],
+            'actors': self.actors.state_dict(),
+            'critics': self.critics.state_dict(),
+            'critics_target': self.critics_target.state_dict(),
+            'encoder_optim': self.encoder_optim.state_dict(),
+            'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'log_alpha': self.log_alpha.detach().cpu().numpy(),
+            'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'total_steps': self.total_update_steps,
             'total_update_steps': self.total_update_steps,
@@ -430,6 +492,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         path = path or self.save_dir
         # if path is None:
         #     raise ValueError("No load path provided")
+        path = os.path.join(path, 'checkpoints')
 
         model_file = os.path.join(path, "last_model.pt")
         replay_file = os.path.join(path, "last_replay_buffer.pkl")
@@ -441,20 +504,22 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         # Load model + training variables
         state = torch.load(model_file, map_location=self.device)
 
-        self.encoder.load_state_dict(state['encoder'])
-        for a, s in zip(self.actors, state['actors']):
-            a.load_state_dict(s)
-        for c, s in zip(self.critics, state['critics']):
-            c.load_state_dict(s)
-        for ct, s in zip(self.critics_target, state['critics_target']):
-            ct.load_state_dict(s)
+        dummy = torch.zeros(1, self.context_horizon, *self.each_image_shape).to(self.device)  # adjust (B, N, C, H, W) to your case
+        self.encoder(dummy)  # this triggers _ensure_init and builds _project
 
-        for opt, s in zip(self.actor_optimizers, state['actor_optimizers']):
-            opt.load_state_dict(s)
+        self.encoder.load_state_dict(state['encoder'])
+        self.actors.load_state_dict(state['actors'])
+        self.critics.load_state_dict(state['critics'])
+        self.critics_target.load_state_dict(state['critics_target'])
+
+        self.actor_optim.load_state_dict(state['actor_optim'])
+        self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha = torch.tensor(state['log_alpha'], device=self.device)
+        self.log_alpha = self.log_alpha = torch.nn.Parameter(
+            state['log_alpha'].to(self.device).clone().requires_grad_(True)
+        )
 
         # Restore training variables
         self.total_update_steps = state.get('total_update_steps', 0)
@@ -506,12 +571,12 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         for ct, s in zip(self.critics_target, state['critics_target']):
             ct.load_state_dict(s)
 
-        for opt, s in zip(self.actor_optimizers, state['actor_optimizers']):
+        for opt, s in zip(self.actor_optim, state['actor_optimizers']):
             opt.load_state_dict(s)
         self.critic_optim.load_state_dict(state['critic_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha = torch.tensor(state['log_alpha'], device=self.device)
+        self.log_alpha = torch.nn.Parameter(torch.tensor(state['log_alpha'], device=self.device, dtype=torch.float32))
 
         # Restore training variables
         self.total_update_steps = state.get('total_update_steps', 0)

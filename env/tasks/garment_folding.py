@@ -116,7 +116,7 @@ class GarmentFoldingTask(Task):
 
     def _load_or_generate_goals(self, arena, num_goals):
         goals = []
-        for i in tqdm(range(num_goals), desc="Generating goals"):
+        for i in tqdm(range(num_goals), desc=f"Generating goals for {arena.eid}"):
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
             if not os.path.exists(goal_path):
                 goal = self._generate_a_goal(arena)

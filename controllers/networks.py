@@ -27,8 +27,8 @@ class ConvEncoder(nn.Module):
             self._initialized = True
 
     def forward(self, contexts):
-        if contexts.dim() == 4:
-            contexts = contexts.unsqueeze(0)
+        # if contexts.dim() == 4:
+        #     contexts = contexts.unsqueeze(0)
         B, N, C, H, W = contexts.shape
         contexts_flat = contexts.reshape(B, N * C, H, W)
         #print(contexts_flat.shape)

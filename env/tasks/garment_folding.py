@@ -116,9 +116,10 @@ class GarmentFoldingTask(Task):
 
     def _load_or_generate_goals(self, arena, num_goals):
         goals = []
-        for i in tqdm(range(num_goals), desc=f"Generating goals for {arena.eid}"):
+        for i in range(num_goals):
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
             if not os.path.exists(goal_path):
+                print(f'Generating goal {i} for episode id {arena.eid}')
                 goal = self._generate_a_goal(arena)
                 os.makedirs(goal_path, exist_ok=True)
 
@@ -155,7 +156,8 @@ class GarmentFoldingTask(Task):
         if os.path.exists(keypoint_file):
             with open(keypoint_file, "r") as f:
                 keypoints = json.load(f)
-            print("annotated keypoint ids", keypoints)
+            if self.config.debug:
+                print("annotated keypoint ids", keypoints)
             return keypoints
 
         # Get flattened garment observation
@@ -371,7 +373,7 @@ class GarmentFoldingTask(Task):
         cur_eval = self.evaluate(arena)
         if cur_eval == {}:
             return False
-        return cur_eval['mean_particle_distance'] < 0.01
+        return cur_eval['mean_particle_distance'] < 0.07
     
     def _get_max_IoU(self, arena):
         cur_mask = arena._get_cloth_mask()

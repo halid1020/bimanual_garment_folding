@@ -65,11 +65,12 @@ class SingleGarmentFixedInitialEnv(Arena):
             if 'observation_image_shape' in config else (480, 480, 3)
 
         self.init_state_path = config.init_state_path
-        self.object = 'longsleeve'
+        self.object = self.config.get('garment_type', 'longsleeve')
         self._get_init_state_keys()
 
         self.evaluate_result = None
         self.track_semkey_on_frames = self.config.track_semkey_on_frames
+        self.init_mode = self.config.get('init_mode', 'crumpled')
         self.action_step = 0
         self.last_info = None
     
@@ -166,7 +167,9 @@ class SingleGarmentFixedInitialEnv(Arena):
 
         self.evaluate_result = None
         self.last_info = None
-       
+        
+        if self.init_mode == 'flattened':
+            self.set_to_flatten()
         
         self.info = self._process_info({})
 
@@ -181,9 +184,9 @@ class SingleGarmentFixedInitialEnv(Arena):
 
     def get_num_episodes(self) -> np.int:
         if self.mode == 'eval':
-            return 30
+            return 1
         elif self.mode == 'train':
-            return self.num_train_tasks
+            return 1
         else:
             raise NotImplementedError
 

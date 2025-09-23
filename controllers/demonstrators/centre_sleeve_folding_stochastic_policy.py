@@ -16,8 +16,9 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
 
     def __init__(self, config):
         super().__init__(config)
-        self.name = "oracle_garment_agent"
+        #self.name = "oracle_garment_agent"
         self.config = config
+        self.name = "centre_sleeve_folding_stochastic_policy"
 
     def reset(self, arena_ids):
         for aid in arena_ids:

@@ -356,11 +356,6 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             self.episode_return = 0.0
             self.episode_length = 0
 
-        # img_obs = info['observation'][self.obs_key]
-        # self.internal_states[aid]['obs_queue'].append(img_obs)
-        # while len(self.internal_states[aid]['obs_queue']) < self.context_horizon:
-        #     self.internal_states[aid]['obs_queue'].append(img_obs)
-
         #img_obs = self.pre_process(img_obs)
         dict_action, vector_action = self._select_action(self.info, stochastic=True)
         

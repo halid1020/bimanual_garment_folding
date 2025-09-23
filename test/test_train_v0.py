@@ -10,7 +10,7 @@ import torch
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
-from controllers.Image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
+from controllers.multi_primitive_sac.image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 
 

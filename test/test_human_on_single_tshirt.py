@@ -27,7 +27,7 @@ def main():
         #'task': 'centre-sleeve-folding',
         'disp': False,
         'ray_id': 0,
-        'horizon': 1,
+        'horizon': 2,
         'track_semkey_on_frames': True,
         'readjust_pick': True,
     }

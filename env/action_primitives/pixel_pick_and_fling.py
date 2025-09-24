@@ -19,12 +19,12 @@ class PixelPickAndFling():
         prefling_height=0.7,#
         prefling_vel=0.01,
         fling_pos_y=0.3,
-        lift_vel=0.01,
+        lift_vel=0.02, #0.01,
         adaptive_fling_momentum=0.8,
         action_horizon=20,
         hang_adjust_vel=0.01,
         stretch_adjust_vel=0.01,
-        fling_vel=0.008,
+        fling_vel= 0.02, #0.008,
         release_vel=0.01,
         drag_vel=0.01,
         lower_height=0.06,
@@ -163,6 +163,6 @@ class PixelPickAndFling():
         self.camera_pose = env.camera_extrinsic_matrix
         self.camera_size = env.camera_size
         world_action_, pixel_action = self.process(env, action)
-        info = self.action_tool.step(env, action_)
+        info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
         return info

@@ -199,6 +199,7 @@ class WorldPickAndFling():
         front_fling_pos = back_fling_pos.copy()
         front_fling_pos[:, 1] = -fling_y
         
+        print('fling_vel', fling_vel)
         info = self.action_tool.movep(env, back_fling_pos, fling_vel)
         info = self.action_tool.movep(env, front_fling_pos, fling_vel)
         
@@ -239,36 +240,52 @@ class WorldPickAndFling():
             [-grasp_dist/2, hang_pos_y, hang_height]])
 
         info = self.action_tool.movep(env, hang_positios, adjust_vel)
-        cloth_mid_pos = (picker_pos[0] + picker_pos[1])/2
+        picker_mid_pos = (picker_pos[0] + picker_pos[1])/2
         max_steps = 100
         stretch_steps = 0
         stable_steps = 0
         while True:
-            cloth_positions = env.get_particle_positions() # N, [x, y, z]
+            cloth_positions = env.get_mesh_particles_positions()  # (N, 3)
 
-            high_cloth_positions = cloth_positions[cloth_positions[:, 2] > hang_height-0.1, ...]
-
-            if len(high_cloth_positions) == 0:
-                break
-
-            # sort cloth particles regarding to the distance to the mid_pos on x-y plane
-            sorted_cloth_positions = high_cloth_positions[np.argsort(np.linalg.norm(high_cloth_positions[:, :2] - mid_pos[:2], axis=1))]
+            high_cloth_positions = cloth_positions[cloth_positions[:, 2] > hang_height - 0.1]
             
-            new_cloth_mid_pos = sorted_cloth_positions[0]
-            stable = np.linalg.norm(new_cloth_mid_pos - cloth_mid_pos) < 3e-2
-            if stable:
-                stable_steps += 1
-            else:
-                stable_steps = 0
-            
-            stretched = stable_steps > 2
-            if stretched or stretch_steps > max_steps:
-                break
+            if len(high_cloth_positions) > 0:
+                # compute XY distances to picker midpoint
+                xy_dists = np.linalg.norm(high_cloth_positions[:, :2] - picker_mid_pos[:2], axis=1)
+
+                # get indices of the 10 nearest particles in XY
+                k = min(10, len(high_cloth_positions))
+                nearest_idxs = np.argpartition(xy_dists, k-1)[:k]
+
+                if len(nearest_idxs) > 0:
+                    # subset to those particles only
+                    candidate_particles = high_cloth_positions[nearest_idxs]
+
+                    # now sort those candidates by 3D distance to picker_mid_pos
+                    sorted_cloth_positions = candidate_particles[np.argsort(np.linalg.norm(candidate_particles - picker_mid_pos, axis=1))]
+
+                    # pick the closest one
+                    closest_cloth_particle_to_picker_mid = sorted_cloth_positions[0]
+                    dist = np.linalg.norm(closest_cloth_particle_to_picker_mid - picker_mid_pos)
+
+                    stable = dist < 0.07  # top is within 7 cm
+                    if stable:
+                        stable_steps += 1
+                    else:
+                        stable_steps = 0
+
+                    stretched = stable_steps > 1
+                    if stretched:
+                        break
+                    if stretch_steps > max_steps:
+                        break
+
 
             stretch_steps += 1
             
-            cloth_mid_pos = new_cloth_mid_pos
+            #cloth_mid_pos = new_cloth_mid_pos
             grasp_dist += increment_dist
+            #print('streching grasp dist', grasp_dist)
 
             left_pos = mid_pos - direction*grasp_dist/2
             right_pos = mid_pos + direction*grasp_dist/2
@@ -276,6 +293,7 @@ class WorldPickAndFling():
             info = self.action_tool.movep(env, np.stack([right_pos, left_pos]), adjust_vel)
 
             if grasp_dist > max_grasp_dist:
+                #print('break because reaching max grasp step')
                 break
 
         return grasp_dist, info

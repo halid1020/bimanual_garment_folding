@@ -199,7 +199,7 @@ class WorldPickAndFling():
         front_fling_pos = back_fling_pos.copy()
         front_fling_pos[:, 1] = -fling_y
         
-        print('fling_vel', fling_vel)
+        #print('fling_vel', fling_vel)
         info = self.action_tool.movep(env, back_fling_pos, fling_vel)
         info = self.action_tool.movep(env, front_fling_pos, fling_vel)
         

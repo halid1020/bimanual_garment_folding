@@ -164,6 +164,31 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         return rgb_norm.transpose(2, 0, 1)
 
+    def _dict_to_vector_action(self, dict_action):
+        # extract primitive_name (should be a single key)
+        primitive_name = next(iter(dict_action.keys()))
+        #print('primitive name', primitive_name)
+        params_dict = dict_action[primitive_name]
+
+        # find primitive index
+        best_k = None
+        for k, (pname, params) in enumerate(self.primitive_param):
+            if pname == primitive_name:
+                best_k = k
+                break
+        if best_k is None:
+            raise ValueError(f"Unknown primitive {primitive_name}")
+
+        # flatten parameters in the same order as in primitive_param
+        flat_params = []
+        for param_name, dim in self.primitive_param[best_k][1]:
+            val = np.array(params_dict[param_name]).reshape(-1)
+            flat_params.extend(val.tolist())
+
+        # prepend primitive index
+        return np.array([best_k] + flat_params)
+
+
     def _select_action(self, info, stochastic=False):
         obs = info["observation"][self.obs_key]
         obs = self.pre_process(obs)
@@ -358,9 +383,15 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         #img_obs = self.pre_process(img_obs)
         dict_action, vector_action = self._select_action(self.info, stochastic=True)
-        
+        # print('\n\nvector action', vector_action)
+        # print('dict_action', dict_action)
         #self.act([info], updates=[False])[0]
         next_info = arena.step(dict_action)
+
+        dict_action_ = next_info['applied_action']
+        vector_action_ = self._dict_to_vector_action(dict_action_)
+        # print('\nreadjust vector action', vector_action_)
+        # print('readjut diction action', dict_action_)
 
         next_img_obs = next_info['observation'][self.obs_key]
         reward = next_info.get("reward", 0.0)[self.reward_key]
@@ -378,7 +409,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         
         action = np.zeros(self.max_action_dim, dtype=np.float32)
         #print('vector_action', vector_action)
-        action[:len(vector_action)] = vector_action
+        action[:len(vector_action_)] = vector_action_
         #print('action', action)
         self.replay.add(img_obs, action, reward, next_img_obs, done)
         

@@ -52,8 +52,8 @@ class HybridActionPrimitive():
         return action_space
         
     
-    def get_action_horizon(self):
-        return self.action_horizon
+    # def get_action_horizon(self):
+    #     return self.action_horizon
     
     def reset(self, env):
         self.np_pnf.reset(env)
@@ -65,26 +65,41 @@ class HybridActionPrimitive():
     def step(self, env, action):
         #self.action_step += 1
         #print('action', action)
-        swap = action['swap'] if 'swap' in action else False
+        #swap = action['swap'] if 'swap' in action else False
         if 'norm-pixel-pick-and-fling' in action:
             action = action['norm-pixel-pick-and-fling']
             info = self.np_pnf.step(env, action)
+            info['applied_action'] = {
+                'norm-pixel-pick-and-fling': info['applied_action']
+            }
         elif 'norm-pixel-pick-and-place' in action:
             action = action['norm-pixel-pick-and-place']
-            action['swap'] = swap
+            #action['swap'] = swap
             info = self.np_pnp.step(env, action)
+            info['applied_action'] = {
+                'norm-pixel-pick-and-place': info['applied_action']
+            }
         elif 'norm-pixel-pick-and-drag' in action:
             action = action['norm-pixel-pick-and-drag']
-            action['swap'] = swap
+            #action['swap'] = swap
             info = self.np_pnd.step(env, action)
+            info['applied_action'] = {
+                'norm-pixel-pick-and-drag': info['applied_action']
+            }
         elif 'norm-pixel-fold' in action:
             action = action['norm-pixel-fold']
-            action['swap'] = swap
+            #action['swap'] = swap
             info = self.np_fold.step(env, action)
+            info['applied_action'] = {
+                'norm-pixel-fold': info['applied_action']
+            }
         elif 'no-op' in action and action['no-op']:
             info = env.get_info()
         else:
             raise ValueError('Action not recognized')
+
+        
+
 
         # print('action_step', self.action_step)
         # print('action_horizon', self.action_horizon)

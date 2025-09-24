@@ -18,8 +18,8 @@ class PixelPickAndDrag():
                  place_upper_bound=[1, 1],
                  pregrasp_height=0.05,
                  pre_grasp_vel=0.05,
-                 drag_vel=0.05,
-                 lift_vel=0.05,
+                 drag_vel=0.1,#0.05,
+                 lift_vel=0.1,#0.05,
                  readjust_pick=False,
                  single_operator=False,
                  **kwargs):
@@ -65,7 +65,7 @@ class PixelPickAndDrag():
         self.drag_vel = drag_vel
         self.lift_vel = lift_vel
         self.readjust_pick = readjust_pick
-        print('readjust_pick', readjust_pick)
+        #print('readjust_pick', readjust_pick)
         
 
 
@@ -87,12 +87,11 @@ class PixelPickAndDrag():
         
     def process(self, env, action):
         pick_0 = np.asarray(action['pick_0'])
-        print('pick_0 before', pick_0)
+        #print('pick_0 before', pick_0)
         pick_1 = np.asarray(action['pick_1'])
         if self.readjust_pick:
             mask = env._get_cloth_mask()
             pick_0 = readjust_norm_pixel_pick(pick_0, mask)
-            print('pick_0 after', pick_0)
             pick_1 = readjust_norm_pixel_pick(pick_1, mask)
 
         # pick_0 = np.asarray(action['pick_0'])
@@ -118,31 +117,26 @@ class PixelPickAndDrag():
         ref_b = np.array([1, 1])
 
         if np.linalg.norm(pick_1[:2] - ref_a) > np.linalg.norm(pick_0[:2] - ref_a):
-            pick_0, pick_1 = pick_1, pick_0
-            place_0, place_1 = place_1, place_0
+            pick_0_, pick_1_ = pick_1, pick_0
+            place_0_, place_1_ = place_1, place_0
+        else:
+            pick_0_, pick_1_ = pick_0, pick_1
+            place_0_, place_1_ = place_0, place_1
 
-        action_ = np.concatenate([pick_0, place_0, pick_1, place_1]).reshape(-1, 2)
+        action_ = np.concatenate([pick_0_, place_0_, pick_1_, place_1_]).reshape(-1, 2)
 
         depths = np.array([
             pick_0_depth, place_0_depth, 
             pick_1_depth, place_1_depth])
 
-        # action_ = action_ * self.camera_to_world_ratio * depths
-
         convert_action = np.zeros((4, 3))
         W, H = self.camera_size
-        # for i, (a, d )in enumerate(zip(action_, depths)):
-        #     # print('a:', a)
-        #     # print('d:', d)
-        #     convert_action[i] = norm_pixel2world(a, d,
-        #         self.camera_intrinsics, self.camera_pose)
-        #print('before cnovertionaction:', action_)
+ 
         convert_action = norm_pixel2world(
                 action_, np.asarray([H, W]),  
                 self.camera_intrinsics, self.camera_pose, depths) 
         convert_action = convert_action.reshape(2, 2, 3)
-        #print('convert_action in worldspace:', convert_action)
-
+        
         world_action =  {
             'pick_0_position': convert_action[0, 0],
             'place_0_position': convert_action[0, 1],

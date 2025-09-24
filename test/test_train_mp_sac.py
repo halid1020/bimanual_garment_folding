@@ -42,7 +42,7 @@ def test_config() -> DotMap:
     #cfg.target_entropy = -cfg.max_action_dim
     cfg.max_grad_norm = 10.0
     cfg.save_dir = None
-    cfg.act_steps_per_update = 2
+    cfg.act_steps_per_update = 1
     cfg.num_primitives = 4
     cfg.action_dims = [4, 8, 6, 8]
     cfg.primitive_param = [
@@ -73,7 +73,7 @@ def main():
         'disp': False,
         'ray_id': 0,
         'horizon': 8,
-        'track_semkey_on_frames': True,
+        'track_semkey_on_frames': False,
         'readjust_pick': True
     }
     

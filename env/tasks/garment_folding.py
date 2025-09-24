@@ -230,18 +230,22 @@ class GarmentFoldingTask(Task):
 
         # Evaluate particle alignment against each goal
         particle_distances = []
+        key_distances = []
         for goal in self.goals:
             goal_particles = goal['observation']["particle_positions"][:arena.num_mesh_particles]
-            aligned_dist = self._compute_particle_distance(cur_particles, goal_particles, arena)
-            particle_distances.append(aligned_dist)
+            mdp, kdp = self._compute_particle_distance(cur_particles, goal_particles, arena)
+            particle_distances.append(mdp)
+            key_distances.append(kdp)
+       
         mean_particle_distance = min(particle_distances)
+        key_particle_distance = min(key_distances)
         #print('MPD', mean_particle_distance)
 
-        semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
+        #semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
 
         return {
             "mean_particle_distance": mean_particle_distance,
-            "semantic_keypoint_distance": semantic_dist,
+            "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena)
@@ -279,6 +283,16 @@ class GarmentFoldingTask(Task):
         #print('len cur', len(cur))
         aligned_curr, aligned_goal = self._align_points(arena, cur.copy(), goal.copy())
         mdp = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))
+
+        cur_pts = []
+        goal_pts = []
+        for name, pid in self.semkey2pid.items():
+            
+            cur_pts.append(aligned_curr[pid])
+            goal_pts.append(aligned_goal[pid])
+        cur_pts = np.stack(cur_pts)
+        goal_pts = np.stack(goal_pts)
+        kdp = np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
         
 
         if self.config.debug:
@@ -312,7 +326,7 @@ class GarmentFoldingTask(Task):
                     canvas[x, y] = (0, 255, 0)
 
                 # Save both images
-                combined = np.hstack((canvas, arena.info['observation']['rgb']))
+                combined = np.hstack((canvas, arena._render('rgb')))
 
                 # 🔹 Overlay mdp value on combined image
                 cv2.putText(
@@ -327,26 +341,26 @@ class GarmentFoldingTask(Task):
                 )
                 cv2.imwrite(f"tmp/{align_type}_combined_{arena.action_step}.png", combined)
 
-        return mdp
+        return mdp, kdp
 
 
 
-    def _compute_keypoint_distance(self, arena, cur, goal):
-        """Align semantic keypoints and compute mean distance."""
+    # def _compute_keypoint_distance(self, arena, cur, goal):
+    #     """Align semantic keypoints and compute mean distance."""
 
-        aligned_cur, aligned_goal = self._align_points(arena, cur, goal)
+    #     aligned_cur, aligned_goal = self._align_points(arena, cur, goal)
         
-        cur_pts = []
-        goal_pts = []
-        for name, pid in self.semkey2pid.items():
+    #     cur_pts = []
+    #     goal_pts = []
+    #     for name, pid in self.semkey2pid.items():
             
-            cur_pts.append(aligned_cur[pid])
-            goal_pts.append(aligned_goal[pid])
-        cur_pts = np.stack(cur_pts)
-        goal_pts = np.stack(goal_pts)
+    #         cur_pts.append(aligned_cur[pid])
+    #         goal_pts.append(aligned_goal[pid])
+    #     cur_pts = np.stack(cur_pts)
+    #     goal_pts = np.stack(goal_pts)
 
 
-        return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
+    #     return np.mean(np.linalg.norm(cur_pts - goal_pts, axis=1))
     
     def reward(self, last_info, action, info): 
         mpd = info['evaluation']['mean_particle_distance']
@@ -376,7 +390,7 @@ class GarmentFoldingTask(Task):
         return cur_eval['mean_particle_distance'] < 0.07
     
     def _get_max_IoU(self, arena):
-        cur_mask = arena._get_cloth_mask()
+        cur_mask = arena.cloth_mask
         max_IoU = 0
         for goal in self.goals[:1]:
             goal_mask = goal['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
@@ -388,7 +402,7 @@ class GarmentFoldingTask(Task):
         return IoU
     
     def _get_max_IoU_to_flattened(self, arena):
-        cur_mask = arena._get_cloth_mask()
+        cur_mask = arena.cloth_mask
         IoU, matched_IoU = get_max_IoU(cur_mask, arena.get_flattened_obs()['observation']['mask'], debug=self.config.debug)
         
         return IoU

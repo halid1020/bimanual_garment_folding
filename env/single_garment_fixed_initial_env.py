@@ -116,7 +116,7 @@ class SingleGarmentFixedInitialEnv(Arena):
 
     ## TODO: put this into the interface
     def get_action_horizon(self):
-        return self.action_tool.get_action_horizon()
+        return self.horizon
        
     ## TODO: if eid is out of range, we need to raise an error.   
     def reset(self, episode_config=None):
@@ -271,7 +271,7 @@ class SingleGarmentFixedInitialEnv(Arena):
             # self.wait_until_stable()
             self.flattened_obs = self.set_to_flatten()
             self.flatten_coverage = self._get_coverage()
-            print('flatten coverage', self._get_coverage())
+            #print('flatten coverage', self._get_coverage())
             pyflex.set_positions(current_particl_pos)
             self.wait_until_stable()
         
@@ -333,6 +333,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         
         info = {}
         if process_info:
+            print('here')
             info = {
                 'observation': self._get_obs(),
             }
@@ -419,10 +420,11 @@ class SingleGarmentFixedInitialEnv(Arena):
         
     def _step_sim(self):
         pyflex.step()
-        rgb = self._render('rgb', background=True)
+        
 
         if self.save_video:
-            
+            #print('save')
+            rgb = self._render('rgb', background=True)
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
                 particle_pos = self.get_mesh_particles_positions()          # (N, 3)
@@ -505,9 +507,11 @@ class SingleGarmentFixedInitialEnv(Arena):
     
     def _get_obs(self):
         obs = {}
-        obs['rgb'] = self._render(mode='rgb')
-        obs['depth'] = self._render(mode='depth')
-        obs['mask'] = self._get_cloth_mask()
+        rgbd = self._render(mode='rgbd')
+        obs['rgb'] = rgbd[:, :, :3]
+        obs['depth'] = rgbd[:, :, 3:]
+        obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
+        self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
         obs['action_step'] = self.action_step

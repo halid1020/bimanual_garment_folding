@@ -41,7 +41,7 @@ class WorldPositionWithVelocityAndGraspingControl():
                 
                 control_signal = np.hstack([delta, action[:, 4:5]])
                 #print('control_signal', control_signal)
-                info = env.control_picker(control_signal, process_info=(i == num_step-1))
+                info = env.control_picker(control_signal, process_info=False)#, process_info=(i == num_step-1))
                 curr_pos += delta
                 total_steps += 1
             

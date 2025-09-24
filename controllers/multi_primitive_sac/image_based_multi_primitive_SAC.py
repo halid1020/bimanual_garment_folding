@@ -550,7 +550,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         # Restore training variables
         self.total_update_steps = state.get('total_update_steps', 0)
         self.total_act_steps = state.get('total_act_steps', 0)
-        self.last_done = state.get('last_done', True)
+        #self.last_done = state.get('last_done', True)
 
         # Load replay buffer if available
         if os.path.exists(replay_file):

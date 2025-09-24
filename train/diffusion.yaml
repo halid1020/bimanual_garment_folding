@@ -1,5 +1,5 @@
 obs_dim: 512
-action_dim: 4
+action_dim: 8
 obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
@@ -9,19 +9,18 @@ use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
+batch_size: 64
 
-readjust_pick: True
+# readjust_pick: True
 data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
 demo_policy: "centre_sleeve_folding_stochastic_policy"
-num_epochs: 100
+# num_epochs: 100
 
 logger_name: 'pick_and_place_fabric_single_task_logger'
 
-validation_interval: 2000
-total_update_steps: 120000
 
 dataset_mode: "general"
 dataset_config:
@@ -46,24 +45,24 @@ dataset_config:
       shape: [8]
       output_key: 'default'
 
-transform:
-  name: 'pick_and_place_transformer'
+data_augmenter:
   params:
     img_dim: [96, 96]
+    remap_image: [0, 1]
     device: "cuda:0"
+    rgb_norm_mode: ['remap']
+    rgb_norm_param:
+      remap_range: [0, 1]
+    rgb_noise_factor: 0.01
     random_rotation: True
     random_terminal: False
     rotation_degree: 1
-    vertical_flip: True
+    vertical_flip: False
     random_resize: False
     action_noise: 0.0
-    maskout: True
-    bg_value: 0.0
-    rgb_noise_factor: 0.0
-
     depth_clip: True
-    depth_clip_min: 1.8
-    depth_clip_max: 2.0
+    depth_clip_min: 1.8 #
+    depth_clip_max: 2.0 #0.66
     min_max_norm: True
     depth_min: 1.8
     depth_max: 2.0
@@ -71,20 +70,25 @@ transform:
     depth_map_range: [0, 1]
     depth_blur: True
     depth_flip: True
-    depth_blur_kernel_size: 11
+    depth_blur_kernel_size: 2
     depth_noise_var: 0.01
+    depth_eval_process: True
+    maskout: True
+    bg_value: 0
+    debug: False
+    primitive: "norm-pixel-fold"
 
 disable_updown: True
 swap_pick_and_place: True
-action_shape: [1, 8]
+action_shape: [8]
 
 action_output:
   norm-pixel-fold:
-    pick_0: [1, 0]
-    place_0: [3, 2]
-    pick_1: [5, 4]
-    place_1: [7, 6]
-
+    pick_0: [0, 1]
+    place_0: [2, 3]
+    pick_1: [4, 5]
+    place_1: [6, 7]
+    
 action_save:
   norm-pixel-fold:
     pick_0: [0, 1]

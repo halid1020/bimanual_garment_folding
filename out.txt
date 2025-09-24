@@ -1,0 +1,15 @@
+!!!!!!!!!cam_size: [480, 480]
+self.pregrasp_height 0.05
+self.pregrasp_height 0.25
+disabel_updown True
+number of parameters: 7.256065e+07
+Log directory for the arena is set to /data/hcv530/garment_folding/test_diffusion_folding_from_flattened
+Log directory for the agent is set to /data/hcv530/garment_folding/test_diffusion_folding_from_flattened
+action horizon 4
+No checkpoint found
+total_update_steps 100000
+u -1
+data_path ./data/single_longsleeve_folding_from_flattened_100
+total trj 1
+num_samples 2
+Collecting data from policy ...:   0%|          | 0/100 [00:00<?, ?it/s]Collecting data from policy ...:   1%|          | 1/100 [00:00<00:00, 123361.88it/s]

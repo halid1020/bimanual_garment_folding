@@ -11,7 +11,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
-
+from controllers.data_augmentation.pixel_based_primitives_data_augmenter import PixelBasedPrimitiveDataAugmenter
 
 def main():
 
@@ -42,8 +42,8 @@ def main():
         'alignment': 'deform'
     }
 
-    validation_interval = int(1e3)
-    total_update_steps = int(1e5)
+    validation_interval = int(10)
+    total_update_steps = int(100)
     eval_checkpoint = -1
     
     exp_config = ag_ar.retrieve_config_from_path(
@@ -63,6 +63,9 @@ def main():
     save_dir = os.path.join('./tmp', 'garment_folding', 'test_diffusion_folding_from_flattened')
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
+
+    data_augmenter = PixelBasedPrimitiveDataAugmenter(exp_config.data_augmenter.params)
+    agent.set_data_augmenter(data_augmenter)
    
     res = ag_ar.train_and_evaluate(agent, arena,
         validation_interval, total_update_steps, eval_checkpoint)

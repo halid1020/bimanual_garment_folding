@@ -3,3 +3,4 @@ assets
 tmp
 wandb
 runs
+datasets

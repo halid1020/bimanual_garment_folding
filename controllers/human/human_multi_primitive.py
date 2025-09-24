@@ -46,7 +46,7 @@ class HumanMultiPrimitive(Agent):
         return actions
     
 
-    def single_act(self, state):
+    def single_act(self, state, update=False):
         """
         Allow user to choose a primitive, then delegate to the chosen primitive's act method.
         Shows rgb and goal_rgb images while prompting for input.

@@ -27,8 +27,9 @@ def main():
         #'task': 'centre-sleeve-folding',
         'disp': False,
         'ray_id': 0,
-        'horizon': 10,
-        'track_semkey_on_frames': True
+        'horizon': 1,
+        'track_semkey_on_frames': True,
+        'readjust_pick': True,
     }
     
     demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
@@ -48,13 +49,14 @@ def main():
     
     task = GarmentFoldingTask(task_config)
     arena = SingleGarmentFixedInitialEnv(arena_config)
+    arena.set_log_dir('./tmp/test_human')
     
     arena.set_task(task)
 
     agent = HumanMultiPrimitive(DotMap())
     
     res = perform_single(arena, agent, mode='eval', 
-        episode_config={'eid':0, 'save_video': True}, collect_frames=False)
+        episode_config={'eid':0, 'save_video': True}, collect_frames=False, debug=True)
     
     
 

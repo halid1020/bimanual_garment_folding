@@ -11,7 +11,7 @@ from agent_arena import Arena
 from tqdm import tqdm
 
 
-from agent_arena.arena.softgym.picker_action_wrappers.hybrid_action_primitive import HybridActionPrimitive
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
@@ -59,7 +59,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         )
         self.particle_radius = self.scene_config['radius']
         self.action_tool = HybridActionPrimitive(
-            action_horizon=self.config.horizon,
+            # action_horizon=self.config.horizon,
+            readjust_pick=self.config.get('readjust_pick', False),
             drag_vel=0.01)
         self._observation_image_shape = config.observation_image_shape \
             if 'observation_image_shape' in config else (480, 480, 3)
@@ -73,6 +74,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.init_mode = self.config.get('init_mode', 'crumpled')
         self.action_step = 0
         self.last_info = None
+        self.horizon = self.config.horizon
     
 
     def _setup_camera(self):
@@ -209,6 +211,8 @@ class SingleGarmentFixedInitialEnv(Arena):
             for k, v in info['flattened_obs'].items():
                 info['observation'][f'flattened-{k}'] = v
 
+        info['done'] = self.action_step >= self.horizon
+        
         if 'done' not in info:
             info['done'] = False
         

@@ -12,4 +12,125 @@ u -1
 data_path ./data/single_longsleeve_folding_from_flattened_100
 total trj 1
 num_samples 2
-Collecting data from policy ...:   0%|          | 0/100 [00:00<?, ?it/s]Collecting data from policy ...:   1%|          | 1/100 [00:00<00:00, 123361.88it/s]
+Collecting data from policy ...:   0%|          | 0/100 [00:00<?, ?it/s]Collecting data from policy ...:   1%|          | 1/100 [00:00<00:00, 123361.88it/s]Collecting data from policy ...:   2%|▏         | 2/100 [00:17<14:27,  8.85s/it]    Collecting data from policy ...:   3%|▎         | 3/100 [00:37<21:23, 13.23s/it]Collecting data from policy ...:   4%|▍         | 4/100 [00:56<25:02, 15.65s/it]Collecting data from policy ...:   5%|▌         | 5/100 [01:15<26:27, 16.71s/it]Collecting data from policy ...:   6%|▌         | 6/100 [01:34<27:31, 17.57s/it]Collecting data from policy ...:   7%|▋         | 7/100 [01:53<27:39, 17.85s/it]Collecting data from policy ...:   8%|▊         | 8/100 [02:13<28:30, 18.59s/it]Collecting data from policy ...:   9%|▉         | 9/100 [02:31<28:06, 18.53s/it]Collecting data from policy ...:  10%|█         | 10/100 [02:49<27:20, 18.22s/it]Collecting data from policy ...:  11%|█         | 11/100 [03:25<35:21, 23.83s/it]Collecting data from policy ...:  12%|█▏        | 12/100 [03:45<32:49, 22.38s/it]Collecting data from policy ...:  13%|█▎        | 13/100 [04:03<30:31, 21.05s/it]Collecting data from policy ...:  14%|█▍        | 14/100 [04:21<29:11, 20.37s/it]Collecting data from policy ...:  15%|█▌        | 15/100 [04:40<27:57, 19.74s/it]Collecting data from policy ...:  16%|█▌        | 16/100 [04:57<26:47, 19.14s/it]Collecting data from policy ...:  17%|█▋        | 17/100 [05:16<26:26, 19.12s/it]Collecting data from policy ...:  18%|█▊        | 18/100 [05:35<26:05, 19.09s/it]Collecting data from policy ...:  19%|█▉        | 19/100 [06:12<32:51, 24.34s/it]Collecting data from policy ...:  20%|██        | 20/100 [06:31<30:08, 22.61s/it]Collecting data from policy ...:  21%|██        | 21/100 [06:50<28:25, 21.58s/it]Collecting data from policy ...:  22%|██▏       | 22/100 [07:08<26:41, 20.54s/it]Collecting data from policy ...:  23%|██▎       | 23/100 [07:27<25:39, 19.99s/it]Collecting data from policy ...:  24%|██▍       | 24/100 [08:04<31:46, 25.09s/it]Collecting data from policy ...:  25%|██▌       | 25/100 [08:22<28:54, 23.13s/it]Collecting data from policy ...:  26%|██▌       | 26/100 [08:40<26:28, 21.46s/it]Collecting data from policy ...:  27%|██▋       | 27/100 [08:58<25:07, 20.65s/it]Collecting data from policy ...:  28%|██▊       | 28/100 [09:17<23:55, 19.94s/it]Collecting data from policy ...:  29%|██▉       | 29/100 [09:35<23:07, 19.54s/it]Collecting data from policy ...:  30%|███       | 30/100 [09:53<22:03, 18.91s/it]Collecting data from policy ...:  31%|███       | 31/100 [10:11<21:34, 18.76s/it]Collecting data from policy ...:  32%|███▏      | 32/100 [10:30<21:21, 18.84s/it]Collecting data from policy ...:  33%|███▎      | 33/100 [10:49<21:00, 18.81s/it]Collecting data from policy ...:  34%|███▍      | 34/100 [11:08<20:54, 19.01s/it]Collecting data from policy ...:  35%|███▌      | 35/100 [11:27<20:31, 18.95s/it]Collecting data from policy ...:  36%|███▌      | 36/100 [11:46<20:06, 18.84s/it]Collecting data from policy ...:  37%|███▋      | 37/100 [12:06<20:02, 19.09s/it]Collecting data from policy ...:  38%|███▊      | 38/100 [12:23<19:18, 18.68s/it]Collecting data from policy ...:  39%|███▉      | 39/100 [12:42<18:54, 18.60s/it]Collecting data from policy ...:  40%|████      | 40/100 [13:19<24:07, 24.13s/it]Collecting data from policy ...:  41%|████      | 41/100 [13:55<27:22, 27.83s/it]Collecting data from policy ...:  42%|████▏     | 42/100 [14:13<24:08, 24.97s/it]Collecting data from policy ...:  43%|████▎     | 43/100 [14:32<21:45, 22.90s/it]Collecting data from policy ...:  44%|████▍     | 44/100 [14:50<20:09, 21.60s/it]Collecting data from policy ...:  45%|████▌     | 45/100 [15:08<18:52, 20.60s/it]Collecting data from policy ...:  46%|████▌     | 46/100 [15:44<22:41, 25.21s/it]Collecting data from policy ...:  47%|████▋     | 47/100 [16:03<20:27, 23.16s/it]Collecting data from policy ...:  48%|████▊     | 48/100 [16:22<18:59, 21.92s/it]Collecting data from policy ...:  49%|████▉     | 49/100 [16:39<17:34, 20.67s/it]Collecting data from policy ...:  50%|█████     | 50/100 [16:58<16:44, 20.09s/it]Collecting data from policy ...:  51%|█████     | 51/100 [17:17<16:05, 19.70s/it]Collecting data from policy ...:  52%|█████▏    | 52/100 [17:36<15:37, 19.53s/it]Collecting data from policy ...:  53%|█████▎    | 53/100 [17:55<15:05, 19.26s/it]Collecting data from policy ...:  54%|█████▍    | 54/100 [18:13<14:29, 18.89s/it]Collecting data from policy ...:  55%|█████▌    | 55/100 [18:31<14:04, 18.77s/it]Collecting data from policy ...:  56%|█████▌    | 56/100 [18:49<13:37, 18.58s/it]Collecting data from policy ...:  57%|█████▋    | 57/100 [19:08<13:25, 18.73s/it]Collecting data from policy ...:  58%|█████▊    | 58/100 [19:26<12:55, 18.46s/it]Collecting data from policy ...:  59%|█████▉    | 59/100 [19:46<12:49, 18.78s/it]Collecting data from policy ...:  60%|██████    | 60/100 [20:04<12:25, 18.64s/it]Collecting data from policy ...:  61%|██████    | 61/100 [20:23<12:05, 18.59s/it]Collecting data from policy ...:  62%|██████▏   | 62/100 [20:41<11:48, 18.64s/it]Collecting data from policy ...:  63%|██████▎   | 63/100 [21:00<11:28, 18.60s/it]Collecting data from policy ...:  64%|██████▍   | 64/100 [21:19<11:15, 18.76s/it]Collecting data from policy ...:  65%|██████▌   | 65/100 [21:39<11:10, 19.14s/it]Collecting data from policy ...:  66%|██████▌   | 66/100 [21:57<10:41, 18.86s/it]Collecting data from policy ...:  67%|██████▋   | 67/100 [22:16<10:23, 18.91s/it]Collecting data from policy ...:  68%|██████▊   | 68/100 [22:36<10:09, 19.05s/it]Collecting data from policy ...:  69%|██████▉   | 69/100 [22:55<09:49, 19.00s/it]Collecting data from policy ...:  70%|███████   | 70/100 [23:13<09:24, 18.82s/it]Collecting data from policy ...:  71%|███████   | 71/100 [23:31<08:56, 18.51s/it]Collecting data from policy ...:  72%|███████▏  | 72/100 [23:49<08:37, 18.50s/it]Collecting data from policy ...:  73%|███████▎  | 73/100 [24:08<08:24, 18.68s/it]Collecting data from policy ...:  74%|███████▍  | 74/100 [24:26<07:57, 18.35s/it]Collecting data from policy ...:  75%|███████▌  | 75/100 [24:45<07:43, 18.54s/it]Collecting data from policy ...:  76%|███████▌  | 76/100 [25:04<07:27, 18.63s/it]Collecting data from policy ...:  77%|███████▋  | 77/100 [25:42<09:26, 24.61s/it]Collecting data from policy ...:  78%|███████▊  | 78/100 [26:01<08:23, 22.90s/it]Collecting data from policy ...:  79%|███████▉  | 79/100 [26:19<07:28, 21.35s/it]Collecting data from policy ...:  80%|████████  | 80/100 [26:37<06:46, 20.34s/it]Collecting data from policy ...:  81%|████████  | 81/100 [26:55<06:13, 19.65s/it]Collecting data from policy ...:  82%|████████▏ | 82/100 [27:15<05:55, 19.73s/it]Collecting data from policy ...:  83%|████████▎ | 83/100 [27:34<05:31, 19.53s/it]Collecting data from policy ...:  84%|████████▍ | 84/100 [27:52<05:06, 19.14s/it]Collecting data from policy ...:  85%|████████▌ | 85/100 [28:11<04:46, 19.13s/it]Collecting data from policy ...:  86%|████████▌ | 86/100 [28:30<04:27, 19.08s/it]Collecting data from policy ...:  87%|████████▋ | 87/100 [28:49<04:05, 18.89s/it]Collecting data from policy ...:  88%|████████▊ | 88/100 [29:07<03:45, 18.83s/it]Collecting data from policy ...:  89%|████████▉ | 89/100 [29:27<03:30, 19.11s/it]Collecting data from policy ...:  90%|█████████ | 90/100 [29:46<03:09, 18.91s/it]Collecting data from policy ...:  91%|█████████ | 91/100 [30:04<02:49, 18.85s/it]Collecting data from policy ...:  92%|█████████▏| 92/100 [30:23<02:30, 18.80s/it]Collecting data from policy ...:  93%|█████████▎| 93/100 [30:43<02:14, 19.24s/it]Collecting data from policy ...:  94%|█████████▍| 94/100 [31:03<01:55, 19.24s/it]Collecting data from policy ...:  95%|█████████▌| 95/100 [31:22<01:36, 19.26s/it]Collecting data from policy ...:  96%|█████████▌| 96/100 [31:40<01:16, 19.03s/it]Collecting data from policy ...:  97%|█████████▋| 97/100 [31:58<00:55, 18.55s/it]Collecting data from policy ...:  98%|█████████▊| 98/100 [32:17<00:37, 18.74s/it]Collecting data from policy ...:  99%|█████████▉| 99/100 [32:36<00:18, 18.88s/it]Collecting data from policy ...: 100%|██████████| 100/100 [32:56<00:00, 19.14s/it]Collecting data from policy ...: 100%|██████████| 100/100 [32:56<00:00, 19.76s/it]
+flatten coverage 0.36512116911415327
+flatten coverage 0.36506315242772275
+flatten coverage 0.3650114590910152
+flatten coverage 0.36512130339590076
+flatten coverage 0.3652313110213051
+flatten coverage 0.36522804828231287
+flatten coverage 0.365283083037504
+flatten coverage 0.3651179118595736
+flatten coverage 0.36511823630911044
+flatten coverage 0.3652283505046306
+flatten coverage 0.3651732956471351
+flatten coverage 0.3650101014969228
+flatten coverage 0.36517312326967893
+flatten coverage 0.3651188604540676
+flatten coverage 0.3651207351388457
+flatten coverage 0.3650662794320813
+flatten coverage 0.3652842782298552
+flatten coverage 0.3653413141615025
+flatten coverage 0.36522804828231287
+flatten coverage 0.36517299347031906
+flatten coverage 0.3651143213378639
+flatten coverage 0.36511675302861735
+flatten coverage 0.36495317258558335
+flatten coverage 0.36506319499291556
+flatten coverage 0.36511639294309445
+flatten coverage 0.36500816025660726
+flatten coverage 0.3651730337976744
+flatten coverage 0.3651758530012276
+flatten coverage 0.3650623226709607
+flatten coverage 0.3653415224615828
+flatten coverage 0.3652832665383219
+flatten coverage 0.36506642044457516
+flatten coverage 0.3651180774598903
+flatten coverage 0.3651190125519724
+flatten coverage 0.3651762557174954
+flatten coverage 0.36512134146765995
+flatten coverage 0.3650661854869478
+flatten coverage 0.36517408982685323
+flatten coverage 0.36523151475594356
+flatten coverage 0.36517111850307643
+flatten coverage 0.36517319042009405
+flatten coverage 0.36511830795015465
+flatten coverage 0.3652283146733307
+flatten coverage 0.36528313444844723
+flatten coverage 0.3652830359439031
+flatten coverage 0.3652308410832938
+flatten coverage 0.3651213347156679
+flatten coverage 0.36500703758401765
+flatten coverage 0.36512110647464213
+flatten coverage 0.36511781790030684
+flatten coverage 0.36517609909510457
+flatten coverage 0.36522791846341934
+flatten coverage 0.36511810427889374
+flatten coverage 0.36512133246499234
+flatten coverage 0.3651760945930871
+flatten coverage 0.36528518241094765
+flatten coverage 0.3651162877327364
+flatten coverage 0.3653382542346245
+flatten coverage 0.36517335829613173
+flatten coverage 0.36506308529754217
+flatten coverage 0.36500816475602105
+flatten coverage 0.3651728927447137
+flatten coverage 0.36528640893762265
+flatten coverage 0.3650630181673616
+flatten coverage 0.3651178850405644
+flatten coverage 0.3651761572420319
+flatten coverage 0.3650069772129396
+flatten coverage 0.3650617968808506
+flatten coverage 0.3652831031145296
+flatten coverage 0.36512120943659954
+flatten coverage 0.3651732284967315
+flatten coverage 0.3651180729591324
+flatten coverage 0.36511814009942445
+flatten coverage 0.3651180729591324
+flatten coverage 0.3651214599947362
+flatten coverage 0.3651762243930172
+flatten coverage 0.36511794317932916
+flatten coverage 0.36528296877327654
+flatten coverage 0.3650611550140475
+flatten coverage 0.36517299347031906
+flatten coverage 0.36534122014561654
+flatten coverage 0.36534145528025697
+flatten coverage 0.36517639677246927
+flatten coverage 0.3650115933323279
+flatten coverage 0.36522799012602486
+flatten coverage 0.3650081021353542
+flatten coverage 0.3652312551169122
+flatten coverage 0.36522804828231287
+flatten coverage 0.3652312774407538
+flatten coverage 0.36523070676126124
+flatten coverage 0.365118135598655
+flatten coverage 0.3650112241687179
+flatten coverage 0.36501129128937426
+flatten coverage 0.36517329114571667
+flatten coverage 0.36517312326967893
+flatten coverage 0.3650111660480636
+flatten coverage 0.3650661854869478
+flatten coverage 0.3651180148203561
+flatten coverage 0.36517329114571667
+flatten coverage 0.36533825873807646
+flatten coverage 0.36511814009942445
+flatten coverage 0.36506326212307316
+flatten coverage 0.3652315057505873
+flatten coverage 0.36512142867496916
+flatten coverage 0.3650067871013502
+flatten coverage 0.36517342544654685
+pybullet build time: Sep 22 2020 00:55:20
+Detected 5 devices
+Compute Device: NVIDIA GeForce RTX 3090 Ti
+
+Pyflex init done!
+Traceback (most recent call last):
+  File "train/train_diffusion.py", line 75, in <module>
+    main()
+  File "train/train_diffusion.py", line 71, in main
+    validation_interval, total_update_steps, eval_checkpoint)
+  File "/home/hcv530/project/agent-arena-v0/agent_arena/api.py", line 177, in train_and_evaluate
+    agent.train(validation_interval, [arena])
+  File "/home/hcv530/project/agent-arena-v0/agent_arena/agent/bc/diffusion/adapter.py", line 394, in train
+    self.config.total_update_steps - self.update_step,
+TypeError: unsupported operand type(s) for -: 'DotMap' and 'int'

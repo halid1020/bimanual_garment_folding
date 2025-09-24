@@ -73,7 +73,8 @@ def main():
         'disp': False,
         'ray_id': 0,
         'horizon': 8,
-        'track_semkey_on_frames': True
+        'track_semkey_on_frames': True,
+        'readjust_pick': True
     }
     
     demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False})) # TODO: create demonstrator for 'centre-sleeve-folding'

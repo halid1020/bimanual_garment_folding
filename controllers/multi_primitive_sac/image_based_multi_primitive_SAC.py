@@ -499,9 +499,23 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         torch.save(state, os.path.join(path, "last_model.pt"))
 
         # Save replay buffer
-        replay_path = os.path.join(path, "last_replay_buffer.pkl")
-        with open(replay_path, "wb") as f:
-            pickle.dump(self.replay, f)
+        # replay_path = os.path.join(path, "last_replay_buffer.pkl")
+        # with open(replay_path, "wb") as f:
+        #     pickle.dump(self.replay, f)
+
+        # In your agent.save()
+        replay_path = os.path.join(path, "last_replay_buffer.pt")
+        torch.save({
+            "ptr": self.replay.ptr,
+            "size": self.replay.size,
+            "capacity": self.replay.capacity,
+            "observation": self.replay.observation,
+            "actions": self.replay.actions,
+            "rewards": self.replay.rewards,
+            "next_observation": self.replay.next_observation,
+            "dones": self.replay.dones,
+        }, replay_path)
+
 
         return True
 
@@ -522,7 +536,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         path = os.path.join(path, 'checkpoints')
 
         model_file = os.path.join(path, "last_model.pt")
-        replay_file = os.path.join(path, "last_replay_buffer.pkl")
+        replay_path = os.path.join(path, "last_replay_buffer.pt")
 
         if not os.path.exists(model_file):
             print(f"[WARN] Model file not found: {model_file}")
@@ -555,8 +569,17 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         # Load replay buffer if available
         if os.path.exists(replay_file):
-            with open(replay_file, "rb") as f:
-                self.replay = pickle.load(f)
+            replay_state = torch.load(replay_path, map_location="cpu")
+
+            self.replay.ptr = replay_state["ptr"]
+            self.replay.size = replay_state["size"]
+            self.replay.capacity = replay_state["capacity"]
+            self.replay.observation = replay_state["observation"]
+            self.replay.actions = replay_state["actions"]
+            self.replay.rewards = replay_state["rewards"]
+            self.replay.next_observation = replay_state["next_observation"]
+            self.replay.dones = replay_state["dones"]
+
         else:
             print(f"[WARN] Replay buffer file not found: {replay_file}")
 
@@ -581,7 +604,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             raise ValueError("No save directory provided in config")
 
         model_file = os.path.join(self.config.save_dir, f"checkpoint_{checkpoint}.pt")
-        replay_file = os.path.join(self.config.save_dir, f"checkpoint_{checkpoint}_replay.pkl")
+        #replay_file = os.path.join(self.config.save_dir, f"checkpoint_{checkpoint}_replay.pkl")
 
         if not os.path.exists(model_file):
             print(f"[WARN] Checkpoint model file not found: {model_file}")
@@ -609,13 +632,6 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.total_update_steps = state.get('total_update_steps', 0)
         self.total_act_steps = state.get('total_act_steps', 0)
         self.last_done = state.get('last_done', True)
-
-        # Load replay buffer if available
-        if os.path.exists(replay_file):
-            with open(replay_file, "rb") as f:
-                self.replay = pickle.load(f)
-        else:
-            print(f"[WARN] Replay buffer file not found: {replay_file}")
 
         self.loaded = True
         return True

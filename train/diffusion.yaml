@@ -10,15 +10,13 @@ eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
 batch_size: 64
-
-# readjust_pick: True
+disable_updown: True
+action_shape: [8]
 data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
 demo_policy: "centre_sleeve_folding_stochastic_policy"
-# num_epochs: 100
-
 validation_interval: 1e3
 total_update_steps: 1e5
 
@@ -81,9 +79,9 @@ data_augmenter:
     debug: False
     primitive: "norm-pixel-fold"
 
-disable_updown: True
-swap_pick_and_place: True
-action_shape: [8]
+
+# swap_pick_and_place: True
+
 
 action_output:
   norm-pixel-fold:

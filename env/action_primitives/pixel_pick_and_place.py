@@ -18,8 +18,8 @@ class PixelPickAndPlace():
                  place_upper_bound=[1, 1],
                  pregrasp_height=0.05,
                  pre_grasp_vel=0.05,
-                 drag_vel=0.1, #0.05,
-                 lift_vel=0.1, #0.05,
+                 drag_vel=0.05,
+                 lift_vel=0.05,
                  readjust_pick=False,
                  single_operator=False,
                  **kwargs):

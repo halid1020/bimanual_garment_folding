@@ -59,7 +59,8 @@ def get_max_IoU(mask1, mask2, debug=False):
         mask2 = (mask2 > 0.5).astype(np.uint8)
     
     
-    max_iou, best_mask = 0, None
+    max_iou, best_mask = -1, None
+    best_angle = 0
     angles = range(0, 360, 5)  # coarse search
     
     for angle in angles:

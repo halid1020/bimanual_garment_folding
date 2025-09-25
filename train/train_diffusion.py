@@ -39,7 +39,7 @@ def main():
         'asset_dir': 'assets',
         'task_name': 'centre-sleeve-folding',
         'debug': False,
-        'alignment': 'deform'
+        'alignment': 'simple_rigid'
     }
 
     

@@ -425,7 +425,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             raise ValueError("SACAgent.train requires at least one Arena.")
         arena = arenas[0]
         self.set_train()
-
+        #self.save(self.config.save_dir, checkpoint_id='-1')
         with tqdm(total=update_steps, desc="Current Round of Training", initial=0) as pbar:
             pbar.set_postfix(
                     phase="start",
@@ -455,8 +455,8 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
                     )
 
                 # Save checkpoint periodically
-                if self.total_update_steps % self.checkpoint_interval == 0:
-                    self.save(self.config.save_dir, checkpoint_id=self.total_update_steps)
+                # if self.total_update_steps % self.checkpoint_interval == 0:
+                #     self.save(self.config.save_dir, checkpoint_id=self.total_update_steps)
 
                 # Update progress bar with global counter
                 # pbar.set_postfix(total_updates=self.total_update_steps)
@@ -472,8 +472,11 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             path: Save directory.
             checkpoint_id: Optional ID for checkpoint (e.g. total update step).
         """
+        print(f'Saving Checkpoint {checkpoint_id} ....')
         path = os.path.join(self.save_dir, "checkpoints")
         os.makedirs(path, exist_ok=True)
+        dummy = torch.zeros(1, self.context_horizon, *self.each_image_shape).to(self.device)  # adjust (B, N, C, H, W) to your case
+        self.encoder(dummy)  # this triggers _ensure_init and builds _project
 
         state = {
             'encoder': self.encoder.state_dict(),
@@ -505,17 +508,19 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         # In your agent.save()
         replay_path = os.path.join(path, "last_replay_buffer.pt")
+        replay_path = os.path.join(path, "last_replay_buffer.pt")
         torch.save({
             "ptr": self.replay.ptr,
             "size": self.replay.size,
             "capacity": self.replay.capacity,
-            "observation": self.replay.observation,
-            "actions": self.replay.actions,
-            "rewards": self.replay.rewards,
-            "next_observation": self.replay.next_observation,
-            "dones": self.replay.dones,
+            "observation": torch.from_numpy(self.replay.observation),
+            "actions": torch.from_numpy(self.replay.actions),
+            "rewards": torch.from_numpy(self.replay.rewards),
+            "next_observation": torch.from_numpy(self.replay.next_observation),
+            "dones": torch.from_numpy(self.replay.dones),
         }, replay_path)
 
+        print(f'Finished saving checkpoint {checkpoint_id} !')
 
         return True
 
@@ -530,13 +535,14 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         Returns:
             int: The total update step at which the model was saved, or -1 if loading failed.
         """
+        print(f'Loading last checkpoint from {path} ...')
         path = path or self.save_dir
         # if path is None:
         #     raise ValueError("No load path provided")
         path = os.path.join(path, 'checkpoints')
 
         model_file = os.path.join(path, "last_model.pt")
-        replay_path = os.path.join(path, "last_replay_buffer.pt")
+        replay_file = os.path.join(path, "last_replay_buffer.pt")
 
         if not os.path.exists(model_file):
             print(f"[WARN] Model file not found: {model_file}")
@@ -569,22 +575,26 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         # Load replay buffer if available
         if os.path.exists(replay_file):
-            replay_state = torch.load(replay_path, map_location="cpu")
+            replay_state = torch.load(replay_file, map_location="cpu")
 
             self.replay.ptr = replay_state["ptr"]
             self.replay.size = replay_state["size"]
             self.replay.capacity = replay_state["capacity"]
-            self.replay.observation = replay_state["observation"]
-            self.replay.actions = replay_state["actions"]
-            self.replay.rewards = replay_state["rewards"]
-            self.replay.next_observation = replay_state["next_observation"]
-            self.replay.dones = replay_state["dones"]
+
+            self.replay.observation = replay_state["observation"].cpu().numpy()
+            self.replay.actions = replay_state["actions"].cpu().numpy()
+            self.replay.rewards = replay_state["rewards"].cpu().numpy()
+            self.replay.next_observation = replay_state["next_observation"].cpu().numpy()
+            self.replay.dones = replay_state["dones"].cpu().numpy()
+
 
         else:
             print(f"[WARN] Replay buffer file not found: {replay_file}")
 
         # Mark agent as loaded
         self.loaded = True
+
+        print(f'Finished loading last checkpoint from {path}!')
 
         return self.total_update_steps
 

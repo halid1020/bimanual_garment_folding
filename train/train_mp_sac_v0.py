@@ -35,10 +35,10 @@ def test_config() -> DotMap:
     cfg.alpha_lr = 3e-4
     cfg.tau = 0.005
     cfg.gamma = 0.99
-    cfg.batch_size = 2 #256
+    cfg.batch_size = 256
 
-    cfg.replay_capacity = int(1e2)
-    cfg.initial_act_steps = 5
+    cfg.replay_capacity = int(1e5)
+    cfg.initial_act_steps = 100
     #cfg.target_entropy = -cfg.max_action_dim
     cfg.max_grad_norm = 10.0
     cfg.save_dir = None
@@ -72,7 +72,7 @@ def main():
         #'task': 'centre-sleeve-folding',
         'disp': False,
         'ray_id': 0,
-        'horizon': 5,
+        'horizon': 20,
         'track_semkey_on_frames': False,
         'readjust_pick': True
     }
@@ -89,8 +89,8 @@ def main():
         'alignment': 'simple_rigid'
     }
 
-    validation_interval = int(10)
-    total_update_steps = int(100)
+    validation_interval = int(1e3)
+    total_update_steps = int(1e5)
     eval_checkpoint = -1
 
     arena_config = DotMap(arena_config)
@@ -103,7 +103,7 @@ def main():
 
     agent = ImageBasedMultiPrimitiveSAC(config=test_config())
 
-    save_dir = os.path.join('./tmp', 'garment_folding', 'train_v0')
+    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v0')
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
     

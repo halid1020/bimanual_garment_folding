@@ -42,12 +42,14 @@ def main():
         'alignment': 'deform'
     }
 
-    validation_interval = int(1e3)
-    total_update_steps = int(1e5)
+    
     eval_checkpoint = -1
     
     exp_config = ag_ar.retrieve_config_from_path(
         config_path='./train/diffusion.yaml')
+
+    validation_interval = int(exp_config.validation_interval)
+    total_update_steps = int(exp_config.total_update_steps)
 
     arena_config = DotMap(arena_config)
     task_config = DotMap(task_config)

@@ -160,6 +160,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         #self.flatten_coverage = init_state_params['flatten_area']
         
         self.info = {}
+        self.last_info = None
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
         
@@ -168,7 +169,7 @@ class SingleGarmentFixedInitialEnv(Arena):
         self.action_step = 0
 
         self.evaluate_result = None
-        self.last_info = None
+        
         
         if self.init_mode == 'flattened':
             self.set_to_flatten()
@@ -225,6 +226,7 @@ class SingleGarmentFixedInitialEnv(Arena):
             
             info['success'] =  self.success()
             if info['evaluation'] != {}:
+                #print('self.last_info', self.last_info)
                 info['reward'] = self.task.reward(self.last_info, None, info)
             
 
@@ -279,17 +281,17 @@ class SingleGarmentFixedInitialEnv(Arena):
     
     def get_eval_configs(self):
         eval_configs = [
-            {'eid': eid, 'tier': 0, 'save_video': True}
-            for eid in range(10)
+            {'eid': 0, 'tier': 0, 'save_video': True}
+            for eid in range(30)
         ]
-        eval_configs += [
-            {'eid': eid, 'tier': 1, 'save_video': False}
-            for eid in range(10, 30)]
+        
         return eval_configs
 
     
     def get_val_configs(self):
-        return {} #TODO
+        return [
+            {'eid': 0, 'tier': 0, 'save_video': True}
+        ]
     
     def get_no_op(self):
         return self.action_tool.get_no_op()

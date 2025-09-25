@@ -16,6 +16,7 @@ import pickle
 
 
 from agent_arena import TrainableAgent
+from agent_arena.utilities.logger.logger_interface import Logger
 from dotmap import DotMap
 from .networks import *
 from .replay_buffer import ReplayBuffer
@@ -62,19 +63,19 @@ def default_config() -> DotMap:
 
     return cfg
 
-class WandbLogger:
+class WandbLogger(Logger):
     def __init__(self, project: str = "rl-project", name: Optional[str] = None, config: Optional[dict] = None):
         self.project = project
         self.name = name
         self.config = config or {}
         self.run = wandb.init(project=self.project, name=self.name, config=self.config)
-        self.logdir = None
+        self.log_dir = None
 
-    def set_log_dir(self, logdir: str) -> None:
+    def set_log_dir(self, log_dir: str) -> None:
         """Set log directory (also saves W&B files there)."""
-        self.logdir = logdir
-        os.makedirs(logdir, exist_ok=True)
-        wandb.run.config.update({"logdir": logdir}, allow_val_change=True)
+        self.log_dir = log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        wandb.run.config.update({"logdir": log_dir}, allow_val_change=True)
 
     def log(self, metrics: dict, step: Optional[int] = None) -> None:
         """Log a dictionary of metrics to W&B."""
@@ -431,7 +432,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
                     env_step=self.total_act_steps,
                     total_updates=self.total_update_steps
             )
-            while self.replay.size < self.config.batch_size or self.replay.size < self.initial_act_steps:
+            while self.replay.size < self.initial_act_steps:
                 self._collect_from_arena(arena)
                 pbar.set_postfix(
                     phase="pre-collecting",
@@ -525,7 +526,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         if not os.path.exists(model_file):
             print(f"[WARN] Model file not found: {model_file}")
-            return -1
+            return 0
 
         # Load model + training variables
         state = torch.load(model_file, map_location=self.device)

@@ -19,13 +19,16 @@ train_mode: 'from_policy'
 demo_policy: "centre_sleeve_folding_stochastic_policy"
 # num_epochs: 100
 
+validation_interval: 1e3
+total_update_steps: 1e5
+
 logger_name: 'pick_and_place_fabric_single_task_logger'
 
 
 dataset_mode: "general"
 dataset_config:
   data_path: "single_longsleeve_folding_from_flattened_100"
-  data_dir: "./data/"
+  data_dir: "./data/datasets"
   seq_length: 1
   obs_config:
     mask: 

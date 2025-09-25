@@ -124,7 +124,7 @@ class GarmentFoldingTask(Task):
                 os.makedirs(goal_path, exist_ok=True)
 
                 # Save RGB
-                plt.imsave(os.path.join(goal_path, "rgb.png"), goal['observation']['rgb'])
+                plt.imsave(os.path.join(goal_path, "rgb.png"), goal['observation']['rgb']/255.0)
 
                 # Save particles as PLY
                 save_point_cloud_ply(os.path.join(goal_path, "particles.ply"),

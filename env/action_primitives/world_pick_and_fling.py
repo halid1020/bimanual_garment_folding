@@ -139,7 +139,7 @@ class WorldPickAndFling():
         info = self.action_tool.movep(env, pick_positions, action['tograsp_vel'])
         #print('pick_positions', pick_positions)
         ## pick the object
-        info = self.action_tool.grasp(env)
+        info = self.action_tool.both_grasp(env)
         ## lift the cloth to the prefling height
         info = self.action_tool.movep(env, lift_positions, action['lift_vel'])
         ## go to fling position
@@ -215,7 +215,7 @@ class WorldPickAndFling():
                     [-grasp_dist/2, drag_y, lower_height]], drag_vel)
         
         # release the cloth, TODO: refactor
-        info = self.action_tool.open_gripper(env)
+        info = self.action_tool.open_both_gripper(env)
 
         # move up the picker a bit
         self.action_tool.movep(env,[[grasp_dist/2, drag_y, lower_height+0.1],

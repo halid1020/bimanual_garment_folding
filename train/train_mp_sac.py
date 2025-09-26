@@ -24,7 +24,7 @@ def test_config() -> DotMap:
     cfg.encoder.pool = 2
     cfg.obs_key = 'rgb'
 
-    cfg.context_horizon = 3
+    cfg.context_horizon = 4
     cfg.each_image_shape = (3, 64, 64) # RGB
     cfg.num_primitives = 5
     cfg.hidden_dim = 256
@@ -54,8 +54,8 @@ def test_config() -> DotMap:
 
     cfg.reward_key = 'multi_stage_reward'
     cfg.checkpoint_interval = 5
-    cfb.add_reject_actions = True
-    reject_action_reward = -1
+    cfg.add_reject_actions = True
+    cfg.reject_action_reward = -1
 
     return cfg
 
@@ -105,7 +105,7 @@ def main():
 
     agent = ImageBasedMultiPrimitiveSAC(config=test_config())
 
-    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v0')
+    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v1')
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
     

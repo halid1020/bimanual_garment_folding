@@ -108,8 +108,8 @@ class PixelPickAndDrag():
         # if swap:
         #     pick_1 = pick_1[::-1]
             #place_1 = place_1[::-1]
-        pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height
-        place_1_depth = self.camera_height - self.pick_height
+        pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height + 0.005
+        place_1_depth = self.camera_height - self.pick_height + 0.005
         action['single_operator'] = False
        
         
@@ -146,7 +146,7 @@ class PixelPickAndDrag():
             'drag_vel': self.drag_vel,
             'lift_vel': self.lift_vel,
             'pregrasp_height': self.pregrasp_height,
-            'single_operator': action['single_operator']
+            'single_operator': False,
         }
 
         pixel_action = {

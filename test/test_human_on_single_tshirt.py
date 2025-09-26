@@ -25,7 +25,7 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': False,
+        'disp': True,
         'ray_id': 0,
         'horizon': 2,
         'track_semkey_on_frames': True,

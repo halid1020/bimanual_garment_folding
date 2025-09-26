@@ -175,6 +175,7 @@ class SingleGarmentFixedInitialEnv(Arena):
             self.set_to_flatten()
         
         self.info = self._process_info({})
+        self.clear_frames()
 
         
         return self.info
@@ -510,7 +511,7 @@ class SingleGarmentFixedInitialEnv(Arena):
     def _get_obs(self):
         obs = {}
         rgbd = self._render(mode='rgbd')
-        obs['rgb'] = rgbd[:, :, :3]
+        obs['rgb'] = rgbd[:, :, :3].astype(np.uint8)
         obs['depth'] = rgbd[:, :, 3:]
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
         self.cloth_mask = obs['mask']

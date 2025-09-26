@@ -122,12 +122,12 @@ class WorldPickAndPlace():
 
         self.action_tool.movep(env, pre_pick_positions, self.no_cloth_vel)
         self.action_tool.movep(env, pick_positions, action['tograsp_vel'])
-        self.action_tool.grasp(env)
+        self.action_tool.both_grasp(env)
         self.action_tool.movep(env, pre_pick_positions, action['lift_vel'])
         self.action_tool.movep(env, place_positions, action['drag_vel'])
-        self.action_tool.open_gripper(env)
+        self.action_tool.open_both_gripper(env)
         self.action_tool.movep(env, place_raise, action['lift_vel'])
-        self.action_tool.open_gripper(env)
+        self.action_tool.open_both_gripper(env)
 
         self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
 

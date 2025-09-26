@@ -177,7 +177,7 @@ class WorldPickAndFling():
     def reset_pickers(self, env):
         
         self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
-        return self.action_tool.open_gripper(env)
+        return self.action_tool.open_both_gripper(env)
     
 
     ## ALERT!!! this cannot be done in real world, as it reqruiest the get the information of the cloth

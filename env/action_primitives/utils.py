@@ -29,7 +29,12 @@ def adjust_points(points, mask, min_distance=2):
     
     # Create a new mask where pixels < min_distance from border are 0
     eroded_mask = (dist_transform >= min_distance).astype(np.uint8)
+    while np.sum(eroded_mask) == 0 and min_distance >= 1:
+        min_distance -= 1
+        eroded_mask = (dist_transform >= min_distance).astype(np.uint8)
     
+    if np.sum(eroded_mask) == 0:
+        return points, mask
    
     # plt.imshow(eroded_mask.astype(np.float32))
     # plt.savefig('tmp/eroded_mask.png')
@@ -40,6 +45,7 @@ def adjust_points(points, mask, min_distance=2):
         if eroded_mask[x, y] == 0:  # If point is too close to border
             # Find the nearest valid point
             x_indices, y_indices = np.where(eroded_mask == 1)
+            
             distances = np.sqrt((x - x_indices)**2 + (y - y_indices)**2)
             nearest_index = np.argmin(distances)
             new_x, new_y = x_indices[nearest_index], y_indices[nearest_index]

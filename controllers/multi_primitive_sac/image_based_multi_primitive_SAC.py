@@ -408,11 +408,13 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         next_img_obs =  np.stack(img_obs_list)[-self.context_horizon:].reshape(self.context_horizon*self.each_image_shape[0], *self.each_image_shape[1:])
 
         
-        action = np.zeros(self.max_action_dim, dtype=np.float32)
+        accept_action = np.zeros(self.max_action_dim, dtype=np.float32)
         #print('vector_action', vector_action)
-        action[:len(vector_action_)] = vector_action_
+        accept_action[:len(vector_action_)] = vector_action_
         #print('action', action)
-        self.replay.add(img_obs, action, reward, next_img_obs, done)
+        self.replay.add(img_obs, accept_action, reward, next_img_obs, done)
+        if self.config.get('add_reject_actions', False) and not np.array_equal(accept_action, vector_action_):
+            self.replay.add(img_obs, vector_action_, self.config.get('reject_action_reward', -1), next_img_obs, done)
         
         self.total_act_steps += 1
 

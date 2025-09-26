@@ -54,6 +54,8 @@ def test_config() -> DotMap:
 
     cfg.reward_key = 'multi_stage_reward'
     cfg.checkpoint_interval = 5
+    cfb.add_reject_actions = True
+    reject_action_reward = -1
 
     return cfg
 

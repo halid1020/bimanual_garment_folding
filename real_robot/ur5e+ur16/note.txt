@@ -1,0 +1,94 @@
+
+
+sudo ip addr add 192.168.1.20/24 dev enp2s0 # set up the ip of my laptop
+
+ping 192.168.1.10 # try to communicate with robot ur5e
+ping 192.168.1.102 # try to communicate with robot ur16
+
+cd bimanual_garment_folding/real_robot/ur5e+ur16
+docker build -t bimanual_garment_folding .
+
+
+```
+
+xhost +local:root
+docker run -it \
+    --network host \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v /home/halid/Projects/bimanual_garment_folding:/root/ws/bimanual_garment_folding \
+    bimanual_garment_folding
+
+```
+
+
+## Start driver for ur5e.
+```
+
+# Source ROS2 Humble
+source /opt/ros/humble/setup.bash
+
+# Launch UR driver (replace IP if needed)
+ros2 launch ur_robot_driver ur_control.launch.py \
+    ur_type:=ur5e \
+    robot_ip:=192.168.1.10 \
+    launch_rviz:=false \
+    tf_prefix:=ur5e \
+    use_namespace:=true \
+    namespace:=ur5e
+
+```
+
+## Start driver for ur16.
+```
+
+# Source ROS2 Humble
+source /opt/ros/humble/setup.bash
+
+# Launch UR driver (replace IP if needed)
+ros2 launch ur_robot_driver ur_control.launch.py \
+    ur_type:=ur16e \
+    robot_ip:=192.168.1.102 \
+    launch_rviz:=false \
+    tf_prefix:=ur16e \
+    use_namespace:=true \
+    namespace:=ur16e
+
+```
+
+## Launch Moveit on its own ur5e
+```
+source /opt/ros/humble/setup.bash
+
+ros2 control switch_controllers \
+    --start scaled_joint_trajectory_controller \
+    --strict \
+    --controller-manager /ur5e/controller_manager
+
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+    ur_type:=ur5e \
+    rviz_tutorial:=true \
+    use_namespace:=true \
+    namespace:=ur5e \
+    tf_prefix:=ur5e
+
+```
+
+
+## Launch Moveit on its own ur16
+```
+source /opt/ros/humble/setup.bash
+
+ros2 control switch_controllers \
+    --start scaled_joint_trajectory_controller \
+    --strict \
+    --controller-manager /ur16e/controller_manager
+    
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+    ur_type:=ur16e \
+    rviz_tutorial:=true \
+    use_namespace:=true \
+    namespace:=ur16e \
+    tf_prefix:=ur16e
+
+```

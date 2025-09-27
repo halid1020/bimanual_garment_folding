@@ -194,9 +194,9 @@ def coverage_alignment_reward(last_info, action, info):
         last_info = info
     r_ca = speedFolding_approx_reward(last_info, action, info)
     dc = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage']
-    ds = info['evaluation']['max_IoU'] - last_info['evaluation']['max_IoU']
+    ds = info['evaluation']['max_IoU_to_flattend'] - last_info['evaluation']['max_IoU_to_flattend']
     nc = info['evaluation']['normalised_coverage']
-    iou = info['evaluation']['max_IoU']
+    iou = info['evaluation']['max_IoU_to_flattend']
     epsilon_c = 1e-4
     epsilon_s = 1e-4
     max_c = 0.99

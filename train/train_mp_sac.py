@@ -105,7 +105,7 @@ def main():
 
     agent = ImageBasedMultiPrimitiveSAC(config=test_config())
 
-    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v1')
+    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v2')
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
     

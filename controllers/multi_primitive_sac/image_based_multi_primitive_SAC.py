@@ -475,6 +475,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         
             for _ in range(update_steps):  # network updates
                 batch = self.replay.sample(self.config.batch_size)
+                self.data_augmenter(batch)
                 self._update_networks(batch)
                 self.update_steps += 1
 
@@ -486,12 +487,6 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
                         total_updates=self.update_steps,
                     )
 
-                # Save checkpoint periodically
-                # if self.update_steps % self.checkpoint_interval == 0:
-                #     self.save(self.config.save_dir, checkpoint_id=self.update_steps)
-
-                # Update progress bar with global counter
-                # pbar.set_postfix(total_updates=self.update_steps)
                 pbar.update(1)
 
         return True

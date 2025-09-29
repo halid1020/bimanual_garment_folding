@@ -12,9 +12,9 @@ from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_sac.image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.multi_primitive_sac.data_augmenter import PixelBasedPrimitiveDataAugmenter
 
-
-def test_config() -> DotMap:
+def get_agent_config() -> DotMap:
     cfg = DotMap()
     cfg.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     cfg.encoder = DotMap()
@@ -39,7 +39,6 @@ def test_config() -> DotMap:
 
     cfg.replay_capacity = int(1e5)
     cfg.initial_act_steps = 100
-    #cfg.target_entropy = -cfg.max_action_dim
     cfg.max_grad_norm = 10.0
     cfg.save_dir = None
     cfg.act_steps_per_update = 1
@@ -98,25 +97,37 @@ def main():
         'alignment': 'simple_rigid'
     }
 
+    data_augmenter_config = {
+        "device": "cuda:0",
+        "rgb_noise_factor": 0.01,
+        "random_rotation": True,
+        "rotation_degree": 1,
+        "vertical_flip": True,
+    }
+
+
     validation_interval = int(1e3)
    
     eval_checkpoint = -1
 
     arena_config = DotMap(arena_config)
     task_config = DotMap(task_config)
+    data_augmenter_config = DotMap(data_augmenter_config)
     
     task = GarmentFoldingTask(task_config)
     arena = SingleGarmentFixedInitialEnv(arena_config)
+    data_augmenter = PixelBasedPrimitiveDataAugmenter(data_augmenter_config)
     
     arena.set_task(task)
 
-    exp_config = test_config()
-    agent = ImageBasedMultiPrimitiveSAC(config=exp_config)
-    total_update_steps = exp_config.total_update_steps
+    agent_config = get_agent_config()
+    agent = ImageBasedMultiPrimitiveSAC(config=agent_config)
+    total_update_steps = agent_config.total_update_steps
 
     save_dir = os.path.join('/data/hcv530', 'garment_folding', args.exp_name)
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
+    agent.set_data_augmenter(data_augmenter)
     
     res = ag_ar.train_and_evaluate(agent, arena,
         validation_interval, total_update_steps, eval_checkpoint)

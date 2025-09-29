@@ -222,10 +222,15 @@ class SingleGarmentFixedInitialEnv(Arena):
             info['evaluation'] = self.evaluate()
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
                 self.last_flattened_step = self.action_step
+
+            
            
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
             info['success'] =  self.success()
+            if info['success']:
+                info['done'] = True
+
             if info['evaluation'] != {}:
                 #print('self.last_info', self.last_info)
                 info['reward'] = self.task.reward(self.last_info, None, info)

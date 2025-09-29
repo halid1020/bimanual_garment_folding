@@ -127,7 +127,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.target_entropy = float(-self.max_action_dim)
 
         self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.max_action_dim, self.device)
-        self.total_update_steps = 0
+        self.update_steps = 0
         self.loaded = False
         self.logger = WandbLogger(
             project="multi-primitive-sac",
@@ -140,10 +140,15 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.episode_return = 0
         self.episode_length = 0
         self.reward_key = cfg.reward_key
-        self.total_act_steps = 0
+        self.act_steps = 0
         self.initial_act_steps = cfg.initial_act_steps
         self.act_steps_per_update = cfg.act_steps_per_update
         self.checkpoint_interval = cfg.checkpoint_interval
+        
+        self.max_epsilon = self.config.get('max_epsilon', 1.0)
+        self.min_epsilon = self.config.get('min_epsilon', 0.05)
+        self.explore_mode = self.config.get('explore_mode', 'best')
+        self.total_update_steps = self.config.get('total_update_steps', int(1e5))
 
     def pre_process(self, rgb):
         """
@@ -212,22 +217,45 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         z = self.encoder(obs_t)
 
         best_q, best_action, best_k = None, None, None
+        sampled_actions = []
+        sampled_Qs = []
         for k in range(self.K):
             if stochastic:
                 action, _, _ = self.actors[k].sample(z)
+                sampled_actions.append(action)
+                
             else:
                 mean, _ = self.actors[k](z)
                 action = torch.tanh(mean)
             q = self.critics[k](torch.cat([z, action], dim=-1))
+            sampled_Qs.append(q)
             if (best_q is None) or (q.item() > best_q):
                 best_q = q.item()
                 best_action = action
                 best_k = k
 
         # Convert to numpy
-        best_action = best_action.detach().cpu().numpy().squeeze(0)
-        #print('best action', best_action)
-        
+        if not stochastic:
+            best_action = best_action.detach().cpu().numpy().squeeze(0)
+        elif self.explore_mode == 'e-greedy':
+           
+            frac = max(0, (self.total_update_steps - self.update_steps) / self.total_update_steps)
+            epsilon = self.min_epsilon + (self.max_epsilon - self.min_epsilon) * frac
+            
+            # print(f'epsilon {epsilon}')
+            if np.random.rand() < epsilon:
+                
+                # pick a random primitive index
+                best_k = np.random.randint(self.K)
+                best_action = sampled_actions[best_k].detach().cpu().numpy().squeeze(0)
+            else:
+                # greedy: pick action with max Q
+                best_action = best_action.detach().cpu().numpy().squeeze(0)
+        elif self.explore_mode == 'best':
+            # print('best')
+            best_action = best_action.detach().cpu().numpy().squeeze(0)
+        else:
+            raise NotImplementedError
 
         # Build dictionary for chosen primitive
         primitive_name, params = self.primitive_param[best_k]
@@ -418,7 +446,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             reject_action[:len(vector_action)] = vector_action
             self.replay.add(img_obs, reject_action, self.config.get('reject_action_reward', -1), next_img_obs, done)
         
-        self.total_act_steps += 1
+        self.act_steps += 1
 
         # Track episodic return
         self.episode_return += reward
@@ -433,37 +461,37 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         with tqdm(total=update_steps, desc="Current Round of Training", initial=0) as pbar:
             pbar.set_postfix(
                     phase="start",
-                    env_step=self.total_act_steps,
-                    total_updates=self.total_update_steps
+                    env_step=self.act_steps,
+                    total_updates=self.update_steps
             )
             while self.replay.size < self.initial_act_steps:
                 self._collect_from_arena(arena)
                 pbar.set_postfix(
                     phase="pre-collecting",
-                    env_step=self.total_act_steps,
-                    total_updates=self.total_update_steps
+                    env_step=self.act_steps,
+                    total_updates=self.update_steps
                 )
 
         
             for _ in range(update_steps):  # network updates
                 batch = self.replay.sample(self.config.batch_size)
                 self._update_networks(batch)
-                self.total_update_steps += 1
+                self.update_steps += 1
 
                 for _ in range(self.act_steps_per_update):
                     self._collect_from_arena(arena)
                     pbar.set_postfix(
                         phase="training",
-                        env_step=self.total_act_steps,
-                        total_updates=self.total_update_steps,
+                        env_step=self.act_steps,
+                        total_updates=self.update_steps,
                     )
 
                 # Save checkpoint periodically
-                # if self.total_update_steps % self.checkpoint_interval == 0:
-                #     self.save(self.config.save_dir, checkpoint_id=self.total_update_steps)
+                # if self.update_steps % self.checkpoint_interval == 0:
+                #     self.save(self.config.save_dir, checkpoint_id=self.update_steps)
 
                 # Update progress bar with global counter
-                # pbar.set_postfix(total_updates=self.total_update_steps)
+                # pbar.set_postfix(total_updates=self.update_steps)
                 pbar.update(1)
 
         return True
@@ -492,9 +520,9 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             'critic_optim': self.critic_optim.state_dict(),
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
-            'total_steps': self.total_update_steps,
-            'total_update_steps': self.total_update_steps,
-            'total_act_steps': self.total_act_steps,
+            'total_steps': self.update_steps,
+            'update_steps': self.update_steps,
+            'act_steps': self.act_steps,
         }
 
         # Save checkpoint with ID if provided
@@ -573,8 +601,8 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         )
 
         # Restore training variables
-        self.total_update_steps = state.get('total_update_steps', 0)
-        self.total_act_steps = state.get('total_act_steps', 0)
+        self.update_steps = state.get('update_steps', 0)
+        self.act_steps = state.get('act_steps', 0)
         #self.last_done = state.get('last_done', True)
 
         # Load replay buffer if available
@@ -600,7 +628,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
         print(f'Finished loading last checkpoint from {path}!')
 
-        return self.total_update_steps
+        return self.update_steps
 
 
     
@@ -643,8 +671,8 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.log_alpha = torch.nn.Parameter(torch.tensor(state['log_alpha'], device=self.device, dtype=torch.float32))
 
         # Restore training variables
-        self.total_update_steps = state.get('total_update_steps', 0)
-        self.total_act_steps = state.get('total_act_steps', 0)
+        self.update_steps = state.get('update_steps', 0)
+        self.act_steps = state.get('act_steps', 0)
         self.last_done = state.get('last_done', True)
 
         self.loaded = True

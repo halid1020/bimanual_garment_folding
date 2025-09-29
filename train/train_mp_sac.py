@@ -56,10 +56,17 @@ def test_config() -> DotMap:
     cfg.checkpoint_interval = 5
     cfg.add_reject_actions = True
     cfg.reject_action_reward = -1
+    cfg.total_update_steps = int(1e5)
+    cfg.explore_mode = 'e-greedy'
 
     return cfg
 
 def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp_name", type=str, default="mp_sac_v3",
+                        help="Name of the experiment (used for save directory)")
+    args = parser.parse_args()
 
     arena_config = {
         'object': 'longsleeve',
@@ -92,7 +99,7 @@ def main():
     }
 
     validation_interval = int(1e3)
-    total_update_steps = int(1e5)
+   
     eval_checkpoint = -1
 
     arena_config = DotMap(arena_config)
@@ -103,9 +110,11 @@ def main():
     
     arena.set_task(task)
 
-    agent = ImageBasedMultiPrimitiveSAC(config=test_config())
+    exp_config = test_config()
+    agent = ImageBasedMultiPrimitiveSAC(config=exp_config)
+    total_update_steps = exp_config.total_update_steps
 
-    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'mp_sac_v2')
+    save_dir = os.path.join('/data/hcv530', 'garment_folding', args.exp_name)
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
     

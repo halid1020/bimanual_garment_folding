@@ -23,7 +23,7 @@ ENV_NUM = 0
 class SingleGarmentFixedInitialEnv(Arena):
     
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
         self.config = config
         self.info = {}
         self.sim_step = 0

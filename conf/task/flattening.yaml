@@ -1,0 +1,6 @@
+num_goals: 10
+object: longsleeve
+asset_dir: assets
+task_name: flattening
+debug: false
+alignment: simple_rigid

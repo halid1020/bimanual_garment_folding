@@ -6,6 +6,7 @@ from dotmap import DotMap
 import agent_arena.api as ag_ar
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
+from env.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.multi_primitive_sac.image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 from controllers.multi_primitive_sac.data_augmenter import PixelBasedPrimitiveDataAugmenter
@@ -23,6 +24,9 @@ def main(cfg: DictConfig):
     if cfg.task.task_name == 'centre-sleeve-folding':
         demonstrator = CentreSleeveFoldingStochasticPolicy({"debug": False})
         task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
+        arena.set_task(task)
+    elif cfg.task.task_name == 'flattening':
+        task = GarmentFlatteningTask(cfg.task)
         arena.set_task(task)
     else:
         raise NotImplementedError(f"Task {cfg.task.task_name} not supported")

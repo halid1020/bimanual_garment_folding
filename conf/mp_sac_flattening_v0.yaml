@@ -1,0 +1,8 @@
+defaults:
+  - agent: mp_sac_flattening_v0
+  - arena: single_longsleeve_readjust_pick
+  - task: flattening
+  - data_augmenter: multi_primitive_augmenter
+
+exp_name: mp_sac_flattening_v0
+save_root: /data/hcv530/garment_folding

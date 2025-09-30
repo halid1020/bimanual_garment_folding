@@ -1,0 +1,14 @@
+[2025-09-30 15:21:57,942][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/agent-arena-v0/lib/python3.7/site-packages/gym/spaces/box.py:84: UserWarning: [33mWARN: Box bound precision lowered by casting to float64[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+
+[2025-09-30 15:21:57,943][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/agent-arena-v0/lib/python3.7/site-packages/gym/spaces/box.py:84: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+
+[2025-09-30 15:21:59,537][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/agent-arena-v0/lib/python3.7/site-packages/wandb/analytics/sentry.py:265: DeprecationWarning: The `Scope.user` setter is deprecated in favor of `Scope.set_user()`.
+  self.scope.user = {"email": email}  # noqa
+
+[2025-09-30 15:21:59,965][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/agent-arena-v0/lib/python3.7/site-packages/wandb/analytics/sentry.py:265: DeprecationWarning: The `Scope.user` setter is deprecated in favor of `Scope.set_user()`.
+  self.scope.user = {"email": email}  # noqa
+
+[2025-09-30 15:22:00,116][root][INFO] - 
+[ag_ar.train_and_evaluate] Training Agent "sac-agent"

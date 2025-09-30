@@ -521,7 +521,8 @@ class SingleGarmentFixedInitialEnv(Arena):
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
-        obs['semkey2pid'] = self.task.semkey2pid
+        if 'folding' in self.task.name:
+            obs['semkey2pid'] = self.task.semkey2pid
         obs['action_step'] = self.action_step
 
         return obs

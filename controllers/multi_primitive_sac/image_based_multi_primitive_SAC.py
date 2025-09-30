@@ -143,7 +143,6 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.act_steps = 0
         self.initial_act_steps = cfg.initial_act_steps
         self.act_steps_per_update = cfg.act_steps_per_update
-        self.checkpoint_interval = cfg.checkpoint_interval
         
         self.max_epsilon = self.config.get('max_epsilon', 1.0)
         self.min_epsilon = self.config.get('min_epsilon', 0.05)

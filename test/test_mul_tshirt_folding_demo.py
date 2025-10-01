@@ -24,7 +24,7 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': False,
+        'disp': True,
         'ray_id': 0,
         'horizon': 8,
         'track_semkey_on_frames': False
@@ -41,7 +41,6 @@ def main():
         'debug': True,
         'alignment': 'simple_rigid'
     }
-
     arena_config = DotMap(arena_config)
     task_config = DotMap(task_config)
     
@@ -49,12 +48,21 @@ def main():
     arena = MultiGarmentEnv(arena_config)
     
     arena.set_task(task)
-
-    train_trials_configs = arena.get_train_configs()
     arena.set_train()
-    for cfg in train_trials_configs:
-        #print('cfg', cfg)
-        arena.reset(cfg)
+    arena.reset({'eid': 0})
+    info = arena.set_to_flatten(re_process_info=True)
+    cv2.imwrite('tmp/set2flat_rgb.png', info['observation']['rgb'])
+
+    agent = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False}))
+    agent.reset([arena.id])
+    print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+    print(f"\nstep {arena.action_step} reward {info['reward']}")
+    while not info['done']:
+        action = agent.single_act(info)
+        info = arena.step(action)
+        print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+        print(f"\nstep {arena.action_step} reward {info['reward']}")
+    
 
 if __name__ == '__main__':
     main()

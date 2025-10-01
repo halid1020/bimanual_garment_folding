@@ -1,6 +1,42 @@
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
+def segment_distance(p1, p2, q1, q2):
+    """Compute min distance between two 3D line segments p1→p2 and q1→q2."""
+    u = p2 - p1
+    v = q2 - q1
+    w = p1 - q1
+
+    a = np.dot(u, u)
+    b = np.dot(u, v)
+    c = np.dot(v, v)
+    d = np.dot(u, w)
+    e = np.dot(v, w)
+
+    denom = a * c - b * b
+    sc, tc = 0.0, 0.0
+
+    if denom != 0:
+        sc = (b * e - c * d) / denom
+        sc = np.clip(sc, 0.0, 1.0)
+    tc = (a * e - b * d) / denom if denom != 0 else 0.0
+    tc = np.clip(tc, 0.0, 1.0)
+
+    dP = w + sc * u - tc * v
+    return np.linalg.norm(dP)
+
+def check_trajectories_close(pre_pick_positions, pick_positions, place_positions, threshold=0.1):
+    """Check if the two trajectories come closer than threshold (m)."""
+    traj0 = [pre_pick_positions[0], pick_positions[0], place_positions[0]]
+    traj1 = [pre_pick_positions[1], pick_positions[1], place_positions[1]]
+
+    min_dist = float("inf")
+    for i in range(len(traj0)-1):
+        for j in range(len(traj1)-1):
+            dist = segment_distance(traj0[i], traj0[i+1], traj1[j], traj1[j+1])
+            min_dist = min(min_dist, dist)
+    return min_dist < threshold, min_dist
+
 def readjust_norm_pixel_pick(pick_point, mask):
     H, W = mask.shape
     pixel_action = ((pick_point + 1)/2 * np.array([H, W])).astype(np.int32)

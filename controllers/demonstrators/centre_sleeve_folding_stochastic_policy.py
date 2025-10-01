@@ -82,20 +82,36 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
         lower_left_sleeve = self.get_pixel("lower_left_sleeve", semkey2pid, keypids, key_pixels)
         lower_right_sleeve = self.get_pixel("lower_right_sleeve", semkey2pid, keypids, key_pixels)
 
+        lower_left_sleeve[0] -= 20
+        lower_right_sleeve[0] -= 20
+
         centre = self.get_pixel("centre", semkey2pid, keypids, key_pixels)
+        centre[0] += 60
         centre_hem = self.get_pixel("centre_hem", semkey2pid, keypids, key_pixels)
+        centre_hem[0] += 20
+        # print('centre', centre)
+        # print('centre_hem', centre_hem)
 
         # randomized picks near sleeves
         left_pick = self.random_point_on_line(lower_left_sleeve, higher_left_sleeve, cloth_mask)
         right_pick = self.random_point_on_line(lower_right_sleeve, higher_right_sleeve, cloth_mask)
 
         # randomized places along line (centre -> centre_hem)
-        left_place = self.random_point_on_line(centre, centre_hem, cloth_mask)
-        right_place = self.random_point_on_line(centre, centre_hem, cloth_mask)
+        centre_for_left = centre.copy()
+        centre_for_left[1] += 30
+        centre_hem_for_left = centre_hem.copy()
+        centre_hem_for_left[1] += 30
+        left_place = self.random_point_on_line(centre_for_left, centre_hem_for_left, cloth_mask)
+        
+        centre_for_right = centre.copy()
+        centre_for_right[1] -= 30
+        centre_hem_for_right = centre_hem.copy()
+        centre_hem_for_right[1] -= 30
+        right_place = self.random_point_on_line(centre_for_right, centre_for_right, cloth_mask)
 
-        # enforce left is left of right
-        if left_place[1] > right_place[1]:
-            left_place, right_place = right_place, left_place
+        # # enforce left is left of right
+        # if left_place[1] > right_place[1]:
+        #     left_place, right_place = right_place, left_place
 
         H, W = cloth_mask.shape
         action = {

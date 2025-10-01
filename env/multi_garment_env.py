@@ -57,7 +57,8 @@ class MultiGarmentEnv(GarmentEnv):
            
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
-
+        episode_config['eid'] = episode_config['eid']
+        self.eid = episode_config['eid']
 
         self.sim_step = 0
         self.video_frames = []
@@ -71,7 +72,7 @@ class MultiGarmentEnv(GarmentEnv):
             config=init_state_params, 
             state=init_state_params)
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
-        print('mesh particles', self.num_mesh_particles)
+        #print('mesh particles', self.num_mesh_particles)
         self.init_state_params = init_state_params
 
         
@@ -92,14 +93,20 @@ class MultiGarmentEnv(GarmentEnv):
         
         self.last_flattened_step = -100
         self.task.reset(self)
+        
         self.action_step = 0
 
         self.evaluate_result = None
         
-        
+        set_scene(
+            config=init_state_params, 
+            state=init_state_params)
         if self.init_mode == 'flattened':
+            #print('init_mode')
             self.set_to_flatten()
         
+        self.last_info = None
+        self.sim_step = 0
         self.info = self._process_info({})
         self.clear_frames()
 

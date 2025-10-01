@@ -197,24 +197,33 @@ def deformable_align(current_verts, goal_verts, max_coverage,  flip_x=True, scal
     return icp_verts, reverse_goal_verts
 
 def simple_rigid_align(cur, goal):
-    # 1. Center in XY only (preserve Z)
-    cur_centered = cur.copy()
-    goal_centered = goal.copy()
-    cur_centered[:, :2] -= np.mean(cur[:, :2], axis=0)
-    goal_centered[:, :2] -= np.mean(goal[:, :2], axis=0)
 
-    # 2. Compute optimal rotation in XY plane
-    H = cur_centered[:, :2].T @ goal_centered[:, :2]  # 2x2
-    U, _, Vt = np.linalg.svd(H)
-    R = U @ Vt  # 2x2 rotation matrix
+    assert np.isfinite(cur).all(), "cur contains NaN or Inf"
+    assert np.isfinite(goal).all(), "goal contains NaN or Inf"
+    
+    try:
+        # 1. Center in XY only (preserve Z)
+        cur_centered = cur.copy()
+        goal_centered = goal.copy()
+        cur_centered[:, :2] -= np.mean(cur[:, :2], axis=0)
+        goal_centered[:, :2] -= np.mean(goal[:, :2], axis=0)
 
-    # 3. Apply rotation in XY only
-    aligned_cur = cur_centered.copy()
-    aligned_cur[:, :2] = cur_centered[:, :2] @ R
-    aligned_goal = goal_centered  # leave goal centered
+        # 2. Compute optimal rotation in XY plane
+        H = cur_centered[:, :2].T @ goal_centered[:, :2]  # 2x2
+        U, _, Vt = np.linalg.svd(H)
+        R = U @ Vt  # 2x2 rotation matrix
 
-    return aligned_cur, aligned_goal
+        # 3. Apply rotation in XY only
+        aligned_cur = cur_centered.copy()
+        aligned_cur[:, :2] = cur_centered[:, :2] @ R
+        aligned_goal = goal_centered  # leave goal centered
 
+        return aligned_cur, aligned_goal
+
+    except np.linalg.LinAlgError:
+        # fallback: return original (unaligned) points
+        print('SVD error')
+        return cur, goal
 
 def chamfer_alignment_with_rotation(cur_verts, goal_verts, coarse_steps=36, fine_steps=10, fine_window=np.deg2rad(5)):
     """

@@ -27,7 +27,7 @@ class KeypointGUI:
         self.current_prompt = self.ax.text(
             0.5, 0.97, f"Next: {self.semantics[0]}",
             transform=self.ax.transAxes, ha='center', va='top',
-            fontsize=12, color='red',
+            fontsize=12, color='black',
             bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.3')
         )
 

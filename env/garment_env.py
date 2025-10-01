@@ -128,8 +128,8 @@ class GarmentEnv(Arena):
         if 'save_video' not in episode_config:
             episode_config['save_video'] = False
         
-        episode_config['eid'] = 0
-        self.eid = 0
+        episode_config['eid'] = episode_config['eid']
+        self.eid = episode_config['eid']
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
 
@@ -230,7 +230,8 @@ class GarmentEnv(Arena):
             info['success'] =  self.success()
             if info['success']:
                 info['done'] = True
-
+            
+            #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
                 #print('self.last_info', self.last_info)
                 info['reward'] = self.task.reward(self.last_info, None, info)
@@ -335,12 +336,12 @@ class GarmentEnv(Arena):
         
         info = {}
         if process_info:
-            print('here')
+            #print('here')
             info = {
                 'observation': self._get_obs(),
             }
             info = self._process_info_(info)
-        self.info = info
+        #self.info = info
         return info
     
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
@@ -426,6 +427,7 @@ class GarmentEnv(Arena):
 
         if self.save_video:
             #print('save')
+            #print('save here')
             rgb = self._render('rgb', background=True)
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
@@ -509,6 +511,7 @@ class GarmentEnv(Arena):
     
     def _get_obs(self):
         obs = {}
+        # print('get obs here')
         rgbd = self._render(mode='rgbd')
         obs['rgb'] = rgbd[:, :, :3].astype(np.uint8)
         obs['depth'] = rgbd[:, :, 3:]
@@ -521,6 +524,7 @@ class GarmentEnv(Arena):
         return obs
 
     def _get_cloth_mask(self, camera_name='default_camera', resolution=None):
+        # print('cloth mask here')
         rgb = self._render(camera_name=camera_name, mode='rgb', resolution=resolution)
         
         return rgb.sum(axis=2) > 0
@@ -534,7 +538,7 @@ class GarmentEnv(Arena):
             with h5py.File(hdf5_path, 'r') as tasks:
                 eval_keys = \
                     [key for key in tasks if tasks[key].attrs['task_difficulty'] in difficulties]
-                print('total evalal keys', len(eval_keys))
+                # print('total evalal keys', len(eval_keys))
             keys = []
             for key in tqdm(eval_keys, desc='Filtering keys'):
                 with h5py.File(hdf5_path, 'r') as tasks:
@@ -614,6 +618,7 @@ class GarmentEnv(Arena):
         u, v = pixels[:, 0], pixels[:, 1]
 
         # Rendered depth map (same size as camera)
+        # print('vis here')
         depth_img = self._render('depth').reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds

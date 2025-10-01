@@ -84,6 +84,7 @@ class GarmentFoldingTask(Task):
         self.semkey2pid = self._load_or_create_keypoints(arena)
 
         # Generate goals (10 small variations)
+        self.goals = []
         self.goals = self._load_or_generate_goals(arena, self.num_goals)
 
         self.aligned_pairs = []
@@ -228,14 +229,14 @@ class GarmentFoldingTask(Task):
         if len(self.goals) == 0:
             return {}
         cur_particles = arena.get_mesh_particles_positions()
-        print('len cur', len(cur_particles))
+        #print('len cur', len(cur_particles))
 
         # Evaluate particle alignment against each goal
         particle_distances = []
         key_distances = []
         for goal in self.goals:
             goal_particles = goal['observation']["particle_positions"][:arena.num_mesh_particles]
-            print('goal len', len(goal_particles))
+            #print('goal len', len(goal_particles))
             mdp, kdp = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(mdp)
             key_distances.append(kdp)

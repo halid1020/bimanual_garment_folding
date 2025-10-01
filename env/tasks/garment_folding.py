@@ -57,7 +57,7 @@ def load_point_cloud_ply(path):
 class GarmentFoldingTask(Task):
     def __init__(self, config):
         self.num_goals = config.num_goals
-        self.task_name = config.task_name
+        self.name = config.task_name
         self.asset_dir = config.asset_dir
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
@@ -70,12 +70,13 @@ class GarmentFoldingTask(Task):
         self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
         self.keypoint_dir = os.path.join(self.asset_dir, 'keypoints')
         os.makedirs(self.keypoint_dir, exist_ok=True)
+        self.name
         
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""
         self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), \
-                                     self.task_name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
+                                     self.name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
         
         os.makedirs(self.goal_dir, exist_ok=True)
 

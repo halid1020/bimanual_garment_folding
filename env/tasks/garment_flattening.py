@@ -22,13 +22,6 @@ class GarmentFlatteningTask(Task):
         self.goals = [arena.flattened_obs]
         #self._save_goal(arena)
         return {"goals": self.goals}
-    
-    # def step(self, arena, action):
-    #     info = self._process_info(arena)
-    #     # self.last_coverage = self.cur_coverage
-    #     # self.cur_coverage = arena.get_normalised_coverage()
-    #     info['reward'] = self.reward(arena, action)
-    #     return info
 
     def get_goals(self):
         return self.goals
@@ -36,9 +29,12 @@ class GarmentFlatteningTask(Task):
     def get_goal(self):
         return self.goals[0]
 
-    def reward(self, last_info, action, info):
+    def reward(self, last_info, action, info):#
+        reward = coverage_alignment_reward(last_info, action, info)
+        if info['success']:
+            reward = info['arena'].horizon - info['observation']['action_step']
         return {
-            'coverage_alignment': coverage_alignment_reward(last_info, action, info)
+            'coverage_alignment': reward
         }
     
     def evaluate(self, arena):

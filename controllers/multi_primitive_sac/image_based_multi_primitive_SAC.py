@@ -126,7 +126,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
         self.target_entropy = float(-self.max_action_dim)
 
-        self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.max_action_dim, self.device)
+        self.replay = ReplayBuffer(cfg.replay_capacity, (self.input_channel, H, W), self.action_dim, self.device)
         self.update_steps = 0
         self.loaded = False
         self.logger = WandbLogger(

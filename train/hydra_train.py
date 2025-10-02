@@ -4,13 +4,17 @@ import os
 from dotmap import DotMap
 
 import agent_arena.api as ag_ar
+
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
+from env.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
+
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
-from controllers.multi_primitive_sac.image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
-from controllers.multi_primitive_sac.data_augmenter import PixelBasedPrimitiveDataAugmenter
 
+from controllers.rl.image_based_multi_primitive_sac import ImageBasedMultiPrimitiveSAC
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.rl.data_augmenter import PixelBasedPrimitiveDataAugmenter
+from controllers.rl.vanilla_image_sac import VanillaImageSAC
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
@@ -18,7 +22,12 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
     # arena
-    arena = SingleGarmentFixedInitialEnv(cfg.arena)
+    if cfg.arena.name == 'single-garment-fixed-init-env':
+        arena = SingleGarmentFixedInitialEnv(cfg.arena)
+    elif cfg.arena.name == 'single-garment-vectorised-fold-prim-env':
+        arena = SingleGarmentVectorisedFoldPrimEnv(cfg.arena)
+    else:
+        raise NotImplementedError
 
     # task
     if cfg.task.task_name == 'centre-sleeve-folding':
@@ -34,6 +43,8 @@ def main(cfg: DictConfig):
     # agent
     if cfg.agent.name == 'image-based-multi-primitive-sac':
         agent = ImageBasedMultiPrimitiveSAC(config=cfg.agent)
+    elif cfg.agent.name == 'vanilla-image-sac':
+        agent = VanillaImageSAC(config=cfg.agent)
     else:
         raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
 
@@ -41,6 +52,8 @@ def main(cfg: DictConfig):
     if cfg.data_augmenter.name == 'pixel-based-primitive-data-augmenter':
         augmenter = PixelBasedPrimitiveDataAugmenter(cfg.data_augmenter)
         agent.set_data_augmenter(augmenter)
+    elif cfg.data_augmenter.name == 'identity':
+        pass
     else:
         raise NotImplementedError(f"Data augmenter {cfg.data_augmenter.name} not supported")
 

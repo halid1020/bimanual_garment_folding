@@ -24,7 +24,7 @@ ENV_NUM = 0
 class SingleGarmentFixedInitialEnv(GarmentEnv):
     
     def __init__(self, config):
-        config.name = f'single-garment-fixed-init-env'
+        #config.name = f'single-garment-fixed-init-env'
         super().__init__(config)
         #self.name =f'single-garment-fixed-init-env'
 
@@ -121,7 +121,7 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
         # print len of keys
         self.num_trials = 1
 
-     def _get_init_state_params(self, eid):
+    def _get_init_state_params(self, eid):
             
         hdf5_path = os.path.join(self.init_state_path, f'multi-{self.object}-eval.hdf5')
         key = self.keys[eid]

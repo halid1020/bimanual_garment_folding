@@ -134,6 +134,7 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
             name=self.name,
             config=dict(cfg)
         )
+        self.info = None
         self.obs_key = cfg.obs_key
         self.primitive_param = cfg.primitive_param
         self.last_done = True
@@ -397,14 +398,29 @@ class ImageBasedMultiPrimitiveSAC(TrainableAgent):
 
     def _collect_from_arena(self, arena):
         if self.last_done:
+            
+            if self.info is not None:
+                evaluation = self.info['evaluation']
+                success = self.info['success']
+
+                for k, v in evaluation.items():
+                    self.logger.log({
+                            f"train/eps_lst_step_eval_{k}": v,
+                        }) 
+                
+                self.logger.log({
+                    "train/episode_return": self.episode_return,
+                    "train/episode_length": self.episode_length,
+                    'train/episode_success': success
+                })
+
             self.info = arena.reset()
             self.set_train()
             self.reset([arena.id])
            
-            self.logger.log({
-                "train/episode_return": self.episode_return,
-                "train/episode_length": self.episode_length,
-            })
+            
+
+            
 
             self.episode_return = 0.0
             self.episode_length = 0

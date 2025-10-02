@@ -1,5 +1,5 @@
 object: longsleeve
-name: single-garment-fixed-init-env
+name: single-garment-vectorised-fold-prim-env
 picker_radius: 0.03
 picker_threshold: 0.007
 picker_low: [-5, 0, -5]

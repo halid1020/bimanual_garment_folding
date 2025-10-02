@@ -98,11 +98,4 @@ class HybridActionPrimitive():
         else:
             raise ValueError('Action not recognized')
 
-        
-
-
-        # print('action_step', self.action_step)
-        # print('action_horizon', self.action_horizon)
-        
-        #info['done'] = self.action_step >= self.action_horizon
         return info

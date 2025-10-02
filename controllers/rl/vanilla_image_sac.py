@@ -105,7 +105,7 @@ class NatureCNNEncoder(nn.Module):
         # Normalize image to [0,1]
         x = obs / 255.0
         x = self.conv_net(x)
-        x = x.view(x.size(0), -1)
+        x = x.reshape(x.size(0), -1)
         x = self.fc(x)
         return F.relu(x)
 
@@ -118,7 +118,8 @@ class Critic(nn.Module):
         self.q1_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
         self.q1_2 = nn.Linear(hidden_dim, hidden_dim)
         self.q1_3 = nn.Linear(hidden_dim, 1)
-        self.q2_1 = nn.Linear(feature_dim + action_dim, 1)
+       
+        self.q2_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
         self.q2_2 = nn.Linear(hidden_dim, hidden_dim)
         self.q2_3 = nn.Linear(hidden_dim, 1)
 
@@ -158,6 +159,7 @@ class Actor(nn.Module):
 
 
     def sample(self, obs):
+        #print('obs shape', obs.shape)
         mean, std = self(obs)
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample() # reparameterization trick
@@ -190,7 +192,6 @@ class VanillaImageSAC(TrainableAgent):
 
         C, H, W = cfg.each_image_shape
         self.input_channel = C * self.context_horizon
-        enc_dim = cfg.encoder.out_dim
         obs_shape = (self.input_channel, H, W) 
 
         # actor and critics (two critics for twin-Q)
@@ -227,16 +228,16 @@ class VanillaImageSAC(TrainableAgent):
         self.episode_length = 0
         self.act_steps = 0
         self.initial_act_steps = cfg.initial_act_steps
-        self.act_steps_per_update = cfg.act_steps_per_update
+        #self.act_steps_per_update = cfg.act_steps_per_update
         self.total_update_steps = cfg.total_update_steps
+        self.info = None
 
     # ---------------------- utils ----------------------
     def pre_process(self, rgb: np.ndarray) -> np.ndarray:
         if rgb.dtype != np.float32:
             rgb = rgb.astype(np.float32)
         rgb_resized = cv2.resize(rgb, (self.each_image_shape[2], self.each_image_shape[1]), interpolation=cv2.INTER_AREA)
-        #rgb_norm = rgb_resized / 255.0 - 0.5
-        return rgb_norm.transpose(2, 0, 1)
+        return rgb_resized.transpose(2, 0, 1)
 
     def _select_action(self, info: dict, stochastic: bool = False):
         obs = info['observation'][self.obs_key]
@@ -250,22 +251,22 @@ class VanillaImageSAC(TrainableAgent):
             self.internal_states[aid]['obs_que'].append(obs)
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
         obs_np = np.stack(obs_list, axis=0)
-        obs_t = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device).unsqueeze(0)
+        obs_t = torch.as_tensor(obs_np, dtype=torch.float32, device=self.device)
 
         # encoder expects either (B, C*N, H, W) or (B, C, N, H, W) depending on your ConvEncoder
         # follow the same pattern as the framework: reshape to (B, C, N, H, W) then pass
-        B = obs_t.shape[0]
-        C = self.each_image_shape[0]
-        N = self.context_horizon
-        H, W = self.each_image_shape[1:]
-        z = self.encoder(obs_t.reshape(B, C, N, H, W))
+        # B = obs_t.shape[0]
+        # C = self.each_image_shape[0]
+        # N = self.context_horizon
+        # H, W = self.each_image_shape[1:]
+        # z = self.encoder(obs_t.reshape(B, C, N, H, W))
 
         if stochastic:
-            a, logp, _ = self.actor.sample(z)
+            a, logp = self.actor.sample(obs_t)
             a = a.detach().cpu().numpy().squeeze(0)
             return a, logp.detach().cpu().numpy().squeeze(0)
         else:
-            mean, _ = self.actor(z)
+            mean, _ = self.actor(obs_t)
             action = torch.tanh(mean)
             return action.detach().cpu().numpy().squeeze(0), None
 
@@ -279,10 +280,13 @@ class VanillaImageSAC(TrainableAgent):
         with torch.no_grad():
             return [self._select_action(info, stochastic=True)[0] for info in info_list]
 
+    def single_act(self, info, update=False):
+        return self._select_action(info)[0]
+
     def set_eval(self):
         if getattr(self, 'mode', None) == 'eval':
             return
-        self.encoder.eval()
+       
         self.actor.eval()
         self.critic.eval()
         self.mode = 'eval'
@@ -290,7 +294,7 @@ class VanillaImageSAC(TrainableAgent):
     def set_train(self):
         if getattr(self, 'mode', None) == 'train':
             return
-        self.encoder.train()
+
         self.actor.train()
         self.critic.train()
         self.mode = 'train'
@@ -308,22 +312,22 @@ class VanillaImageSAC(TrainableAgent):
         N = self.context_horizon
         H, W = self.each_image_shape[1:]
 
-        # encode
-        z = self.encoder(context.reshape(B, C, N, H, W))
-        z_next = self.encoder(next_context.reshape(B, C, N, H, W))
-
         alpha = self.log_alpha.exp()
 
         # compute target Q
         with torch.no_grad():
-            a_next, logp_next, _ = self.actor.sample(next_context)
+            a_next, logp_next = self.actor.sample(next_context)
             q1_next, q2_next = self.critic_target(next_context, a_next)
             q_next = torch.min(q1_next, q2_next)
-            target_q = reward + (1 - done) * cfg.gamma * (q_next - alpha * logp_next.unsqueeze(-1))
+            target_q = reward + (1 - done) * cfg.gamma * (q_next - alpha * logp_next)
 
         # current Q estimates
         a_curr = action.view(B, -1).to(self.device)
-        q1_pred, q2_pred = self.critic(context, a_curr, dim=-1)
+        q1_pred, q2_pred = self.critic(context, a_curr)
+
+        # print('q1_pred', q1_pred.shape)
+        # print('q2_pred', q1_pred.shape)
+        # print('target_q', target_q.shape)
 
         critic_loss = 0.5*(F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
 
@@ -333,17 +337,18 @@ class VanillaImageSAC(TrainableAgent):
         self.critic_optim.step()
 
         # actor loss
-        pi, log_pi = self.actor.sample(obs)
-        q1_pi, q2_pi = self.critic(obs, pi)
+        pi, log_pi = self.actor.sample(context)
+        q1_pi, q2_pi = self.critic(context, pi)
         min_q_pi = torch.min(q1_pi, q2_pi)
-        actor_loss = (self.alpha * log_pi - min_q_pi).mean()
+        alpha = self.log_alpha.exp()
+        actor_loss = (alpha * log_pi - min_q_pi).mean()
 
-        self.actor_optimizer.zero_grad()
+        self.actor_optim.zero_grad()
         actor_loss.backward()
-        self.actor_optimizer.step()
+        self.actor_optim.step()
 
         # alpha loss
-        alpha_loss = -(self.log_alpha * (logp + self.target_entropy).detach()).mean()
+        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
         self.alpha_optim.step()
@@ -388,14 +393,14 @@ class VanillaImageSAC(TrainableAgent):
         a, _ = self._select_action(self.info, stochastic=True)
         # clip to action range
         a = np.clip(a, -self.config.action_range, self.config.action_range)
-        dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
-        next_info = arena.step(dict_action)
+        #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
+        next_info = arena.step(a)
 
         next_img_obs = next_info['observation'][self.obs_key]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
         done = next_info.get('done', False)
         self.info = next_info
-        a = netx_info['applied_action']
+        a = next_info['applied_action']
         self.last_done = done
 
         aid = arena.id
@@ -454,7 +459,6 @@ class VanillaImageSAC(TrainableAgent):
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
             'critic_target': self.critic_target.state_dict(),
-            'encoder_optim': self.encoder_optim.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
             'log_alpha': self.log_alpha.detach().cpu(),
@@ -497,7 +501,6 @@ class VanillaImageSAC(TrainableAgent):
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
 
-        self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])

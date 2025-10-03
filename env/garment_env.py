@@ -4,13 +4,14 @@ import numpy as np
 import cv2
 import json
 
-from softgym.action_space.action_space import Picker
+
 from softgym.utils.env_utils import get_coverage
 import pyflex
 from agent_arena import Arena
 from tqdm import tqdm
+from scipy.spatial.distance import cdist
 
-
+from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
@@ -75,6 +76,8 @@ class GarmentEnv(Arena):
         self.action_step = 0
         self.last_info = None
         self.horizon = self.config.horizon
+
+        self.over_strech = False
     
 
     def _setup_camera(self):
@@ -205,7 +208,9 @@ class GarmentEnv(Arena):
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
+            'over_strech': self.over_strech
         })
+        #print('over strech!!!', self.over_strech)
 
         if flatten_obs:
             info['flattened_obs'] = self.get_flattened_obs()
@@ -249,9 +254,13 @@ class GarmentEnv(Arena):
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
+        #print('action step', self.action_step)
+        self.over_strech = False
         info = self.action_tool.step(self, action)
+        
         self.action_step += 1
         self.info = self._process_info(info)
+        #print('reward', info['reward'])
         return self.info
     
 
@@ -263,10 +272,23 @@ class GarmentEnv(Arena):
     
     def get_frames(self):
         return self.video_frames.copy()
+    
+    def _get_particle_distance_matrix(self):
+        mesh_particles = self.get_mesh_particles_positions()
+        # Only use xyz coordinates (ignore mass or extra channels if present)
+        positions = mesh_particles[:, :3]
+
+        # Compute pairwise Euclidean distances
+        self.particle_dist_matrix = cdist(positions, positions)
+
+        return self.particle_dist_matrix
 
     def set_to_flatten(self, re_process_info=False):
         pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
         self.wait_until_stable()
+
+        self._get_particle_distance_matrix()
+
         self.info = self._process_info({}, task_related=False, flatten_obs=False)
         if re_process_info:
             self.info = self._process_info({}, task_related=True, flatten_obs=False)
@@ -332,7 +354,7 @@ class GarmentEnv(Arena):
     def control_picker(self, signal, process_info=True):
         
         signal = signal[:, [0, 2, 1, 3]]
-        self.pickers.step(signal)
+        self.pickers.step(signal, self)
         self._step_sim()
         
         info = {}

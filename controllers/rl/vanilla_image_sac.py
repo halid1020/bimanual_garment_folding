@@ -421,13 +421,14 @@ class VanillaImageSAC(TrainableAgent):
             raise ValueError("SAC.train requires at least one Arena.")
         arena = arenas[0]
         self.set_train()
-
+        #print('here update!!')
         with tqdm(total=update_steps, desc="SAC Training", initial=0) as pbar:
             while self.replay.size < self.initial_act_steps:
                 self._collect_from_arena(arena)
                 pbar.set_postfix(env_step=self.act_steps, updates=self.update_steps)
 
             for _ in range(update_steps):
+                #print('here update')
                 batch = self.replay.sample(self.config.batch_size)
                 # optional data augmentation hook
                 if hasattr(self, 'data_augmenter') and callable(self.data_augmenter):

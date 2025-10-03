@@ -33,8 +33,18 @@ class GarmentFlatteningTask(Task):
         reward = coverage_alignment_reward(last_info, action, info)
         if info['success']:
             reward = info['arena'].horizon - info['observation']['action_step']
+        
+        reward_ = reward
+        
+        if info['evaluation']['normalised_coverage'] > 0.7:
+            reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
+
+        if info['over_strech']:
+            reward_ = 0
+
         return {
-            'coverage_alignment': reward
+            'coverage_alignment': reward,
+            'coverage_alignment_with_strech_penality_high_coverage_bonus': reward_
         }
     
     def evaluate(self, arena):

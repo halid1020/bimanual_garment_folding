@@ -7,6 +7,7 @@ import agent_arena.api as ag_ar
 
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
+from env.multi_garment_env import MultiGarmentEnv
 
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
@@ -29,6 +30,8 @@ def main(cfg: DictConfig):
         arena = SingleGarmentFixedInitialEnv(cfg.arena)
     elif cfg.arena.name == 'single-garment-vectorised-fold-prim-env':
         arena = SingleGarmentVectorisedFoldPrimEnv(cfg.arena)
+    elif cfg.arena.name == 'multi-garment-longsleeve-env':
+        arena = MultiGarmentEnv(cfg.arena)
     else:
         raise NotImplementedError
 

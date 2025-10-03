@@ -324,6 +324,7 @@ class GarmentEnv(Arena):
     # these funcitons is required by the action_tool
     def get_picker_position(self):
         p = self._get_picker_position()
+        #print('p', p)
         # swap y and z
         p[:, [1, 2]] = p[:, [2, 1]]
         return p

@@ -161,6 +161,7 @@ class WorldPickAndPlace():
         if conflict:
             # Run sequentially: each picker moves while the other stays frozen
             pickers_position = env.get_picker_position()  # shape (2,3)
+            #print('pickers_position', pickers_position)
 
             for i in range(2):
                 # Copy trajectory arrays so we can freeze the other picker

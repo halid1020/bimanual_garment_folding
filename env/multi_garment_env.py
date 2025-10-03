@@ -24,7 +24,7 @@ ENV_NUM = 0
 class MultiGarmentEnv(GarmentEnv):
     
     def __init__(self, config):
-        config.name = f'multi-garment-{config.object}-env'
+        #config.name = f'multi-garment-{config.object}-env'
         self.num_eval_trials = 30
         self.num_train_trials = 100
         self.num_val_trials = 10
@@ -93,7 +93,6 @@ class MultiGarmentEnv(GarmentEnv):
         
         self.last_flattened_step = -100
         self.task.reset(self)
-        
         self.action_step = 0
 
         self.evaluate_result = None
@@ -101,6 +100,10 @@ class MultiGarmentEnv(GarmentEnv):
         set_scene(
             config=init_state_params, 
             state=init_state_params)
+        self.pickers.reset(self.picker_initial_pos)
+        self.action_tool.reset(self) # get out of camera view, and open the gripper
+        self._step_sim()
+        
         if self.init_mode == 'flattened':
             #print('init_mode')
             self.set_to_flatten()

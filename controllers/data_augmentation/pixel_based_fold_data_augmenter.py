@@ -15,7 +15,7 @@ def gaussian_2d(shape, sigma=1):
     h[h < torch.finfo(h.dtype).eps * h.max()] = 0
     return h
 
-class PixelBasedPrimitiveDataAugmenter:
+class PixelBasedFoldDataAugmenter:
     def __init__(self,  config=None):
         self.config = config
         self.process_rgb = self.config.get('rgb_eval_process', False)
@@ -121,10 +121,9 @@ class PixelBasedPrimitiveDataAugmenter:
                     sample[obs] = sample[obs].permute(0, 1, 4, 2, 3)
                 #print('obs', obs, sample[obs].shape)
                 B, T, C, H, W = sample[obs].shape
-
                 sample[obs] = F.interpolate(
                     sample[obs].view(B*T, C, H, W),
-                    size=self.config.img_dim, mode='bilinear', align_corners=False)\
+                    size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)\
                         .view(B, T, C, *self.config.img_dim)
 
                 if obs == 'mask':
@@ -148,7 +147,7 @@ class PixelBasedPrimitiveDataAugmenter:
                 sample['depth'].reshape(B*T, 1, *self.config.img_dim), 
                 sample.get('mask', None), train).reshape(B, T, 1, *self.config.img_dim)
         
-        if self.config.reward_scale and train:
+        if 'reward_scale' in self.config.keys() and train:
             sample['reward'] *= self.config.reward_scale
         
         # we assume the action is in the correct form
@@ -452,7 +451,7 @@ class PixelBasedPrimitiveDataAugmenter:
         if self.config.depth_clip:
             depth = depth.clip(self.config.depth_clip_min, self.config.depth_clip_max)
         
-        if self.config.z_norm:
+        if self.config.get('z_norm', False):
             depth = (depth - self.config.z_norm_mean) / self.config.z_norm_std
 
         elif self.config.min_max_norm:

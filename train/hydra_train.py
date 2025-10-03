@@ -13,7 +13,10 @@ from env.tasks.garment_flattening import GarmentFlatteningTask
 
 from controllers.rl.image_based_multi_primitive_sac import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+
 from controllers.rl.data_augmenter import PixelBasedPrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
+
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
@@ -45,6 +48,11 @@ def main(cfg: DictConfig):
         agent = ImageBasedMultiPrimitiveSAC(config=cfg.agent)
     elif cfg.agent.name == 'vanilla-image-sac':
         agent = VanillaImageSAC(config=cfg.agent)
+    elif cfg.agent.name == 'diffusion_policy':
+        agent =  ag_ar.build_agent('diffusion_policy', cfg.agent)
+        ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
+        # TODO: I have to do this because diffusion needs to initialise a demonstrator.
+        # I need to automate the registration process.
     else:
         raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
 
@@ -52,6 +60,9 @@ def main(cfg: DictConfig):
     if cfg.data_augmenter.name == 'pixel-based-primitive-data-augmenter':
         augmenter = PixelBasedPrimitiveDataAugmenter(cfg.data_augmenter)
         agent.set_data_augmenter(augmenter)
+    elif cfg.data_augmenter.name == 'pixel-based-fold-data-augmenter':
+        data_augmenter = PixelBasedFoldDataAugmenter(cfg.data_augmenter)
+        agent.set_data_augmenter(data_augmenter)
     elif cfg.data_augmenter.name == 'identity':
         pass
     else:

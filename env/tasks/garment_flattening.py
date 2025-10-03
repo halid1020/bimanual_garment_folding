@@ -66,4 +66,4 @@ class GarmentFlatteningTask(Task):
         cur_eval = self.evaluate(arena)
         IoU = cur_eval['max_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
-        return IoU > 0.85 and  coverage > 0.99
+        return IoU > 0.85 and coverage > 0.99

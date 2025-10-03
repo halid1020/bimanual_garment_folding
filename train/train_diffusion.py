@@ -11,7 +11,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
-from controllers.data_augmentation.pixel_based_primitives_data_augmenter import PixelBasedPrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
 
 def main():
 
@@ -62,11 +62,11 @@ def main():
     agent =  ag_ar.build_agent('diffusion_policy', exp_config)
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
 
-    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'test_diffusion_folding_from_flattened')
+    save_dir = os.path.join('/data/hcv530', 'garment_folding', 'test_diffusion_folding_from_flattened_v1')
     arena.set_log_dir(save_dir)
     agent.set_log_dir(save_dir)
 
-    data_augmenter = PixelBasedPrimitiveDataAugmenter(exp_config.data_augmenter.params)
+    data_augmenter = PixelBasedFoldDataAugmenter(exp_config.data_augmenter.params)
     agent.set_data_augmenter(data_augmenter)
    
     res = ag_ar.train_and_evaluate(agent, arena,

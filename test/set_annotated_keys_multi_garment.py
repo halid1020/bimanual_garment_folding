@@ -50,9 +50,18 @@ def main():
     
     arena.set_task(task)
 
-    train_trials_configs = arena.get_train_configs()
-    arena.set_train()
-    for cfg in train_trials_configs:
+    mode = 'eval'
+    if mode == 'train':
+        trials_configs = arena.get_train_configs()
+        arena.set_train()
+    elif mode == 'val':
+        trials_configs = arena.get_val_configs()
+        arena.set_val()
+    elif mode == 'eval':
+        trials_configs = arena.get_eval_configs()
+        arena.set_eval()
+
+    for cfg in trials_configs:
         #print('cfg', cfg)
         arena.reset(cfg)
 

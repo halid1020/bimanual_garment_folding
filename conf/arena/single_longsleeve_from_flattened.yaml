@@ -11,4 +11,5 @@ disp: false
 ray_id: 0
 horizon: 20
 track_semkey_on_frames: false
-readjust_pick: true
+readjust_pick: false
+init_mode: flattened

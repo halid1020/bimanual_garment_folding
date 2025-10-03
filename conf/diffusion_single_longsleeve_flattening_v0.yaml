@@ -1,0 +1,8 @@
+defaults:
+  - agent: diffusion_single_longsleeve_flattening_v0
+  - arena: single_longsleeve_from_flattened
+  - task: centre_sleeve_folding
+  - data_augmenter: pixel-based-fold-data-augmenter
+
+exp_name: diffusion_single_garment_flattening_v0
+save_root: /data/hcv530/garment_folding

@@ -20,6 +20,9 @@ class GarmentFlatteningTask(Task):
         #self.cur_coverage = self._get_normalised_coverage(arena)
         #info = self._process_info(arena)
         self.goals = [arena.flattened_obs]
+        self.ncs = []
+        self.nis = []
+        self.ious = []
         #self._save_goal(arena)
         return {"goals": self.goals}
 
@@ -48,11 +51,28 @@ class GarmentFlatteningTask(Task):
         }
     
     def evaluate(self, arena):
-        return {
+        eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'normalised_improvement': self._get_normalised_impovement(arena),
         }
+
+        if arena.action_step == len(self.ncs):
+            self.ncs.append(eval_dict['normalised_coverage'])
+            self.nis.append(eval_dict['normalised_improvement'])
+            self.ious.append(eval_dict['max_IoU_to_flattened'])
+
+        if arena.action_step < len(self.ncs):
+            self.ncs[arena.action_step] = eval_dict['normalised_coverage']
+            self.nis[arena.action_step] = eval_dict['normalised_improvement']
+            self.ious[arena.action_step] = eval_dict['max_IoU_to_flattened']
+        
+        eval_dict.update({
+            'maximum_trj_max_IoU_to_flattened': max(self.ious),
+            'maximum_trj_normalised_coverage': max(self.ncs),
+            'maximum_trj_normalised_improvement': max(self.nis),
+        })
+        return eval_dict
 
     def _get_normalised_coverage(self, arena):
         res = arena._get_coverage() / arena.flatten_coverage

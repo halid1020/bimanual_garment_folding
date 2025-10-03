@@ -276,12 +276,12 @@ class GarmentEnv(Arena):
     def _get_particle_distance_matrix(self):
         mesh_particles = self.get_mesh_particles_positions()
         # Only use xyz coordinates (ignore mass or extra channels if present)
-        positions = mesh_particles[:, :3]
+        #positions = mesh_particles[:, :3]
 
         # Compute pairwise Euclidean distances
-        self.particle_dist_matrix = cdist(positions, positions)
+        self.particle_dist_matrix = cdist(mesh_particles, mesh_particles)
 
-        return self.particle_dist_matrix
+        #return self.particle_dist_matrix
 
     def set_to_flatten(self, re_process_info=False):
         pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())

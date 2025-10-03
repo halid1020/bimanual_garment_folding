@@ -363,7 +363,7 @@ class VanillaImageSAC(TrainableAgent):
             'actor_loss': actor_loss.item(),
             'alpha': self.log_alpha.exp().item(),
             'alpha_loss': alpha_loss.item()
-        }, step=self.update_steps)
+        }, step=self.act_steps)
 
     # ---------------------- environment interaction ----------------------
     def _collect_from_arena(self, arena):
@@ -374,14 +374,14 @@ class VanillaImageSAC(TrainableAgent):
 
                 for k, v in evaluation.items():
                     self.logger.log({
-                            f"train/eps_lst_step_eval_{k}": v,
-                        }) 
+                        f"train/eps_lst_step_eval_{k}": v,
+                    }, step=self.act_steps) 
                 
                 self.logger.log({
                     "train/episode_return": self.episode_return,
                     "train/episode_length": self.episode_length,
                     'train/episode_success': success
-                })
+                }, step=self.act_steps)
 
             self.info = arena.reset()
             self.set_train()
@@ -398,6 +398,9 @@ class VanillaImageSAC(TrainableAgent):
 
         next_img_obs = next_info['observation'][self.obs_key]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
+        self.logger.log(
+            {'train/step_reward': reward}, step=self.act_steps
+        )
         done = next_info.get('done', False)
         self.info = next_info
         a = next_info['applied_action']

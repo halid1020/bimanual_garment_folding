@@ -370,8 +370,8 @@ class GarmentFoldingTask(Task):
         mpd = info['evaluation']['mean_particle_distance']
         mkd = info['evaluation']["semantic_keypoint_distance"]
         
-        multi_stage_reward = coverage_alignment_reward(last_info, action, info) - 1 
-        if info['observation']['action_step'] - info['observation']['last_flattened_step'] <= 3:
+        multi_stage_reward = coverage_alignment_reward(last_info, action, info) - 1 # -1 to 0
+        if info['observation']['action_step'] - info['observation']['last_flattened_step'] <= 3: # 0 to 1
             multi_stage_reward = particle_distance_reward(mpd) # 0 to 1
         
         if info['success']:

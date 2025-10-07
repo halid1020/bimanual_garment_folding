@@ -5,20 +5,24 @@ import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
 
-from agent_arena import Task
+
 from agent_arena import save_video
 from .utils import get_max_IoU
 from .folding_rewards import *
+from .garment_task import GarmentTask
 
-class GarmentFlatteningTask(Task):
+class GarmentFlatteningTask(GarmentTask):
     def __init__(self, config):
+        super().__init__(config)
         self.goals = []
         self.config = config
         self.name = 'garment-flattening'
+        self.semkey2pid = None 
     
     def reset(self, arena):
         #self.cur_coverage = self._get_normalised_coverage(arena)
         #info = self._process_info(arena)
+        self.semkey2pid = self._load_or_create_keypoints(arena)
         self.goals = [arena.flattened_obs]
         self.ncs = []
         self.nis = []
@@ -97,3 +101,6 @@ class GarmentFlatteningTask(Task):
         IoU = cur_eval['max_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
         return IoU > 0.85 and coverage > 0.99
+
+
+    

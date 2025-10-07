@@ -20,8 +20,11 @@ from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelB
 
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 
+from train.utils import register_agent_arena
+
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
+    register_agent_arena()
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
@@ -47,17 +50,19 @@ def main(cfg: DictConfig):
         raise NotImplementedError(f"Task {cfg.task.task_name} not supported")
 
     # agent
-    if cfg.agent.name == 'image-based-multi-primitive-sac':
-        agent = ImageBasedMultiPrimitiveSAC(config=cfg.agent)
-    elif cfg.agent.name == 'vanilla-image-sac':
-        agent = VanillaImageSAC(config=cfg.agent)
-    elif cfg.agent.name == 'diffusion_policy':
-        agent =  ag_ar.build_agent('diffusion_policy', cfg.agent)
-        ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
-        # TODO: I have to do this because diffusion needs to initialise a demonstrator.
-        # I need to automate the registration process.
-    else:
-        raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
+    agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
+    print('agent', cfg.agent.name, agent)
+    # if cfg.agent.name == 'image-based-multi-primitive-sac':
+    #     agent = ImageBasedMultiPrimitiveSAC(config=cfg.agent)
+    # elif cfg.agent.name == 'vanilla-image-sac':
+    #     agent = VanillaImageSAC(config=cfg.agent)
+    # elif cfg.agent.name == 'diffusion_policy':
+    #     agent =  ag_ar.build_agent('diffusion_policy', cfg.agent)
+    #     #ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
+    #     # TODO: I have to do this because diffusion needs to initialise a demonstrator.
+    #     # I need to automate the registration process.
+    # else:
+    #     raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
 
     # data_augmenter
     if cfg.data_augmenter.name == 'pixel-based-primitive-data-augmenter':

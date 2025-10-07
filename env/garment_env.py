@@ -370,12 +370,12 @@ class GarmentEnv(Arena):
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
         wait_steps = self._wait_to_stabalise(max_wait_step=max_wait_step, stable_vel_threshold=stable_vel_threshold)
         # print('wait steps', wait_steps)
-        obs = self._get_obs()
-        return {
-            'observation': obs,
-            'done': False,
-            'wait_steps': wait_steps
-        }
+        # obs = self._get_obs()
+        # return {
+        #     'observation': obs,
+        #     'done': False,
+        #     'wait_steps': wait_steps
+        # }
     
     ## Helper Functions
     def _wait_to_stabalise(self, max_wait_step=300, stable_vel_threshold=0.0006,
@@ -541,8 +541,16 @@ class GarmentEnv(Arena):
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
-        if 'folding' in self.task.name:
-            obs['semkey2pid'] = self.task.semkey2pid
+        obs['semkey2pid'] = self.task.semkey2pid
+        
+        if self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
+            semkey_positions = []
+            for key in obs['semkey2pid'].keys():
+                pid = obs['semkey2pid'][key]
+                pos = obs['particle_positions'][pid]
+                semkey_positions.append(pos)
+            obs['semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
+
         obs['action_step'] = self.action_step
 
         return obs

@@ -72,11 +72,11 @@ class WorldPickAndPlace():
     def get_action_horizon(self):
         return self.action_horizon
     
-    def _process_info(self, info):
-        info['no_op'] = self.ready_pos
-        info['action_space'] = self.action_space
-        #info['arena'] = self
-        return info
+    # def _process_info(self, info):
+    #     info['no_op'] = self.ready_pos
+    #     info['action_space'] = self.action_space
+    #     #info['arena'] = self
+    #     return info
 
     def reset(self, env):
         self.action_step = 0
@@ -201,7 +201,7 @@ class WorldPickAndPlace():
         # Return to ready pose
         self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
 
-        info = env.wait_until_stable()
+        env.wait_until_stable()
         self.action_step += 1
-        info['done'] = self.action_step >= self.action_horizon
-        return self._process_info(info)
+        #info['done'] = self.action_step >= self.action_horizon
+        return {} #self._process_info({})

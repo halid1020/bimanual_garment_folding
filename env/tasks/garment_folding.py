@@ -8,12 +8,10 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
-from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
-    simple_rigid_align, chamfer_alignment_with_rotation
-from ..utils.keypoint_gui import KeypointGUI
+
 from .utils import get_max_IoU
 from .folding_rewards import *
-
+from .garment_task import GarmentTask
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
     header = f"""ply
@@ -54,23 +52,17 @@ def load_point_cloud_ply(path):
     return np.array(points)
 
 
-class GarmentFoldingTask(Task):
+class GarmentFoldingTask(GarmentTask):
     def __init__(self, config):
+        super().__init__(config)
         self.num_goals = config.num_goals
         self.name = config.task_name
-        self.asset_dir = config.asset_dir
+
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
-        
-        self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
-
-        self.semkey2pid = None # This needs to be loaded or annotated
         self.goals = [] # This needs to be loaded  or generated
 
-        self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
-        self.keypoint_dir = os.path.join(self.asset_dir, 'keypoints')
-        os.makedirs(self.keypoint_dir, exist_ok=True)
-        self.name
+        
         
 
     def reset(self, arena):

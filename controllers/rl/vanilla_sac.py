@@ -358,6 +358,7 @@ class VanillaSAC(TrainableAgent):
                 batch = self.replay.sample(self.config.batch_size)
                 # optional data augmentation hook
                 if hasattr(self, 'data_augmenter') and callable(self.data_augmenter):
+                    #print('aguemtn!')
                     self.data_augmenter(batch)
                 self._update_networks(batch)
                 self.update_steps += 1

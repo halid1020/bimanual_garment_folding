@@ -15,7 +15,8 @@ from env.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.rl.image_based_multi_primitive_sac import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 
-from controllers.rl.data_augmenter import PixelBasedPrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
 from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
 
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
@@ -66,11 +67,14 @@ def main(cfg: DictConfig):
     #     raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
 
     # data_augmenter
-    if cfg.data_augmenter.name == 'pixel-based-primitive-data-augmenter':
+    if cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter':
         augmenter = PixelBasedPrimitiveDataAugmenter(cfg.data_augmenter)
         agent.set_data_augmenter(augmenter)
     elif cfg.data_augmenter.name == 'pixel-based-fold-data-augmenter':
         data_augmenter = PixelBasedFoldDataAugmenter(cfg.data_augmenter)
+        agent.set_data_augmenter(data_augmenter)
+    elif cfg.data_augmenter.name == 'pixel-based-single-primitive-augmenter':
+        data_augmenter = PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
         agent.set_data_augmenter(data_augmenter)
     elif cfg.data_augmenter.name == 'identity':
         pass

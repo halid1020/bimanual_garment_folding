@@ -9,9 +9,6 @@ from env.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.rl.image_based_multi_primitive_sac import ImageBasedMultiPrimitiveSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 
-from controllers.rl.data_augmenter import PixelBasedPrimitiveDataAugmenter
-from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
-
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 from controllers.rl.vanilla_sac import VanillaSAC
 

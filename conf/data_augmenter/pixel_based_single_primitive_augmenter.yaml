@@ -1,4 +1,4 @@
-name: pixel-based-primitive-data-augmenter
+name: pixel-based-single-primitive-augmenter
 device: cuda:0
 rgb_noise_factor: 0.01
 random_rotation: true

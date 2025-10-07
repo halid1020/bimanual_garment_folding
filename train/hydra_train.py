@@ -20,7 +20,7 @@ from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelB
 
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 
-from train.utils import register_agent_arena
+from train.utils import register_agent_arena, registered_arena
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
@@ -29,14 +29,15 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
     # arena
-    if cfg.arena.name == 'single-garment-fixed-init-env':
-        arena = SingleGarmentFixedInitialEnv(cfg.arena)
-    elif cfg.arena.name == 'single-garment-vectorised-fold-prim-env':
-        arena = SingleGarmentVectorisedFoldPrimEnv(cfg.arena)
-    elif cfg.arena.name == 'multi-garment-longsleeve-env':
-        arena = MultiGarmentEnv(cfg.arena)
-    else:
-        raise NotImplementedError
+    arena = registered_arena[cfg.arena.name](cfg.arena)
+    # if cfg.arena.name == 'single-garment-fixed-init-env':
+    #     arena = SingleGarmentFixedInitialEnv(cfg.arena)
+    # elif cfg.arena.name == 'single-garment-vectorised-fold-prim-env':
+    #     arena = SingleGarmentVectorisedFoldPrimEnv(cfg.arena)
+    # elif cfg.arena.name == 'multi-garment-longsleeve-env':
+    #     arena = MultiGarmentEnv(cfg.arena)
+    # else:
+    #     raise NotImplementedError
 
     # task
     if cfg.task.task_name == 'centre-sleeve-folding':

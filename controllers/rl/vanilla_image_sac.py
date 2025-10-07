@@ -126,9 +126,10 @@ class VanillaImageSAC(VanillaSAC):
         - critic(concat(z, action)) -> q
     """
 
-    def __init__(self, config: Optional[DotMap] = None):
-        cfg = default_config() if config is None else config
-        super().__init__(cfg)
+    def __init__(self, config):
+        super().__init__(config)
+        #self.each_image_shape = cfg.each_image_shape
+        
 
     def _make_actor_critic(self, cfg):
         C, H, W = cfg.each_image_shape
@@ -155,11 +156,16 @@ class VanillaImageSAC(VanillaSAC):
         self.replay = ReplayBuffer(cfg.replay_capacity, obs_shape, self.action_dim, self.device)
 
 
-    def pre_process(self, rgb: np.ndarray) -> np.ndarray:
+    def _process_obs_for_input(self, rgb: np.ndarray) -> np.ndarray:
         if rgb.dtype != np.float32:
             rgb = rgb.astype(np.float32)
-        rgb_resized = cv2.resize(rgb, (self.each_image_shape[2], self.each_image_shape[1]), interpolation=cv2.INTER_AREA)
+        rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
         return rgb_resized.transpose(2, 0, 1)
+
+    def _process_context_for_replay(self, context):
+        return np.stack(context).reshape(
+            self.config.context_horizon * self.config.each_image_shape[0], 
+            *self.config.each_image_shape[1:])
 
 
     # # ---------------------- environment interaction ----------------------

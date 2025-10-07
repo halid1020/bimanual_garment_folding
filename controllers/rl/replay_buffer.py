@@ -8,6 +8,7 @@ class ReplayBuffer:
 
         self.ptr = 0
         self.size = 0
+        #print('obs shape', obs_shape)
 
         # Support any observation shape (e.g., images, vectors, etc.)
         self.observation = np.zeros((self.capacity, *obs_shape), dtype=np.float32)

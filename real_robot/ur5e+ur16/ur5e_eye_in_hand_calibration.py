@@ -95,6 +95,9 @@ def capture_samples(args):
         rtde_c = RTDEControlInterface(args.robot_ip)
         time.sleep(0.5)
         print('Connected successfully.')
+    else:
+        print(f'Failed to connect to UR robot at {args.robot_ip}...')
+        sys.exit(1)
 
     # ---------------- Predefined joint positions (in DEGREES) ----------------
     # You can edit these for your own calibration poses (degrees are easier to read)

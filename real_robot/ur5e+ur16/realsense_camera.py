@@ -6,12 +6,39 @@ import pyrealsense2 as rs
 from utils import save_depth, save_color
 
 class RealsenseCamera():
+    # def __init__(self, debug=False):
+    #     self.pipeline = rs.pipeline()
+    #     config = rs.config()
+    #     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+    #     config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    #     self.pipeline.start(config)
+    #     align_to = rs.stream.color
+    #     self.align = rs.align(align_to)
+
+    #     ### Depth Camera Macros ###
+    #     self.colorizer = rs.colorizer()
+    #     self.hole_filling = rs.hole_filling_filter()
+    #     self.temporal = rs.temporal_filter()
+    #     self.temporal.set_option(rs.option.filter_smooth_alpha, 0.2)
+    #     self.temporal.set_option(rs.option.filter_smooth_delta, 24)
+    #     self.debug = debug
+    #     #self.camera_height = camera_height
+
+    #     self.take_rgbd()
+
     def __init__(self, debug=False):
         self.pipeline = rs.pipeline()
         config = rs.config()
-        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+
+        # Explicitly select your device (optional but safer if multiple are connected)
+        # config.enable_device('239722074129')
+
+        # Use supported resolutions and frame rates
+        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 6)
+        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 15)
+
         self.pipeline.start(config)
+
         align_to = rs.stream.color
         self.align = rs.align(align_to)
 
@@ -22,9 +49,9 @@ class RealsenseCamera():
         self.temporal.set_option(rs.option.filter_smooth_alpha, 0.2)
         self.temporal.set_option(rs.option.filter_smooth_delta, 24)
         self.debug = debug
-        #self.camera_height = camera_height
 
         self.take_rgbd()
+
 
     def _post_process_depth(self, depth_frame):
         H, W = np.asanyarray(depth_frame.get_data()).shape[:2]

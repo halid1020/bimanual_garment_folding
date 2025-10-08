@@ -62,7 +62,7 @@ def ur_pose_to_lists(pose):
 def start_realsense():
     pipeline = rs.pipeline()
     config = rs.config()
-    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 15)
     profile = pipeline.start(config)
     align = rs.align(rs.stream.color)
     return pipeline, align
@@ -142,8 +142,32 @@ def capture_samples(args):
         print("TCP pose (m, rad):", ur_pose)
 
         # Capture color frame
-        color = get_color_frame(pipeline, align)
+        
+        # wait for frames and align
+        frames = pipeline.wait_for_frames(timeout_ms=5000)
+        aligned = align.process(frames)
+
+        # get color frame object and image
+        color_frame = aligned.get_color_frame()
+        if not color_frame:
+            print("No color frame, skipping this pose.")
+            continue
+        color = np.asanyarray(color_frame.get_data())
         gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+
+        # --- use real intrinsics from the camera (preferred) ---
+        intr = color_frame.profile.as_video_stream_profile().intrinsics
+        fx, fy, cx, cy = intr.fx, intr.fy, intr.ppx, intr.ppy
+        camera_matrix = np.array([[fx, 0, cx],
+                                [0, fy, cy],
+                                [0,  0,  1]], dtype=float)
+
+        # distortion: if you don't have a calibration file, use zeros (suboptimal but OK)
+        dist_coeffs = np.zeros((5, 1), dtype=float)
+
+        print(f"Using camera intrinsics from RealSense: fx={fx:.2f}, fy={fy:.2f}, cx={cx:.2f}, cy={cy:.2f}")
+
+
         found, corners = cv2.findChessboardCorners(gray, tuple(args.board_size), None)
         if not found:
             print('⚠️  Chessboard not found in the frame. Skipping this pose.')
@@ -160,20 +184,23 @@ def capture_samples(args):
         objp[:, :2] = np.mgrid[0:args.board_size[0], 0:args.board_size[1]].T.reshape(-1, 2)
         objp *= args.square_size
 
-        if args.camera_intrinsics:
-            with open(args.camera_intrinsics, 'r') as f:
-                cam = yaml.safe_load(f)
-            camera_matrix = np.array(cam['camera_matrix'])
-            dist_coeffs = np.array(cam.get('dist_coeff', [0,0,0,0,0]))
-        else:
-            h, w = gray.shape
-            fx = fy = args.focal_est * max(w, h)
-            cx, cy = w / 2.0, h / 2.0
-            camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
-            dist_coeffs = np.zeros((5,1))
-            print('No intrinsics provided. Using estimated focal length (not recommended).')
+        # if args.camera_intrinsics:
+        #     with open(args.camera_intrinsics, 'r') as f:
+        #         cam = yaml.safe_load(f)
+        #     camera_matrix = np.array(cam['camera_matrix'])
+        #     dist_coeffs = np.array(cam.get('dist_coeff', [0,0,0,0,0]))
+        # else:
+        #     h, w = gray.shape
+        #     fx = fy = args.focal_est * max(w, h)
+        #     cx, cy = w / 2.0, h / 2.0
+        #     camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+        #     dist_coeffs = np.zeros((5,1))
+        #     print('No intrinsics provided. Using estimated focal length (not recommended).')
 
         ret, rvec, tvec = cv2.solvePnP(objp, corners2, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+        if ret:
+            dist = np.linalg.norm(tvec)
+            print(f"Board distance: {dist:.3f} m")
         
         if not ret:
             print('solvePnP failed. Try another view.')
@@ -248,7 +275,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Eye-in-Hand calibration using RealSense + UR (RTDE)')
     parser.add_argument('--robot-ip', type=str, default=None, help='UR robot IP for RTDE read (optional)')
     #parser.add_argument('--samples', type=int, default=12, help='Number of samples to collect')
-    parser.add_argument('--board-size', type=int, nargs=2, default=[7,9], help='Chessboard inner corners (cols rows)')
+    parser.add_argument('--board-size', type=int, nargs=2, default=[9,7], help='Chessboard inner corners (cols rows)')
     parser.add_argument('--square-size', type=float, default=0.02, help='Chessboard square size in meters')
     parser.add_argument('--camera-intrinsics', type=str, default=None, help='YAML file with camera intrinsics')
     parser.add_argument('--focal-est', type=float, default=0.006, help='Estimated focal length fraction of max(image_dim)')

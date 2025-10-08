@@ -12,6 +12,8 @@ from agent_arena import save_video
 from .utils import get_max_IoU
 from .folding_rewards import *
 from .garment_task import GarmentTask
+from ..utils.garment_utils import simple_rigid_align
+
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
     header = f"""ply
@@ -141,79 +143,79 @@ class GarmentFoldingTask(GarmentTask):
         return goals
 
 
-    def _load_or_create_keypoints(self, arena):
-        """Load semantic keypoints if they exist, otherwise ask user to assign them."""
+    # def _load_or_create_keypoints(self, arena):
+    #     """Load semantic keypoints if they exist, otherwise ask user to assign them."""
 
-        mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
-        keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
+    #     mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
+    #     keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
 
-        if os.path.exists(keypoint_file):
-            with open(keypoint_file, "r") as f:
-                keypoints = json.load(f)
-            if self.config.debug:
-                print("annotated keypoint ids", keypoints)
-            return keypoints
+    #     if os.path.exists(keypoint_file):
+    #         with open(keypoint_file, "r") as f:
+    #             keypoints = json.load(f)
+    #         if self.config.debug:
+    #             print("annotated keypoint ids", keypoints)
+    #         return keypoints
 
-        # Get flattened garment observation
-        flatten_obs = arena.get_flattened_obs()
-        flatten_rgb = flatten_obs['observation']["rgb"]
-        particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
+    #     # Get flattened garment observation
+    #     flatten_obs = arena.get_flattened_obs()
+    #     flatten_rgb = flatten_obs['observation']["rgb"]
+    #     particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
 
-        # Ask user to click semantic keypoints
-        keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
+    #     # Ask user to click semantic keypoints
+    #     keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
         
-        # Project all garment particles
-        pixels, visible = arena.get_visibility(particle_positions)
+    #     # Project all garment particles
+    #     pixels, visible = arena.get_visibility(particle_positions)
         
-        if self.config.debug:
-            H, W = (480, 480)
+    #     if self.config.debug:
+    #         H, W = (480, 480)
 
 
-            print('annotated keypoints', keypoints_pixel)
+    #         print('annotated keypoints', keypoints_pixel)
 
-            # Make sure tmp folder exists
-            os.makedirs("tmp", exist_ok=True)
+    #         # Make sure tmp folder exists
+    #         os.makedirs("tmp", exist_ok=True)
 
-            # Start with black canvases
-            non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
-            visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+    #         # Start with black canvases
+    #         non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+    #         visible_img = np.zeros((H, W, 3), dtype=np.uint8)
 
-            for pix, vis in zip(pixels, visible):
-                x, y = pix  # assuming pix = (x, y)
-                x = int(x)
-                y = int(y)
-                if not vis:
-                    # non-visible -> gray pixel
-                    non_visible_img[x, y] = (128, 128, 128)
-                else:
-                    # visible -> white pixel
-                    visible_img[x, y] = (255, 255, 255)
+    #         for pix, vis in zip(pixels, visible):
+    #             x, y = pix  # assuming pix = (x, y)
+    #             x = int(x)
+    #             y = int(y)
+    #             if not vis:
+    #                 # non-visible -> gray pixel
+    #                 non_visible_img[x, y] = (128, 128, 128)
+    #             else:
+    #                 # visible -> white pixel
+    #                 visible_img[x, y] = (255, 255, 255)
 
-            # Save both images
-            cv2.imwrite("tmp/non-visible.png", non_visible_img)
-            cv2.imwrite("tmp/visible.png", visible_img)
+    #         # Save both images
+    #         cv2.imwrite("tmp/non-visible.png", non_visible_img)
+    #         cv2.imwrite("tmp/visible.png", visible_img)
 
 
-        keypoints = {}
-        for name, pix in keypoints_pixel.items():
-            y, x = pix
-            dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
-            particle_id = np.argmin(dists)
-            keypoints[name] = int(particle_id)
+    #     keypoints = {}
+    #     for name, pix in keypoints_pixel.items():
+    #         y, x = pix
+    #         dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
+    #         particle_id = np.argmin(dists)
+    #         keypoints[name] = int(particle_id)
         
-        if self.config.debug:
-            annotated = np.zeros((H, W, 3), dtype=np.uint8)
-            for pid in keypoints.values():
-                x, y = pixels[pid]
-                x = int(x)
-                y = int(y)
-                annotated[x, y] = (255, 255, 255)
-            cv2.imwrite("tmp/annotated.png", annotated)
+    #     if self.config.debug:
+    #         annotated = np.zeros((H, W, 3), dtype=np.uint8)
+    #         for pid in keypoints.values():
+    #             x, y = pixels[pid]
+    #             x = int(x)
+    #             y = int(y)
+    #             annotated[x, y] = (255, 255, 255)
+    #         cv2.imwrite("tmp/annotated.png", annotated)
 
 
-        with open(keypoint_file, "w") as f:
-            json.dump(keypoints, f, indent=2)
-        return keypoints
+    #     with open(keypoint_file, "w") as f:
+    #         json.dump(keypoints, f, indent=2)
+    #     return keypoints
 
 
     def evaluate(self, arena):

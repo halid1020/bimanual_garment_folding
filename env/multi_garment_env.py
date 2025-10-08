@@ -28,6 +28,7 @@ class MultiGarmentEnv(GarmentEnv):
         self.num_eval_trials = 30
         self.num_train_trials = 100
         self.num_val_trials = 10
+        config.name = f'multi-garment-{config.garment_type}-env'
         super().__init__(config)
 
         
@@ -155,8 +156,8 @@ class MultiGarmentEnv(GarmentEnv):
 
     def _get_init_state_keys(self):
         
-        eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-eval.hdf5')
-        train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-train.hdf5')
+        eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
+        train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
 
         eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
         train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
@@ -170,13 +171,13 @@ class MultiGarmentEnv(GarmentEnv):
     def _get_init_state_params(self, eid):
         if self.mode == 'train':
             keys = self.train_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-train.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
         elif self.mode == 'eval':
             keys = self.eval_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-eval.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
         elif self.mode == 'val':
             keys = self.val_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.object}-eval.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
 
         key = keys[eid]
         with h5py.File(hdf5_path, 'r') as init_states:

@@ -147,6 +147,11 @@ class WorldPickAndPlace():
 
         pre_pick_positions = pick_positions.copy()
         pre_pick_positions[:, 2] = action['pregrasp_height']
+        post_pick_positions = pick_positions.copy()
+        post_pick_positions[:, 2] = action['post_pick_height']
+
+        pre_place_positions = place_positions.copy()
+        pre_place_positions[:, 2] = action['pre_place_height']
 
         place_raise = place_positions.copy()
         place_raise[:, 2] = 0.1
@@ -167,6 +172,8 @@ class WorldPickAndPlace():
                 # Copy trajectory arrays so we can freeze the other picker
                 _pre = pre_pick_positions.copy()
                 _pick = pick_positions.copy()
+                _post = post_pick_positions.copy()
+                _pre_place = pre_place_positions.copy()
                 _place = place_positions.copy()
                 _raise = place_raise.copy()
 
@@ -174,6 +181,8 @@ class WorldPickAndPlace():
                 other = 1 - i
                 _pre[other] = pickers_position[other]
                 _pick[other] = pickers_position[other]
+                _post[other] = pickers_position[other]
+                _pre_place[other] = pickers_position[other]
                 _place[other] = pickers_position[other]
                 _raise[other] = pickers_position[other]
 
@@ -181,7 +190,8 @@ class WorldPickAndPlace():
                 self.action_tool.movep(env, _pre, self.no_cloth_vel)
                 self.action_tool.movep(env, _pick, action['tograsp_vel'])
                 self.action_tool.both_grasp(env)     # frozen picker will grasp in place
-                self.action_tool.movep(env, _pre, action['lift_vel'])
+                self.action_tool.movep(env, _post, action['lift_vel'])
+                self.action_tool.movep(env, _pre_place, action['drag_vel'])
                 self.action_tool.movep(env, _place, action['drag_vel'])
                 self.action_tool.open_both_gripper(env)
                 self.action_tool.movep(env, _raise, action['lift_vel'])
@@ -192,7 +202,8 @@ class WorldPickAndPlace():
             self.action_tool.movep(env, pre_pick_positions, self.no_cloth_vel)
             self.action_tool.movep(env, pick_positions, action['tograsp_vel'])
             self.action_tool.both_grasp(env)
-            self.action_tool.movep(env, pre_pick_positions, action['lift_vel'])
+            self.action_tool.movep(env, post_pick_positions, action['lift_vel'])
+            self.action_tool.movep(env, pre_place_positions, action['drag_vel'])
             self.action_tool.movep(env, place_positions, action['drag_vel'])
             self.action_tool.open_both_gripper(env)
             self.action_tool.movep(env, place_raise, action['lift_vel'])

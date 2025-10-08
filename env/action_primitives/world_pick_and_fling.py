@@ -167,11 +167,11 @@ class WorldPickAndFling():
 
         info = self.reset_pickers(env)
 
-        info = env.wait_until_stable()
+        env.wait_until_stable()
 
         self.action_step += 1
-        done = self.action_step >= self.action_horizon
-        info['done'] = done
+        # done = self.action_step >= self.action_horizon
+        # info['done'] = done
         return info
     
     def reset_pickers(self, env):

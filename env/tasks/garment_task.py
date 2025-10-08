@@ -1,5 +1,6 @@
 import os
 import json
+import numpy as np
 
 from agent_arena import Task
 
@@ -23,6 +24,7 @@ class GarmentTask(Task):
 
         mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
         keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
+        print('mesh id', mesh_id)
 
         if os.path.exists(keypoint_file):
             with open(keypoint_file, "r") as f:

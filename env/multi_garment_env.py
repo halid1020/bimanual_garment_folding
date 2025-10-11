@@ -63,7 +63,7 @@ class MultiGarmentEnv(GarmentEnv):
 
         self.sim_step = 0
         self.video_frames = []
-        self.save_video = episode_config['save_video']
+        
 
         self.episode_config = episode_config
 
@@ -73,7 +73,7 @@ class MultiGarmentEnv(GarmentEnv):
             config=init_state_params, 
             state=init_state_params)
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
-        #print('mesh particles', self.num_mesh_particles)
+        print('mesh particles', self.num_mesh_particles)
         self.init_state_params = init_state_params
 
         
@@ -82,8 +82,11 @@ class MultiGarmentEnv(GarmentEnv):
         self.pickers.reset(self.picker_initial_pos)
         #print('picker reset done')
 
+        
+
         self.init_coverae = self._get_coverage()
         self.flattened_obs = None
+        self.save_video = False
         self.get_flattened_obs()
         #self.flatten_coverage = init_state_params['flatten_area']
         
@@ -91,10 +94,15 @@ class MultiGarmentEnv(GarmentEnv):
         self.last_info = None
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
-        
+
+        self.save_video = episode_config['save_video']
+
+
         self.last_flattened_step = -100
         self.task.reset(self)
         self.action_step = 0
+        
+       
 
         self.evaluate_result = None
         

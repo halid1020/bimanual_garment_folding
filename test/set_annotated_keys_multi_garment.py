@@ -16,6 +16,7 @@ import cv2
 def main():
     task = 'waist-leg-alignment-folding'
     garment_type = 'trousers'
+    mode = 'val'
 
     arena_config = {
         'garment_type': garment_type,
@@ -27,11 +28,11 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': True,
+        'disp': False,
         'ray_id': 0,
         'horizon': 2,
         'track_semkey_on_frames': False,
-        'readjust_pick': True,
+        'readjust_pick': False,
         'grasp_mode': {'around': 1.0}
     }
     
@@ -60,7 +61,7 @@ def main():
     
     arena.set_task(task)
 
-    mode = 'eval'
+    
     if mode == 'train':
         trials_configs = arena.get_train_configs()
         arena.set_train()

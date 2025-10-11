@@ -472,7 +472,7 @@ class GarmentEnv(Arena):
                 debug_frame = rgb.copy()
                 for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
                     color = tuple(map(int, color))  # ensure int
-                    
+                    #print('v, u, name', v, u, name)
                     cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
                     cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)

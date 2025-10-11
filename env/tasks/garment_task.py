@@ -1,6 +1,7 @@
 import os
 import json
 import numpy as np
+import cv2
 
 from agent_arena import Task
 

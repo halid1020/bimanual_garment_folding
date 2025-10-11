@@ -8,6 +8,7 @@ from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
+from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
 
 from .utils import get_max_IoU
 from .folding_rewards import *
@@ -104,7 +105,12 @@ class GarmentFoldingTask(GarmentTask):
             frames = arena.get_frames()
             if len(frames) > 0:
                 save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos')
-        
+                sg(
+                    np.stack(arena.get_frames()), 
+                    path='tmp',
+                    filename="demo_videos"
+                )
+            
         arena.set_particle_positions(particle_pos)
 
         return info
@@ -261,10 +267,6 @@ class GarmentFoldingTask(GarmentTask):
             # Center both sets
             aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
             #return aligned, goal_centered
-        elif self.config.alignment == 'complex_rigid':
-            aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
-        elif self.config.alignment == 'deform':
-            aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
         else:
             raise NotImplementedError
         
@@ -296,14 +298,14 @@ class GarmentFoldingTask(GarmentTask):
         if self.config.debug:
             save_point_cloud_ply(os.path.join('tmp', f"cur_particles_step_{arena.action_step}.ply"), cur)
             save_point_cloud_ply(os.path.join('tmp', "goal_particles.ply"), goal)
-            for align_type in ['simple_rigid', 'complex_rigid', 'deform', 'chamfer_rotation']:
+            for align_type in ['simple_rigid']:
                 if align_type == 'simple_rigid':
                     aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
-                elif align_type == 'complex_rigid':
-                    #print('Cloth Area', arena.get_cloth_area())
-                    aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
-                elif align_type == 'deform':
-                    aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
+                # elif align_type == 'complex_rigid':
+                #     #print('Cloth Area', arena.get_cloth_area())
+                #     aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
+                # elif align_type == 'deform':
+                #     aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
                 # elif align_type == 'chamfer_rotation':
                 #     aligned_curr, aligned_goal = chamfer_alignment_with_rotation(cur, goal)
                 mdp_ = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))

@@ -37,18 +37,23 @@ class WaistLegFoldingStochasticPolicy(Agent):
         left_hem = get_pixel("left_hem_left", semkey2pid, keypids, key_pixels)
         right_hem = get_pixel("right_hem_right", semkey2pid, keypids, key_pixels)
         centre = get_pixel("centre", semkey2pid, keypids, key_pixels)
+        if cloth_mask.dtype == bool:
+            cloth_mask_img = (cloth_mask.astype(np.uint8)) * 255
+        else:
+            cloth_mask_img = cloth_mask.astype(np.uint8)
+        cv2.imwrite('tmp/demo_cloth_mask.png', cloth_mask_img)
 
         # random pick along right side (waist->hem)
-        right_pick = sample_near_pixel(left_hem, cloth_mask, radius=0, on_mask=True)
+        right_pick = sample_near_pixel(left_hem, cloth_mask, radius=2, on_mask=True)
         # place near centre line (towards left)
         right_place = right_hem.copy()
-        right_place[1] -= 20
+        right_place[1] -= 15
         right_place[0] += 15
 
         # left side for balance (could stay stationary)
-        left_pick = sample_near_pixel(left_waist, cloth_mask, radius=0, on_mask=True)
+        left_pick = sample_near_pixel(left_waist, cloth_mask, radius=2, on_mask=True)
         left_place = right_waist.copy()
-        left_place[1] -= 20
+        left_place[1] -= 15
         left_place[0] -= 15
 
         H, W = cloth_mask.shape
@@ -62,6 +67,8 @@ class WaistLegFoldingStochasticPolicy(Agent):
         }
 
         self.internal_states[arena_id]['step'] += 1
+
+        print('action', action)
         return action
 
     def act_step1(self, arena_id, key_pixels, semkey2pid, keypids, cloth_mask):

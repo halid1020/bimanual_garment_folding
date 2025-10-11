@@ -136,7 +136,7 @@ class MultiGarmentEnv(GarmentEnv):
 
     def get_train_configs(self):
         train_configs = [
-            {'eid': eid, 'tier': 0, 'save_video': True}
+            {'eid': eid, 'tier': 0, 'save_video': self.config.get('save_video', False)}
             for eid in range(self.num_train_trials)
         ]
         
@@ -187,19 +187,26 @@ class MultiGarmentEnv(GarmentEnv):
             keys = self.val_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
 
-        key = keys[eid]
-        with h5py.File(hdf5_path, 'r') as init_states:
-            # print(hdf5_path, key)
-            # Convert group to dict
-            group = init_states[key]
-            episode_params = dict(group.attrs)
-            
-            # If there are datasets in the group, add them to the dictionary
-            #print('group keys', group.keys())
-            for dataset_name in group.keys():
-                episode_params[dataset_name] = group[dataset_name][()]
+        while True:
+            key = keys[eid]
+            with h5py.File(hdf5_path, 'r') as init_states:
+                # print(hdf5_path, key)
+                # Convert group to dict
+                group = init_states[key]
+                episode_params = dict(group.attrs)
 
-            self.episode_params = episode_params
+                if not ('pkl_path' in episode_params.keys()):
+                    eid += 1
+                    print('eid', eid)
+                    continue
+                
+                # If there are datasets in the group, add them to the dictionary
+                #print('group keys', group.keys())
+                for dataset_name in group.keys():
+                    episode_params[dataset_name] = group[dataset_name][()]
+
+                self.episode_params = episode_params#
+            break
             #print('episode_params', episode_params.keys())
 
         return episode_params

@@ -11,7 +11,7 @@ from ..utils.keypoint_gui import KeypointGUI
 
 class GarmentTask(Task):
     def __init__(self, config):
-        self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
+        self.keypoint_semantics = KEYPOINT_SEMANTICS[config.garment_type]
 
         self.semkey2pid = None # This needs to be loaded or annotated
         self.asset_dir = config.asset_dir
@@ -22,10 +22,10 @@ class GarmentTask(Task):
 
     def _load_or_create_keypoints(self, arena):
         """Load semantic keypoints if they exist, otherwise ask user to assign them."""
-
+        #print('state keys', arena.init_state_params.keys())
         mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
         keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
-        print('mesh id', mesh_id)
+        #print('mesh id', mesh_id)
 
         if os.path.exists(keypoint_file):
             with open(keypoint_file, "r") as f:

@@ -16,7 +16,8 @@ import cv2
 def main():
     task = 'waist-leg-alignment-folding'
     garment_type = 'trousers'
-    mode = 'val'
+    mode = 'train'
+    reverse_trav = False
 
     arena_config = {
         'garment_type': garment_type,
@@ -72,7 +73,10 @@ def main():
         trials_configs = arena.get_eval_configs()
         arena.set_eval()
 
-    for cfg in trials_configs:
+    if reverse_trav:
+        trials_configs = reversed(trials_configs)
+
+    for cfg in trials_configs[35:]:
         #print('cfg', cfg)
         arena.reset(cfg)
 

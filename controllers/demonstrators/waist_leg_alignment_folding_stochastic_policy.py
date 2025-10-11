@@ -68,7 +68,7 @@ class WaistLegFoldingStochasticPolicy(Agent):
 
         self.internal_states[arena_id]['step'] += 1
 
-        print('action', action)
+        #print('action', action)
         return action
 
     def act_step1(self, arena_id, key_pixels, semkey2pid, keypids, cloth_mask):

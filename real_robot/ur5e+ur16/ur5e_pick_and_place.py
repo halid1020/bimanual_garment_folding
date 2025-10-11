@@ -181,12 +181,12 @@ def run_pick_and_place():
     try:
         # Get current TCP pose (base frame)
         tcp_pose = robot.get_tcp_pose()   # [x,y,z,rx,ry,rz] in base frame for TCP
-        T_base_grip = tcp_pose_to_transform(tcp_pose)
+        T_gripper2base = tcp_pose_to_transform(tcp_pose)
         print("Current TCP pose:", tcp_pose)
 
         # Compute pick/place in base frame: p_base = T_base_grip @ p_gripper
-        p_base_pick = transform_point(T_base_grip, p_grip_pick)
-        p_base_place = transform_point(T_base_grip, p_grip_place)
+        p_base_pick = transform_point(T_gripper2base, p_grip_pick)
+        p_base_place = transform_point(T_gripper2base, p_grip_place)
         print("p_base_pick:", p_base_pick, "p_base_place:", p_base_place)
 
         # TODO:

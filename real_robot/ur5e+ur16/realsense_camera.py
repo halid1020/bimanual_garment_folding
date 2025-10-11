@@ -6,25 +6,6 @@ import pyrealsense2 as rs
 from utils import save_depth, save_color
 
 class RealsenseCamera():
-    # def __init__(self, debug=False):
-    #     self.pipeline = rs.pipeline()
-    #     config = rs.config()
-    #     config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-    #     config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-    #     self.pipeline.start(config)
-    #     align_to = rs.stream.color
-    #     self.align = rs.align(align_to)
-
-    #     ### Depth Camera Macros ###
-    #     self.colorizer = rs.colorizer()
-    #     self.hole_filling = rs.hole_filling_filter()
-    #     self.temporal = rs.temporal_filter()
-    #     self.temporal.set_option(rs.option.filter_smooth_alpha, 0.2)
-    #     self.temporal.set_option(rs.option.filter_smooth_delta, 24)
-    #     self.debug = debug
-    #     #self.camera_height = camera_height
-
-    #     self.take_rgbd()
 
     def __init__(self, debug=False):
         self.pipeline = rs.pipeline()
@@ -81,19 +62,8 @@ class RealsenseCamera():
         ## get the blak ones
         blank_mask = (depth_data == 0)
 
-
-
-        #average_depth = self.camera_height
-        #depth_data += blank_mask * (average_depth+0.005)
-        
-        #depth_data = (depth_data + 0.005) - ground_depth + average_depth
-        
-        
-        #depth_data = depth_data.clip(0, average_depth+0.02)
         self.depth_img = depth_data.copy()
-
         
-
         return depth_data
 
     def take_rgbd(self):

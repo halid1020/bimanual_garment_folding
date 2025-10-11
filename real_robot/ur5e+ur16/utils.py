@@ -13,6 +13,8 @@ import os
 import cv2
 from scipy.ndimage import distance_transform_edt
 from scipy.ndimage import distance_transform_edt, sobel
+from scipy.spatial.transform import Rotation
+
 import math
 # import torch
 # import signal
@@ -313,25 +315,6 @@ def normalise_quaterion(q):
         raise ValueError("Cannot normalize a zero quaternion.")
     return q / norm
 
-# def load_config(config_name):
-#     config_dir = os.path.join(get_package_share_directory('robot_control_cloth'), 'config')
-#     config_file_path = os.path.join(config_dir, f"{config_name}.yaml")
-#     with open(config_file_path, 'r') as file:
-#         config_dict = yaml.safe_load(file)
-#     return DotMap(config_dict)
-
-# def prepare_posestamped(pose: MyPos, frame_id):
-#     posestamp = PoseStamped()
-#     posestamp.header.frame_id = frame_id
-#     posestamp.pose.position.x = pose.pose[0]
-#     posestamp.pose.position.y = pose.pose[1]
-#     posestamp.pose.position.z = pose.pose[2]
-#     posestamp.pose.orientation.x = pose.orien[0]
-#     posestamp.pose.orientation.y = pose.orien[1]
-#     posestamp.pose.orientation.z = pose.orien[2]
-#     posestamp.pose.orientation.w = pose.orien[3]
-#     return posestamp
-
 def add_quaternions(quat1, quat2):
     """
     Multiplies two quaternions to combine their rotations.
@@ -422,3 +405,117 @@ def interpolate_image(height, width, corner_values):
             interpolated_image[i, j] = \
                 bilinear_interpolation(x, y, x1, y1, x2, y2, q11, q21, q12, q22)
     return interpolated_image
+
+def load_camera_to_gripper(yaml_path):
+    """Load 4x4 camera-to-gripper matrix from the YAML file."""
+    with open(yaml_path, 'r') as f:
+        data = yaml.safe_load(f)
+    mat_list = data.get('camera_to_gripper', {}).get('matrix', None)
+    if mat_list is None:
+        raise RuntimeError("camera_to_gripper.matrix not found in YAML")
+    mat = np.array(mat_list, dtype=float)
+    if mat.shape != (4,4):
+        raise RuntimeError(f"camera_to_gripper matrix must be 4x4, got {mat.shape}")
+    return mat
+
+
+def load_camera_to_base(yaml_path):
+    """Load 4x4 camera-to-base matrix from the YAML file."""
+    with open(yaml_path, 'r') as f:
+        data = yaml.safe_load(f)
+    # MODIFIED: Look for 'camera_to_base' key from Hand-to-Eye script
+    mat_list = data.get('camera_to_base', {}).get('matrix', None)
+    if mat_list is None:
+        raise RuntimeError("camera_to_base.matrix not found in YAML")
+    mat = np.array(mat_list, dtype=float)
+    if mat.shape != (4,4):
+        raise RuntimeError(f"camera_to_base matrix must be 4x4, got {mat.shape}")
+    return mat
+
+
+def click_points_pick_and_place(window_name, img):
+    """
+    Display image and collect two clicks (pick, place).
+    Returns pixel coordinates as (u,v) tuples: (pick_uv, place_uv)
+    """
+    clicks = []
+    clone = img.copy()
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            clicks.append((int(x), int(y)))
+            cv2.circle(clone, (int(x), int(y)), 5, (0,255,0), -1)
+            cv2.imshow(window_name, clone)
+
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720) 
+    cv2.imshow(window_name, clone)
+    cv2.setMouseCallback(window_name, mouse_cb)
+
+    print("Please click PICK point then PLACE point on the image window.")
+    while len(clicks) < 4:
+        if cv2.waitKey(20) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyWindow(window_name)
+    if len(clicks) < 4:
+        raise RuntimeError("Four points not selected")
+    return clicks[0], clicks[1], clicks[2], clicks[3]
+
+
+
+def safe_depth_at(depth_img, pixel):
+    """Return a usable depth (meters) at or near pixel (u,v). Tries small neighborhood if zero."""
+    u, v = pixel[0], pixel[1]
+    H, W = depth_img.shape[:2]
+    u = int(np.clip(u, 0, W-1))
+    v = int(np.clip(v, 0, H-1))
+    z = float(depth_img[v, u])
+    if z > 0:
+        return z
+    # try small neighborhood up to 5x5
+    for r in range(1,6):
+        ys = slice(max(0, v-r), min(H, v+r+1))
+        xs = slice(max(0, u-r), min(W, u+r+1))
+        patch = depth_img[ys, xs]
+        nz = patch[patch>0]
+        if nz.size > 0:
+            return float(np.median(nz))
+    raise RuntimeError("Could not find valid depth near clicked pixel")
+
+def intrinsic_to_params(intr):
+    """Convert pyrealsense2 intrinsics object to fx,fy,ppx,ppy."""
+    fx = intr.fx
+    fy = intr.fy
+    cx = intr.ppx
+    cy = intr.ppy
+    return fx, fy, cx, cy
+
+def pixel_to_camera_point(pixel, depth_m, intr):
+    """Convert image pixel + depth (meters) to 3D camera coordinates."""
+    u, v = pixel[0], pixel[1]
+    fx, fy, cx, cy = intrinsic_to_params(intr)
+    x = (u - cx) * depth_m / fx
+    y = (v - cy) * depth_m / fy
+    z = depth_m
+    return np.array([x, y, z])
+
+def transform_point(T, p):
+    """Apply 4x4 transform T to 3D point p (len 3). Returns len-3 point."""
+    p_h = np.ones(4)
+    p_h[:3] = p
+    p_t = T @ p_h
+    return p_t[:3]
+
+def tcp_pose_to_transform(tcp_pose):
+    """
+    tcp_pose: [x,y,z, rx,ry,rz] where rx,ry,rz is rotation vector (axis-angle)
+    returns 4x4 homogeneous transform from base -> gripper (TCP)
+    """
+    t = np.array(tcp_pose[:3], dtype=float)
+    rvec = np.array(tcp_pose[3:], dtype=float)
+    R = Rotation.from_rotvec(rvec).as_matrix()
+    T = np.eye(4)
+    T[:3,:3] = R
+    T[:3,3] = t
+    return T

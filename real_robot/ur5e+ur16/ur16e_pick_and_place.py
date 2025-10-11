@@ -108,24 +108,6 @@ def click_two_points(window_name, img):
     return clicks[0], clicks[1]
 
 
-def safe_depth_at(depth_img, u, v):
-    """Return a usable depth (meters) at or near pixel (u,v). Tries small neighborhood if zero."""
-    H, W = depth_img.shape[:2]
-    u = int(np.clip(u, 0, W-1))
-    v = int(np.clip(v, 0, H-1))
-    z = float(depth_img[v, u])
-    if z > 0:
-        return z
-    # try small neighborhood up to 5x5
-    for r in range(1,6):
-        ys = slice(max(0, v-r), min(H, v+r+1))
-        xs = slice(max(0, u-r), min(W, u+r+1))
-        patch = depth_img[ys, xs]
-        nz = patch[patch>0]
-        if nz.size > 0:
-            return float(np.median(nz))
-    raise RuntimeError("Could not find valid depth near clicked pixel")
-
 def pose_to_rtde_tcp_format(pos3, rotvec3):
     """Return RTDE TCP pose array [x,y,z,rx,ry,rz]"""
     return [float(pos3[0]), float(pos3[1]), float(pos3[2]),
@@ -136,15 +118,6 @@ def run_pick_and_place():
     T_cam_base = load_camera_to_base(CALIB_YAML)
     print("Loaded T_camera^base transform (Camera in Base frame):\n", T_cam_base)
 
-    # We need T_base^camera to transform points: p_base = T_base^camera @ p_camera
-    # MODIFIED: Calculate the inverse transform
-    # R_cam = T_cam_base[:3,:3]
-    # t_cam = T_cam_base[:3,3]
-    # R_cam_inv = R_cam.T
-    # t_cam_inv = -R_cam_inv @ t_cam
-    # T_base_cam = np.eye(4)
-    # T_base_cam[:3,:3] = R_cam_inv
-    # T_base_cam[:3,3] = t_cam_inv
     T_base_cam = T_cam_base
     print("\nCalculated T_base^camera (Base in Camera frame):\n", T_base_cam)
 

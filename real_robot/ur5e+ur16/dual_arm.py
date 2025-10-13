@@ -15,7 +15,10 @@ from utils import (
     transform_point,
     load_camera_to_gripper,
     tcp_pose_to_transform,
-    point_on_table_base
+    point_on_table_base,
+    points_to_gripper_pose,
+    points_to_fling_path,
+    transform_pose
 )
 
 MIN_Z = 0.015
@@ -71,6 +74,8 @@ class DualArm:
         else:
             self.ur16e_T_cam2base = np.eye(4)
             self.ur5e_T_cam2base = np.eye(4)
+        
+        self.T_ur16e2ur5e = self.ur5e_T_cam2base @ np.linalg.inv(self.ur16e_T_cam2base )
 
     # --------------------- DRY-RUN SAFE MOTION HELPERS ---------------------
 
@@ -155,16 +160,6 @@ class DualArm:
             return t1.result and t2.result
         return True
 
-    # --------------------- PICK & PLACE SEQUENCE ---------------------
-
-    # def execute_pick_and_place(self):
-    #     if self.dry_run:
-    #         print("[Dry-run] Simulating pick and place cycle...")
-    #         time.sleep(1)
-    #         return
-
-    #     # ... (your existing pick-and-place logic here, unchanged) ...
-    #     print("[INFO] Real pick-and-place executed (not dry-run).")
 
     
     def execute_pick_and_place(self):
@@ -196,55 +191,6 @@ class DualArm:
         p_base_place_0 = point_on_table_base(place_0[0], place_0[1], self.intr, self.ur5e_T_cam2base, TABLE_HEIGHT)
         p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.intr, self.ur16e_T_cam2base, TABLE_HEIGHT)
         p_base_place_1 = point_on_table_base(place_1[0], place_1[1], self.intr, self.ur16e_T_cam2base, TABLE_HEIGHT)
-
-        # # Safe depths (handle missing/NaN depth values)
-        # dz_pick_0 = safe_depth_at(depth, pick_0)
-        # dz_place_0 = safe_depth_at(depth, place_0)
-        # dz_pick_1 = safe_depth_at(depth, pick_1)
-        # dz_place_1 = safe_depth_at(depth, place_1)
-
-        # # If safe_depth_at returns None/NaN/0, fall back to a conservative depth
-        # def validate_depth(d):
-        #     try:
-        #         if d is None or np.isnan(d) or d <= 0:
-        #             return 0.10  # fallback depth 10 cm
-        #         return float(d)
-        #     except Exception:
-        #         return 0.10
-
-        # dz_pick_0 = validate_depth(dz_pick_0)
-        # dz_place_0 = validate_depth(dz_place_0)
-        # dz_pick_1 = validate_depth(dz_pick_1)
-        # dz_place_1 = validate_depth(dz_place_1)
-
-        # print("Depths (m):", dz_pick_0, dz_place_0, dz_pick_1, dz_place_1)
-
-        # Convert pixel -> camera points
-        # p_cam_pick_0 = pixel_to_camera_point(pick_0, dz_pick_0, self.intr)
-        # p_cam_place_0 = pixel_to_camera_point(place_0, dz_place_0, self.intr)
-        # p_cam_pick_1 = pixel_to_camera_point(pick_1, dz_pick_1, self.intr)
-        # # ---------- FIXED: use place_1 pixel for place point ----------
-        # p_cam_place_1 = pixel_to_camera_point(place_1, dz_place_1, self.intr)
-
-        # print("p_cam_pick_0:", p_cam_pick_0, "p_cam_place_0:", p_cam_place_0)
-        # print("p_cam_pick_1:", p_cam_pick_1, "p_cam_place_1:", p_cam_place_1)
-
-        # Transform to corresponding robot base frames
-        # try:
-        #     p_base_pick_0 = transform_point(self.ur5e_T_cam2base, p_cam_pick_0)
-        #     p_base_place_0 = transform_point(self.ur5e_T_cam2base, p_cam_place_0)
-        # except Exception as e:
-        #     print(f"[Warning] transform for ur16e failed: {e}")
-        #     p_base_pick_0 = np.array([0.0, 0.0, MIN_Z])
-        #     p_base_place_0 = np.array([0.0, 0.0, MIN_Z])
-
-        # try:
-        #     p_base_pick_1 = transform_point(self.ur16e_T_cam2base, p_cam_pick_1)
-        #     p_base_place_1 = transform_point(self.ur16e_T_cam2base, p_cam_place_1)
-        # except Exception as e:
-        #     print(f"[Warning] transform for ur5e failed: {e}")
-        #     p_base_pick_1 = np.array([0.0, 0.0, MIN_Z])
-        #     p_base_place_1 = np.array([0.0, 0.0, MIN_Z])
 
         print(
             "p_base_pick_0 (pre-offset):", p_base_pick_0,
@@ -357,6 +303,125 @@ class DualArm:
             self.both_home(speed=1.0, acceleration=0.8, blocking=True)
 
         print("Pick-and-place sequence finished.")
+
+
+
+    def dual_arm_strech_and_fling(self, 
+            left_point, 
+            right_point,
+            strech_force=20,
+            strech_max_speed=0.15,
+            strech_max_width=0.7, 
+            strech_max_time=5,
+            swing_stroke=0.6,
+            swing_height=0.45,
+            swing_angle=np.pi/4,
+            lift_height=0.4,
+            place_height=0.05,
+            fling_speed=1.3,
+            fling_acceleration=5
+            ):
+        left_pose, right_pose = points_to_gripper_pose(
+            left_point, right_point, max_width=strech_max_width)
+
+        # strech
+        r = self.dual_arm_strech(left_pose, right_pose, 
+            force=strech_force, 
+            max_speed=strech_max_speed, 
+            max_width=strech_max_width,
+            max_time=strech_max_time)
+        if not r: return False
+        width = self.get_tcp_distance()
+        print('Width: {}'.format(width))
+        
+        # fling
+        left_path, right_path = points_to_fling_path(
+            left_point=left_point,
+            right_point=right_point,
+            width=width,
+            swing_stroke=swing_stroke,
+            swing_height=swing_height,
+            swing_angle=swing_angle,
+            lift_height=lift_height,
+            place_height=place_height
+        )
+        return self.dual_arm_fling(left_path, right_path, 
+            fling_speed, fling_acceleration)
+
+    def dual_arm_strech(self, 
+        left_pose, right_pose,
+        force=12, init_force=30,
+        max_speed=0.15, 
+        max_width=0.7, max_time=5,
+        speed_threshold=0.001):
+        """
+        Assuming specific gripper and tcp orientation.
+        """
+        r = self.dual_arm_movel(left_pose, right_pose, speed=max_speed)
+        if not r: return False
+
+        ur5e_tcp_pose = self.ur5e.get_tcp_pose()
+        ur16e_tcp_pose = self.ur16e.get_tcp_pose()
+
+        # task_frame = [0, 0, 0, 0, 0, 0]
+        selection_vector = [1, 0, 0, 0, 0, 0]
+        force_type = 2
+        # speed for compliant axis, deviation for non-compliant axis
+        limits = [max_speed, 2, 2, 1, 1, 1]
+        dt = 1.0/125
+
+        # enable force mode on both robots
+        tcp_distance = self.get_tcp_distance()
+        with self.ur5e.start_force_mode() as left_force_guard:
+            with self.ur16e.start_force_mode() as right_force_guard:
+                start_time = time.time()
+                prev_time = start_time
+                max_acutal_speed = 0
+                while (time.time() - start_time) < max_time:
+                    f = force
+                    if max_acutal_speed < max_speed/20:
+                        f = init_force
+                    left_wrench = [f, 0, 0, 0, 0, 0]
+                    right_wrench = [-f, 0, 0, 0, 0, 0]
+
+                    # apply force
+                    r = left_force_guard.apply_force(ur5e_tcp_pose, selection_vector, 
+                        left_wrench, force_type, limits)
+                    if not r: return False
+                    r = right_force_guard.apply_force(ur16e_tcp_pose, selection_vector, 
+                        right_wrench, force_type, limits)
+                    if not r: return False
+
+                    # check for distance
+                    tcp_distance = self.get_tcp_distance()
+                    if tcp_distance >= max_width:
+                        print('Max distance reached: {}'.format(tcp_distance))
+                        break
+
+                    # check for speed
+                    l_speed = np.linalg.norm(self.ur5e.get_tcp_speed()[:3])
+                    r_speed = np.linalg.norm(self.ur16e.get_tcp_speed()[:3])
+                    actual_speed = max(l_speed, r_speed)
+                    max_acutal_speed = max(max_acutal_speed, actual_speed)
+                    if max_acutal_speed > (max_speed * 0.4):
+                        if actual_speed < speed_threshold:
+                            print('Action stopped at acutal_speed: {} with  max_acutal_speed: {}'.format(
+                                actual_speed, max_acutal_speed))
+                            break
+
+                    curr_time = time.time()
+                    duration = curr_time - prev_time
+                    if duration < dt:
+                        time.sleep(dt - duration)
+        return r
+
+
+    def get_tcp_distance(self):
+        ur5e_tcp_pose = self.ur5e.get_tcp_pose()
+        ur16e_tcp_pose = transform_pose(self.T_ur16e2ur5e,
+            self.ur16e.get_tcp_pose())
+        tcp_distance = np.linalg.norm((ur16e_tcp_pose - ur5e_tcp_pose)[:3])
+        return tcp_distance
 
     def run(self, iterations=1):
         self.both_home()

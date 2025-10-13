@@ -463,6 +463,24 @@ def click_points_pick_and_place(window_name, img):
     return clicks[0], clicks[1], clicks[2], clicks[3]
 
 
+def point_on_table_base(u, v, intr, cam2base, table_z):
+    """
+    Convert a pixel to a 3D point on a planar table at table_z in base frame.
+    """
+    # Direction vector in camera frame (depth=1)
+    p_cam = pixel_to_camera_point((u,v), 1.0, intr)  # returns 3x1 vector
+
+    # Rotate to base frame
+    p_dir_base = cam2base[:3,:3] @ p_cam
+    cam_origin_base = cam2base[:3,3]
+
+    # Compute scale factor
+    s = (table_z - cam_origin_base[2]) / p_dir_base[2]
+
+    # Compute base-frame point
+    p_base = cam_origin_base + s * p_dir_base
+    return p_base
+
 
 def safe_depth_at(depth_img, pixel):
     """Return a usable depth (meters) at or near pixel (u,v). Tries small neighborhood if zero."""

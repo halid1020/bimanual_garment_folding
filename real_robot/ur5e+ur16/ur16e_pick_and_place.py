@@ -141,8 +141,8 @@ def run_pick_and_place():
     print("Picked pixels:", pick_uv, place_uv)
 
     # Compute 3D camera points (p_cam)
-    dz_pick = safe_depth_at(cam.depth_img, pick_uv[0], pick_uv[1])
-    dz_place = safe_depth_at(cam.depth_img, place_uv[0], place_uv[1])
+    dz_pick = safe_depth_at(depth_img, pick_uv[0], pick_uv[1])
+    dz_place = safe_depth_at(depth_img, place_uv[0], place_uv[1])
     print("Depths (m):", dz_pick, dz_place)
 
     p_cam_pick = pixel_to_camera_point(pick_uv[0], pick_uv[1], dz_pick, intr)

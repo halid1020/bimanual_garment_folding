@@ -15,6 +15,7 @@ from utils import (
     transform_point,
     load_camera_to_gripper,
     tcp_pose_to_transform,
+    point_on_table_base
 )
 
 MIN_Z = 0.015
@@ -23,7 +24,9 @@ LIFT_DIST = 0.08            # meters to lift after grasp
 MOVE_SPEED = 0.2
 MOVE_ACC = 0.2
 HOME_AFTER = True
-TABLE_OFFSET = 0.03        # Gripper length offset
+GRIPPER_OFFSET_UR5e = 0.006       # Gripper length offset
+GRIPPER_OFFSET_UR16e = -0.006
+TABLE_HEIGHT = 0.08
 
 
 class ThreadWithResult(threading.Thread):
@@ -64,7 +67,7 @@ class DualArm:
             self.ur5e_T_cam2gripper = load_camera_to_gripper(self.ur5e_eyeinhand_calib_file)
             tcp_pose = self.ur5e.get_tcp_pose()
             T_gripper2base = tcp_pose_to_transform(tcp_pose)
-            self.ur5e_T_cam2base = self.ur5e_T_cam2gripper @ T_gripper2base
+            self.ur5e_T_cam2base =   T_gripper2base @ self.ur5e_T_cam2gripper
         else:
             self.ur16e_T_cam2base = np.eye(4)
             self.ur5e_T_cam2base = np.eye(4)
@@ -107,8 +110,8 @@ class DualArm:
     # --------------------- THREADING WRAPPERS ---------------------
 
     def both_movel(self, p_left, p_right, speed=0.25, acceleration=1.2, blocking=True, avoid_singularity=False):
-        t1 = ThreadWithResult(target=self.safe_movel, args=("ur16e", p_left, speed, acceleration, blocking, avoid_singularity))
-        t2 = ThreadWithResult(target=self.safe_movel, args=("ur5e", p_right, speed, acceleration, blocking, avoid_singularity))
+        t1 = ThreadWithResult(target=self.safe_movel, args=("ur5e", p_left, speed, acceleration, blocking, avoid_singularity))
+        t2 = ThreadWithResult(target=self.safe_movel, args=("ur16e", p_right, speed, acceleration, blocking, avoid_singularity))
         t1.start()
         t2.start()
         if blocking:
@@ -186,55 +189,62 @@ class DualArm:
 
         pick_0, place_0, pick_1, place_1 = picked
         print("Picked pixels:", pick_0, place_0, pick_1, place_1)
+        if pick_0[0] < pick_1[0]:
+            pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
 
-        # Safe depths (handle missing/NaN depth values)
-        dz_pick_0 = safe_depth_at(depth, pick_0)
-        dz_place_0 = safe_depth_at(depth, place_0)
-        dz_pick_1 = safe_depth_at(depth, pick_1)
-        dz_place_1 = safe_depth_at(depth, place_1)
+        p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.intr, self.ur5e_T_cam2base, TABLE_HEIGHT)
+        p_base_place_0 = point_on_table_base(place_0[0], place_0[1], self.intr, self.ur5e_T_cam2base, TABLE_HEIGHT)
+        p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.intr, self.ur16e_T_cam2base, TABLE_HEIGHT)
+        p_base_place_1 = point_on_table_base(place_1[0], place_1[1], self.intr, self.ur16e_T_cam2base, TABLE_HEIGHT)
 
-        # If safe_depth_at returns None/NaN/0, fall back to a conservative depth
-        def validate_depth(d):
-            try:
-                if d is None or np.isnan(d) or d <= 0:
-                    return 0.10  # fallback depth 10 cm
-                return float(d)
-            except Exception:
-                return 0.10
+        # # Safe depths (handle missing/NaN depth values)
+        # dz_pick_0 = safe_depth_at(depth, pick_0)
+        # dz_place_0 = safe_depth_at(depth, place_0)
+        # dz_pick_1 = safe_depth_at(depth, pick_1)
+        # dz_place_1 = safe_depth_at(depth, place_1)
 
-        dz_pick_0 = validate_depth(dz_pick_0)
-        dz_place_0 = validate_depth(dz_place_0)
-        dz_pick_1 = validate_depth(dz_pick_1)
-        dz_place_1 = validate_depth(dz_place_1)
+        # # If safe_depth_at returns None/NaN/0, fall back to a conservative depth
+        # def validate_depth(d):
+        #     try:
+        #         if d is None or np.isnan(d) or d <= 0:
+        #             return 0.10  # fallback depth 10 cm
+        #         return float(d)
+        #     except Exception:
+        #         return 0.10
 
-        print("Depths (m):", dz_pick_0, dz_place_0, dz_pick_1, dz_place_1)
+        # dz_pick_0 = validate_depth(dz_pick_0)
+        # dz_place_0 = validate_depth(dz_place_0)
+        # dz_pick_1 = validate_depth(dz_pick_1)
+        # dz_place_1 = validate_depth(dz_place_1)
+
+        # print("Depths (m):", dz_pick_0, dz_place_0, dz_pick_1, dz_place_1)
 
         # Convert pixel -> camera points
-        p_cam_pick_0 = pixel_to_camera_point(pick_0, dz_pick_0, self.intr)
-        p_cam_place_0 = pixel_to_camera_point(place_0, dz_place_0, self.intr)
-        p_cam_pick_1 = pixel_to_camera_point(pick_1, dz_pick_1, self.intr)
-        # ---------- FIXED: use place_1 pixel for place point ----------
-        p_cam_place_1 = pixel_to_camera_point(place_1, dz_place_1, self.intr)
+        # p_cam_pick_0 = pixel_to_camera_point(pick_0, dz_pick_0, self.intr)
+        # p_cam_place_0 = pixel_to_camera_point(place_0, dz_place_0, self.intr)
+        # p_cam_pick_1 = pixel_to_camera_point(pick_1, dz_pick_1, self.intr)
+        # # ---------- FIXED: use place_1 pixel for place point ----------
+        # p_cam_place_1 = pixel_to_camera_point(place_1, dz_place_1, self.intr)
 
-        print("p_cam_pick_0:", p_cam_pick_0, "p_cam_place_0:", p_cam_place_0)
-        print("p_cam_pick_1:", p_cam_pick_1, "p_cam_place_1:", p_cam_place_1)
+        # print("p_cam_pick_0:", p_cam_pick_0, "p_cam_place_0:", p_cam_place_0)
+        # print("p_cam_pick_1:", p_cam_pick_1, "p_cam_place_1:", p_cam_place_1)
 
         # Transform to corresponding robot base frames
-        try:
-            p_base_pick_0 = transform_point(self.ur16e_T_cam2base, p_cam_pick_0)
-            p_base_place_0 = transform_point(self.ur16e_T_cam2base, p_cam_place_0)
-        except Exception as e:
-            print(f"[Warning] transform for ur16e failed: {e}")
-            p_base_pick_0 = np.array([0.0, 0.0, MIN_Z])
-            p_base_place_0 = np.array([0.0, 0.0, MIN_Z])
+        # try:
+        #     p_base_pick_0 = transform_point(self.ur5e_T_cam2base, p_cam_pick_0)
+        #     p_base_place_0 = transform_point(self.ur5e_T_cam2base, p_cam_place_0)
+        # except Exception as e:
+        #     print(f"[Warning] transform for ur16e failed: {e}")
+        #     p_base_pick_0 = np.array([0.0, 0.0, MIN_Z])
+        #     p_base_place_0 = np.array([0.0, 0.0, MIN_Z])
 
-        try:
-            p_base_pick_1 = transform_point(self.ur5e_T_cam2base, p_cam_pick_1)
-            p_base_place_1 = transform_point(self.ur5e_T_cam2base, p_cam_place_1)
-        except Exception as e:
-            print(f"[Warning] transform for ur5e failed: {e}")
-            p_base_pick_1 = np.array([0.0, 0.0, MIN_Z])
-            p_base_place_1 = np.array([0.0, 0.0, MIN_Z])
+        # try:
+        #     p_base_pick_1 = transform_point(self.ur16e_T_cam2base, p_cam_pick_1)
+        #     p_base_place_1 = transform_point(self.ur16e_T_cam2base, p_cam_place_1)
+        # except Exception as e:
+        #     print(f"[Warning] transform for ur5e failed: {e}")
+        #     p_base_pick_1 = np.array([0.0, 0.0, MIN_Z])
+        #     p_base_place_1 = np.array([0.0, 0.0, MIN_Z])
 
         print(
             "p_base_pick_0 (pre-offset):", p_base_pick_0,
@@ -259,10 +269,11 @@ class DualArm:
         p_base_place_1 = clamp_z(p_base_place_1)
 
         # Apply table offset (gripper length)
-        p_base_pick_0 += np.array([0.0, 0.0, TABLE_OFFSET])
-        p_base_pick_1 += np.array([0.0, 0.0, TABLE_OFFSET])
-        p_base_place_0 += np.array([0.0, 0.0, TABLE_OFFSET])
-        p_base_place_1 += np.array([0.0, 0.0, TABLE_OFFSET])
+        p_base_pick_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
+        p_base_place_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
+        p_base_pick_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
+        
+        p_base_place_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
 
         # Use current orientation for the TCP during motion (keep orientation same)
         # The code expects rotation-vector-like [rx,ry,rz] for the TCP orientation

@@ -203,7 +203,7 @@ class GarmentEnv(Arena):
     def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
            
-            'observation': self._get_obs(),
+            'observation': self._get_obs(flatten_obs),
             
             'arena': self,
             'arena_id': self.id,
@@ -532,7 +532,7 @@ class GarmentEnv(Arena):
 
         return img
     
-    def _get_obs(self):
+    def _get_obs(self, flatten_obs=True):
         obs = {}
         # print('get obs here')
         rgbd = self._render(mode='rgbd')
@@ -551,7 +551,7 @@ class GarmentEnv(Arena):
                 semkey_positions.append(pos)
             obs['semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
         
-        if self.config.get("provide_flattened_semkey_pos", False) and obs['semkey2pid']:
+        if flatten_obs and self.config.get("provide_flattened_semkey_pos", False) and obs['semkey2pid']:
             semkey_positions = []
             for key in obs['semkey2pid'].keys():
                 pid = obs['semkey2pid'][key]

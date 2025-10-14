@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
-
+from statistics import mean
 
 from agent_arena import save_video
 from .utils import get_max_IoU
@@ -101,6 +101,35 @@ class GarmentFlatteningTask(GarmentTask):
         IoU = cur_eval['max_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
         return IoU > 0.85 and coverage > 0.99
-
-
     
+    def compare(self, results_1, results_2):
+        threshold=0.95
+
+        # --- Compute averages for results_1 ---
+        avg_nc_1 = mean([ep["normalised_coverage"][-1] for ep in results_1])
+        avg_iou_1 = mean([ep["max_IoU_to_flattened"][-1] for ep in results_1])
+        avg_len_1 = mean([len(ep["max_IoU_to_flattened"]) for ep in results_1])
+        score_1 = avg_nc_1 + avg_iou_1
+
+        # --- Compute averages for results_2 ---
+        avg_nc_2 = mean([ep["normalised_coverage"][-1] for ep in results_2])
+        avg_iou_2 = mean([ep["max_IoU_to_flattened"][-1] for ep in results_2])
+        avg_len_2 = mean([len(ep["max_IoU_to_flattened"]) for ep in results_2])
+        score_2 = avg_nc_2 + avg_iou_2
+
+        # --- Both are very good → prefer shorter trajectory ---
+        if score_1 > 2 * threshold and score_2 > 2 * threshold:
+            if avg_len_1 < avg_len_2:
+                return 1
+            elif avg_len_1 > avg_len_2:
+                return -1
+            else:
+                return 0
+
+        # --- Otherwise prefer higher score ---
+        if score_1 > score_2:
+            return 1
+        elif score_1 < score_2:
+            return -1
+        else:
+            return 0

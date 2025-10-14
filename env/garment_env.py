@@ -550,6 +550,14 @@ class GarmentEnv(Arena):
                 pos = obs['particle_positions'][pid]
                 semkey_positions.append(pos)
             obs['semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
+        
+        if self.config.get("provide_flattened_semkey_pos", False) and obs['semkey2pid']:
+            semkey_positions = []
+            for key in obs['semkey2pid'].keys():
+                pid = obs['semkey2pid'][key]
+                pos = self.flattened_obs['observation']['particle_positions'][pid]
+                semkey_positions.append(pos)
+            obs['flattened_semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
 
         obs['action_step'] = self.action_step
 
@@ -679,3 +687,6 @@ class GarmentEnv(Arena):
     
     def get_cloth_area(self):
         return self.episode_params['cloth_height'] * self.episode_params['cloth_width']
+
+    def compare(self, results_1, results_2):
+        return self.task.compare(results_1, results_2)

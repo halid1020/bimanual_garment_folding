@@ -77,7 +77,7 @@ class GarmentEnv(Arena):
         self.last_info = None
         self.horizon = self.config.horizon
 
-        self.overstretch = False
+        self.overstretch = 0
     
 
     def _setup_camera(self):
@@ -543,7 +543,7 @@ class GarmentEnv(Arena):
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
         
-        if self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
+        if flatten_obs and self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
             semkey_positions = []
             for key in obs['semkey2pid'].keys():
                 pid = obs['semkey2pid'][key]

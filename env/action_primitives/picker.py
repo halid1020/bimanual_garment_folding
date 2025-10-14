@@ -235,14 +235,14 @@ class Picker():
         
         self._set_pos(new_picker_pos, new_particle_pos)
 
-        #self._detect_over_stretching(arena, new_particle_pos)
+        self._detect_over_stretching(arena, new_particle_pos)
        
                             
         return 1
 
     def _detect_over_stretching(self, arena, new_particle_pos):
         #pairwise_dists = []
-        overstretch = False
+        overstretch = 0
 
         for i in range(self.num_picker):
             for j in range(i + 1, self.num_picker):
@@ -255,12 +255,10 @@ class Picker():
                             # Compare with rest distance from the arena’s distance matrix
                             rest_dist = arena.particle_dist_matrix[p1, p2]
                             #print('dist', dist, 'rest_dist', rest_dist)
-                            if dist > 0.4 + rest_dist:  # threshold factor 20cm
-                                overstretch = True
-                                #print('over strech!')
-                                break
+                            overstretch = max(overstretch, dist - rest_dist)
 
-        arena.over_strech = (arena.over_strech or overstretch)
+        #print('overstrech', overstretch)
+        arena.overstretch = max(overstretch, arena.overstretch)
         #return pairwise_dists
         
 

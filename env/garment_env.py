@@ -77,7 +77,7 @@ class GarmentEnv(Arena):
         self.last_info = None
         self.horizon = self.config.horizon
 
-        self.over_strech = False
+        self.overstretch = False
     
 
     def _setup_camera(self):
@@ -208,7 +208,7 @@ class GarmentEnv(Arena):
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
-            'over_strech': self.over_strech
+            'overstretch': self.overstretch
         })
         #print('over strech!!!', self.over_strech)
 
@@ -255,7 +255,7 @@ class GarmentEnv(Arena):
         self.last_info = self.info
         self.evaluate_result = None
         #print('action step', self.action_step)
-        self.over_strech = False
+        self.overstretch = 0
         info = self.action_tool.step(self, action)
         
         self.action_step += 1

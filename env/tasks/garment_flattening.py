@@ -46,8 +46,11 @@ class GarmentFlatteningTask(GarmentTask):
         if info['evaluation']['normalised_coverage'] > 0.7:
             reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
 
-        if info['over_strech']:
-            reward_ = 0
+        threshold =  self.config.get('overstretch_penality_threshold', 0)
+        if info['overstretch'] > threshold:
+           
+            reward_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+    
 
         return {
             'coverage_alignment': reward,

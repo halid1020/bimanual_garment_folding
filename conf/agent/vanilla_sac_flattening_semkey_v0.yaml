@@ -2,7 +2,7 @@ name: vanilla-sac
 device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
 
 
-obs_key: semkey_pos
+obs_keys: ['semkey_pos']
 reward_key: coverage_alignment_with_strech_penality_high_coverage_bonus
 
 context_horizon: 1

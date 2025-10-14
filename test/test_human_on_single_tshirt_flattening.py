@@ -17,7 +17,7 @@ def main():
 
     arena_config = {
         'name': 'multi-garment-longsleeve-env',
-        'object': 'longsleeve',
+        'garment_type': 'longsleeve',
         'picker_radius': 0.03, #0.015,
         # 'particle_radius': 0.00625,
         'picker_threshold': 0.007, # 0.05,
@@ -27,7 +27,7 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': False,
+        'disp': True,
         'ray_id': 0,
         'horizon': 8,
         'track_semkey_on_frames': False
@@ -35,7 +35,7 @@ def main():
     
     task_config = {
         'num_goals': 1,
-        'object': 'longsleeve',
+        'garment_type': 'longsleeve',
         'asset_dir': 'assets',
         'task_name': 'flattening', # TODO: indicate what kinds of folding,
         'debug': True,

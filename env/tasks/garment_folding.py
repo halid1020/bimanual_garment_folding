@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
+from statistics import median
 
 from scipy.spatial.distance import cdist
 from agent_arena import Task
@@ -241,8 +242,8 @@ class GarmentFoldingTask(GarmentTask):
             particle_distances.append(mdp)
             key_distances.append(kdp)
        
-        mean_particle_distance = min(particle_distances)
-        key_particle_distance = min(key_distances)
+        mean_particle_distance = median(particle_distances)
+        key_particle_distance = median(key_distances)
         #print('MPD', mean_particle_distance)
 
         #semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)

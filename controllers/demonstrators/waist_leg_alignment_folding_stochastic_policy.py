@@ -41,20 +41,42 @@ class WaistLegFoldingStochasticPolicy(Agent):
             cloth_mask_img = (cloth_mask.astype(np.uint8)) * 255
         else:
             cloth_mask_img = cloth_mask.astype(np.uint8)
-        cv2.imwrite('tmp/demo_cloth_mask.png', cloth_mask_img)
+
+        ys, xs = np.where(cloth_mask > 0)  # coordinates of True (or nonzero) pixels
+
+        if len(xs) == 0 or len(ys) == 0:
+            # Empty mask fallback
+            cloth_height, cloth_width = 0, 0
+        else:
+            y_min, y_max = ys.min(), ys.max()
+            x_min, x_max = xs.min(), xs.max()
+            cloth_height = y_max - y_min + 1
+            cloth_width = x_max - x_min + 1
+        
+        #print('cloth_height', cloth_height, 'cloth width', cloth_width)
+        
+        base_offset = 12.2
+        base_width = 160
+        alpha = 11.7  # tuned to give ~25 when width=147
+
+        horizontal_offset = int(base_offset * (base_width / cloth_width) ** alpha)
+
+        #print('offset', horizontal_offset)
+        
+        #cv2.imwrite('tmp/demo_cloth_mask.png', cloth_mask_img)
 
         # random pick along right side (waist->hem)
         right_pick = sample_near_pixel(left_hem, cloth_mask, radius=2, on_mask=True)
         # place near centre line (towards left)
         right_place = right_hem.copy()
-        right_place[1] -= 15
-        right_place[0] += 15
+        right_place[1] -= horizontal_offset
+        right_place[0] += 20
 
         # left side for balance (could stay stationary)
         left_pick = sample_near_pixel(left_waist, cloth_mask, radius=2, on_mask=True)
         left_place = right_waist.copy()
-        left_place[1] -= 15
-        left_place[0] -= 15
+        left_place[1] -= horizontal_offset
+        left_place[0] -= 20
 
         H, W = cloth_mask.shape
         action = {
@@ -81,17 +103,40 @@ class WaistLegFoldingStochasticPolicy(Agent):
         centre_waist = get_pixel("centre_waistband", semkey2pid, keypids, key_pixels)
 
         # pick near bottom hems
-        left_pick = sample_near_pixel(left_waist, cloth_mask, radius=2, on_mask=True)
+        left_pick = sample_near_pixel(right_waist, cloth_mask, radius=2, on_mask=True)
         right_pick = sample_near_pixel(centre_waist, cloth_mask, radius=2, on_mask=True)
 
 
         left_place = sample_near_pixel(left_hem, cloth_mask, radius=2, on_mask=True)
         right_place = sample_near_pixel(right_hem, cloth_mask, radius=2, on_mask=True)
 
-        left_place[0] -= 15
+        ys, xs = np.where(cloth_mask > 0)  # coordinates of True (or nonzero) pixels
+
+        if len(xs) == 0 or len(ys) == 0:
+            # Empty mask fallback
+            cloth_height, cloth_width = 0, 0
+        else:
+            y_min, y_max = ys.min(), ys.max()
+            x_min, x_max = xs.min(), xs.max()
+            cloth_height = y_max - y_min + 1
+            cloth_width = x_max - x_min + 1
+        
+        #print('cloth_height', cloth_height, 'cloth width', cloth_width)
+        
+        base_offset = 15
+        base_heigth = 190
+        alpha = 5.0  
+
+        vertical_offset = int(base_offset * (base_heigth / cloth_height) ** alpha)
+
+        #print('offset', vertical_offset)
+
+
+        left_place[0] -= vertical_offset
         left_place[1] += 15
-        right_place[0] -= 15
-        right_place[1] -= 10
+        
+        right_place[0] -= vertical_offset
+        right_place[1] -= 15
 
         H, W = cloth_mask.shape
         action = {

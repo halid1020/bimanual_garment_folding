@@ -1,0 +1,8 @@
+defaults:
+  - agent: diffusion_multi_trousers_folding_v1
+  - arena: multi_trousers_from_flattened
+  - task: waist_leg_alignment_folding
+  - data_augmenter: pixel-based-fold-data-augmenter
+
+exp_name: diffusion_multi_trousers_folding_v1
+save_root: /data/hcv530/garment_folding

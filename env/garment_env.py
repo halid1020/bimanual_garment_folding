@@ -106,7 +106,11 @@ class GarmentEnv(Arena):
 
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
-        self.default_config = get_default_config()
+        self.default_config = get_default_config(
+            particle_radius = 0.01,
+            cloth_stiffness = (0.75, .02, .02),
+            scale=0.8,
+        )
 
     def set_task(self, task):
         self.task = task

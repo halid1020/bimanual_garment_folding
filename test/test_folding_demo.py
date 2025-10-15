@@ -11,13 +11,11 @@ from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy import WaistLegFoldingStochasticPolicy
 
-import cv2
-
 def main():
+
     task = 'waist-leg-alignment-folding'
     garment_type = 'trousers'
-    mode = 'train'
-    reverse_trav = False
+    mode = 'eval'
 
     arena_config = {
         'garment_type': garment_type,
@@ -29,12 +27,13 @@ def main():
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
-        'disp': False,
+        'disp': True,
         'ray_id': 0,
         'horizon': 2,
         'track_semkey_on_frames': False,
         'readjust_pick': False,
-        'grasp_mode': {'around': 1.0}
+        'grasp_mode': {'around': 1.0},
+        'init_mode': 'flattened'
     }
     
     if task == 'centre-sleeve-fodling':
@@ -45,9 +44,9 @@ def main():
         raise NotImplementedError
     
     task_config = {
-        'num_goals': 10,
+        'num_goals': 1,
         'demonstrator': demonstrator,
-        'object': garment_type,
+        'garment_type': garment_type,
         'asset_dir': 'assets',
         'task_name': task,
         'debug': False,
@@ -73,12 +72,19 @@ def main():
         trials_configs = arena.get_eval_configs()
         arena.set_eval()
 
-    if reverse_trav:
-        trials_configs = reversed(trials_configs)
+    agent = arena.task.demonstrator
 
-    for cfg in trials_configs[35:]:
-        #print('cfg', cfg)
-        arena.reset(cfg)
+    for cfg in trials_configs[7:10]:
+        agent.reset([arena.id])
+        info = arena.reset(cfg)
+        print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+        print(f"\nstep {arena.action_step} reward {info['reward']}")
+        while not info['done']:
+            action = agent.single_act(info)
+            info = arena.step(action)
+            print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
+            print(f"\nstep {arena.action_step} reward {info['reward']}")
+    
 
 if __name__ == '__main__':
     main()

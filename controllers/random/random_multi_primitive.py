@@ -34,21 +34,21 @@ class RandomMultiPrimitive(Agent):
     def update(self, infos, actions):
         pass
 
-    def act(self, info_list, update=False):
-        """
-        Pop up a window shows the RGB image, and user can click on the image to
-        produce normalised pick-and-place action ranges from [-1, 1]
-        """
-        actions = []
-        for info in info_list:
-            actions.append(self.single_act(info))
+    # def act(self, info_list, updates=[]):
+    #     """
+    #     Pop up a window shows the RGB image, and user can click on the image to
+    #     produce normalised pick-and-place action ranges from [-1, 1]
+    #     """
+    #     actions = []
+    #     for info in info_list:
+    #         actions.append(self.single_act(info))
         
-        print('random action', actions[0])
+    #     print('random action', actions[0])
         
-        return actions
+    #     return actions
     
 
-    def single_act(self, state):
+    def single_act(self, state, update=False):
         """
         Allow user to choose a primitive, then delegate to the chosen primitive's act method.
         Shows rgb and goal_rgb images while prompting for input.

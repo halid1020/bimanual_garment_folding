@@ -402,11 +402,11 @@ class PixelBasedFoldDataAugmenter:
             
         if 'depth' in res:
             
-            if self.config.z_norm:
+            if 'z_norm' in self.config.keys():
                 res['depth'] = res['depth'] * self.config.z_norm_std + \
                       self.config.z_norm_mean
             
-            if self.config.min_max_norm:
+            if 'min_max_norm' in self.config.keys():
                 res['depth'] = \
                     res['depth'] * (self.config.depth_max - self.config.depth_min) \
                     + self.config.depth_min

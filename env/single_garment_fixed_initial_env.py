@@ -24,7 +24,7 @@ ENV_NUM = 0
 class SingleGarmentFixedInitialEnv(GarmentEnv):
     
     def __init__(self, config):
-        #config.name = f'single-garment-fixed-init-env'
+        config.name = f'single-garment-fixed-init-env-{config.garment_type}'
         super().__init__(config)
         #self.name =f'single-garment-fixed-init-env'
 
@@ -84,6 +84,7 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
         if self.init_mode == 'flattened':
             self.set_to_flatten()
         
+        self.overstretch = 0
         self.info = self._process_info({})
         self.clear_frames()
 

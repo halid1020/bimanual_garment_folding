@@ -4,22 +4,29 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
+from statistics import mean
 
-from agent_arena import Task
 from agent_arena import save_video
 from .utils import get_max_IoU
 from .folding_rewards import *
+from .garment_task import GarmentTask
 
-class GarmentFlatteningTask(Task):
+class GarmentFlatteningTask(GarmentTask):
     def __init__(self, config):
+        super().__init__(config)
         self.goals = []
         self.config = config
         self.name = 'garment-flattening'
+        self.semkey2pid = None 
     
     def reset(self, arena):
         #self.cur_coverage = self._get_normalised_coverage(arena)
         #info = self._process_info(arena)
+        self.semkey2pid = self._load_or_create_keypoints(arena)
         self.goals = [arena.flattened_obs]
+        self.ncs = []
+        self.nis = []
+        self.ious = []
         #self._save_goal(arena)
         return {"goals": self.goals}
 
@@ -33,16 +40,47 @@ class GarmentFlatteningTask(Task):
         reward = coverage_alignment_reward(last_info, action, info)
         if info['success']:
             reward = info['arena'].horizon - info['observation']['action_step']
+        
+        reward_ = reward
+        
+        if info['evaluation']['normalised_coverage'] > 0.7:
+            reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
+
+        threshold =  self.config.get('overstretch_penality_threshold', 0)
+        if info['overstretch'] > threshold:
+           
+            reward_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+    
+
         return {
-            'coverage_alignment': reward
+            'coverage_alignment': reward,
+            'coverage_alignment_with_strech_penality_high_coverage_bonus': reward_
         }
     
     def evaluate(self, arena):
-        return {
+        eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'normalised_improvement': self._get_normalised_impovement(arena),
+            'overstretch': arena.overstretch
         }
+
+        if arena.action_step == len(self.ncs):
+            self.ncs.append(eval_dict['normalised_coverage'])
+            self.nis.append(eval_dict['normalised_improvement'])
+            self.ious.append(eval_dict['max_IoU_to_flattened'])
+
+        if arena.action_step < len(self.ncs):
+            self.ncs[arena.action_step] = eval_dict['normalised_coverage']
+            self.nis[arena.action_step] = eval_dict['normalised_improvement']
+            self.ious[arena.action_step] = eval_dict['max_IoU_to_flattened']
+        
+        eval_dict.update({
+            'maximum_trj_max_IoU_to_flattened': max(self.ious),
+            'maximum_trj_normalised_coverage': max(self.ncs),
+            'maximum_trj_normalised_improvement': max(self.nis),
+        })
+        return eval_dict
 
     def _get_normalised_coverage(self, arena):
         res = arena._get_coverage() / arena.flatten_coverage
@@ -67,3 +105,35 @@ class GarmentFlatteningTask(Task):
         IoU = cur_eval['max_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
         return IoU > 0.85 and coverage > 0.99
+    
+    def compare(self, results_1, results_2):
+        threshold=0.95
+
+        # --- Compute averages for results_1 ---
+        avg_nc_1 = mean([ep["normalised_coverage"][-1] for ep in results_1])
+        avg_iou_1 = mean([ep["max_IoU_to_flattened"][-1] for ep in results_1])
+        avg_len_1 = mean([len(ep["max_IoU_to_flattened"]) for ep in results_1])
+        score_1 = avg_nc_1 + avg_iou_1
+
+        # --- Compute averages for results_2 ---
+        avg_nc_2 = mean([ep["normalised_coverage"][-1] for ep in results_2])
+        avg_iou_2 = mean([ep["max_IoU_to_flattened"][-1] for ep in results_2])
+        avg_len_2 = mean([len(ep["max_IoU_to_flattened"]) for ep in results_2])
+        score_2 = avg_nc_2 + avg_iou_2
+
+        # --- Both are very good → prefer shorter trajectory ---
+        if score_1 > 2 * threshold and score_2 > 2 * threshold:
+            if avg_len_1 < avg_len_2:
+                return 1
+            elif avg_len_1 > avg_len_2:
+                return -1
+            else:
+                return 0
+
+        # --- Otherwise prefer higher score ---
+        if score_1 > score_2:
+            return 1
+        elif score_1 < score_2:
+            return -1
+        else:
+            return 0

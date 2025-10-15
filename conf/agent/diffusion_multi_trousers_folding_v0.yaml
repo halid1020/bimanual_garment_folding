@@ -1,0 +1,67 @@
+name: diffusion_policy
+oracle: False # TODO: fix this, I need to add this because of build_agent function
+obs_dim: 512
+action_dim: 8
+obs_horizon: 1
+pred_horizon: 1
+num_diffusion_iters: 100
+action_horizon: 1
+input_obs: 'depth'
+use_mask: True
+eval_action_sampler: 'normal'
+include_state: False
+num_demos: 100
+batch_size: 64
+disable_updown: True
+add_all_demos: True
+action_shape: [8]
+debug: False
+data_obs: 'image'
+data_state: 'agent_pos'
+data_action: 'action'
+train_mode: 'from_policy'
+demo_policy: "wasit_leg_alignment_folding_stochastic_policy"
+validation_interval: 1000
+total_update_steps: 100000
+eval_checkpoint: -1
+
+logger_name: 'pick_and_place_fabric_single_task_logger' ## TODO: change it to wandb logger
+
+
+dataset_mode: "general"
+dataset_config:
+  data_path: "multi_trousers_folding_from_flattened_100"
+  data_dir: "./data/datasets"
+  seq_length: 1
+  io_mode: "w"
+  obs_config:
+    mask: 
+      shape: [128, 128, 1]
+      output_key: 'mask'
+    
+    depth: 
+      shape: [128, 128, 1]
+      output_key: 'depth'
+    
+    rgb: 
+      shape: [128, 128, 3]
+      output_key: 'rgb'
+
+  act_config:
+    norm-pixel-fold: 
+      shape: [8]
+      output_key: 'default'
+
+action_output:
+  norm-pixel-fold:
+    pick_0: [0, 1]
+    place_0: [2, 3]
+    pick_1: [4, 5]
+    place_1: [6, 7]
+    
+action_save:
+  norm-pixel-fold:
+    pick_0: [0, 1]
+    place_0: [2, 3]
+    pick_1: [4, 5]
+    place_1: [6, 7]

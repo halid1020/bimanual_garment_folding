@@ -4,15 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
+from statistics import median
 
 from scipy.spatial.distance import cdist
 from agent_arena import Task
 from agent_arena import save_video
-from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
-    simple_rigid_align, chamfer_alignment_with_rotation
-from ..utils.keypoint_gui import KeypointGUI
+from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
+
 from .utils import get_max_IoU
 from .folding_rewards import *
+from .garment_task import GarmentTask
+from ..utils.garment_utils import simple_rigid_align
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
@@ -54,23 +56,17 @@ def load_point_cloud_ply(path):
     return np.array(points)
 
 
-class GarmentFoldingTask(Task):
+class GarmentFoldingTask(GarmentTask):
     def __init__(self, config):
+        super().__init__(config)
         self.num_goals = config.num_goals
         self.name = config.task_name
-        self.asset_dir = config.asset_dir
+
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
-        
-        self.keypoint_semantics = KEYPOINT_SEMANTICS[config.object]
-
-        self.semkey2pid = None # This needs to be loaded or annotated
         self.goals = [] # This needs to be loaded  or generated
 
-        self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
-        self.keypoint_dir = os.path.join(self.asset_dir, 'keypoints')
-        os.makedirs(self.keypoint_dir, exist_ok=True)
-        self.name
+        
         
 
     def reset(self, arena):
@@ -110,7 +106,12 @@ class GarmentFoldingTask(Task):
             frames = arena.get_frames()
             if len(frames) > 0:
                 save_video(np.stack(arena.get_frames()), 'tmp', 'demo_videos')
-        
+                sg(
+                    np.stack(arena.get_frames()), 
+                    path='tmp',
+                    filename="demo_videos"
+                )
+            
         arena.set_particle_positions(particle_pos)
 
         return info
@@ -149,79 +150,79 @@ class GarmentFoldingTask(Task):
         return goals
 
 
-    def _load_or_create_keypoints(self, arena):
-        """Load semantic keypoints if they exist, otherwise ask user to assign them."""
+    # def _load_or_create_keypoints(self, arena):
+    #     """Load semantic keypoints if they exist, otherwise ask user to assign them."""
 
-        mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
-        keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
+    #     mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
+    #     keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
 
-        if os.path.exists(keypoint_file):
-            with open(keypoint_file, "r") as f:
-                keypoints = json.load(f)
-            if self.config.debug:
-                print("annotated keypoint ids", keypoints)
-            return keypoints
+    #     if os.path.exists(keypoint_file):
+    #         with open(keypoint_file, "r") as f:
+    #             keypoints = json.load(f)
+    #         if self.config.debug:
+    #             print("annotated keypoint ids", keypoints)
+    #         return keypoints
 
-        # Get flattened garment observation
-        flatten_obs = arena.get_flattened_obs()
-        flatten_rgb = flatten_obs['observation']["rgb"]
-        particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
+    #     # Get flattened garment observation
+    #     flatten_obs = arena.get_flattened_obs()
+    #     flatten_rgb = flatten_obs['observation']["rgb"]
+    #     particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
 
-        # Ask user to click semantic keypoints
-        keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
+    #     # Ask user to click semantic keypoints
+    #     keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
         
-        # Project all garment particles
-        pixels, visible = arena.get_visibility(particle_positions)
+    #     # Project all garment particles
+    #     pixels, visible = arena.get_visibility(particle_positions)
         
-        if self.config.debug:
-            H, W = (480, 480)
+    #     if self.config.debug:
+    #         H, W = (480, 480)
 
 
-            print('annotated keypoints', keypoints_pixel)
+    #         print('annotated keypoints', keypoints_pixel)
 
-            # Make sure tmp folder exists
-            os.makedirs("tmp", exist_ok=True)
+    #         # Make sure tmp folder exists
+    #         os.makedirs("tmp", exist_ok=True)
 
-            # Start with black canvases
-            non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
-            visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+    #         # Start with black canvases
+    #         non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
+    #         visible_img = np.zeros((H, W, 3), dtype=np.uint8)
 
-            for pix, vis in zip(pixels, visible):
-                x, y = pix  # assuming pix = (x, y)
-                x = int(x)
-                y = int(y)
-                if not vis:
-                    # non-visible -> gray pixel
-                    non_visible_img[x, y] = (128, 128, 128)
-                else:
-                    # visible -> white pixel
-                    visible_img[x, y] = (255, 255, 255)
+    #         for pix, vis in zip(pixels, visible):
+    #             x, y = pix  # assuming pix = (x, y)
+    #             x = int(x)
+    #             y = int(y)
+    #             if not vis:
+    #                 # non-visible -> gray pixel
+    #                 non_visible_img[x, y] = (128, 128, 128)
+    #             else:
+    #                 # visible -> white pixel
+    #                 visible_img[x, y] = (255, 255, 255)
 
-            # Save both images
-            cv2.imwrite("tmp/non-visible.png", non_visible_img)
-            cv2.imwrite("tmp/visible.png", visible_img)
+    #         # Save both images
+    #         cv2.imwrite("tmp/non-visible.png", non_visible_img)
+    #         cv2.imwrite("tmp/visible.png", visible_img)
 
 
-        keypoints = {}
-        for name, pix in keypoints_pixel.items():
-            y, x = pix
-            dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
-            particle_id = np.argmin(dists)
-            keypoints[name] = int(particle_id)
+    #     keypoints = {}
+    #     for name, pix in keypoints_pixel.items():
+    #         y, x = pix
+    #         dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
+    #         particle_id = np.argmin(dists)
+    #         keypoints[name] = int(particle_id)
         
-        if self.config.debug:
-            annotated = np.zeros((H, W, 3), dtype=np.uint8)
-            for pid in keypoints.values():
-                x, y = pixels[pid]
-                x = int(x)
-                y = int(y)
-                annotated[x, y] = (255, 255, 255)
-            cv2.imwrite("tmp/annotated.png", annotated)
+    #     if self.config.debug:
+    #         annotated = np.zeros((H, W, 3), dtype=np.uint8)
+    #         for pid in keypoints.values():
+    #             x, y = pixels[pid]
+    #             x = int(x)
+    #             y = int(y)
+    #             annotated[x, y] = (255, 255, 255)
+    #         cv2.imwrite("tmp/annotated.png", annotated)
 
 
-        with open(keypoint_file, "w") as f:
-            json.dump(keypoints, f, indent=2)
-        return keypoints
+    #     with open(keypoint_file, "w") as f:
+    #         json.dump(keypoints, f, indent=2)
+    #     return keypoints
 
 
     def evaluate(self, arena):
@@ -241,8 +242,8 @@ class GarmentFoldingTask(Task):
             particle_distances.append(mdp)
             key_distances.append(kdp)
        
-        mean_particle_distance = min(particle_distances)
-        key_particle_distance = min(key_distances)
+        mean_particle_distance = median(particle_distances)
+        key_particle_distance = median(key_distances)
         #print('MPD', mean_particle_distance)
 
         #semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
@@ -267,10 +268,6 @@ class GarmentFoldingTask(Task):
             # Center both sets
             aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
             #return aligned, goal_centered
-        elif self.config.alignment == 'complex_rigid':
-            aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
-        elif self.config.alignment == 'deform':
-            aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
         else:
             raise NotImplementedError
         
@@ -302,14 +299,14 @@ class GarmentFoldingTask(Task):
         if self.config.debug:
             save_point_cloud_ply(os.path.join('tmp', f"cur_particles_step_{arena.action_step}.ply"), cur)
             save_point_cloud_ply(os.path.join('tmp', "goal_particles.ply"), goal)
-            for align_type in ['simple_rigid', 'complex_rigid', 'deform', 'chamfer_rotation']:
+            for align_type in ['simple_rigid']:
                 if align_type == 'simple_rigid':
                     aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
-                elif align_type == 'complex_rigid':
-                    #print('Cloth Area', arena.get_cloth_area())
-                    aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
-                elif align_type == 'deform':
-                    aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
+                # elif align_type == 'complex_rigid':
+                #     #print('Cloth Area', arena.get_cloth_area())
+                #     aligned_curr, aligned_goal = rigid_align(cur, goal, arena.get_cloth_area())
+                # elif align_type == 'deform':
+                #     aligned_curr, aligned_goal = deformable_align(cur, goal, arena.get_cloth_area())
                 # elif align_type == 'chamfer_rotation':
                 #     aligned_curr, aligned_goal = chamfer_alignment_with_rotation(cur, goal)
                 mdp_ = np.mean(np.linalg.norm(aligned_curr - aligned_goal, axis=1))

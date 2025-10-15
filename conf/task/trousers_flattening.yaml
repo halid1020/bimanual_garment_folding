@@ -1,5 +1,5 @@
-num_goals: 10
-object: longsleeve
+num_goals: 1
+garment_type: trousers
 asset_dir: assets
 task_name: flattening
 debug: false

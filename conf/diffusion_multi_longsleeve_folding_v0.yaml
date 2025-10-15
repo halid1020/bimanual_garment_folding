@@ -4,5 +4,5 @@ defaults:
   - task: centre_sleeve_folding
   - data_augmenter: pixel-based-fold-data-augmenter
 
-exp_name: diffusion_single_garment_flattening_v0
+exp_name: diffusion_multi_garment_flattening_v0
 save_root: /data/hcv530/garment_folding

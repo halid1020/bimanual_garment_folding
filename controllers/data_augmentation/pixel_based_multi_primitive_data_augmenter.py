@@ -24,7 +24,7 @@ def add_noise(rgb, noise_factor=0.0, ):
     
     return rgb
 
-class PixelBasedPrimitiveDataAugmenter:
+class PixelBasedMultiPrimitiveDataAugmenter:
     ## Only for training
     def __init__(self,  config=None):
         self.config = config

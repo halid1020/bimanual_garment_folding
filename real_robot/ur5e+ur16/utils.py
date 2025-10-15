@@ -434,10 +434,6 @@ def load_camera_to_base(yaml_path):
 
 
 def click_points_pick_and_place(window_name, img):
-    """
-    Display image and collect two clicks (pick, place).
-    Returns pixel coordinates as (u,v) tuples: (pick_uv, place_uv)
-    """
     clicks = []
     clone = img.copy()
 
@@ -462,6 +458,30 @@ def click_points_pick_and_place(window_name, img):
         raise RuntimeError("Four points not selected")
     return clicks[0], clicks[1], clicks[2], clicks[3]
 
+def click_points_pick_and_fling(window_name, img):
+    clicks = []
+    clone = img.copy()
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            clicks.append((int(x), int(y)))
+            cv2.circle(clone, (int(x), int(y)), 5, (0,255,0), -1)
+            cv2.imshow(window_name, clone)
+
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720) 
+    cv2.imshow(window_name, clone)
+    cv2.setMouseCallback(window_name, mouse_cb)
+
+    print("Please click PICK point then PLACE point on the image window.")
+    while len(clicks) < 2:
+        if cv2.waitKey(20) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyWindow(window_name)
+    if len(clicks) < 4:
+        raise RuntimeError("Four points not selected")
+    return clicks[0], clicks[1]
 
 def pos_rot_to_mat(pos, rot):
     shape = pos.shape[:-1]

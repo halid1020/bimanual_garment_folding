@@ -31,7 +31,7 @@ class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
-
+        self.overstretch = 0
         dict_action = {
             'norm-pixel-fold': {
                 'pick_0': action[:2],

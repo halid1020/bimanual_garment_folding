@@ -260,6 +260,7 @@ class GarmentEnv(Arena):
         
         self.action_step += 1
         self.info = self._process_info(info)
+        
         #print('reward', info['reward'])
         return self.info
     

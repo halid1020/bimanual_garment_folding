@@ -119,6 +119,7 @@ class MultiGarmentEnv(GarmentEnv):
         
         self.last_info = None
         self.sim_step = 0
+        self.overstretch = 0
         self.info = self._process_info({})
         self.clear_frames()
 

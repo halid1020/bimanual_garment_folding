@@ -62,7 +62,7 @@ class GarmentFlatteningTask(GarmentTask):
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'normalised_improvement': self._get_normalised_impovement(arena),
-            'overstretch': self.arena.overstrech
+            'overstretch': arena.overstretch
         }
 
         if arena.action_step == len(self.ncs):

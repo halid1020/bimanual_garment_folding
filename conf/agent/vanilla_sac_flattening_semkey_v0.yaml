@@ -1,5 +1,5 @@
 name: vanilla-sac
-device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
+device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
 
 
 obs_keys: ['semkey_pos']

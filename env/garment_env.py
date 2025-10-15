@@ -4,13 +4,14 @@ import numpy as np
 import cv2
 import json
 
-from softgym.action_space.action_space import Picker
+
 from softgym.utils.env_utils import get_coverage
 import pyflex
 from agent_arena import Arena
 from tqdm import tqdm
+from scipy.spatial.distance import cdist
 
-
+from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
@@ -75,6 +76,8 @@ class GarmentEnv(Arena):
         self.action_step = 0
         self.last_info = None
         self.horizon = self.config.horizon
+
+        self.overstretch = 0
     
 
     def _setup_camera(self):
@@ -103,7 +106,11 @@ class GarmentEnv(Arena):
 
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
-        self.default_config = get_default_config()
+        self.default_config = get_default_config(
+            particle_radius = 0.01,
+            cloth_stiffness = (0.75, .02, .02),
+            scale=0.8,
+        )
 
     def set_task(self, task):
         self.task = task
@@ -200,12 +207,14 @@ class GarmentEnv(Arena):
     def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
            
-            'observation': self._get_obs(),
+            'observation': self._get_obs(flatten_obs),
             
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
+            'overstretch': self.overstretch
         })
+        #print('over strech!!!', self.over_strech)
 
         if flatten_obs:
             info['flattened_obs'] = self.get_flattened_obs()
@@ -249,9 +258,14 @@ class GarmentEnv(Arena):
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
+        #print('action step', self.action_step)
+        self.overstretch = 0
         info = self.action_tool.step(self, action)
+        
         self.action_step += 1
         self.info = self._process_info(info)
+        
+        #print('reward', info['reward'])
         return self.info
     
 
@@ -263,10 +277,23 @@ class GarmentEnv(Arena):
     
     def get_frames(self):
         return self.video_frames.copy()
+    
+    def _get_particle_distance_matrix(self):
+        mesh_particles = self.get_mesh_particles_positions()
+        # Only use xyz coordinates (ignore mass or extra channels if present)
+        #positions = mesh_particles[:, :3]
+
+        # Compute pairwise Euclidean distances
+        self.particle_dist_matrix = cdist(mesh_particles, mesh_particles)
+
+        #return self.particle_dist_matrix
 
     def set_to_flatten(self, re_process_info=False):
         pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
         self.wait_until_stable()
+
+        self._get_particle_distance_matrix()
+
         self.info = self._process_info({}, task_related=False, flatten_obs=False)
         if re_process_info:
             self.info = self._process_info({}, task_related=True, flatten_obs=False)
@@ -332,7 +359,7 @@ class GarmentEnv(Arena):
     def control_picker(self, signal, process_info=True):
         
         signal = signal[:, [0, 2, 1, 3]]
-        self.pickers.step(signal)
+        self.pickers.step(signal, self)
         self._step_sim()
         
         info = {}
@@ -348,12 +375,12 @@ class GarmentEnv(Arena):
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
         wait_steps = self._wait_to_stabalise(max_wait_step=max_wait_step, stable_vel_threshold=stable_vel_threshold)
         # print('wait steps', wait_steps)
-        obs = self._get_obs()
-        return {
-            'observation': obs,
-            'done': False,
-            'wait_steps': wait_steps
-        }
+        # obs = self._get_obs()
+        # return {
+        #     'observation': obs,
+        #     'done': False,
+        #     'wait_steps': wait_steps
+        # }
     
     ## Helper Functions
     def _wait_to_stabalise(self, max_wait_step=300, stable_vel_threshold=0.0006,
@@ -450,7 +477,7 @@ class GarmentEnv(Arena):
                 debug_frame = rgb.copy()
                 for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
                     color = tuple(map(int, color))  # ensure int
-                    
+                    #print('v, u, name', v, u, name)
                     cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
                     cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
@@ -510,7 +537,7 @@ class GarmentEnv(Arena):
 
         return img
     
-    def _get_obs(self):
+    def _get_obs(self, flatten_obs=True):
         obs = {}
         # print('get obs here')
         rgbd = self._render(mode='rgbd')
@@ -519,8 +546,24 @@ class GarmentEnv(Arena):
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
-        if 'folding' in self.task.name:
-            obs['semkey2pid'] = self.task.semkey2pid
+        obs['semkey2pid'] = self.task.semkey2pid
+        
+        if flatten_obs and self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
+            semkey_positions = []
+            for key in obs['semkey2pid'].keys():
+                pid = obs['semkey2pid'][key]
+                pos = obs['particle_positions'][pid]
+                semkey_positions.append(pos)
+            obs['semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
+        
+        if flatten_obs and self.config.get("provide_flattened_semkey_pos", False) and obs['semkey2pid']:
+            semkey_positions = []
+            for key in obs['semkey2pid'].keys():
+                pid = obs['semkey2pid'][key]
+                pos = self.flattened_obs['observation']['particle_positions'][pid]
+                semkey_positions.append(pos)
+            obs['flattened_semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
+
         obs['action_step'] = self.action_step
 
         return obs
@@ -649,3 +692,6 @@ class GarmentEnv(Arena):
     
     def get_cloth_area(self):
         return self.episode_params['cloth_height'] * self.episode_params['cloth_width']
+
+    def compare(self, results_1, results_2):
+        return self.task.compare(results_1, results_2)

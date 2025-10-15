@@ -2,18 +2,19 @@ import torch
 import numpy as np
 
 class ReplayBuffer:
-    def __init__(self, capacity, image_shape, max_action_dim, device):
+    def __init__(self, capacity, obs_shape, max_action_dim, device):
         self.capacity = int(capacity)
-        C, H, W = image_shape
         self.device = device
 
         self.ptr = 0
         self.size = 0
+        #print('obs shape', obs_shape)
 
-        self.observation = np.zeros((self.capacity, C, H, W), dtype=np.float32)
+        # Support any observation shape (e.g., images, vectors, etc.)
+        self.observation = np.zeros((self.capacity, *obs_shape), dtype=np.float32)
         self.actions = np.zeros((self.capacity, max_action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.capacity,), dtype=np.float32)
-        self.next_observation = np.zeros((self.capacity, C, H, W), dtype=np.float32)
+        self.next_observation = np.zeros((self.capacity, *obs_shape), dtype=np.float32)
         self.dones = np.zeros((self.capacity,), dtype=np.float32)
 
     def add(self, observation, action, reward, next_observation, done):
@@ -36,5 +37,3 @@ class ReplayBuffer:
             done=torch.tensor(self.dones[idxs]).unsqueeze(-1).to(self.device),
         )
         return batch
-    
-    # TODO: add data augmentation.

@@ -15,13 +15,13 @@ from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
-from .single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
+from .multi_garment_env import MultiGarmentEnv
 
 global ENV_NUM
 ENV_NUM = 0
 
 # @ray.remote
-class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
+class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
     
     def __init__(self, config):
         #config.name = f'single-garment-fixed-init-env'
@@ -32,7 +32,6 @@ class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
         self.last_info = self.info
         self.evaluate_result = None
         self.overstretch = 0
-
         dict_action = {
             'norm-pixel-fold': {
                 'pick_0': action[:2],

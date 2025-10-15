@@ -21,8 +21,11 @@ class HybridActionPrimitive():
         self.np_pnp = PixelPickAndPlace(**kwargs)
         self.np_pnf = PixelPickAndFling(**kwargs)
         self.np_pnd = PixelPickAndDrag(**kwargs)
-        kwargs['pregrasp_height'] = 0.25 # only difference from Pick and Place so far
-        kwargs['place_height'] = 0.15
+        kwargs['pregrasp_height'] = 0.2 # only difference from Pick and Place so far
+        kwargs['post_pick_height'] = 0.2
+        kwargs['pre_place_height'] = 0.15
+        kwargs['place_height'] = 0.04
+        kwargs['lift_vel'] = 0.01
         self.np_fold = PixelPickAndPlace(**kwargs)
         #self.env = env
 

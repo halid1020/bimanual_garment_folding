@@ -11,36 +11,46 @@ from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy import WaistLegFoldingStochasticPolicy
+
 
 def main():
 
+    task = 'waist-leg-alignment-folding'
+    garment_type = 'trousers'
+
     arena_config = {
-        'object': 'longsleeve',
+        'garment_type': garment_type,
         'picker_radius': 0.03, #0.015,
         # 'particle_radius': 0.00625,
-        'picker_threshold': 0.007, # 0.05,
+        'picker_threshold': 0.001, # 0.05,
         'picker_low': (-5, 0, -5),
         'picker_high': (5, 5, 5),
-        'grasp_mode': {'closest': 1.0},
         "picker_initial_pos": [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]],
         'init_state_path': os.path.join('assets', 'init_states'),
         #'task': 'centre-sleeve-folding',
         'disp': True,
         'ray_id': 0,
         'horizon': 2,
-        'track_semkey_on_frames': True,
+        'track_semkey_on_frames': False,
         'readjust_pick': True,
+        'grasp_mode': {'around': 1.0}
     }
     
-    demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
+    if task == 'centre-sleeve-fodling':
+        demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
+    elif task == 'waist-leg-alignment-folding':
+        demonstrator = WaistLegFoldingStochasticPolicy(DotMap({'debug': True}))
+    else:
+        raise NotImplementedError
     
     task_config = {
         'num_goals': 10,
         'demonstrator': demonstrator,
-        'object': 'longsleeve',
+        'object': garment_type,
         'asset_dir': 'assets',
-        'task_name': 'centre-sleeve-folding', # TODO: indicate what kinds of folding,
-        'debug': True,
+        'task_name': task,
+        'debug': False,
         'alignment': 'simple_rigid'
     }
 

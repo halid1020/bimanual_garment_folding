@@ -1,8 +1,8 @@
 defaults:
-  - agent: test_vanilla_sac
+  - agent: test_vanilla_image_sac
   - arena: single_longsleeve_vectorised_fold_readjust_pick
   - task: flattening
-  - data_augmenter: identity
+  - data_augmenter: pixel_based_single_primitive_augmenter
 
-exp_name: test_vanilla_sac
+exp_name: test_vanilla_image_sac
 save_root: /data/hcv530/garment_folding

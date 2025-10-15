@@ -24,15 +24,15 @@ KEYPOINT_SEMANTICS = {
         'centre_hem'
     ],
 
-    'pants': [
+    'trousers': [
         'left_waistband',
-        'left_waistband_centre',
-        'right_waistband_centre',
+        'centre_waistband',
         'right_waistband',
-        'left_hem',
-        'left_hem_centre',
-        'right_hem_centre',
-        'right_hem'
+        'centre',
+        'left_hem_left',
+        'left_hem_right',
+        'right_hem_left',
+        'right_hem_right',
     ]
 }
 

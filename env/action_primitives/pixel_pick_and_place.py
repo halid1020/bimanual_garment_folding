@@ -11,6 +11,8 @@ class PixelPickAndPlace():
     def __init__(self, 
                  action_horizon=20,
                  pick_height=0.025,
+                 post_pick_height=0.05,
+                 pre_place_height=0.06,
                  place_height=0.06,
                  pick_lower_bound=[-1, -1],
                  pick_upper_bound=[1, 1],
@@ -61,7 +63,9 @@ class PixelPickAndPlace():
         #self.logger_name = 'standard_logger' #'pick_and_place_fabric_single_task_logger'
         self.single_operator = single_operator
         self.pregrasp_height = pregrasp_height
+        self.pre_place_height = pre_place_height
         self.pre_grasp_vel = pre_grasp_vel
+        self.post_pick_height = post_pick_height
         self.drag_vel = drag_vel
         self.lift_vel = lift_vel
         self.readjust_pick = readjust_pick
@@ -154,6 +158,8 @@ class PixelPickAndPlace():
             'drag_vel': self.drag_vel,
             'lift_vel': self.lift_vel,
             'pregrasp_height': self.pregrasp_height,
+            'pre_place_height': self.pre_place_height,
+            'post_pick_height': self.post_pick_height,
             'single_operator': action['single_operator']
         }
 

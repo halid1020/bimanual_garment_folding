@@ -1,0 +1,8 @@
+defaults:
+  - agent: vanilla_sac_multi_trousers_flattening_semkey_v0
+  - arena: multi_trousers_vectorised_fold_readjust_pick_provide_semkey_pos
+  - task: trousers_flattening
+  - data_augmenter: identity
+
+exp_name: vanilla_sac_multi_trousers_flattening_semkey_v0
+save_root: /data/hcv530/garment_folding

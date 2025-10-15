@@ -319,6 +319,11 @@ class VanillaSAC(TrainableAgent):
         self.logger.log(
             {'train/step_reward': reward}, step=self.act_steps
         )
+        evaluation = next_info.get('evaluation', {})
+        for k, v in evaluation.items():
+            self.logger.log({
+                f"train/{k}": v,
+            }, step=self.act_steps)
         done = next_info.get('done', False)
         self.info = next_info
         a = next_info['applied_action']

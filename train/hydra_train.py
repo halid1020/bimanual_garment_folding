@@ -51,6 +51,12 @@ def main(cfg: DictConfig):
         demonstrator = WaistLegFoldingStochasticPolicy({"debug": False})
         task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
         arena.set_task(task)
+    elif cfg.task.task_name == 'waist-hem-alignment-folding':
+        from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
+            import WaistHemAlignmentFoldingStochasticPolicy
+        demonstrator = WaistHemAlignmentFoldingStochasticPolicy({"debug": False})
+        task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
+        arena.set_task(task)
     elif cfg.task.task_name == 'flattening':
         task = GarmentFlatteningTask(cfg.task)
         arena.set_task(task)

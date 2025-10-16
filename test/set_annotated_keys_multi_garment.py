@@ -10,13 +10,14 @@ from env.multi_garment_env import MultiGarmentEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy import WaistLegFoldingStochasticPolicy
+from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy import WaistHemAlignmentFoldingStochasticPolicy
 
 import cv2
 
 def main():
-    task = 'waist-leg-alignment-folding'
-    garment_type = 'trousers'
-    mode = 'train'
+    task = 'waist-hem-alignment-folding'
+    garment_type = 'skirt'
+    mode = 'val'
     reverse_trav = False
 
     arena_config = {
@@ -41,13 +42,15 @@ def main():
         demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
     elif task == 'waist-leg-alignment-folding':
         demonstrator = WaistLegFoldingStochasticPolicy(DotMap({'debug': True}))
+    elif task == 'waist-hem-alignment-folding':
+        demonstrator = WaistHemAlignmentFoldingStochasticPolicy(DotMap({'debug': True}))
     else:
         raise NotImplementedError
     
     task_config = {
-        'num_goals': 10,
+        'num_goals': 0,
         'demonstrator': demonstrator,
-        'object': garment_type,
+        'garment_type': garment_type,
         'asset_dir': 'assets',
         'task_name': task,
         'debug': False,
@@ -76,8 +79,9 @@ def main():
     if reverse_trav:
         trials_configs = reversed(trials_configs)
 
-    for cfg in trials_configs[35:]:
+    for cfg in trials_configs:
         #print('cfg', cfg)
+        cfg['save_video'] = True
         arena.reset(cfg)
 
 if __name__ == '__main__':

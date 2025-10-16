@@ -33,6 +33,15 @@ KEYPOINT_SEMANTICS = {
         'left_hem_right',
         'right_hem_left',
         'right_hem_right',
+    ],
+    'skirt': [
+        'left_waistband',
+        'centre_waistband',
+        'right_waistband',
+        'centre',
+        'left_hem',
+        'right_hem',
+        'centre_hem'
     ]
 }
 

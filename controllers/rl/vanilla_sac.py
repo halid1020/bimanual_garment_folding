@@ -107,7 +107,7 @@ class VanillaSAC(TrainableAgent):
         # entropy temperature
         self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(0.1), requires_grad=True, device=self.device))
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.target_entropy = -float(self.action_dim)
+        self.target_entropy = -float(self.network_action_dim)
 
         # replay
         self._init_reply_buffer(config)
@@ -129,7 +129,7 @@ class VanillaSAC(TrainableAgent):
 
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
-        self.action_dim = int(config.action_dim)
+        self.network_action_dim = int(config.action_dim)
         self.actor = Actor(config.state_dim, config.action_dim, config.hidden_dim).to(self.device)
 
         self.critic = Critic(config.state_dim,  config.action_dim).to(config.device)
@@ -142,7 +142,7 @@ class VanillaSAC(TrainableAgent):
     
     def _init_reply_buffer(self, config):
         
-        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.action_dim, self.device)
+        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.network_action_dim, self.device)
 
 
     # ---------------------- utils ----------------------
@@ -332,8 +332,7 @@ class VanillaSAC(TrainableAgent):
         aid = arena.id
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
         obs_stack = self._process_context_for_replay(obs_list)
-         #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
-
+        
         # append next
         obs_list.append(self._process_obs_for_input(next_obs))
         next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])

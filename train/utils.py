@@ -14,6 +14,8 @@ from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
     import CentreSleeveFoldingStochasticPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
     import WaistLegFoldingStochasticPolicy
+from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
+    import WaistHemAlignmentFoldingStochasticPolicy
 
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 from controllers.rl.vanilla_sac import VanillaSAC
@@ -30,6 +32,7 @@ registered_arena = {
 def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
     ag_ar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
+    ag_ar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
     ag_ar.register_agent('image-based-multi-primitive-sac', ImageBasedMultiPrimitiveSAC)
     ag_ar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
     ag_ar.register_agent('vanilla-image-sac', VanillaImageSAC)

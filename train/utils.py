@@ -6,7 +6,10 @@ from env.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFol
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
 
-from controllers.rl.image_based_multi_primitive_sac import ImageBasedMultiPrimitiveSAC
+from controllers.rl.image_based_multi_primitive_sac \
+    import ImageBasedMultiPrimitiveSAC
+from controllers.rl.primitive_encoding_sac \
+    import PrimitiveEncodingSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
     import CentreSleeveFoldingStochasticPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
@@ -28,5 +31,6 @@ def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
     ag_ar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
     ag_ar.register_agent('image-based-multi-primitive-sac', ImageBasedMultiPrimitiveSAC)
+    ag_ar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
     ag_ar.register_agent('vanilla-image-sac', VanillaImageSAC)
     ag_ar.register_agent('vanilla-sac', VanillaSAC)

@@ -31,7 +31,7 @@ HOME_AFTER = True
 GRIPPER_OFFSET_UR5e = 0.012       # Gripper length offset
 GRIPPER_OFFSET_UR16e = 0
 TABLE_HEIGHT = 0.074
-FLING_LIFT_DIST = 0.4
+FLING_LIFT_DIST = 0.1
 
 class ThreadWithResult(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
@@ -165,9 +165,9 @@ class DualArm:
         return True
 
     def both_fling(self, ur5e_path, ur16e_path, speed, acceleration):
-        r = self.both_movel(ur5e_path[0], ur5e_path[0], speed=speed, acceleration=acceleration)
+        r = self.both_movel(ur5e_path[0], ur16e_path[0], speed=speed, acceleration=acceleration)
         if not r: return False
-        r = self.both_movel(ur16e_path[1:], ur16e_path[1:], speed=speed, acceleration=acceleration)
+        r = self.both_movel(ur5e_path[1:], ur16e_path[1:], speed=speed, acceleration=acceleration)
         return r
 
     
@@ -373,16 +373,19 @@ class DualArm:
         # Compose approach/grasp/lift poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_0 = p_base_pick_0
-        lift_after_0 = grasp_pick_0 + np.array([0.0, 0.0, FLING_LIFT_DIST])
+        lift_after_0 = grasp_pick_0.copy()
+        lift_after_0 [2] += FLING_LIFT_DIST
         
 
         approach_pick_1 = p_base_pick_1 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_1 = p_base_pick_1
-        lift_after_1 = grasp_pick_1 + np.array([0.0, 0.0, FLING_LIFT_DIST])
+        lift_after_1 = grasp_pick_1.copy()
+        lift_after_1 [2] += FLING_LIFT_DIST
         
 
         # Motion sequence
         print("Moving to home (safe start)")
+        self.both_open_gripper()
         self.both_home(speed=1.0, acceleration=0.8, blocking=True)
 
         # move to approach above picks (both arms)
@@ -393,6 +396,8 @@ class DualArm:
         )
 
         # descend to grasp poses
+        print('grasp_pick_0', grasp_pick_0)
+        print('grasp_pick_1', grasp_pick_1)
         self.both_movel(
             np.concatenate([grasp_pick_0, vertical_rotvec]),
             np.concatenate([grasp_pick_1, vertical_rotvec]),
@@ -411,8 +416,8 @@ class DualArm:
             np.concatenate([lift_after_1, vertical_rotvec]),
             speed=0.2, acceleration=0.1, blocking=True
         )
-
-        self.dual_arm_stretch_and_fling(p_base_pick_0, self.T_ur5e_ur16e@p_base_pick_1)
+        print('lift_pick_0', lift_after_0, 'lift_pick_1', lift_after_1, 'lift_pick_1_world', transform_point(self.T_ur5e_ur16e, lift_after_1))
+        self.dual_arm_stretch_and_fling(lift_after_0, transform_point(self.T_ur5e_ur16e, lift_after_1))
 
 
     def dual_arm_stretch_and_fling(self, 
@@ -422,16 +427,22 @@ class DualArm:
             stretch_max_speed=0.15,
             stretch_max_width=0.7, 
             stretch_max_time=5,
-            swing_stroke=0.6,
+            swing_stroke=0.4,
             swing_height=0.45,
             swing_angle=np.pi/4,
-            lift_height=0.4,
-            place_height=0.05,
-            fling_speed=1.3,
-            fling_acceleration=5
+            lift_height=0.3,
+            place_height= 0.15, #0.05,
+            fling_speed=1.0, #1.3,
+            fling_acceleration=3 #5
             ):
+        
+        width = self.get_tcp_distance()
+        print('Width before stretch: {}'.format(width))
+    
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
             ur5e_pick_point_world, ur16e_pick_point_world, max_width=stretch_max_width)
+        
+        print('ur5e_pose_world', ur5e_pose_world, 'ur16e_pose_world', ur16e_pose_world)
 
         # stretch
         r = self.dual_arm_stretch(ur5e_pose_world, ur16e_pose_world, 
@@ -444,18 +455,24 @@ class DualArm:
         print('Width: {}'.format(width))
         
         # fling
-        ur5e_path, ur16e_path = points_to_fling_path(
-            ur5e_point=ur5e_pick_point_world,
-            ur16e_point=ur16e_pick_point_world,
+        ur5e_path_world, ur16e_path_world = points_to_fling_path(
+            left_point=ur5e_pick_point_world,
+            right_point=ur16e_pick_point_world,
             width=width,
             swing_stroke=swing_stroke,
-            swing_height=swing_height,
+            #swing_height=swing_height,
             swing_angle=swing_angle,
             lift_height=lift_height,
             place_height=place_height
         )
-        return self.both_fling(ur5e_path, ur16e_path, 
+
+        print('ur5e_path_world', ur5e_path_world)
+        print('ur16e_path_world', ur16e_path_world)
+
+        self.both_fling(ur5e_path_world, transform_pose(np.linalg.inv(self.T_ur5e_ur16e), ur16e_path_world), 
             fling_speed, fling_acceleration)
+        
+        self.both_open_gripper()
 
     def dual_arm_stretch(self, 
         ur5e_pose_world, ur16e_pose_world,
@@ -466,7 +483,7 @@ class DualArm:
         """
         Assuming specific gripper and tcp orientation.
         """
-        r = self.both_movel(ur5e_pose_world, ur16e_pose_world, speed=max_speed)
+        r = self.both_movel(ur5e_pose_world, transform_pose(np.linalg.inv(self.T_ur5e_ur16e), ur16e_pose_world), speed=max_speed)
         if not r: return False
 
         ur5e_tcp_pose = self.ur5e.get_tcp_pose()
@@ -481,6 +498,7 @@ class DualArm:
 
         # enable force mode on both robots
         tcp_distance = self.get_tcp_distance()
+        print('Force Mode')
         with self.ur5e.start_force_mode() as left_force_guard:
             with self.ur16e.start_force_mode() as right_force_guard:
                 start_time = time.time()
@@ -544,6 +562,7 @@ class DualArm:
         print("  [2] pick-and-fling")
         print("  [q] quit\n")
 
+        self.both_open_gripper()
         self.both_home()
 
         while True:
@@ -566,10 +585,7 @@ class DualArm:
 
             elif cmd in ("2", "fling", "pick-and-fling", "f"):
                 print("\n--- Executing Pick and Fling ---")
-                try:
-                    self.execute_pick_and_fling()
-                except Exception as e:
-                    print(f"[Error] Pick-and-fling failed: {e}")
+                self.execute_pick_and_fling()
                 print("\n--- Pick and Fling Completed ---\n")
 
             else:

@@ -479,8 +479,8 @@ def click_points_pick_and_fling(window_name, img):
             break
 
     cv2.destroyWindow(window_name)
-    if len(clicks) < 4:
-        raise RuntimeError("Four points not selected")
+    if len(clicks) < 2:
+        raise RuntimeError("2 points not selected")
     return clicks[0], clicks[1]
 
 def pos_rot_to_mat(pos, rot):
@@ -538,16 +538,19 @@ def rot_from_directions(from_vec, to_vec):
     rot = Rotation.from_rotvec(rotvec)
     return rot
 
+import numpy as np
+
 def points_to_action_frame(left_point, right_point):
     """
     Compute transfrom from action frame to world
     Action frame: centered on the mid-point between gripers,
     with the y-axis facing fling direction (i.e. forward)
-    * left_point
-    |---> y
-    * right_point
-    |
-    x
+
+                (forward)
+                    ↑  (y-axis of action frame)
+                    |
+    left * -------> * right
+            (x-axis)
     """
     left_point, right_point = left_point.copy(), right_point.copy()
     center_point = (left_point + right_point) / 2
@@ -572,14 +575,14 @@ def points_to_gripper_pose(left_point, right_point, max_width=None):
     width = np.linalg.norm((left_point - right_point)[:2])
     if max_width is not None:
         width = min(width, max_width)
-    left_pose_action = np.array([-width/2,0,0,0,np.pi,0])
-    right_pose_action = np.array([width/2,0,0, 0,np.pi,0])
+    left_pose_action = np.array([-width/2, 0, 0, 0, np.pi,0])
+    right_pose_action = np.array([width/2, 0, 0, 0,np.pi,0])
     left_pose = transform_pose(tx_world_action, left_pose_action)
     right_pose = transform_pose(tx_world_action, right_pose_action)
     return left_pose, right_pose
 
 def get_base_fling_poses(
-        place_y=0.0,
+        place_y=0,
         stroke=0.6, 
         lift_height=0.45, 
         swing_angle=np.pi/4,
@@ -621,7 +624,7 @@ def points_to_fling_path(
         left_point, right_point,
         width=None,   
         swing_stroke=0.6, 
-        swing_height=0.45, 
+        #swing_height=0.45, 
         swing_angle=np.pi/4,
         lift_height=0.4,
         place_height=0.05):
@@ -630,8 +633,8 @@ def points_to_fling_path(
     # height is managed by get_base_fling_poses
     tx_world_fling_base[2,3] = 0
     base_fling = get_base_fling_poses(
-        swing_stroke=swing_stroke,
-        swing_height=swing_height,
+        stroke=swing_stroke,
+        #lift_height=swing_height,
         swing_angle=swing_angle,
         lift_height=lift_height,
         place_height=place_height)

@@ -19,6 +19,7 @@ from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
 
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 from controllers.rl.vanilla_sac import VanillaSAC
+from controllers.rl.image2state_sac import Image2State_SAC
 
 import agent_arena as ag_ar
 
@@ -37,3 +38,4 @@ def register_agent_arena():
     ag_ar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
     ag_ar.register_agent('vanilla-image-sac', VanillaImageSAC)
     ag_ar.register_agent('vanilla-sac', VanillaSAC)
+    ag_ar.register_agent('image2state-sac', Image2State_SAC)

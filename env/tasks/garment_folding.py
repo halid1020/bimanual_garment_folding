@@ -425,3 +425,19 @@ class GarmentFoldingTask(GarmentTask):
         
         # clip between 0 and 1
         return np.clip(res, 0, 1)
+
+    def compare(self, results_1, results_2):
+        threshold=0.95
+
+        # --- Compute averages for results_1 ---
+        score_1 = mean([ep["mean_particle_distance"][-1] for ep in results_1])
+        # --- Compute averages for results_2 ---
+        score_2 = mean([ep["mean_particle_distance"][-1] for ep in results_2])
+
+        # --- Otherwise prefer higher score ---
+        if score_1 < score_2:
+            return 1
+        elif score_1 > score_2:
+            return -1
+        else:
+            return 0

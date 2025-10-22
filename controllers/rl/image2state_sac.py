@@ -17,7 +17,7 @@ from agent_arena import TrainableAgent
 from agent_arena.utilities.logger.logger_interface import Logger
 from dotmap import DotMap
 from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar to your repo
-from .replay_buffer import ReplayBuffer
+from .obs_state_replay_buffer import ObsStateReplayBuffer
 from .vanilla_image_sac import NatureCNNEncoder
 
 class NatureCNNEncoder(nn.Module):
@@ -121,20 +121,22 @@ class Image2State_SAC(VanillaSAC):
 
         # actor and critics (two critics for twin-Q)
         self.action_dim = int(cfg.action_dim)
-        self.encoder = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim)
+        self.encoder = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
         self.actor = Actor(cfg.action_dim, cfg.feature_dim, cfg.hidden_dim).to(self.device)
 
         self.critic = Critic(cfg.action_dim, cfg.feature_dim).to(cfg.device)
        
 
-        self.critic_target = Critic(obs_shape, cfg.action_dim, cfg.feature_dim).to(cfg.device)
+        self.critic_target = Critic(cfg.action_dim, cfg.feature_dim).to(cfg.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim)
+        self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
+        self.encoder_target.load_state_dict(self.encoder.state_dict())
 
         # optimizers
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
-        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=self.config.actor_lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=self.config.critic_lr)
+        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=self.config.encoder_lr)
+        self.network_action_dim = self.action_dim
     
     def _init_reply_buffer(self, cfg):
         
@@ -142,12 +144,13 @@ class Image2State_SAC(VanillaSAC):
         self.input_channel = C * self.context_horizon
         obs_shape = (self.input_channel, H, W)
         
-        self.replay = ReplayBuffer(cfg.replay_capacity, obs_shape, (config.state_dim, ) self.action_dim, self.device)
+        self.replay = ObsStateReplayBuffer(cfg.replay_capacity, obs_shape, cfg.state_dim, self.action_dim, self.device)
 
 
-    def _process_obs_for_input(self, obs_and_state: np.ndarray) -> np.ndarray:
+    def _process_obs_for_input(self, obs_and_state):
         rgb, state = obs_and_state
         state = np.concatenate(state).flatten()
+        rgb = np.concatenate(rgb, axis=-1)
         if rgb.dtype != np.float32:
             rgb = rgb.astype(np.float32)
         rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
@@ -156,12 +159,19 @@ class Image2State_SAC(VanillaSAC):
     def _process_context_for_replay(self, context):
         rgb = [c[0] for c in context]
         state = [c[1] for c in context]
-        rgb_stack =  np.stack(context).reshape(
+        rgb_stack =  np.stack(rgb).reshape(
             self.config.context_horizon * self.config.each_image_shape[0], 
             *self.config.each_image_shape[1:])
-        state_stack = np.stack(context).flatten()
+        state_stack = np.stack(state).flatten()
 
-        return rgb_statck, state_stack
+        return rgb_stack, state_stack
+
+    def _process_context_for_input(self, context):
+        rgb = [c[0] for c in context]
+        state = [c[1] for c in context]
+        rgb = torch.as_tensor(rgb, dtype=torch.float32, device=self.device)
+        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+        return rgb, state
 
     def _update_networks(self, batch: dict):
         config = self.config
@@ -238,15 +248,16 @@ class Image2State_SAC(VanillaSAC):
     def _select_action(self, info: dict, stochastic: bool = False):
         #print('info observation keys', info['observation'].keys())
         obs = [info['observation'][k] for k in self.obs_keys]
+        state = [info['observation'][k] for k in self.config.state_keys]
         
-        obs, state = self._process_obs_for_input(obs)
+        obs, state = self._process_obs_for_input((obs, state))
         aid = info['arena_id']
         # maintain obs queue per arena
         if aid not in self.internal_states:
             self.reset([aid])
-        self.internal_states[aid]['obs_que'].append(obs)
+        self.internal_states[aid]['obs_que'].append((obs, state))
         while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
-            self.internal_states[aid]['obs_que'].append(obs)
+            self.internal_states[aid]['obs_que'].append((obs, state))
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
        
 
@@ -304,7 +315,7 @@ class Image2State_SAC(VanillaSAC):
         next_info = arena.step(a)
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
-        next_state = [next_info['observation'][k] for k in self.state_keys]
+        next_state = [next_info['observation'][k] for k in self.config.state_keys]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
         self.logger.log(
             {'train/step_reward': reward}, step=self.act_steps
@@ -334,7 +345,7 @@ class Image2State_SAC(VanillaSAC):
         self.episode_return += reward
         self.episode_length += 1
     
-     def set_eval(self):
+    def set_eval(self):
         if getattr(self, 'mode', None) == 'eval':
             return
        
@@ -349,7 +360,7 @@ class Image2State_SAC(VanillaSAC):
 
         self.actor.train()
         self.critic.train()
-        self.encover.train()
+        self.encoder.train()
         self.mode = 'train'
 
     # ---------------------- save/load ----------------------
@@ -361,11 +372,12 @@ class Image2State_SAC(VanillaSAC):
         state = {
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
+            'encoder': self.encoder.state_dict(),
             'critic_target': self.critic_target.state_dict(),
             'encoder_target': self.encoder_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'encoder_optim': self.encoder_optim.state_dict(),'
+            'encoder_optim': self.encoder_optim.state_dict(),
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
@@ -402,11 +414,12 @@ class Image2State_SAC(VanillaSAC):
         state = {
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
+            'encoder': self.encoder.state_dict(),
             'critic_target': self.critic_target.state_dict(),
             'encoder_target': self.encoder_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'encoder_optim': self.encoder_optim.state_dict(),'
+            'encoder_optim': self.encoder_optim.state_dict(),
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,

@@ -54,7 +54,7 @@ class GarmentFlatteningTask(GarmentTask):
 
         return {
             'coverage_alignment': reward,
-            'coverage_alignment_with_strech_penality_high_coverage_bonus': reward_
+            'coverage_alignment_with_stretch_penality_high_coverage_bonus': reward_
         }
     
     def evaluate(self, arena):

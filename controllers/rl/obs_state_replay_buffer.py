@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-class ReplayBuffer:
+class ObsStateReplayBuffer:
     def __init__(self, capacity, obs_shape, state_dim, action_dim, device):
         self.capacity = int(capacity)
         self.device = device
@@ -12,14 +12,14 @@ class ReplayBuffer:
 
         # Support any observation shape (e.g., images, vectors, etc.)
         self.observation = np.zeros((self.capacity, *obs_shape), dtype=np.float32)
-        self.state_dim = np.zeros((self.capacity, state_dim), dtype=np.float32)
+        self.state = np.zeros((self.capacity, state_dim), dtype=np.float32)
         self.actions = np.zeros((self.capacity, action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.capacity,), dtype=np.float32)
         self.next_observation = np.zeros((self.capacity, *obs_shape), dtype=np.float32)
-        self.next_state_dim = np.zeros((self.capacity, state_dim), dtype=np.float32)
+        self.next_state = np.zeros((self.capacity, state_dim), dtype=np.float32)
         self.dones = np.zeros((self.capacity,), dtype=np.float32)
 
-    def add(self, observation, state, action, reward, next_observation, next_state done):
+    def add(self, observation, state, action, reward, next_observation, next_state, done):
         self.observation[self.ptr] = observation
         self.state[self.ptr] = state
         self.actions[self.ptr] = action

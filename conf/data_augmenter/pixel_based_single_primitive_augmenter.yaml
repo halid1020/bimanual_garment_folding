@@ -1,5 +1,5 @@
 name: pixel-based-single-primitive-augmenter
-device: cuda:0
+device: cuda:1
 rgb_noise_factor: 0.01
 random_rotation: true
 rotation_degree: 1

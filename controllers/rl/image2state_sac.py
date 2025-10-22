@@ -11,31 +11,61 @@ import torch.nn.functional as F
 import cv2
 from collections import deque
 from tqdm import tqdm
+from .vanilla_sac import VanillaSAC
 
 from agent_arena import TrainableAgent
-
+from agent_arena.utilities.logger.logger_interface import Logger
 from dotmap import DotMap
 from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar to your repo
 from .replay_buffer import ReplayBuffer
+from .vanilla_image_sac import NatureCNNEncoder
 
-from .wandb_logger import WandbLogger
+class NatureCNNEncoder(nn.Module):
+    def __init__(self, obs_shape=(3, 84, 84), state_dim=45, feature_dim=512):
+        super().__init__()
+        assert len(obs_shape) == 3, "Input must be 3D (C,H,W)"
+        self.conv_net = nn.Sequential(
+            nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4),  # 84x84 -> 20x20
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),           # 20x20 -> 9x9
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),           # 9x9 -> 7x7
+            nn.ReLU()
+        )
+
+        # Compute flatten size
+        with torch.no_grad():
+            n_flatten = self.conv_net(torch.zeros(1, *obs_shape)).view(1, -1).size(1)
+
+        self.fc = nn.Linear(n_flatten, feature_dim)
+
+        self.regressor = nn.Linear(feature_dim, state_dim)
+
+    def forward(self, obs):
+        # Normalize image to [0,1]
+        x = obs / 255.0
+        x = self.conv_net(x)
+        x = x.reshape(x.size(0), -1)
+        x = self.fc(x)
+        e = F.relu(x)
+        x = self.regressor(e)
+        return e, x
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
+    def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
         super().__init__()
-        
-        self.q1_1 = nn.Linear(state_dim + action_dim, hidden_dim)
+        self.q1_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
         self.q1_2 = nn.Linear(hidden_dim, hidden_dim)
         self.q1_3 = nn.Linear(hidden_dim, 1)
        
-        self.q2_1 = nn.Linear(state_dim + action_dim, hidden_dim)
+        self.q2_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
         self.q2_2 = nn.Linear(hidden_dim, hidden_dim)
         self.q2_3 = nn.Linear(hidden_dim, 1)
 
 
-    def forward(self, obs, action):
-        x = torch.cat([obs, action], dim=-1)
+    def forward(self, obs_emb, action):
+        x = torch.cat([obs_emb, action], dim=-1)
         # Q1
         q1 = F.relu(self.q1_1(x))
         q1 = F.relu(self.q1_2(q1))
@@ -47,16 +77,16 @@ class Critic(nn.Module):
         return q1, q2
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
+    def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
         super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc1 = nn.Linear(feature_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.mean = nn.Linear(hidden_dim, action_dim)
         self.log_std = nn.Linear(hidden_dim, action_dim)
 
 
-    def forward(self, obs):
-        x = F.relu(self.fc1(obs))
+    def forward(self, obs_emb):
+        x = F.relu(self.fc1(obs_emb))
         x = F.relu(self.fc2(x))
         mean = self.mean(x)
         log_std = self.log_std(x)
@@ -65,9 +95,9 @@ class Actor(nn.Module):
         return mean, std
 
 
-    def sample(self, obs):
+    def sample(self, obs_emb):
         #print('obs shape', obs.shape)
-        mean, std = self(obs)
+        mean, std = self(obs_emb)
         normal = torch.distributions.Normal(mean, std)
         x_t = normal.rsample() # reparameterization trick
         y_t = torch.tanh(x_t)
@@ -77,90 +107,139 @@ class Actor(nn.Module):
         log_prob = log_prob.sum(1, keepdim=True)
         return action, log_prob
 
-class VanillaSAC(TrainableAgent):
-    """A vanilla Soft Actor-Critic for image observations.
-
-    Assumptions:
-    - Replay buffer stores contextual image observations as a stacked channel: (C * N, H, W)
-    - The provided `ConvEncoder`, `MLPActor`, and `Critic` have interfaces compatible with this code:
-        - encoder(input) -> z (batch x enc_dim)
-        - actor.sample(z) -> (action, logp, _)
-        - actor(z) -> (mean, log_std) optionally
-        - critic(concat(z, action)) -> q
-    """
+class Image2State_SAC(VanillaSAC):
 
     def __init__(self, config):
         super().__init__(config)
-        self.name = config.name
-        self.config = config
-        self.device = torch.device(config.device)
-        self.context_horizon = config.context_horizon
-        # self.each_image_shape = config.each_image_shape
-       
+        #self.each_image_shape = cfg.each_image_shape
+        
 
-        self._make_actor_critic(config)
+    def _make_actor_critic(self, cfg):
+        C, H, W = cfg.each_image_shape
+        self.input_channel = C * self.context_horizon
+        obs_shape = (self.input_channel, H, W) 
 
-
-        # entropy temperature
-        self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(0.1), requires_grad=True, device=self.device))
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.target_entropy = -float(self.network_action_dim)
-
-        # replay
-        self._init_reply_buffer(config)
- 
-        # bookkeeping
-        self.update_steps = 0
-        self.loaded = False
-        self.logger = WandbLogger(project="vanilla-sac", name="sac-agent", config=dict(config))
-        self.obs_keys = config.obs_keys
-        self.reward_key = config.reward_key
-        self.last_done = True
-        self.episode_return = 0.0
-        self.episode_length = 0
-        self.act_steps = 0
-        self.initial_act_steps = config.initial_act_steps
-        #self.act_steps_per_update = config.act_steps_per_update
-        self.total_update_steps = config.total_update_steps
-        self.info = None
-
-    def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
-        self.network_action_dim = int(config.action_dim)
-        self.actor = Actor(config.state_dim, config.action_dim, config.hidden_dim).to(self.device)
+        self.action_dim = int(cfg.action_dim)
+        self.encoder = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim)
+        self.actor = Actor(cfg.action_dim, cfg.feature_dim, cfg.hidden_dim).to(self.device)
 
-        self.critic = Critic(config.state_dim,  config.action_dim).to(config.device)
+        self.critic = Critic(cfg.action_dim, cfg.feature_dim).to(cfg.device)
        
 
-        self.critic_target = Critic(config.state_dim,  config.action_dim).to(config.device)
-       
+        self.critic_target = Critic(obs_shape, cfg.action_dim, cfg.feature_dim).to(cfg.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
+        self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim)
 
         # optimizers
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
-
-
-    def _init_reply_buffer(self, config):
+        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
+    
+    def _init_reply_buffer(self, cfg):
         
-        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.network_action_dim, self.device)
+        C, H, W = cfg.each_image_shape
+        self.input_channel = C * self.context_horizon
+        obs_shape = (self.input_channel, H, W)
+        
+        self.replay = ReplayBuffer(cfg.replay_capacity, obs_shape, (config.state_dim, ) self.action_dim, self.device)
 
 
-    # ---------------------- utils ----------------------
-    def _process_obs_for_input(self, state) -> np.ndarray:
-        return np.concatenate(state).flatten()
+    def _process_obs_for_input(self, obs_and_state: np.ndarray) -> np.ndarray:
+        rgb, state = obs_and_state
+        state = np.concatenate(state).flatten()
+        if rgb.dtype != np.float32:
+            rgb = rgb.astype(np.float32)
+        rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
+        return (rgb_resized.transpose(2, 0, 1), state)
 
-    def _process_context_for_input(self, context):
-        context = np.stack(context, axis=0)
-        context = torch.as_tensor(context, dtype=torch.float32, device=self.device)
-        return context
+    def _process_context_for_replay(self, context):
+        rgb = [c[0] for c in context]
+        state = [c[1] for c in context]
+        rgb_stack =  np.stack(context).reshape(
+            self.config.context_horizon * self.config.each_image_shape[0], 
+            *self.config.each_image_shape[1:])
+        state_stack = np.stack(context).flatten()
 
+        return rgb_statck, state_stack
 
+    def _update_networks(self, batch: dict):
+        config = self.config
+        #context, action, reward, next_context, done = batch.values()
+        obs, state, action, reward, next_obs, next_state, done = batch.values()
+        B = obs.shape[0]
+        # C = self.each_image_shape[0]
+        # N = self.context_horizon
+        # H, W = self.each_image_shape[1:]
+
+        alpha = self.log_alpha.exp()
+
+        # compute target Q
+        with torch.no_grad():
+            next_e, _ = self.encoder(next_obs)
+            target_next_e, _ = self.encoder_target(next_obs)
+            a_next, logp_next = self.actor.sample(next_e)
+            q1_next, q2_next = self.critic_target(target_next_e, a_next)
+            q_next = torch.min(q1_next, q2_next)
+            target_q = reward + (1 - done) * config.gamma * (q_next - alpha * logp_next)
+
+        # current Q estimates
+        a_curr = action.view(B, -1).to(self.device)
+        e, pred_state = self.encoder(obs)
+
+        # does not allow encoder has the value information
+        q1_pred, q2_pred = self.critic(e.detach(), a_curr) 
+        critic_loss = 0.5*(F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
+
+        # optimize critics
+        self.critic_optim.zero_grad()
+        critic_loss.backward()
+        self.critic_optim.step()
+
+        # optimise encoder
+        encoder_loss = F.mse_loss(pred_state, state)
+
+        self.encoder_optim.zero_grad()
+        encoder_loss.backward()
+        self.encoder_optim.step()
+
+        # actor loss
+        pi, log_pi = self.actor.sample(e.detach())
+        q1_pi, q2_pi = self.critic(e.detach(), pi)
+        min_q_pi = torch.min(q1_pi, q2_pi)
+        alpha = self.log_alpha.exp()
+        actor_loss = (alpha * log_pi - min_q_pi).mean()
+
+        self.actor_optim.zero_grad()
+        actor_loss.backward()
+        self.actor_optim.step()
+
+        # alpha loss
+        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
+        self.alpha_optim.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optim.step()
+
+        # soft updates
+        if self.update_steps % self.config.target_update_interval == 0:
+            self._soft_update(self.critic, self.critic_target, config.tau)
+            self._soft_update(self.encoder, self.encoder_target, config.tau)
+
+        # logging
+        self.logger.log({
+            'critic_loss': critic_loss.item(),
+            'actor_loss': actor_loss.item(),
+            'encoder_loss': encoder_loss.item(),
+            'alpha': self.log_alpha.exp().item(),
+            'alpha_loss': alpha_loss.item()
+        }, step=self.act_steps)
+
+    
     def _select_action(self, info: dict, stochastic: bool = False):
         #print('info observation keys', info['observation'].keys())
         obs = [info['observation'][k] for k in self.obs_keys]
         
-        obs = self._process_obs_for_input(obs)
+        obs, state = self._process_obs_for_input(obs)
         aid = info['arena_id']
         # maintain obs queue per arena
         if aid not in self.internal_states:
@@ -179,112 +258,21 @@ class VanillaSAC(TrainableAgent):
         # H, W = self.each_image_shape[1:]
         # z = self.encoder(obs_t.reshape(B, C, N, H, W))
 
+        obs_stack, state_stack = self._process_context_for_input(obs_list)
+        e, _ = self.encoder(obs_stack)
+
         if stochastic:
             #print('obs_t', obs)
-            a, logp = self.actor.sample(self._process_context_for_input(obs_list))
+            
+            a, logp = self.actor.sample(e)
             a = a.detach().cpu().numpy().squeeze(0)
             return a, logp.detach().cpu().numpy().squeeze(0)
         else:
-            mean, _ = self.actor(self._process_context_for_input(obs_list))
+            mean, _ = self.actor(e)
             action = torch.tanh(mean)
             return action.detach().cpu().numpy().squeeze(0), None
 
-    def act(self, info_list, updates=None):
-        self.set_eval()
-        with torch.no_grad():
-            return [self._select_action(info, stochastic=False)[0] for info in info_list]
-
-    def explore_act(self, info_list):
-        self.set_eval()
-        with torch.no_grad():
-            return [self._select_action(info, stochastic=True)[0] for info in info_list]
-
-    def single_act(self, info, update=False):
-        return self._select_action(info)[0]
-
-    def set_eval(self):
-        if getattr(self, 'mode', None) == 'eval':
-            return
-       
-        self.actor.eval()
-        self.critic.eval()
-        self.mode = 'eval'
-
-    def set_train(self):
-        if getattr(self, 'mode', None) == 'train':
-            return
-
-        self.actor.train()
-        self.critic.train()
-        self.mode = 'train'
-
-    def _soft_update(self, source: nn.Module, target: nn.Module, tau: float):
-        for p_src, p_tgt in zip(source.parameters(), target.parameters()):
-            p_tgt.data.copy_(tau * p_src.data + (1 - tau) * p_tgt.data)
-
-    # ---------------------- learning ----------------------
-    def _update_networks(self, batch: dict):
-        config = self.config
-        context, action, reward, next_context, done = batch.values()
-        B = context.shape[0]
-        # C = self.each_image_shape[0]
-        # N = self.context_horizon
-        # H, W = self.each_image_shape[1:]
-
-        alpha = self.log_alpha.exp()
-
-        # compute target Q
-        with torch.no_grad():
-            a_next, logp_next = self.actor.sample(next_context)
-            q1_next, q2_next = self.critic_target(next_context, a_next)
-            q_next = torch.min(q1_next, q2_next)
-            target_q = reward + (1 - done) * config.gamma * (q_next - alpha * logp_next)
-
-        # current Q estimates
-        a_curr = action.view(B, -1).to(self.device)
-        q1_pred, q2_pred = self.critic(context, a_curr)
-
-        # print('q1_pred', q1_pred.shape)
-        # print('q2_pred', q1_pred.shape)
-        # print('target_q', target_q.shape)
-
-        critic_loss = 0.5*(F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
-
-        # optimize critics
-        self.critic_optim.zero_grad()
-        critic_loss.backward()
-        self.critic_optim.step()
-
-        # actor loss
-        pi, log_pi = self.actor.sample(context)
-        q1_pi, q2_pi = self.critic(context, pi)
-        min_q_pi = torch.min(q1_pi, q2_pi)
-        alpha = self.log_alpha.exp()
-        actor_loss = (alpha * log_pi - min_q_pi).mean()
-
-        self.actor_optim.zero_grad()
-        actor_loss.backward()
-        self.actor_optim.step()
-
-        # alpha loss
-        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
-        self.alpha_optim.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optim.step()
-
-        # soft updates
-        if self.update_steps % self.config.target_update_interval == 0:
-            self._soft_update(self.critic, self.critic_target, config.tau)
-
-        # logging
-        self.logger.log({
-            'critic_loss': critic_loss.item(),
-            'actor_loss': actor_loss.item(),
-            'alpha': self.log_alpha.exp().item(),
-            'alpha_loss': alpha_loss.item()
-        }, step=self.act_steps)
-
-    # ---------------------- environment interaction ----------------------
+    
     def _collect_from_arena(self, arena):
         if self.last_done:
             if self.info is not None:
@@ -316,6 +304,7 @@ class VanillaSAC(TrainableAgent):
         next_info = arena.step(a)
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
+        next_state = [next_info['observation'][k] for k in self.state_keys]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
         self.logger.log(
             {'train/step_reward': reward}, step=self.act_steps
@@ -332,57 +321,36 @@ class VanillaSAC(TrainableAgent):
 
         aid = arena.id
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-        obs_stack = self._process_context_for_replay(obs_list)
+        obs_stack, state_stack = self._process_context_for_replay(obs_list)
         
         # append next
-        obs_list.append(self._process_obs_for_input(next_obs))
-        next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
+        obs_list.append(self._process_obs_for_input((next_obs, next_state)))
+        next_obs_stack, next_state_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
 
-        self.replay.add(obs_stack, a.astype(np.float32), reward, next_obs_stack, done)
+        self.replay.add(obs_stack, state_stack, a.astype(np.float32), reward, next_obs_stack, next_state_stack,  done)
         self.act_steps += 1
         self.episode_return += reward
         self.episode_length += 1
+    
+     def set_eval(self):
+        if getattr(self, 'mode', None) == 'eval':
+            return
+       
+        self.actor.eval()
+        self.critic.eval()
+        self.encoder.eval()
+        self.mode = 'eval'
 
-    def _process_context_for_replay(self, context):
-        return np.stack(context).flatten()
+    def set_train(self):
+        if getattr(self, 'mode', None) == 'train':
+            return
 
-
-    def train(self, update_steps, arenas) -> bool:
-        if arenas is None or len(arenas) == 0:
-            raise ValueError("SAC.train requires at least one Arena.")
-        arena = arenas[0]
-        self.set_train()
-        #print('here update!!')
-        with tqdm(total=update_steps, desc=f"{self.name} Training", initial=0) as pbar:
-            while self.replay.size < self.initial_act_steps:
-                self._collect_from_arena(arena)
-                pbar.set_postfix(env_step=self.act_steps, updates=self.update_steps)
-
-            for _ in range(update_steps):
-                #print('here update')
-                batch = self.replay.sample(self.config.batch_size)
-                # optional data augmentation hook
-                if hasattr(self, 'data_augmenter') and callable(self.data_augmenter):
-                    #print('aguemtn!')
-                    self.data_augmenter(batch)
-                self._update_networks(batch)
-                self.update_steps += 1
-
-                if self.update_steps % self.config.gradient_steps == 0:
-                    for _ in range(self.config.train_freq):
-                        self._collect_from_arena(arena)
-                        pbar.set_postfix(
-                            phase="training",
-                            env_step=self.act_steps,
-                            total_updates=self.update_steps,
-                        )
-
-                pbar.update(1)
-                pbar.set_postfix(env_step=self.act_steps, updates=self.update_steps)
-
-        return True
+        self.actor.train()
+        self.critic.train()
+        self.encover.train()
+        self.mode = 'train'
 
     # ---------------------- save/load ----------------------
     def save(self, path: Optional[str] = None, checkpoint_id: Optional[int] = None) -> bool:
@@ -394,8 +362,10 @@ class VanillaSAC(TrainableAgent):
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
             'critic_target': self.critic_target.state_dict(),
+            'encoder_target': self.encoder_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
+            'encoder_optim': self.encoder_optim.state_dict(),'
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
@@ -413,9 +383,11 @@ class VanillaSAC(TrainableAgent):
             'size': self.replay.size,
             'capacity': self.replay.capacity,
             'observation': torch.from_numpy(self.replay.observation),
+            'state':  torch.from_numpy(self.replay.state),
             'actions': torch.from_numpy(self.replay.actions),
             'rewards': torch.from_numpy(self.replay.rewards),
             'next_observation': torch.from_numpy(self.replay.next_observation),
+            'next_state':  torch.from_numpy(self.replay.next_state),
             'dones': torch.from_numpy(self.replay.dones),
         }, replay_path)
 
@@ -431,8 +403,10 @@ class VanillaSAC(TrainableAgent):
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
             'critic_target': self.critic_target.state_dict(),
+            'encoder_target': self.encoder_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
+            'encoder_optim': self.encoder_optim.state_dict(),'
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
@@ -448,9 +422,11 @@ class VanillaSAC(TrainableAgent):
             'size': self.replay.size,
             'capacity': self.replay.capacity,
             'observation': torch.from_numpy(self.replay.observation),
+            'state':  torch.from_numpy(self.replay.state),
             'actions': torch.from_numpy(self.replay.actions),
             'rewards': torch.from_numpy(self.replay.rewards),
             'next_observation': torch.from_numpy(self.replay.next_observation),
+            'next_state':  torch.from_numpy(self.replay.next_state),
             'dones': torch.from_numpy(self.replay.dones),
         }, replay_path)
 
@@ -470,9 +446,12 @@ class VanillaSAC(TrainableAgent):
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
+        self.encoder.load_state_dict(state['encoder'])
+        self.encoder_target.load_state_dict(state['encoder_target'])
 
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
+        self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
@@ -486,9 +465,11 @@ class VanillaSAC(TrainableAgent):
             self.replay.size = replay_state['size']
             self.replay.capacity = replay_state['capacity']
             self.replay.observation = replay_state['observation'].cpu().numpy()
+            self.replay.state = replay_state['state'].cpu().numpy()
             self.replay.actions = replay_state['actions'].cpu().numpy()
             self.replay.rewards = replay_state['rewards'].cpu().numpy()
             self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
+            self.replay.next_state = replay_state['next_state'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
 
         self.loaded = True
@@ -509,9 +490,12 @@ class VanillaSAC(TrainableAgent):
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
+        self.encoder.load_state_dict(state['encoder'])
+        self.encoder_target.load_state_dict(state['encoder_target'])
 
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
+        self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
@@ -525,19 +509,12 @@ class VanillaSAC(TrainableAgent):
             self.replay.size = replay_state['size']
             self.replay.capacity = replay_state['capacity']
             self.replay.observation = replay_state['observation'].cpu().numpy()
+            self.replay.state = replay_state['state'].cpu().numpy()
             self.replay.actions = replay_state['actions'].cpu().numpy()
             self.replay.rewards = replay_state['rewards'].cpu().numpy()
             self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
+            self.replay.next_state = replay_state['next_state'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
 
         self.loaded = True
         return self.update_steps
-
-    def reset(self, arena_ids):
-        for aid in arena_ids:
-            self.internal_states[aid] = {}
-            self.internal_states[aid]['obs_que'] = deque()
-
-    def set_log_dir(self, log_dir):
-        self.save_dir = log_dir
-        self.logger.set_log_dir(log_dir)

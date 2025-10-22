@@ -55,6 +55,10 @@ class PrimitiveEncodingSAC(VanillaSAC):
         self.critic_target = Critic(self.aug_state_dim, self.network_action_dim, config.hidden_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         
+        # optimizers
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
+
     
     def _init_reply_buffer(self, config):
         self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)

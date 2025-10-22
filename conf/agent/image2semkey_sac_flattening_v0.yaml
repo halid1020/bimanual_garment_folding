@@ -1,5 +1,5 @@
 name: image2state-sac
-device: cuda:1   # fallback to cuda:0
+device: "cuda:1"   # fallback to cuda:0
 
 
 obs_keys: ['rgb']

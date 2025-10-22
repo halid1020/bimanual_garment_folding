@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import json
 from tqdm import tqdm
 from statistics import median
+from statistics import mean
 
 from scipy.spatial.distance import cdist
 from agent_arena import Task

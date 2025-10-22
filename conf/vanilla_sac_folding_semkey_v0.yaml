@@ -1,6 +1,6 @@
 defaults:
   - agent: vanilla_sac_folding_semkey_v0
-  - arena: single_longsleeve_vectorised_fold_readjust_pick_provide_semkey_pos
+  - arena: single_longsleeve_readjust_pick_provide_semkey_pos_from_flattened
   - task: folding_overstretch_penality_1
   - data_augmenter: identity
 

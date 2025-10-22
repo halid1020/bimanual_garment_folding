@@ -146,7 +146,12 @@ class VanillaImageSAC(VanillaSAC):
         self.critic_target = Critic(obs_shape, cfg.action_dim, cfg.feature_dim).to(cfg.device)
        
         self.critic_target.load_state_dict(self.critic.state_dict())
-    
+
+        # optimizers
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
+
+
     def _init_reply_buffer(self, cfg):
         
         C, H, W = cfg.each_image_shape
@@ -166,58 +171,3 @@ class VanillaImageSAC(VanillaSAC):
         return np.stack(context).reshape(
             self.config.context_horizon * self.config.each_image_shape[0], 
             *self.config.each_image_shape[1:])
-
-
-    # # ---------------------- environment interaction ----------------------
-    # def _collect_from_arena(self, arena):
-    #     if self.last_done:
-    #         if self.info is not None:
-    #             evaluation = self.info['evaluation']
-    #             success = int(self.info['success'])
-
-    #             for k, v in evaluation.items():
-    #                 self.logger.log({
-    #                     f"train/eps_lst_step_eval_{k}": v,
-    #                 }, step=self.act_steps) 
-                
-    #             self.logger.log({
-    #                 "train/episode_return": self.episode_return,
-    #                 "train/episode_length": self.episode_length,
-    #                 'train/episode_success': success
-    #             }, step=self.act_steps)
-
-    #         self.info = arena.reset()
-    #         self.set_train()
-    #         self.reset([arena.id])
-    #         self.episode_return = 0.0
-    #         self.episode_length = 0
-
-    #     # sample stochastic action for exploration
-    #     a, _ = self._select_action(self.info, stochastic=True)
-    #     # clip to action range
-    #     a = np.clip(a, -self.config.action_range, self.config.action_range)
-    #     #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
-    #     next_info = arena.step(a)
-
-    #     next_img_obs = next_info['observation'][self.obs_key]
-    #     reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
-    #     self.logger.log(
-    #         {'train/step_reward': reward}, step=self.act_steps
-    #     )
-    #     done = next_info.get('done', False)
-    #     self.info = next_info
-    #     a = next_info['applied_action']
-    #     self.last_done = done
-
-    #     aid = arena.id
-    #     img_obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-    #     img_obs = np.stack(img_obs_list).reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
-
-    #     # append next
-    #     img_obs_list.append(self.pre_process(next_img_obs))
-    #     next_img_obs_stack = np.stack(img_obs_list)[-self.context_horizon:].reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
-
-    #     self.replay.add(img_obs, a.astype(np.float32), reward, next_img_obs_stack, done)
-    #     self.act_steps += 1
-    #     self.episode_return += reward
-    #     self.episode_length += 1

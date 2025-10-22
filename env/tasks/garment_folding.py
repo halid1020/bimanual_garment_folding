@@ -367,15 +367,24 @@ class GarmentFoldingTask(GarmentTask):
         mpd = info['evaluation']['mean_particle_distance']
         mkd = info['evaluation']["semantic_keypoint_distance"]
         
-        multi_stage_reward = coverage_alignment_reward(last_info, action, info) - 1 
+        pdr = particle_distance_reward(mpd)
+        pdr_ = pdr
+
+        multi_stage_reward = coverage_alignment_reward(last_info, action, info) 
         if info['observation']['action_step'] - info['observation']['last_flattened_step'] <= 3:
-            multi_stage_reward = particle_distance_reward(mpd) # 0 to 1
+            multi_stage_reward = pdr + 1# 0 to 1
         
         if info['success']:
-            multi_stage_reward = info['arena'].horizon - info['observation']['action_step']
-            
+            multi_stage_reward = 2*(info['arena'].horizon - info['observation']['action_step'])
+            pdr_ += (info['arena'].horizon - info['observation']['action_step'])
+
+        threshold =  self.config.get('overstretch_penality_threshold', 0)
+        if info['overstretch'] > threshold:
+            pdr_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+
         return {
-            'particle_distance': particle_distance_reward(mpd),
+            'particle_distance': pdr,
+            'particle_distance_with_stretch_penality': pdr_,
             'keypoint_distance': particle_distance_reward(mkd),
             'multi_stage_reward': multi_stage_reward,
         }

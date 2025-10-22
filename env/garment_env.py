@@ -180,6 +180,7 @@ class GarmentEnv(Arena):
         
         if self.init_mode == 'flattened':
             self.set_to_flatten()
+            self.last_flattened_step = 0
         
         self.info = self._process_info({})
         self.clear_frames()

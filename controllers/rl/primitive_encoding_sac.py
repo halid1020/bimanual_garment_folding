@@ -37,6 +37,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
     def _make_actor_critic(self, config):
         # number of discrete primitives
         self.primitive_param = config.primitive_param
+        self.update_temperature = self.config.get('update_temperature', 0.01)
+        self.sampling_temperature = self.config.get('sampling_temperature', 1.)
         self.K = int(config.num_primitives)
         self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
         self.replay_action_dim = self.network_action_dim  + 1
@@ -65,6 +67,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
         B = idxs.shape[0]
         one_hot = torch.zeros((B, self.K), device=idxs.device, dtype=torch.float32)
         one_hot.scatter_(1, idxs.unsqueeze(1), 1.0)
+        # print('idx', idxs)
+        # print('one hot', one_hot)
         return one_hot
 
     def _augment_state_with_code(self, state: torch.Tensor, prim_idx: torch.LongTensor) -> torch.Tensor:
@@ -82,8 +86,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
         state_rep = state.unsqueeze(1).repeat(1, self.K, 1).view(B * self.K, -1)  # (B*K, state_dim)
         # create primitive indices 0..K-1 repeated for each batch
         prim_idxs = torch.arange(self.K, device=state.device, dtype=torch.long).unsqueeze(0).repeat(B, 1).view(-1)
-        codes = self._one_hot(prim_idxs)  # (B*K, code_dim)
-        return torch.cat([state_rep, codes], dim=-1), prim_idxs  # (B*K, aug_state_dim), (B*K,)
+        aug_state = self._augment_state_with_code(state_rep, prim_idxs)
+        return aug_state, prim_idxs  # (B*K, aug_state_dim), (B*K,)
 
     def _split_actions_from_replay(self, actions: torch.Tensor):
         # actions: (B, action_param_dim + K) as stored in buffer
@@ -122,7 +126,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
             q_all = torch.min(q1_all, q2_all).view(B, self.K)  # (B, K)
 
             # softmax over Qs -> probabilities
-            probs = torch.softmax(q_all, dim=-1)  # (B, K)
+            probs = torch.softmax(q_all/self.sampling_temperature, dim=-1)  # (B, K)
             # choose primitive according to probs if stochastic, else argmax
             if stochastic:
                 # sample primitive index per batch element
@@ -132,9 +136,6 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
             best_action = a_all[prim_idx].cpu().numpy()
 
-            # Build dictionary for chosen primitive
-            # print('prim_idx', prim_idx)
-            # print('self.primitive_param', self.primitive_param)
             primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
             out_dict = {primitive_name: {}}
 
@@ -144,6 +145,9 @@ class PrimitiveEncodingSAC(VanillaSAC):
                 idx += dim
 
             best_action = np.array([prim_idx] + best_action.tolist())
+
+            # print('out dict', out_dict)
+            # print('best_action', best_action)
 
 
             return out_dict, best_action
@@ -180,7 +184,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
             logp_next_all = logp_next_all.view(B, self.K)  # (B, K)
 
             # compute softmax weights over q_next_all (using raw q values)
-            w_next = torch.softmax(q_next_all, dim=-1)  # (B, K)
+            w_next = torch.softmax(q_next_all/self.update_temperature, dim=-1)  # (B, K) #check
 
             # compute weighted target Q per batch: note q_next_all already (B,K)
             weighted_q_minus_alpha_logp = (w_next * (q_next_all - alpha * logp_next_all)).sum(dim=-1, keepdim=True)  # (B,1)
@@ -204,7 +208,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
         logp_all = logp_all.view(B, self.K)  # (B,K)
 
         # softmax weights over q_all
-        w_pi = torch.softmax(q_all, dim=-1)  # (B,K)
+        w_pi = torch.softmax(q_all/self.update_temperature, dim=-1)  # (B,K) # check
 
         # actor loss per primitive: alpha * logp - Q; weighted sum
         actor_loss_per = (w_pi * (alpha * logp_all - q_all)).sum(dim=-1).mean()

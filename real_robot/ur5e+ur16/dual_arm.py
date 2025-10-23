@@ -19,7 +19,8 @@ from utils import (
     points_to_gripper_pose,
     points_to_fling_path,
     transform_pose,
-    click_points_pick_and_fling
+    click_points_pick_and_fling,
+    pixels2base_on_table
 )
 
 MIN_Z = 0.015
@@ -51,6 +52,8 @@ class DualArm:
 
         self.ur16e_eye2hand_calib_file = "ur16e_eye_to_hand_calib.yaml"
         self.ur5e_eyeinhand_calib_file = "ur5e_eye_in_hand_calib.yaml"
+        self.ur16e_radius = (0.1, 0.9)
+        self.ur5e_radius = (0.1, 0.85)
 
         if not self.dry_run:
             self.ur5e = UR_RTDE(ur5e_robot_ip, self.gripper_type)
@@ -169,8 +172,85 @@ class DualArm:
         if not r: return False
         r = self.both_movel(ur5e_path[1:], ur16e_path[1:], speed=speed, acceleration=acceleration)
         return r
-
     
+
+    def apply_workspace_mask(self, rgb):
+        """
+        Apply workspace mask to RGB image.
+        Pixels outside UR5e and UR16e workspaces are shaded differently (more visible tint).
+        """
+        H, W, _ = rgb.shape
+
+        # 1. Generate all pixel coordinates (u, v)
+        u = np.arange(W)
+        v = np.arange(H)
+        uu, vv = np.meshgrid(u, v)
+        pixel_points = np.stack([uu.ravel(), vv.ravel()], axis=1)  # (N, 2)
+
+        # 2. Project pixels to base frame for each robot
+        ur5e_base_points = pixels2base_on_table(pixel_points, self.intr, self.T_ur5e_cam, TABLE_HEIGHT)
+        ur16e_base_points = pixels2base_on_table(pixel_points, self.intr, self.T_ur16e_cam, TABLE_HEIGHT)
+
+        # 3. Compute planar distances
+        ur5e_dist = np.linalg.norm(ur5e_base_points[:, :2], axis=1)
+        ur16e_dist = np.linalg.norm(ur16e_base_points[:, :2], axis=1)
+
+        # 4. Create boolean masks
+        ur5e_mask = (ur5e_dist >= self.ur5e_radius[0]) & (ur5e_dist <= self.ur5e_radius[1])
+        ur16e_mask = (ur16e_dist >= self.ur16e_radius[0]) & (ur16e_dist <= self.ur16e_radius[1])
+
+        # 5. Reshape masks
+        ur5e_mask = ur5e_mask.reshape(H, W)
+        ur16e_mask = ur16e_mask.reshape(H, W)
+        combined_mask = ur5e_mask | ur16e_mask
+
+        # 6. Prepare RGB for blending
+        rgb_f = rgb.astype(np.float32) / 255.0
+
+        # Distinct, saturated tints
+        ur5e_tint = np.array([0.2, 0.5, 1.0])   # vivid blue
+        ur16e_tint = np.array([1.0, 0.4, 0.4])  # vivid red
+        gray_tint  = np.array([0.5, 0.5, 0.5])  # neutral gray
+
+        # Different blend strengths
+        blend_outside = 0.3   # 0=full gray, 1=original
+        blend_ur5e    = 0.7   # how much original color remains in UR5e tint
+        blend_ur16e   = 0.7   # same for UR16e
+
+        # Build the tinted image
+        shaded_rgb = rgb_f.copy()
+
+        # 7. Apply gray shading outside both
+        shaded_rgb[~combined_mask] = (
+            rgb_f[~combined_mask] * blend_outside + gray_tint * (1 - blend_outside)
+        )
+
+        # 8. Apply blue tint for UR5e-only
+        ur5e_only = ur5e_mask & ~ur16e_mask
+        shaded_rgb[ur5e_only] = (
+            rgb_f[ur5e_only] * blend_ur5e + ur5e_tint * (1 - blend_ur5e)
+        )
+
+        # 9. Apply red tint for UR16e-only
+        ur16e_only = ur16e_mask & ~ur5e_mask
+        shaded_rgb[ur16e_only] = (
+            rgb_f[ur16e_only] * blend_ur16e + ur16e_tint * (1 - blend_ur16e)
+        )
+
+        # 10. Optional: highlight overlap (UR5e + UR16e)
+        overlap_mask = ur5e_mask & ur16e_mask
+        if np.any(overlap_mask):
+            purple_tint = np.array([0.7, 0.4, 0.9])
+            blend_overlap = 0.4
+            shaded_rgb[overlap_mask] = (
+                rgb_f[overlap_mask] * blend_overlap + purple_tint * (1 - blend_overlap)
+            )
+
+        # Convert back to uint8
+        shaded_rgb = (np.clip(shaded_rgb, 0, 1) * 255).astype(np.uint8)
+
+        return shaded_rgb
+
     def execute_pick_and_place(self):
         # update camera state if available (eye-in-hand)
         try:
@@ -184,6 +264,8 @@ class DualArm:
         except Exception as e:
             print(f"[Error] Camera capture failed: {e}")
             return
+        
+        rgb = self.apply_workspace_mask(rgb)
 
         # Let user click four points (pick0, place0, pick1, place1)
         picked = click_points_pick_and_place("Pick & Place", rgb)
@@ -194,6 +276,9 @@ class DualArm:
         pick_0, place_0, pick_1, place_1 = picked
         print("Picked pixels:", pick_0, place_0, pick_1, place_1)
         if pick_0[0] < pick_1[0]:
+            pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
+        
+        if place_0[0] < place_1[0]:
             pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
 
         p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.intr, self.T_ur5e_cam, TABLE_HEIGHT)
@@ -327,6 +412,8 @@ class DualArm:
         except Exception as e:
             print(f"[Error] Camera capture failed: {e}")
             return
+
+        rgb = self.apply_workspace_mask(rgb)
 
         # Let user click four points (pick0, place0, pick1, place1)
         picked = click_points_pick_and_fling("Pick & fling", rgb)
@@ -577,10 +664,8 @@ class DualArm:
 
             elif cmd in ("1", "pick", "pick-and-place", "p"):
                 print("\n--- Executing Pick and Place ---")
-                try:
-                    self.execute_pick_and_place()
-                except Exception as e:
-                    print(f"[Error] Pick-and-place failed: {e}")
+                self.execute_pick_and_place()
+                
                 print("\n--- Pick and Place Completed ---\n")
 
             elif cmd in ("2", "fling", "pick-and-fling", "f"):

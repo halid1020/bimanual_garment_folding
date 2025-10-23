@@ -6,3 +6,4 @@ debug: false
 alignment: simple_rigid
 overstretch_penality_scale: 1.0
 overstretch_penality_threshold: 0.1
+goal_steps: 3

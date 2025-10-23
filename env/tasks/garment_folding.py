@@ -17,6 +17,8 @@ from .folding_rewards import *
 from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
 
+SUCCESS_TRESHOLD = 0.05
+
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
     header = f"""ply
@@ -89,16 +91,17 @@ class GarmentFoldingTask(GarmentTask):
         return {"goals": self.goals, "keypoints": self.semkey2pid}
 
     def _generate_a_goal(self, arena):
-        
+        goal = []
         particle_pos = arena.get_particle_positions()
         info = arena.set_to_flatten()
         self.demonstrator.reset([arena.id])
+        goal.append(info)
         while not self.demonstrator.terminate()[arena.id]: ## The demonstrator does not need update and init function
             #print('here!')
             action = self.demonstrator.single_act(info) # Fold action
             #print('action', action)
             info = arena.step(action)
-
+            goal.append(info)
             if self.config.debug:
                 rgb = info['observation']['rgb']
                 cv2.imwrite("tmp/step_rgb.png", rgb)
@@ -115,7 +118,7 @@ class GarmentFoldingTask(GarmentTask):
             
         arena.set_particle_positions(particle_pos)
 
-        return info
+        return goal
 
 
     def _load_or_generate_goals(self, arena, num_goals):
@@ -127,104 +130,31 @@ class GarmentFoldingTask(GarmentTask):
                 goal = self._generate_a_goal(arena)
                 os.makedirs(goal_path, exist_ok=True)
 
-                # Save RGB
-                plt.imsave(os.path.join(goal_path, "rgb.png"), goal['observation']['rgb']/255.0)
+                for i, subgoal in enumerate(goal):
+                    # Save RGB
+                    plt.imsave(os.path.join(goal_path, f"rgb_step_{i}.png"), subgoal['observation']['rgb']/255.0)
 
-                # Save particles as PLY
-                save_point_cloud_ply(os.path.join(goal_path, "particles.ply"),
-                                    goal['observation']["particle_positions"])
+                    # Save particles as PLY
+                    save_point_cloud_ply(os.path.join(goal_path, f"particles_step_{i}.ply"),
+                                        subgoal['observation']["particle_positions"])
 
                 goals.append(goal)
             else:
-                # Load existing goal
-                rgb = (plt.imread(os.path.join(goal_path, "rgb.png"))*255).astype(np.uint8)
-                #print('max rgb', np.max(rgb))
-                #print('rgb', rgb.shape)
-                particles = load_point_cloud_ply(os.path.join(goal_path, "particles.ply"))
-                goal = {
-                    'observation': {
-                        'rgb': rgb[:, :, :3],
-                        'particle_positions': particles
+                goal = []
+                for i in range(self.config.goal_steps):
+                    # Load existing goal
+                    rgb = (plt.imread(os.path.join(goal_path, f"rgb_step_{i}.png"))*255).astype(np.uint8)
+
+                    particles = load_point_cloud_ply(os.path.join(goal_path, f"particles_step_{i}.ply"))
+                    subgoal = {
+                        'observation': {
+                            'rgb': rgb[:, :, :3],
+                            'particle_positions': particles
+                        }
                     }
-                }
-                goals.append(goal)
+                    goal.append(subgoal.copy())
+                goals.append(goal.copy())
         return goals
-
-
-    # def _load_or_create_keypoints(self, arena):
-    #     """Load semantic keypoints if they exist, otherwise ask user to assign them."""
-
-    #     mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  # e.g. 03346_Tshirt
-    #     keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
-
-    #     if os.path.exists(keypoint_file):
-    #         with open(keypoint_file, "r") as f:
-    #             keypoints = json.load(f)
-    #         if self.config.debug:
-    #             print("annotated keypoint ids", keypoints)
-    #         return keypoints
-
-    #     # Get flattened garment observation
-    #     flatten_obs = arena.get_flattened_obs()
-    #     flatten_rgb = flatten_obs['observation']["rgb"]
-    #     particle_positions = flatten_obs['observation']["particle_positions"]  # (N, 3)
-
-    #     # Ask user to click semantic keypoints
-    #     keypoints_pixel = self.keypoint_assignment_gui.run(flatten_rgb)  # dict: {name: (u, v)}
-        
-    #     # Project all garment particles
-    #     pixels, visible = arena.get_visibility(particle_positions)
-        
-    #     if self.config.debug:
-    #         H, W = (480, 480)
-
-
-    #         print('annotated keypoints', keypoints_pixel)
-
-    #         # Make sure tmp folder exists
-    #         os.makedirs("tmp", exist_ok=True)
-
-    #         # Start with black canvases
-    #         non_visible_img = np.zeros((H, W, 3), dtype=np.uint8)
-    #         visible_img = np.zeros((H, W, 3), dtype=np.uint8)
-
-    #         for pix, vis in zip(pixels, visible):
-    #             x, y = pix  # assuming pix = (x, y)
-    #             x = int(x)
-    #             y = int(y)
-    #             if not vis:
-    #                 # non-visible -> gray pixel
-    #                 non_visible_img[x, y] = (128, 128, 128)
-    #             else:
-    #                 # visible -> white pixel
-    #                 visible_img[x, y] = (255, 255, 255)
-
-    #         # Save both images
-    #         cv2.imwrite("tmp/non-visible.png", non_visible_img)
-    #         cv2.imwrite("tmp/visible.png", visible_img)
-
-
-    #     keypoints = {}
-    #     for name, pix in keypoints_pixel.items():
-    #         y, x = pix
-    #         dists = np.linalg.norm(pixels - np.array((x, y)), axis=1)
-    #         particle_id = np.argmin(dists)
-    #         keypoints[name] = int(particle_id)
-        
-    #     if self.config.debug:
-    #         annotated = np.zeros((H, W, 3), dtype=np.uint8)
-    #         for pid in keypoints.values():
-    #             x, y = pixels[pid]
-    #             x = int(x)
-    #             y = int(y)
-    #             annotated[x, y] = (255, 255, 255)
-    #         cv2.imwrite("tmp/annotated.png", annotated)
-
-
-    #     with open(keypoint_file, "w") as f:
-    #         json.dump(keypoints, f, indent=2)
-    #     return keypoints
-
 
     def evaluate(self, arena):
         """Evaluate folding quality using particle alignment and semantic keypoints."""
@@ -237,7 +167,7 @@ class GarmentFoldingTask(GarmentTask):
         particle_distances = []
         key_distances = []
         for goal in self.goals:
-            goal_particles = goal['observation']["particle_positions"][:arena.num_mesh_particles]
+            goal_particles = goal[-1]['observation']["particle_positions"]
             #print('goal len', len(goal_particles))
             mdp, kdp = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(mdp)
@@ -262,8 +192,8 @@ class GarmentFoldingTask(GarmentTask):
         Align cur points to goal points using Procrustes rigid alignment.
         Returns aligned points and mean distance.
         """
-        if len(self.aligned_pairs) == arena.action_step + 1:
-            return self.aligned_pairs[-1]
+        # if len(self.aligned_pairs) == arena.action_step + 1:
+        #     return self.aligned_pairs[-1]
 
         if self.config.alignment == 'simple_rigid':
             # Center both sets
@@ -276,7 +206,7 @@ class GarmentFoldingTask(GarmentTask):
         assert not (np.isnan(aligned_curr).any() or np.isnan(aligned_goal).any()), \
             "NaN values detected after point alignment!"
         
-        self.aligned_pairs.append((aligned_curr, aligned_goal))
+        # self.aligned_pairs.append((aligned_curr, aligned_goal))
         
         return aligned_curr, aligned_goal
 
@@ -371,17 +301,49 @@ class GarmentFoldingTask(GarmentTask):
         pdr = particle_distance_reward(mpd)
         pdr_ = pdr
 
-        multi_stage_reward = coverage_alignment_reward(last_info, action, info) 
-        if info['observation']['action_step'] - info['observation']['last_flattened_step'] <= 3:
-            multi_stage_reward = pdr + 1# 0 to 1
         
+        #Multi stage reward
+        if last_info == None:
+            last_info = info
+        last_particles = last_info['observation']['particle_positions']
+        cur_particles = info['observation']['particle_positions']
+        
+        
+        multi_stage_reward = coverage_alignment_reward(last_info, action, info)
+        if info['evaluation']['normalised_coverage'] > 0.9 and info['evaluation']['max_IoU_to_flattened'] > 0.85:
+            multi_stage_reward = 1
+        arena = info['arena']
+        for i in range(self.config.goal_steps)[1:]:
+            cur_mdps = []
+            last_mdps = []
+            
+            for goal in self.goals:
+                cur_goal_particles = goal[i]['observation']["particle_positions"]
+                last_goal_particles = goal[i-1]['observation']["particle_positions"]
+                #print('goal len', len(goal_particles))
+                cur_mdp, kdp = self._compute_particle_distance(cur_particles, cur_goal_particles, arena)
+                last_mdp, kdp = self._compute_particle_distance(last_particles, last_goal_particles, arena)
+                cur_mdps.append(cur_mdp)
+                last_mdps.append(last_mdp)
+
+            last_mdp = median(last_mdps)
+            cur_mdp = median(cur_mdps)
+            last_action_step = last_info['observation']['action_step']
+            # print(f'\nlast_mdp for goal step {i-1} at action step {last_action_step}:', last_mdp)
+            # print(f'\ncur_mdp for goal step {i} at action step {last_action_step+1}:', cur_mdp)
+            
+            if last_mdp < SUCCESS_TRESHOLD:
+                # print(f'!!match at last goal step {i-1}, current step mdp', cur_mdp)
+                multi_stage_reward = i + particle_distance_reward(cur_mdp)
+            
         if info['success']:
-            multi_stage_reward = 2*(info['arena'].horizon - info['observation']['action_step'])
+            multi_stage_reward += self.config.goal_steps*(info['arena'].horizon - info['observation']['action_step'])
             pdr_ += (info['arena'].horizon - info['observation']['action_step'])
 
         threshold =  self.config.get('overstretch_penality_threshold', 0)
         if info['overstretch'] > threshold:
             pdr_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+            #multi_stage_reward -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
 
         return {
             'particle_distance': pdr,
@@ -401,13 +363,13 @@ class GarmentFoldingTask(GarmentTask):
         cur_eval = self.evaluate(arena)
         if cur_eval == {}:
             return False
-        return cur_eval['mean_particle_distance'] < 0.07
+        return cur_eval['mean_particle_distance'] < SUCCESS_TRESHOLD
     
     def _get_max_IoU(self, arena):
         cur_mask = arena.cloth_mask
         max_IoU = 0
         for goal in self.goals[:1]:
-            goal_mask = goal['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
+            goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
             
             IoU, matched_IoU = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
             if IoU > max_IoU:

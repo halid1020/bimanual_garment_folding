@@ -28,19 +28,22 @@ class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
         super().__init__(config)
         #self.name =f'single-garment-fixed-init-env'
 
-    def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+    def step(self, action): 
         self.last_info = self.info
         self.evaluate_result = None
         self.overstretch = 0
 
-        dict_action = {
-            'norm-pixel-fold': {
-                'pick_0': action[:2],
-                'pick_1': action[2:4],
-                'place_0': action[4:6],
-                'place_1': action[6:8]
+        if isinstance(action, dict):
+            dict_action = action
+        else:
+            dict_action = {
+                'norm-pixel-fold': {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4],
+                    'place_0': action[4:6],
+                    'place_1': action[6:8]
+                }
             }
-        }
 
         info = self.action_tool.step(self, dict_action)
         self.action_step += 1

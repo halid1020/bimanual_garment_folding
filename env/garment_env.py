@@ -251,7 +251,7 @@ class GarmentEnv(Arena):
             if len(goals) > 0:
                 goal = goals[0]
                 info['goal'] = {}
-                for k, v in goal['observation'].items():
+                for k, v in goal[-1]['observation'].items():
                     info['goal'][k] = v
 
         return info

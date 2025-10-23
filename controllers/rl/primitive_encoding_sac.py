@@ -296,6 +296,11 @@ class PrimitiveEncodingSAC(VanillaSAC):
         # sample stochastic action for exploration
         
         dict_action, vector_action = self._select_action(self.info, stochastic=True)
+        self.logger.log({
+            f"train/primitive_id": vector_action[0],
+        }, step=self.act_steps)
+
+      
         #print('dict action', dict_action)
         next_info = arena.step(dict_action)
 

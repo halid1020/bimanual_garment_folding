@@ -23,7 +23,7 @@ class GarmentFlatteningTask(GarmentTask):
         #self.cur_coverage = self._get_normalised_coverage(arena)
         #info = self._process_info(arena)
         self.semkey2pid = self._load_or_create_keypoints(arena)
-        self.goals = [arena.flattened_obs]
+        self.goals = [[arena.flattened_obs]]
         self.ncs = []
         self.nis = []
         self.ious = []

@@ -261,6 +261,7 @@ class VanillaSAC(TrainableAgent):
         min_q_pi = torch.min(q1_pi, q2_pi)
         alpha = self.log_alpha.exp()
         actor_loss = (alpha * log_pi - min_q_pi).mean()
+        print('\nactor loss', actor_loss.item(), 'alpha', alpha.item())
 
         self.actor_optim.zero_grad()
         actor_loss.backward()

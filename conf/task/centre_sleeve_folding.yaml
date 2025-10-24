@@ -4,3 +4,4 @@ asset_dir: assets
 task_name: centre-sleeve-folding
 debug: false
 alignment: simple_rigid
+goal_steps: 3

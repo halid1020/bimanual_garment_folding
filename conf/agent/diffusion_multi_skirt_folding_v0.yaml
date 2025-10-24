@@ -1,5 +1,5 @@
 name: diffusion_policy
-device: 'cuda:1' 
+device: 'cuda:0' 
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
 action_dim: 8

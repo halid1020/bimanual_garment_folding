@@ -4,3 +4,4 @@ asset_dir: assets
 task_name: waist-leg-alignment-folding
 debug: false
 alignment: simple_rigid
+goal_steps: 3

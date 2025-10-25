@@ -124,10 +124,10 @@ class Image2State_SAC(VanillaSAC):
         self.encoder = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
         self.actor = Actor(cfg.action_dim, cfg.feature_dim, cfg.hidden_dim).to(self.device)
 
-        self.critic = Critic(cfg.action_dim, cfg.feature_dim).to(cfg.device)
+        self.critic = Critic(cfg.action_dim, cfg.feature_dim).to(self.device)
        
 
-        self.critic_target = Critic(cfg.action_dim, cfg.feature_dim).to(cfg.device)
+        self.critic_target = Critic(cfg.action_dim, cfg.feature_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
         self.encoder_target.load_state_dict(self.encoder.state_dict())
@@ -234,6 +234,17 @@ class Image2State_SAC(VanillaSAC):
         if self.update_steps % self.config.target_update_interval == 0:
             self._soft_update(self.critic, self.critic_target, config.tau)
             self._soft_update(self.encoder, self.encoder_target, config.tau)
+
+            with torch.no_grad():
+                q_stats = {
+                    'q_mean': min_q_pi.mean().item(),
+                    'q_max': min_q_pi.max().item(),
+                    'q_min': min_q_pi.min().item(),
+                    'logp_mean': log_pi.mean().item(),
+                    'logp_max': log_pi.max().item(),
+                    'logp_min': log_pi.min().item(),
+                }
+                self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
 
         # logging
         self.logger.log({
@@ -467,8 +478,7 @@ class Image2State_SAC(VanillaSAC):
         self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-
+        self.log_alpha.load_state_dict(state['log_alpha'])
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
@@ -511,8 +521,7 @@ class Image2State_SAC(VanillaSAC):
         self.encoder_optim.load_state_dict(state['encoder_optim'])
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-
+        self.log_alpha.load_state_dict(state['log_alpha'])
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 

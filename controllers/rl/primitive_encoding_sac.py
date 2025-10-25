@@ -68,12 +68,11 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
     # ---------- helpers ----------
     def _one_hot(self, idxs: torch.LongTensor) -> torch.Tensor:
-        # idxs: (B,) long
         B = idxs.shape[0]
         one_hot = torch.zeros((B, self.K), device=idxs.device, dtype=torch.float32)
-        one_hot.scatter_(1, idxs.unsqueeze(1), 1.0) * self.config.get("one_hot_scalar", 0.1)
-        # print('idx', idxs)
-        # print('one hot', one_hot)
+        one_hot.scatter_(1, idxs.unsqueeze(1), 1.0)
+        scalar = float(self.config.get("one_hot_scalar", 0.1))
+        one_hot = one_hot * scalar   # <- ensure multiplication is applied
         return one_hot
 
     def _augment_state_with_code(self, state: torch.Tensor, prim_idx: torch.LongTensor) -> torch.Tensor:
@@ -121,6 +120,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
             # actor deterministic mean or stochastic sample:
             if stochastic:
                 a_all, logp_all = self.actor.sample(aug_states_all)  # a_all: (B*K, param_dim), logp_all: (B*K,1)
+                #print('select action logp_all shape', logp_all.shape)
             else:
                 mean, _ = self.actor(aug_states_all)
                 a_all = torch.tanh(mean)
@@ -134,6 +134,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
             # softmax over Qs -> probabilities
             probs = torch.softmax(q_all/self.sampling_temperature, dim=-1)  # (B, K)
+            #print('probs', probs)
             # choose primitive according to probs if stochastic, else argmax
             if stochastic:
                 # sample primitive index per batch element
@@ -143,6 +144,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
                 prim_idx = torch.argmax(probs, dim=-1).cpu().item()  # (B,)
 
             best_action = a_all[prim_idx].cpu().numpy()
+            #print('before best action', best_action)
 
             primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
             out_dict = {primitive_name: {}}
@@ -155,7 +157,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
             best_action = np.array([prim_idx] + best_action.tolist())
 
             # print('action out dict', out_dict)
-            # print('best_action', best_action)
+            # print('after best_action', best_action)
 
 
             return out_dict, best_action
@@ -173,11 +175,11 @@ class PrimitiveEncodingSAC(VanillaSAC):
         config = self.config
         device = self.device
         context, action, reward, next_context, done = batch.values()
-        context = context.to(device)
-        next_context = next_context.to(device)
-        action = action.to(device)
-        reward = reward.to(device)
-        done = done.to(device)
+        # context = context.to(device)
+        # next_context = next_context.to(device)
+        # action = action.to(device)
+        # reward = reward.to(device)
+        # done = done.to(device)
         B = context.shape[0]
         alpha = self.log_alpha.exp()
 
@@ -193,13 +195,14 @@ class PrimitiveEncodingSAC(VanillaSAC):
             logp_next_all = logp_next_all.view(B, self.K)  # (B, K)
 
             # compute softmax weights over q_next_all (using raw q values)
-            w_next = torch.softmax(q_next_all/self.update_temperature, dim=-1)  # (B, K) #check
+            w_next = torch.softmax(q_next_all/self.update_temperature, dim=-1).detach()  # (B, K) #check
+            #print('w_next', w_next)
             #print('weight shape and value', w_next.shape, w_next[0])
 
             # compute weighted target Q per batch: note q_next_all already (B,K)
             weighted_q_minus_alpha_logp = (w_next * (q_next_all - alpha * logp_next_all)).sum(dim=-1, keepdim=True)  # (B,1)
             #print('weighted_q_minus_alpha_logp', weighted_q_minus_alpha_logp[0])
-            target_q = reward + (1.0 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
+            target_q = reward + (1 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
 
         # --- critic update: compute Q for taken (primitive + params) from batch and MSE to target_q ---
         #print('sampled action', action[0])
@@ -217,16 +220,18 @@ class PrimitiveEncodingSAC(VanillaSAC):
         # --- actor update: compute per-primitive actions & Qs for current context, softmax over Qs, weighted actor loss ---
         aug_states_all, _ = self._expand_state_all_primitives(context)  # (B*K, aug_state_dim)
         pi_all, logp_all = self.actor.sample(aug_states_all)  # (B*K, param_dim), (B*K,1)
+        #print('update action logp_all shape', logp_all.shape)
         q1_all, q2_all = self.critic(aug_states_all, pi_all.view(B * self.K, -1))
         #print('q1 all', q1_all[:5])
         #print('q1 all', q2_all[:5])
         q_all = torch.min(q1_all, q2_all).view(B, self.K)  # (B,K)
         #print('q all', q_all[:5])
         logp_all = logp_all.view(B, self.K)  # (B,K)
+        #print('update action logp_all shape 2', logp_all.shape)
 
         # softmax weights over q_all
-        w_pi = torch.softmax(q_all/self.update_temperature, dim=-1)  # (B,K) # check
-
+        w_pi = torch.softmax(q_all/self.update_temperature, dim=-1).detach()  # (B,K) # check
+        #print('w_pi', w_pi)
         # actor loss per primitive: alpha * logp - Q; weighted sum
         alpha = self.log_alpha.exp()
         actor_loss = w_pi * (alpha * logp_all - q_all)
@@ -240,6 +245,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
         self.actor_optim.step()
 
         # --- alpha (temperature) update ---
+        expected_logp = (w_pi * logp_all).sum(dim=-1, keepdim=True)
         alpha_loss = -(self.log_alpha * (logp_all + self.target_entropy).detach()).mean()
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
@@ -250,6 +256,18 @@ class PrimitiveEncodingSAC(VanillaSAC):
             self._soft_update(self.critic, self.critic_target, config.tau)
 
         # logging
+
+        with torch.no_grad():
+            q_stats = {
+                'q_mean': q_all.mean().item(),
+                'q_max': q_all.max().item(),
+                'q_min': q_all.min().item(),
+                'logp_mean': logp_all.mean().item(),
+                'logp_max': logp_all.max().item(),
+                'logp_min': logp_all.min().item(),
+            }
+            self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
+
         self.logger.log({
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
@@ -258,9 +276,6 @@ class PrimitiveEncodingSAC(VanillaSAC):
         }, step=self.act_steps)
 
     # ---------- replay pre/post-processing ----------
-    def _process_context_for_replay(self, context):
-        # same as Vanilla: flatten the stacked context into 1D vector (state_dim,)
-        return np.stack(context).flatten()
     
     def _dict_to_vector_action(self, dict_action):
         # extract primitive_name (should be a single key)
@@ -313,6 +328,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
         # sample stochastic action for exploration
         
         dict_action, vector_action = self._select_action(self.info, stochastic=True)
+        # print('\ngenerated dict action', dict_action)
+        # print('\ngenerated vector_action', vector_action)
         self.logger.log({
             f"train/primitive_id": vector_action[0],
         }, step=self.act_steps)
@@ -322,7 +339,9 @@ class PrimitiveEncodingSAC(VanillaSAC):
         next_info = arena.step(dict_action)
 
         dict_action_ = next_info['applied_action']
+        #print('\napplied dict aciton', dict_action_)
         vector_action_ = self._dict_to_vector_action(dict_action_)
+        #print('\napplied vector_action', vector_action_)
 
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
@@ -351,8 +370,6 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
 
         accept_action = np.zeros(self.replay_action_dim, dtype=np.float32)
-        #print('accepted vector_action', vector_action_)
-        
         accept_action[:len(vector_action_)] = vector_action_
 
         #print('accepted vector_action to replay', accept_action)

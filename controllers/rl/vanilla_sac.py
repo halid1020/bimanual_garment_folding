@@ -127,7 +127,7 @@ class VanillaSAC(TrainableAgent):
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
         self.network_action_dim = int(config.action_dim)
-        self.actor = Actor(config.state_dim, config.action_dim, config.hidden_dim).to(self.device)
+        self.actor = Actor(config.state_dim, config.action_dim, config.hidden_dim).to(config.device)
 
         self.critic = Critic(config.state_dim,  config.action_dim).to(config.device)
        
@@ -261,7 +261,7 @@ class VanillaSAC(TrainableAgent):
         min_q_pi = torch.min(q1_pi, q2_pi)
         alpha = self.log_alpha.exp()
         actor_loss = (alpha * log_pi - min_q_pi).mean()
-        print('\nactor loss', actor_loss.item(), 'alpha', alpha.item())
+        #print('\nactor loss', actor_loss.item(), 'alpha', alpha.item())
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
@@ -477,7 +477,7 @@ class VanillaSAC(TrainableAgent):
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-
+        
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 

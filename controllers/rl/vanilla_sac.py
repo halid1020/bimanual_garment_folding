@@ -55,6 +55,7 @@ class Actor(nn.Module):
         self.log_std = nn.Linear(hidden_dim, action_dim)
 
 
+    # tanh is not applied on mean
     def forward(self, obs):
         x = F.relu(self.fc1(obs))
         x = F.relu(self.fc2(x))
@@ -64,7 +65,7 @@ class Actor(nn.Module):
         std = log_std.exp()
         return mean, std
 
-
+    # tan h is applied on mean'
     def sample(self, obs):
         #print('obs shape', obs.shape)
         mean, std = self(obs)
@@ -190,11 +191,13 @@ class VanillaSAC(TrainableAgent):
         if stochastic:
             #print('obs_t', obs)
             a, logp = self.actor.sample(self._process_context_for_input(obs_list))
+            a = torch.clip(a, -self.config.action_range, self.config.action_range)
             a = a.detach().cpu().numpy().squeeze(0)
             return a, logp.detach().cpu().numpy().squeeze(0)
         else:
             mean, _ = self.actor(self._process_context_for_input(obs_list))
             action = torch.tanh(mean)
+            action = torch.clip(action, -self.config.action_range, self.config.action_range)
             return action.detach().cpu().numpy().squeeze(0), None
 
     def act(self, info_list, updates=None):
@@ -202,10 +205,10 @@ class VanillaSAC(TrainableAgent):
         with torch.no_grad():
             return [self._select_action(info, stochastic=False)[0] for info in info_list]
 
-    def explore_act(self, info_list):
-        self.set_eval()
-        with torch.no_grad():
-            return [self._select_action(info, stochastic=True)[0] for info in info_list]
+    # def explore_act(self, info_list):
+    #     self.set_eval()
+    #     with torch.no_grad():
+    #         return [self._select_action(info, stochastic=True)[0] for info in info_list]
 
     def single_act(self, info, update=False):
         return self._select_action(info)[0]
@@ -333,7 +336,7 @@ class VanillaSAC(TrainableAgent):
         # sample stochastic action for exploration
         a, _ = self._select_action(self.info, stochastic=True)
         # clip to action range
-        a = np.clip(a, -self.config.action_range, self.config.action_range)
+        #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
         next_info = arena.step(a)
 

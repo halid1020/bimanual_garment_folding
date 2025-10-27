@@ -119,21 +119,21 @@ class PrimitiveEncodingSAC(VanillaSAC):
             self.internal_states[aid]['obs_que'].append(obs)
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
         ctx = self._process_context_for_input(obs_list)  # tensor (1, state_dim) or (1, enc_dim)
-
+        #print('ctx shape', ctx.shape, ctx)
         # compute per-primitive actions and Qs
         with torch.no_grad():
             B = ctx.shape[0]  # should be 1 usually for act
             aug_states_all, _ = self._expand_state_all_primitives(ctx)  # (B*K, aug_state_dim)
+            #print('aug_stats_all shape', aug_states_all.shape, aug_states_all)
             # actor deterministic mean or stochastic sample:
             if stochastic:
                 a_all, logp_all = self.actor.sample(aug_states_all)  # a_all: (B*K, param_dim), logp_all: (B*K,1)
-                a_all = torch.clip(a_all, -self.config.action_range, self.config.action_range)
-                #print('select action logp_all shape', logp_all.shape)
-                #print('herer!')
             else:
                 mean, _ = self.actor(aug_states_all)
                 a_all = torch.tanh(mean)
                 logp_all = None
+            
+            
 
             # critic per-primitive Q
             q1_all, q2_all = self.critic(aug_states_all, a_all.view(B * self.K, -1))
@@ -143,12 +143,16 @@ class PrimitiveEncodingSAC(VanillaSAC):
             probs = torch.softmax(q_all/self.sampling_temperature, dim=-1)  # (B, K)
             #print('probs', probs)
             # choose primitive according to probs if stochastic, else argmax
+
+            
             if stochastic:
                 # sample primitive index per batch element
                 prim_idx = torch.multinomial(probs, num_samples=1).squeeze(-1).detach().cpu().item()  # (B,)
                 #print('chosen prim idx', prim_idx)
             else:
                 prim_idx = torch.argmax(probs, dim=-1).detach().cpu().item()  # (B,)
+            
+            a_all = torch.clip(a_all, -self.config.action_range, self.config.action_range)
 
         
         best_action = a_all[prim_idx].detach().cpu().numpy()

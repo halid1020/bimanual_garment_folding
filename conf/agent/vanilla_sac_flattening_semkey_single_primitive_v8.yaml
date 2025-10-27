@@ -1,5 +1,5 @@
 name: primitive-encoding-sac
-device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
+device: "cuda:1"   # fallback to cuda:0
 
 
 obs_keys: [semkey_pos]

@@ -21,10 +21,13 @@ global ENV_NUM
 ENV_NUM = 0
 
 # @ray.remote
-class SingleGarmentFixedInitialEnv(GarmentEnv):
+class SingleGarmentSubGoalEnv(GarmentEnv):
     
     def __init__(self, config):
-        config.name = f'single-garment-fixed-init-env-{config.garment_type}'
+        self.num_eval_trials = 30
+        self.num_train_trials = 100
+        self.num_val_trials = 10
+        config.name = f'single-garment-subgoal-initial-env-{config.garment_type}'
         super().__init__(config)
         #self.name =f'single-garment-fixed-init-env'
 
@@ -37,10 +40,16 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
             }
         if 'save_video' not in episode_config:
             episode_config['save_video'] = False
+
+        if 'eid' not in episode_config or episode_config['eid'] is None:
+            if self.mode == 'train':
+                episode_config['eid'] = np.random.randint(self.num_train_trials)
+            elif self.mode == 'val':
+                episode_config['eid'] = np.random.randint(self.num_val_trials)
+            else:
+                episode_config['eid'] = np.random.randint(self.num_eval_trials)
         
-        episode_config['eid'] = 0
-        self.eid = 0
-        init_state_params = self._get_init_state_params(episode_config['eid'])
+        init_state_params = self._get_init_state_params(0) #single garment
 
 
 
@@ -58,6 +67,20 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
         self.init_state_params = init_state_params
 
+        ## apply subgoal init
+        goals = self.task.get_goals()
+        all_sub_goals = len(goals) * len(goals[0])
+
+        ## make a random seed using eid, then choose subgoal deterministically
+        rng = np.random.RandomState(self.eid)
+        idx = rng.randint(0, all_sub_goals)
+
+        goal_id = idx // len(goals[0])   # integer division for goal index
+        subgoal_id = idx % len(goals[0]) # remainder for subgoal index
+
+        goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
+
+        self.set_mesh_particles_positions(goal_particles)
         
         #print('set scene done')
         #print('pciker initial pos', self.picker_initial_pos)
@@ -79,10 +102,6 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
         self.action_step = 0
 
         self.evaluate_result = None
-        
-        
-        if self.init_mode == 'flattened':
-            self.set_to_flatten()
           
         
         self.overstretch = 0

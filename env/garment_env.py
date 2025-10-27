@@ -67,7 +67,7 @@ class GarmentEnv(Arena):
             if 'observation_image_shape' in config else (480, 480, 3)
 
         self.init_state_path = config.init_state_path
-        self.object = self.config.get('garment_type', 'longsleeve')
+        self.garment_type = self.config.get('garment_type', 'longsleeve')
         self._get_init_state_keys()
 
         self.evaluate_result = None
@@ -181,6 +181,7 @@ class GarmentEnv(Arena):
         if self.init_mode == 'flattened':
             self.set_to_flatten()
             self.last_flattened_step = 0
+        
         
         self.info = self._process_info({})
         self.clear_frames()
@@ -439,9 +440,17 @@ class GarmentEnv(Arena):
         particles = self.get_particle_positions()
         return particles[:self.num_mesh_particles]
     
+    # Input is N*3
     def set_particle_positions(self, particle_positions):
         particle_positions[:, [1, 2]] = particle_positions[:, [1, 2]]
-        pyflex.set_positions(particle_positions.flatten())
+        pos = pyflex.get_positions().reshape(-1, 4).copy()
+        pos[:, :3] = particle_positions.copy()
+        pyflex.set_positions(pos.flatten())
+    
+    def set_mesh_particles_position(self, mesh_particle_positions):
+        particle_positions = self.get_particle_positions()
+        particle_positions[:self.num_mesh_particles] = mesh_particle_positions
+        self.set_particle_positions(particle_positions)
     
     def _get_picker_pos(self):
         return self.pickers.get_picker_pos()
@@ -614,8 +623,8 @@ class GarmentEnv(Arena):
 
     def _get_init_state_keys(self):
         
-        path = os.path.join(self.init_state_path, f'multi-{self.object}-eval.hdf5')
-        #train_path = os.path.join(self.init_state_path, f'multi-{self.object}-train.hdf5')
+        path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        #train_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-train.hdf5')
 
         key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
         #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')

@@ -4,7 +4,7 @@ device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
 
 obs_keys: ['semkey_pos']
 reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
-
+init_alpha: 0.1
 context_horizon: 1
 
 hidden_dim: 256

@@ -3,10 +3,9 @@ device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
 
 
 obs_key: rgb
-reward_key: coverage_alignment_with_strech_penality_high_coverage_bonus
+reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
 
 context_horizon: 1
-each_image_shape: [3, 84, 84]
 
 hidden_dim: 256
 feature_dim: 512

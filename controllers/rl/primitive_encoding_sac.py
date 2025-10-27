@@ -217,15 +217,17 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
             # compute softmax weights over q_next_all (using raw q values)
             if self.K == 1:
-                w_next = torch.ones((B, 1), device=device)
+                print('!here')
+                weighted_q_minus_alpha_logp = q_next_all - alpha *  logp_next_all
             else:
                 w_next = torch.softmax(q_next_all.view(B, self.K)/self.update_temperature, dim=-1).detach()  # (B, K) #check
+                weighted_q_minus_alpha_logp = (w_next * (q_next_all.view(B, self.K) - alpha *  logp_next_all.view(B, self.K)))
+                weighted_q_minus_alpha_logp = weighted_q_minus_alpha_logp.sum(dim=-1, keepdim=True)  # (B,1)
             #print('w_next', w_next)
             #print('weight shape', w_next.shape)
 
             # compute weighted target Q per batch: note q_next_all already (B,K)
-            weighted_q_minus_alpha_logp = (w_next * (q_next_all.view(B, self.K) - alpha *  logp_next_all.view(B, self.K)))
-            weighted_q_minus_alpha_logp = weighted_q_minus_alpha_logp.sum(dim=-1, keepdim=True)  # (B,1)
+            
             target_q = reward + (1 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
             
             # print('done', done)
@@ -263,16 +265,13 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
         # softmax weights over q_all
         if self.K == 1:
+            print('here')
             w_pi = torch.ones((B, 1), device=device)
+            actor_loss = (alpha * logp_all - q_all).mean()
         else:
             w_pi = torch.softmax(q_all.view(B, self.K)/self.update_temperature, dim=-1).detach()  # (B,K) # check
-        #print('w_pi', w_pi)
-        # actor loss per primitive: alpha * logp - Q; weighted sum
-        
-        actor_loss = w_pi * (alpha * logp_all.view(B, self.K)  - q_all.view(B, self.K))
-        actor_loss = actor_loss.sum(dim=-1).mean()
-        #print('\nactor loss', actor_loss.item(), 'alpha', alpha.item())
-        
+            actor_loss = w_pi * (alpha * logp_all.view(B, self.K)  - q_all.view(B, self.K))
+            actor_loss = actor_loss.sum(dim=-1).mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()

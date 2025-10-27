@@ -6,7 +6,7 @@ obs_keys: ['semkey_pos']
 reward_key: multi_stage_reward
 
 context_horizon: 1
-each_image_shape: [3, 84, 84]
+init_alpha: 1.0
 
 hidden_dim: 256
 state_dim: 45 #3*15

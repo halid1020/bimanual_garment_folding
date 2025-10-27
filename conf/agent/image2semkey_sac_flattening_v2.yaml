@@ -9,6 +9,7 @@ reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
 context_horizon: 1
 each_image_shape: [3, 84, 84]
 
+alpha_init: 0.1
 hidden_dim: 256
 state_dim: 45 #3*15
 feature_dim: 30 #512

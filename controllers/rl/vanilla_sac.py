@@ -97,12 +97,12 @@ class VanillaSAC(TrainableAgent):
         self.context_horizon = config.context_horizon
         # self.each_image_shape = config.each_image_shape
        
-
+        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
         self._make_actor_critic(config)
 
 
         # entropy temperature
-        self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(0.1), requires_grad=True, device=self.device))
+        self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.config.get("init_alpha", 1.0)), requires_grad=True, device=self.device))
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
         self.target_entropy = -float(self.network_action_dim)
 
@@ -152,7 +152,15 @@ class VanillaSAC(TrainableAgent):
 
     def _process_context_for_input(self, context):
         context = np.stack(context, axis=0)
+        
         context = torch.as_tensor(context, dtype=torch.float32, device=self.device)
+
+        ## This is for integrating all garments.
+        if context.shape[-1] < self.config.state_dim:
+            base = torch.zeros((context.shape[0], self.config.state_dim), dtype=torch.float32, device=self.device)
+            base[:, :context.shape[-1]] = context
+            context = base
+            
         return context
 
 
@@ -231,7 +239,16 @@ class VanillaSAC(TrainableAgent):
         # N = self.context_horizon
         # H, W = self.each_image_shape[1:]
 
-        alpha = self.log_alpha.exp()
+        
+
+        # alpha loss
+        pi, log_pi = self.actor.sample(context)
+        alpha = self.log_alpha.exp().detach()
+        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
+        self.alpha_optim.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optim.step()
+
 
         # compute target Q
         with torch.no_grad():
@@ -244,22 +261,18 @@ class VanillaSAC(TrainableAgent):
         a_curr = action.view(B, -1).to(self.device)
         q1_pred, q2_pred = self.critic(context, a_curr)
 
-        # print('q1_pred', q1_pred.shape)
-        # print('q2_pred', q1_pred.shape)
-        # print('target_q', target_q.shape)
-
         critic_loss = 0.5*(F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
 
         # optimize critics
         self.critic_optim.zero_grad()
         critic_loss.backward()
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_grad_clip_value)
         self.critic_optim.step()
 
         # actor loss
         pi, log_pi = self.actor.sample(context)
         q1_pi, q2_pi = self.critic(context, pi)
         min_q_pi = torch.min(q1_pi, q2_pi)
-        alpha = self.log_alpha.exp()
         actor_loss = (alpha * log_pi - min_q_pi).mean()
         #print('\nactor loss', actor_loss.item(), 'alpha', alpha.item())
 
@@ -267,21 +280,29 @@ class VanillaSAC(TrainableAgent):
         actor_loss.backward()
         self.actor_optim.step()
 
-        # alpha loss
-        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
-        self.alpha_optim.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optim.step()
-
+        
         # soft updates
         if self.update_steps % self.config.target_update_interval == 0:
             self._soft_update(self.critic, self.critic_target, config.tau)
+
+        
+        with torch.no_grad():
+            q_stats = {
+                'q_mean': min_q_pi.mean().item(),
+                'q_max': min_q_pi.max().item(),
+                'q_min': min_q_pi.min().item(),
+                'logp_mean': log_pi.mean().item(),
+                'logp_max': log_pi.max().item(),
+                'alpha': self.log_alpha.exp().item(),
+                'logp_min': log_pi.min().item(),
+                'critic_grad_norm': critic_grad_norm.item(),
+            }
+            self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
 
         # logging
         self.logger.log({
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
-            'alpha': self.log_alpha.exp().item(),
             'alpha_loss': alpha_loss.item()
         }, step=self.act_steps)
 
@@ -347,7 +368,16 @@ class VanillaSAC(TrainableAgent):
         self.episode_length += 1
 
     def _process_context_for_replay(self, context):
-        return np.stack(context).flatten()
+        context = np.stack(context).flatten()
+
+        ## This is for integrating all garments.
+        if context.shape[0] < self.config.state_dim:
+            base = np.zeros((self.config.state_dim), dtype=np.float32)
+            base[:context.shape[-1]] = context
+            context = base
+            
+        return context
+
 
 
     def train(self, update_steps, arenas) -> bool:
@@ -474,9 +504,11 @@ class VanillaSAC(TrainableAgent):
 
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
-        self.alpha_optim.load_state_dict(state['alpha_optim'])
+        
 
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
+        self.alpha_optim.load_state_dict(state['alpha_optim'])
         
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
@@ -516,7 +548,9 @@ class VanillaSAC(TrainableAgent):
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+        self.alpha_optim.load_state_dict(state['alpha_optim'])
+        
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 

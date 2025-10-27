@@ -476,9 +476,11 @@ class Image2State_SAC(VanillaSAC):
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
         self.encoder_optim.load_state_dict(state['encoder_optim'])
+        
+        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
         self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha.load_state_dict(state['log_alpha'])
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
@@ -519,9 +521,11 @@ class Image2State_SAC(VanillaSAC):
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
         self.encoder_optim.load_state_dict(state['encoder_optim'])
+        
+        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
         self.alpha_optim.load_state_dict(state['alpha_optim'])
-
-        self.log_alpha.load_state_dict(state['log_alpha'])
+        
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 

@@ -9,7 +9,8 @@ from softgym.utils.env_utils import get_coverage
 import pyflex
 from agent_arena import Arena
 from tqdm import tqdm
-
+# Handle possible uneven lengths by zipping with itertools.zip_longest
+from itertools import zip_longest
 
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
@@ -19,6 +20,7 @@ from .garment_env import GarmentEnv
 
 global ENV_NUM
 ENV_NUM = 0
+# self.all_garment_types = ['longsleeve', 'trousers', 'skirt', 'dress']
 
 # @ray.remote
 class MultiGarmentEnv(GarmentEnv):
@@ -28,6 +30,14 @@ class MultiGarmentEnv(GarmentEnv):
         self.num_eval_trials = 30
         self.num_train_trials = 100
         self.num_val_trials = 10
+        
+        if config.garment_type == 'all':
+            self.all_garment_types = config.all_garment_types
+            self.num_eval_trials = len(self.all_garment_types)*8 # 32
+            self.num_train_trials *= len(self.all_garment_types) # 400
+            self.num_val_trials = len(self.all_garment_types)*3 # 12
+            
+
         config.name = f'multi-garment-{config.garment_type}-env'
         super().__init__(config)
 
@@ -165,28 +175,91 @@ class MultiGarmentEnv(GarmentEnv):
 
     def _get_init_state_keys(self):
         
-        eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
-        train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
+        if self.config.garment_type == 'all':
+            garment_types = self.all_garment_types  # fixed typo
+            num_garments = len(garment_types)
 
-        eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
-        train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
+            # Initialize empty lists
+            self.eval_keys, self.val_keys, self.train_keys = [], [], []
 
-        self.eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
-        self.train_keys = self._get_init_keys_helper(train_path, train_key_file)
+            # Store per-garment key lists temporarily
+            garment_eval_keys = []
+            garment_val_keys = []
+            garment_train_keys = []
 
-        self.val_keys = self.eval_keys[:self.num_val_trials]
-        self.eval_keys = self.eval_keys[self.num_val_trials:]
+            # Load and split per garment type
+            for garment_type in garment_types:
+                eval_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
+                train_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
+
+                eval_key_file = os.path.join(self.config.init_state_path, f'{garment_type}-eval.json')
+                train_key_file = os.path.join(self.config.init_state_path, f'{garment_type}-train.json')
+
+                eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+                train_keys = self._get_init_keys_helper(train_path, train_key_file)
+
+                # Split eval_keys into val and eval
+                val_keys = eval_keys[: self.num_val_trials // num_garments]
+                eval_keys = eval_keys[self.num_val_trials // num_garments : self.num_val_trials // num_garments + (self.num_eval_trials // num_garments)]
+
+                # Trim train_keys to its share
+                train_keys = train_keys[: self.num_train_trials // num_garments]
+
+                garment_eval_keys.append(eval_keys)
+                garment_val_keys.append(val_keys)
+                garment_train_keys.append(train_keys)
+
+            # --- Interleave keys across garments ---
+            def interleave(lists):
+                # zip(*lists) pairs first elements, second elements, etc.
+                interleaved = []
+                for group in zip(*lists):
+                    interleaved.extend(group)
+                return interleaved
+
+            
+
+            def interleave_flexible(lists):
+                interleaved = []
+                for group in zip_longest(*lists, fillvalue=None):
+                    for item in group:
+                        if item is not None:
+                            interleaved.append(item)
+                return interleaved
+
+            self.eval_keys = interleave_flexible(garment_eval_keys)
+            self.val_keys = interleave_flexible(garment_val_keys)
+            self.train_keys = interleave_flexible(garment_train_keys)
+        
+        
+        
+        else: 
+            eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
+            train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
+
+            eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
+            train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
+
+            self.eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+            self.train_keys = self._get_init_keys_helper(train_path, train_key_file)
+
+            self.val_keys = self.eval_keys[:self.num_val_trials]
+            self.eval_keys = self.eval_keys[self.num_val_trials:]
 
     def _get_init_state_params(self, eid):
+        garment_type = self.config.garment_type
+        if self.config.garment_type == 'all':
+            garment_type = self.all_garment_types[eid%len(self.all_garment_types)]
+
         if self.mode == 'train':
             keys = self.train_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
         elif self.mode == 'eval':
             keys = self.eval_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
         elif self.mode == 'val':
             keys = self.val_keys
-            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
 
         while True:
             key = keys[eid]

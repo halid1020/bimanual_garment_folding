@@ -7,6 +7,9 @@ reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
 update_temperature: 0.01 # Too close to 0, it can become softmax
 sampling_temperature: 1
 
+critic_gradient_clip: True
+critic_grad_clip_value: 1.0
+
 context_horizon: 1
 one_hot_scalar: 0.1
 

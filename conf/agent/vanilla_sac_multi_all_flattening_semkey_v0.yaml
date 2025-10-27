@@ -1,16 +1,17 @@
 name: vanilla-sac
-device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
+device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
 
 
-obs_keys: ['semkey_pos']
+obs_keys: ['semkey_pos', 'flattened_semkey_pos']
 reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
 
 context_horizon: 1
 
 hidden_dim: 256
-state_dim: 45 #3*15
+state_dim: 90 #3*15*2
 action_dim: 8
 action_range: 1.0
+init_alpha: 0.1
 
 actor_lr: 3e-4
 critic_lr: 3e-4

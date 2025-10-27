@@ -9,7 +9,8 @@ sampling_temperature: 1
 
 context_horizon: 1
 one_hot_scalar: 1
-
+critic_gradient_clip: True
+critic_grad_clip_value: 1.0
 hidden_dim: 256
 state_dim: 45
 action_dims: [8]

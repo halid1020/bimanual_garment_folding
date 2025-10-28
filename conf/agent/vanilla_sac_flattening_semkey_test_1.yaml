@@ -18,10 +18,10 @@ critic_lr: 3e-4
 alpha_lr: 3e-4
 tau: 0.005
 gamma: 0.99
-batch_size: 4 #256
+batch_size: 1 #256
 
 replay_capacity: 100 #100000 
-initial_act_steps: 5 #100
+initial_act_steps: 1 #100
 train_freq: 1
 gradient_steps: 1
 target_update_interval: 1

@@ -238,6 +238,7 @@ class VanillaSAC(TrainableAgent):
         config = self.config
         context, action, reward, next_context, done = batch.values()
         B = context.shape[0]
+        print('sampled action', action)
         # C = self.each_image_shape[0]
         # N = self.context_horizon
         # H, W = self.each_image_shape[1:]
@@ -364,7 +365,7 @@ class VanillaSAC(TrainableAgent):
         next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
-
+        print('\napplied action vecotr', a, type(a))
         self.replay.add(obs_stack, a.astype(np.float32), reward, next_obs_stack, done)
         self.act_steps += 1
         self.episode_return += reward

@@ -1,0 +1,41 @@
+name: primitive-encoding-sac
+device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
+
+
+obs_keys: [semkey_pos]
+reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
+update_temperature: 1.0
+sampling_temperature: 1.0
+init_alpha: 0.1
+critic_grad_clip_value: 1.0
+one_hot_scalar: 0.1
+context_horizon: 1
+hidden_dim: 256
+state_dim: 45
+action_dims: [4, 8]
+action_range: 1.0
+num_primitives: 2
+primitive_param:
+  - name: norm-pixel-pick-and-fling
+    params: [pick_0, pick_1]
+    dims: [2, 2]
+  - name: norm-pixel-fold
+    params: [pick_0, pick_1, place_0, place_1]
+    dims: [2, 2, 2, 2]
+
+actor_lr: 3e-4
+critic_lr: 3e-4
+alpha_lr: 3e-4
+tau: 0.005
+gamma: 0.99
+batch_size: 256
+
+replay_capacity: 100
+initial_act_steps: 10
+train_freq: 1
+gradient_steps: 1
+target_update_interval: 1
+
+total_update_steps: 100
+validation_interval: 10
+eval_checkpoint: -1

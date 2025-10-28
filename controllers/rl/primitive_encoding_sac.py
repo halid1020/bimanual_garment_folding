@@ -158,11 +158,12 @@ class PrimitiveEncodingSAC(VanillaSAC):
         best_action = a_all[prim_idx].detach().cpu().numpy()
 
         primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
+        dims = self.primitive_param[prim_idx]['dims']
             
         out_dict = {primitive_name: {}}
 
         idx = 0
-        for param_name, dim in params:
+        for param_name, dim in zip(params, dims):
             out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
             idx += dim
         
@@ -312,24 +313,27 @@ class PrimitiveEncodingSAC(VanillaSAC):
         params_dict = dict_action[primitive_name]
 
         # find primitive index
-        best_k = None
+        chosen_primitive = None
         for k, prim in enumerate(self.primitive_param):
-            pname, params = prim['name'], prim['params']
+            pname = prim['name']
             if pname == primitive_name:
-                best_k = k
+                chosen_primitive = k
                 break
-        if best_k is None:
+        if chosen_primitive is None:
             raise ValueError(f"Unknown primitive {primitive_name}")
 
         # flatten parameters in the same order as in primitive_param
         flat_params = []
-        for param_name, dim in self.primitive_param[best_k]['params']:
-            val = np.array(params_dict[param_name]).reshape(-1)
-            flat_params.extend(val.tolist())
-        if self.disable_one_hot:
-            return flat_params
+        for i, param_name in enumerate(self.primitive_param[chosen_primitive]['params']):
+            #val = np.array(params_dict[param_name]).reshape(-1)
+            flat_params.append(params_dict[param_name])
+        
         # prepend primitive index
-        return np.array([best_k] + flat_params)
+        #ret_act = np.stack(flat_params).flatten()
+        ret_act = np.concatenate(([float(chosen_primitive)], np.stack(flat_params).flatten()))
+
+
+        return ret_act
 
     def _collect_from_arena(self, arena):
         if self.last_done:

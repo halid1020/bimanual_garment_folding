@@ -29,7 +29,8 @@ class Primitive2VectorSAC(VanillaSAC):
     
     def _dict_to_vector_action(self, dict_action):
         # extract primitive_name (should be a single key)
-        primitive_name = next(iter(dict_action.keys()))
+        primitive_name = list(dict_action.keys())[0]
+
         #print('primitive name', primitive_name)
         params_dict = dict_action[primitive_name]
 
@@ -65,7 +66,6 @@ class Primitive2VectorSAC(VanillaSAC):
         for param_name, dim in zip(params, dims):
             out_dict[primitive_name][param_name] = vector_act[idx: idx + dim]
             idx += dim
-        
         
         return out_dict
 
@@ -123,12 +123,12 @@ class Primitive2VectorSAC(VanillaSAC):
             self.episode_length = 0
 
         # sample stochastic action for exploration
-        act, _ = self._select_action(self.info, stochastic=True)
+        action, _ = self._select_action(self.info, stochastic=True)
         #print('\ngenerated action dict', act)
         # clip to action range
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
-        next_info = arena.step(act)
+        next_info = arena.step(action)
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
@@ -142,9 +142,9 @@ class Primitive2VectorSAC(VanillaSAC):
             }, step=self.act_steps)
         done = next_info.get('done', False)
         self.info = next_info
-        act = next_info['applied_action']
+        action = next_info['applied_action']
         #print('\napplied action dict', act)
-        act = self._dict_to_vector_action(act) ## Change!!!
+        action = self._dict_to_vector_action(action) ## Change!!!
         #print('\napplied action vecotr', act, type(act))
         self.last_done = done
 
@@ -158,9 +158,9 @@ class Primitive2VectorSAC(VanillaSAC):
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
         #print('before save act', act)
-        act = act.astype(np.float32)
+        action = action.astype(np.float32)
         #print('save act', act)
-        self.replay.add(obs_stack, act, reward, next_obs_stack, done)
+        self.replay.add(obs_stack, action, reward, next_obs_stack, done)
         self.act_steps += 1
         self.episode_return += reward
         self.episode_length += 1

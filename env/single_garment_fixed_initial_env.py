@@ -118,6 +118,7 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
         key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
         #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')
 
+
         self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
         
         # print len of keys

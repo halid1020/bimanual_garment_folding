@@ -2,6 +2,8 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
 from env.multi_garment_env import MultiGarmentEnv
 from env.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
+from env.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
+    
 
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
@@ -30,6 +32,7 @@ import agent_arena as ag_ar
 registered_arena = {
     'single-garment-fixed-init-env':  SingleGarmentFixedInitialEnv,
     'single-garment-vectorised-fold-prim-env': SingleGarmentVectorisedFoldPrimEnv,
+    'single-garment-subgoal-init-vectorised-fold-prim-env': SingleGarmentSubgoalInitVectorisedFoldPrimEnv,
     'multi-garment-env': MultiGarmentEnv,
     'multi-garment-vectorised-fold-prim-env': MultiGarmentVectorisedFoldPrimEnv
 }

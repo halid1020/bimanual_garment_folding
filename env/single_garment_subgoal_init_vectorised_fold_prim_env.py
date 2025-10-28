@@ -15,13 +15,13 @@ from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
-from .single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
+from .single_garment_subgoal_initial_env import SingleGarmentSubGoalEnv
 
 global ENV_NUM
 ENV_NUM = 0
 
 # @ray.remote
-class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
+class SingleGarmentSubgoalInitVectorisedFoldPrimEnv(SingleGarmentSubGoalEnv):
     
     def __init__(self, config):
         #config.name = f'single-garment-fixed-init-env'
@@ -48,7 +48,7 @@ class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
         info = self.action_tool.step(self, dict_action)
         self.action_step += 1
         self.info = self._process_info(info)
-        dict_applied_action = self.info['applied_action'] ## This line is critical!!! This is not used at all.
+        dict_applied_action = self.info['applied_action']
         vector_action = []
         for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
             vector_action.append(dict_action['norm-pixel-fold'][param_name])

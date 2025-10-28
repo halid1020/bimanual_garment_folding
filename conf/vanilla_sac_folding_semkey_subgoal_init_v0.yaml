@@ -1,0 +1,8 @@
+defaults:
+  - agent: vanilla_sac_folding_semkey_subgoal_init_v0
+  - arena: single_longsleeve_subgoal_init_vectorised_fold_readjust_pick_provide_semkey_pos
+  - task: folding_overstretch_penality_1
+  - data_augmenter: identity
+
+exp_name: vanilla_sac_folding_semkey_subgoal_init_v0
+save_root: /home/hcv530/garment_folding_data

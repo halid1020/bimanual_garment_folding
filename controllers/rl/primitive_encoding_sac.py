@@ -218,7 +218,6 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
             # compute softmax weights over q_next_all (using raw q values)
             if self.K == 1:
-                print('!here')
                 weighted_q_minus_alpha_logp = q_next_all - alpha *  logp_next_all
             else:
                 w_next = torch.softmax(q_next_all.view(B, self.K)/self.update_temperature, dim=-1).detach()  # (B, K) #check
@@ -266,7 +265,6 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
         # softmax weights over q_all
         if self.K == 1:
-            print('here')
             w_pi = torch.ones((B, 1), device=device)
             actor_loss = (alpha * logp_all - q_all).mean()
         else:
@@ -405,7 +403,7 @@ class PrimitiveEncodingSAC(VanillaSAC):
 
 
         accept_action = np.zeros(self.replay_action_dim, dtype=np.float32)
-        accept_action[:len(vector_action_)] = vector_action_
+        accept_action[:len(vector_action)] = vector_action ##!!! use the original action Alert!!!
 
         
         #print('accepted vector_action to replay', accept_action)

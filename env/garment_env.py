@@ -245,6 +245,7 @@ class GarmentEnv(Arena):
             #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
                 #print('self.last_info', self.last_info)
+                #print(info['evaluation'])
                 info['reward'] = self.task.reward(self.last_info, None, info)
             
 
@@ -442,12 +443,12 @@ class GarmentEnv(Arena):
     
     # Input is N*3
     def set_particle_positions(self, particle_positions):
-        particle_positions[:, [1, 2]] = particle_positions[:, [1, 2]]
+        particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
         pos = pyflex.get_positions().reshape(-1, 4).copy()
         pos[:, :3] = particle_positions.copy()
         pyflex.set_positions(pos.flatten())
     
-    def set_mesh_particles_position(self, mesh_particle_positions):
+    def set_mesh_particles_positions(self, mesh_particle_positions):
         particle_positions = self.get_particle_positions()
         particle_positions[:self.num_mesh_particles] = mesh_particle_positions
         self.set_particle_positions(particle_positions)

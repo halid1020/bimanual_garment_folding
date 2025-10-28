@@ -67,20 +67,7 @@ class SingleGarmentSubGoalEnv(GarmentEnv):
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
         self.init_state_params = init_state_params
 
-        ## apply subgoal init
-        goals = self.task.get_goals()
-        all_sub_goals = len(goals) * len(goals[0])
-
-        ## make a random seed using eid, then choose subgoal deterministically
-        rng = np.random.RandomState(self.eid)
-        idx = rng.randint(0, all_sub_goals)
-
-        goal_id = idx // len(goals[0])   # integer division for goal index
-        subgoal_id = idx % len(goals[0]) # remainder for subgoal index
-
-        goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
-
-        self.set_mesh_particles_positions(goal_particles)
+        
         
         #print('set scene done')
         #print('pciker initial pos', self.picker_initial_pos)
@@ -98,7 +85,46 @@ class SingleGarmentSubGoalEnv(GarmentEnv):
         self._step_sim()
         
         self.last_flattened_step = -100
+        self.eid = 0
         self.task.reset(self)
+
+        ###### apply subgoal init
+        goals = self.task.get_goals()
+        #print('goals', goals)
+        all_sub_goals = len(goals) * len(goals[0])
+
+        ## make a random seed using eid, then choose subgoal deterministically
+        self.eid = episode_config['eid']
+        rng = np.random.RandomState(self.eid)
+        idx = rng.randint(0, all_sub_goals)
+
+        goal_id = idx // len(goals[0])   # integer division for goal index
+        subgoal_id = idx % len(goals[0]) # remainder for subgoal index
+
+        goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+
+        # Random rotation around Z-axis
+        theta = rng.uniform(0, 2 * np.pi)  # random angle in radians
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+        goal_particles = goal_particles @ rotation_matrix.T  # rotate
+
+        # Random displacement within ±0.5 range per axis
+        displacement = rng.uniform(-0.5, 0.5, size=3)
+        displacement[2] = 0
+        goal_particles += displacement
+
+        self.set_mesh_particles_positions(goal_particles)
+        self._wait_to_stabalise()
+        #######
+
+
         self.action_step = 0
 
         self.evaluate_result = None
@@ -114,17 +140,28 @@ class SingleGarmentSubGoalEnv(GarmentEnv):
     
     def get_eval_configs(self):
         eval_configs = [
-            {'eid': 0, 'tier': 0, 'save_video': True}
-            for eid in range(30)
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_eval_trials)
         ]
         
         return eval_configs
 
+    def get_train_configs(self):
+        train_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': self.config.get('save_video', False)}
+            for eid in range(self.num_train_trials)
+        ]
+        
+        return train_configs
+
     
     def get_val_configs(self):
-        return [
-            {'eid': 0, 'tier': 0, 'save_video': True}
+        val_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_val_trials)
         ]
+        
+        return val_configs
 
 
 

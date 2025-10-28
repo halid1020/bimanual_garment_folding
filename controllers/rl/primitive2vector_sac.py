@@ -23,7 +23,17 @@ from .wandb_logger import WandbLogger
 class Primitive2VectorSAC(VanillaSAC):
 
     def __init__(self, config):
-        self.primitive_param = config.primitive_param
+        self.primitive_param = []
+        for prim in config.primitive_param:
+            name, params, dims = prim['name'], prim['params'], prim['dims']
+            prim_dict = {
+                'name': name,
+                'params': list(params),
+                'dims': list(dims)
+            }
+            self.primitive_param.append(prim_dict)
+        print(self.primitive_param)
+
 
         super().__init__(config)
     
@@ -122,12 +132,8 @@ class Primitive2VectorSAC(VanillaSAC):
             self.episode_return = 0.0
             self.episode_length = 0
 
-        # sample stochastic action for exploration
+
         action, _ = self._select_action(self.info, stochastic=True)
-        #print('\ngenerated action dict', act)
-        # clip to action range
-        #a = np.clip(a, -self.config.action_range, self.config.action_range)
-        #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
         next_info = arena.step(action)
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
@@ -142,10 +148,8 @@ class Primitive2VectorSAC(VanillaSAC):
             }, step=self.act_steps)
         done = next_info.get('done', False)
         self.info = next_info
-        action = next_info['applied_action']
-        #print('\napplied action dict', act)
+        # action = next_info['applied_action'] Alert !!! Change!!!!
         action = self._dict_to_vector_action(action) ## Change!!!
-        #print('\napplied action vecotr', act, type(act))
         self.last_done = done
 
         aid = arena.id
@@ -157,9 +161,7 @@ class Primitive2VectorSAC(VanillaSAC):
         next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
-        #print('before save act', act)
         action = action.astype(np.float32)
-        #print('save act', act)
         self.replay.add(obs_stack, action, reward, next_obs_stack, done)
         self.act_steps += 1
         self.episode_return += reward

@@ -5,4 +5,4 @@ defaults:
   - data_augmenter: identity
 
 exp_name: vanilla_sac_flattening_semkey_v1_retrain
-save_root: /data/hcv530/garment_folding
+save_root: /home/hcv530/garment_folding_data

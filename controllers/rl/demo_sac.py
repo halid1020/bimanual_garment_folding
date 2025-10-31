@@ -42,15 +42,15 @@ class DemoSAC(VanillaSAC):
             data_path=self.demo_data_path,
             data_dir= self.demo_data_dir,
             io_mode='r',
-            obs_config=self.obs_config,
-            act_config=self.action_config,
+            obs_config=self.demo_obs_config,
+            act_config=self.demo_act_config,
             whole_trajectory=True
         )
 
         self.demo_act_steps = 0
         
         for i in range(self.demo_trial_num):
-            demo_trj = self.demo_dataset.get_trajectory
+            demo_trj = self.demo_dataset.get_trajectory(i)
             self.demo_act_steps += demo_trj['action_steps']
 
     def _fill_relay_buffer_with_demo(self):
@@ -70,34 +70,32 @@ class DemoSAC(VanillaSAC):
                 self.internal_states[-1]['obs_que'].append(obs)
             
 
-            for j in demo_trj['action_steps']:
+            for j in range(demo_trj['action_steps']):
 
                 next_obs = [demo_trj['observation'][k][j+1] for k in self.obs_keys]
-                reward = demo_trj['observation'][self.reward_key][j+1]
+                reward = demo_trj['observation']['reward'][j+1]
                 self.logger.log(
                     {'train/step_reward': reward}, step=self.act_steps
                 )
-                action = demo_trj['action']['default']
+                action = demo_trj['action']['default'][j]
 
                 obs_list = list(self.internal_states[-1]['obs_que'])[-self.context_horizon:]
                 obs_stack = self._process_context_for_replay(obs_list)
                 obs_list.append(self._process_obs_for_input(next_obs))
                 next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
+                done = False
+                if j == demo_trj['action_steps'] - 1:
+                    done = True
                 self.replay.add(obs_stack,action, reward, next_obs_stack, done)
                 self.act_steps += 1
                 self.episode_return += reward
                 self.episode_length += 1
 
 
-            for k, v in evaluation.items():
-                self.logger.log({
-                    f"train/eps_lst_step_eval_{k}": v,
-                }, step=self.act_steps) 
-                
             self.logger.log({
                 "train/episode_return": self.episode_return,
                 "train/episode_length": self.episode_length,
-                'train/episode_success': success
+                'train/episode_success': 1 # TODO: make this more general
             }, step=self.act_steps)
 
         print('Finished.')

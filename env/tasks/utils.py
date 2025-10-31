@@ -10,6 +10,9 @@ from scipy.signal import fftconvolve
 import cv2
 import os
 
+IOU_FLATTENING_TRESHOLD = 0.82
+NC_FLATTENING_TRESHOLD = 0.95
+
 def calculate_iou(mask1, mask2):
     if mask1.shape[0] > 128:
         mask1 = cv2.resize(mask1.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)

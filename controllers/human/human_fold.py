@@ -19,7 +19,7 @@ class HumanFold(Agent):
         
         return actions
     
-    def single_act(self, state):
+    def single_act(self, state, update=False):
         """
         Pop up a window shows the RGB image, and user can click on the image to
         produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
@@ -84,12 +84,15 @@ class HumanFold(Agent):
             (place2_y / width) * 2 - 1
         ]
         
-        return {
+        action = {
             'pick_0': normalized_action1[:2],
             'place_0': normalized_action1[2:],
             'pick_1': normalized_action2[:2],
             'place_1': normalized_action2[2:],
         }
+
+        action['norm-pixel-fold'] = action
+        return action
         
     def init(self, state):
         pass

@@ -99,13 +99,17 @@ class VanillaSAC(TrainableAgent):
         # self.each_image_shape = config.each_image_shape
        
         self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
+        self.auto_alpha_learning = config.get('auto_alpha_learning', True)
         self._make_actor_critic(config)
+
+        self.init_alpha = self.config.get("init_alpha", 1.0)
 
 
         # entropy temperature
-        self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.config.get("init_alpha", 1.0)), requires_grad=True, device=self.device))
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.target_entropy = -float(self.network_action_dim)
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+            self.target_entropy = -float(self.network_action_dim)
 
         # replay
         self._init_reply_buffer(config)
@@ -246,12 +250,15 @@ class VanillaSAC(TrainableAgent):
         
 
         # alpha loss
-        pi, log_pi = self.actor.sample(context)
-        alpha = self.log_alpha.exp().detach()
-        alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
-        self.alpha_optim.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optim.step()
+        if self.auto_alpha_learning:
+            pi, log_pi = self.actor.sample(context)
+            alpha = self.log_alpha.exp().detach().item()
+            alpha_loss = -(self.log_alpha * (log_pi + self.target_entropy).detach()).mean()
+            self.alpha_optim.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optim.step()
+        else:
+            alpha = self.init_alpha
 
 
         # compute target Q
@@ -297,7 +304,7 @@ class VanillaSAC(TrainableAgent):
                 'q_min': min_q_pi.min().item(),
                 'logp_mean': log_pi.mean().item(),
                 'logp_max': log_pi.max().item(),
-                'alpha': self.log_alpha.exp().item(),
+                'alpha': alpha,
                 'logp_min': log_pi.min().item(),
                 'critic_grad_norm': critic_grad_norm.item(),
             }
@@ -307,8 +314,12 @@ class VanillaSAC(TrainableAgent):
         self.logger.log({
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
-            'alpha_loss': alpha_loss.item()
         }, step=self.act_steps)
+
+        if self.auto_alpha_learning:
+            self.logger.log({
+                'alpha_loss': alpha_loss.item()
+            }, step=self.act_steps)
 
     # ---------------------- environment interaction ----------------------
     def _collect_from_arena(self, arena):
@@ -431,11 +442,13 @@ class VanillaSAC(TrainableAgent):
             'critic_target': self.critic_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'log_alpha': self.log_alpha.detach().cpu(),
-            'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
         }
+
+        if self.auto_alpha_learning:
+            state['log_alpha'] =  self.log_alpha.detach().cpu()
+            state['alpha_optim'] = self.alpha_optim.state_dict()
 
         if checkpoint_id is not None:
             torch.save(state, os.path.join(path, f'checkpoint_{checkpoint_id}.pt'))
@@ -468,11 +481,13 @@ class VanillaSAC(TrainableAgent):
             'critic_target': self.critic_target.state_dict(),
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'log_alpha': self.log_alpha.detach().cpu(),
-            'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
         }
+
+        if self.auto_alpha_learning:
+            state['log_alpha'] =  self.log_alpha.detach().cpu()
+            state['alpha_optim'] = self.alpha_optim.state_dict()
 
         torch.save(state, os.path.join(path, 'best_model.pt'))
 
@@ -509,10 +524,10 @@ class VanillaSAC(TrainableAgent):
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
         
-
-        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
-        self.alpha_optim.load_state_dict(state['alpha_optim'])
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
+            self.alpha_optim.load_state_dict(state['alpha_optim'])
         
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
@@ -549,11 +564,12 @@ class VanillaSAC(TrainableAgent):
 
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
-        self.alpha_optim.load_state_dict(state['alpha_optim'])
+        #self.alpha_optim.load_state_dict(state['alpha_optim'])
 
-        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-        self.alpha_optim.load_state_dict(state['alpha_optim'])
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+            self.alpha_optim.load_state_dict(state['alpha_optim'])
         
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)

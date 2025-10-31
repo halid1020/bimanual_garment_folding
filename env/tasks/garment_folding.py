@@ -310,7 +310,7 @@ class GarmentFoldingTask(GarmentTask):
         
         
         multi_stage_reward = coverage_alignment_reward(last_info, action, info)
-        if info['evaluation']['normalised_coverage'] > 0.9 and info['evaluation']['max_IoU_to_flattened'] > 0.85:
+        if info['evaluation']['normalised_coverage'] > NC_FLATTENING_TRESHOLD and info['evaluation']['max_IoU_to_flattened'] > IOU_FLATTENING_TRESHOLD:
             multi_stage_reward = 1
         arena = info['arena']
         for i in range(self.config.goal_steps)[1:]:

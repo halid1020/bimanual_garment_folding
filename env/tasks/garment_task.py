@@ -11,12 +11,18 @@ from ..utils.keypoint_gui import KeypointGUI
 
 class GarmentTask(Task):
     def __init__(self, config):
-        self.keypoint_semantics = KEYPOINT_SEMANTICS[config.garment_type]
+        if config.garment_type == 'all':
+            ## we assum the keypoints are generateld
+            pass
+        else:
+           
+            self.keypoint_semantics = KEYPOINT_SEMANTICS[config.garment_type]
+            self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics)
 
         self.semkey2pid = None # This needs to be loaded or annotated
         self.asset_dir = config.asset_dir
 
-        self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics )
+        
         self.keypoint_dir = os.path.join(self.asset_dir, 'keypoints')
         os.makedirs(self.keypoint_dir, exist_ok=True)
 

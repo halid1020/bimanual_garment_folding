@@ -230,7 +230,9 @@ class MultiGarmentEnv(GarmentEnv):
             self.eval_keys = interleave_flexible(garment_eval_keys)
             self.val_keys = interleave_flexible(garment_val_keys)
             self.train_keys = interleave_flexible(garment_train_keys)
-        
+
+            # print('self.train_keys', len(self.train_keys))
+            # print('garment_train_keys', len(garment_train_keys))
         
         
         else: 
@@ -250,6 +252,9 @@ class MultiGarmentEnv(GarmentEnv):
         garment_type = self.config.garment_type
         if self.config.garment_type == 'all':
             garment_type = self.all_garment_types[eid%len(self.all_garment_types)]
+            #eid //=  len(self.all_garment_types)
+            # print('garment_type', garment_type)
+            # print('here')
 
         if self.mode == 'train':
             keys = self.train_keys
@@ -260,9 +265,10 @@ class MultiGarmentEnv(GarmentEnv):
         elif self.mode == 'val':
             keys = self.val_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
-
+        #print('len(keys)', len(keys))
         while True:
             key = keys[eid]
+            #print('key', key)
             with h5py.File(hdf5_path, 'r') as init_states:
                 # print(hdf5_path, key)
                 # Convert group to dict

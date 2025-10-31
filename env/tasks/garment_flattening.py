@@ -7,7 +7,7 @@ from tqdm import tqdm
 from statistics import mean
 
 from agent_arena import save_video
-from .utils import get_max_IoU
+from .utils import get_max_IoU, IOU_FLATTENING_TRESHOLD, NC_FLATTENING_TRESHOLD
 from .folding_rewards import *
 from .garment_task import GarmentTask
 
@@ -104,7 +104,7 @@ class GarmentFlatteningTask(GarmentTask):
         cur_eval = self.evaluate(arena)
         IoU = cur_eval['max_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
-        return IoU > 0.85 and coverage > 0.99
+        return IoU > IOU_FLATTENING_TRESHOLD and coverage > NC_FLATTENING_TRESHOLD
     
     def compare(self, results_1, results_2):
         threshold=0.95

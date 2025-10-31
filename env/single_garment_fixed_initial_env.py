@@ -107,7 +107,10 @@ class SingleGarmentFixedInitialEnv(GarmentEnv):
             {'eid': 0, 'tier': 0, 'save_video': True}
         ]
 
-
+    def get_train_configs(self):
+        return [
+            {'eid': 0, 'tier': 0, 'save_video': False}
+        ]
 
 
     def _get_init_state_keys(self):

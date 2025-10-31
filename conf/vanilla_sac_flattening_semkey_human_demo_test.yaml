@@ -1,0 +1,8 @@
+defaults:
+  - agent: vanilla_sac_flattening_semkey_human_demo_test
+  - arena: single_longsleeve_vectorised_fold_readjust_pick_provide_semkey_pos_v1
+  - task: flattening_overstretch_penality_1
+  - data_augmenter: identity
+
+exp_name: vanilla_sac_flattening_semkey_human_demo_test
+save_root: /home/hcv530/garment_folding_data

@@ -26,6 +26,9 @@ from controllers.rl.image_based_multi_primitive_sac \
 from controllers.rl.primitive2vector_sac \
     import Primitive2VectorSAC
 
+from controllers.rl.demo_sac \
+    import DemoSAC
+
 import agent_arena as ag_ar
 
 
@@ -46,3 +49,4 @@ def register_agent_arena():
     ag_ar.register_agent('vanilla-sac', VanillaSAC)
     ag_ar.register_agent('image2state-sac', Image2State_SAC)
     ag_ar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
+    ag_ar.register_agent('demo-sac', DemoSAC)

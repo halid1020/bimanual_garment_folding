@@ -39,7 +39,7 @@ action_config = {
 def argument_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--trials', type=int, default=10)
-    parser.add_argument('--data_path', type=str, default='gc_longsleeve_flattening')
+    parser.add_argument('--data_path', type=str, default='single_longsleeve_flattening')
     return parser.parse_args()
 
 def main():
@@ -48,7 +48,7 @@ def main():
     task = 'flattening'
     garment_type = 'longsleeve'
     mode = 'train'
-
+    reward_key = 'coverage_alignment_with_stretch_penality_high_coverage_bonus'
     arena_config = {
         'garment_type': garment_type,
         'picker_radius': 0.03,  # 0.015,
@@ -61,7 +61,7 @@ def main():
         # 'task': 'centre-sleeve-folding',
         'disp': False,
         'ray_id': 0,
-        'horizon': 20,
+        'horizon': 3,
         'track_semkey_on_frames': False,
         'readjust_pick': True,
         'provide_semkey_pos': True,
@@ -105,9 +105,12 @@ def main():
     )
 
     # iterate over trials (slice by number of requested trials)
-    for cfg in trials_configs[:arg_parser.trials]:
-
-        res = perform_single(arena, agent, mode=mode, episode_config=cfg, collect_frames=False, debug=True)
+    num_trj = dataset.num_trajectories()
+    print('num trj', num_trj)
+    for i in range(num_trj, arg_parser.trials):
+        
+        cfg = trials_configs[i%len(trials_configs)]
+        res = perform_single(arena, agent, mode=mode, episode_config=cfg, collect_frames=False, debug=False)
 
         # prepare containers for this trajectory
         observations = {
@@ -129,7 +132,7 @@ def main():
                 # guard in case param missing
                 val = action.get('norm-pixel-fold', {}).get(param_name, 0.0)
                 vector_action.append(val)
-            actions['norm-pixel-fold'].append(vector_action)
+            actions['norm-pixel-fold'].append(np.stack(vector_action).flatten())
 
             info = res.get('information', [])[i] if 'information' in res and i < len(res['information']) else {}
             obs = info.get('observation', {})
@@ -145,11 +148,32 @@ def main():
             observations['rgb'].append(rgb_resized)
 
             # reward: prefer info['reward'] if present, otherwise 0.0
-            reward_val = info.get('reward', 0.0)
-            observations['reward'].append(reward_val)
+            reward = info['reward'][reward_key]
+            observations['reward'].append(reward)
 
             semkey = obs.get('semkey_pos', None)
             observations['semkey_pos'].append(semkey)
+
+        
+        info = res.get('information', [])[-1] if 'information' in res and i < len(res['information']) else {}
+        obs = info.get('observation', {})
+
+        # resize rgb if present, otherwise append a zero-array placeholder
+        rgb = obs.get('rgb', None)
+        if rgb is not None:
+            rgb_resized = cv2.resize(rgb, (128, 128))
+        else:
+            # placeholder if missing
+            rgb_resized = (255 * np.zeros((128, 128, 3), dtype=np.uint8))
+
+        observations['rgb'].append(rgb_resized)
+
+        # reward: prefer info['reward'] if present, otherwise 0.0
+        reward = info['reward'][reward_key]
+        observations['reward'].append(reward)
+
+        semkey = obs.get('semkey_pos', None)
+        observations['semkey_pos'].append(semkey)
 
         # add the trajectory to dataset (API: dataset.add_trajectory(observations, actions))
         dataset.add_trajectory(observations, actions)

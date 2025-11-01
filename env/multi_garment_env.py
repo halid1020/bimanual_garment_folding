@@ -269,7 +269,7 @@ class MultiGarmentEnv(GarmentEnv):
                 episode_params = dict(group.attrs)
 
                 if not ('pkl_path' in episode_params.keys()):
-                    eid += 1
+                    eid += 1 if not self.garment_type == 'all' else len(self.all_garment_types)
                     print('eid', eid)
                     continue
                 

@@ -82,7 +82,7 @@ def main():
 
     print(len(trials_configs))
 
-    for cfg in trials_configs[113:]:
+    for cfg in trials_configs[112:]:
         #print('cfg', cfg)
         cfg['save_video'] = True
         perform_single(arena, agent, mode=mode, 

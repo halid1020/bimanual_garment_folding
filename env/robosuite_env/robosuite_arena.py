@@ -5,6 +5,8 @@ from robosuite.wrappers.gym_wrapper import GymWrapper
 from agent_arena import Arena  # your abstract base
 from omegaconf import OmegaConf
 from ..video_logger import VideoLogger
+from statistics import mean
+from .osc_controller import OperationalSpaceController
 
 def to_dict(obj):
     """
@@ -60,11 +62,12 @@ class RoboSuiteArena(Arena):
         self.resolution = config.get("resolution", (640, 480))
         self.renderer = None
 
-        self.config.env_kwargs.controller_configs.update(
-            suite.load_controller_config(default_controller=self.config.controller_name))
-
-
         env_kwargs = to_dict(config.get("env_kwargs", {}))
+        env_kwargs['controller_configs'] = \
+            suite.load_controller_config(default_controller=self.config.controller_name)
+
+
+        
 
         # Initialize robosuite environment
         self.env = GymWrapper(
@@ -79,6 +82,26 @@ class RoboSuiteArena(Arena):
                 **env_kwargs
             )
         )
+
+        robot = self.env.env.robots[0]  # get robot
+        #sim = self.env.env.sim           # mujoco sim
+        # eef_name = robot.robot_model.eff_name
+        # joint_indexes = robot.joints
+        # actuator_range = robot.actuator_ctrlrange
+
+        # robot.controller = OperationalSpaceController(
+        #     sim=robot.sim,
+        #     eef_name=robot.gripper.important_sites["grip_site"],
+        #     robot_name=robot.name,
+        #     joint_indexes={
+        #         "joints": robot.joint_indexes,
+        #         "qpos": robot._ref_joint_pos_indexes,
+        #         "qvel": robot._ref_joint_vel_indexes,
+        #     },
+        #     eef_rot_offset=robot.eef_rot_offset,
+        #     actuator_range=robot.torque_limits,
+        #     **env_kwargs['controller_configs']
+        # )
 
 
         self.action_space = self.env.action_space
@@ -208,5 +231,8 @@ class RoboSuiteArena(Arena):
 
     def compare(self, results_1, results_2):
         # Compare based on reward or success rate
-        
-        return results_1["episode_reward"][-1] - results_2["episode_reward"][-1]
+    
+        avg_last_reward_1 = mean([ep["episode_reward"][-1] for ep in results_1])
+        avg_last_reward_2 = mean([ep["episode_reward"][-1] for ep in results_1])
+
+        return avg_last_reward_1 - avg_last_reward_2

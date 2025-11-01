@@ -16,19 +16,23 @@ class MultiGarmentEnv(GarmentEnv):
     
     def __init__(self, config):
         #config.name = f'multi-garment-{config.object}-env'
+        
         self.num_eval_trials = 30
         self.num_train_trials = 100
         self.num_val_trials = 10
-        
+
+
+        config.name = f'multi-garment-{config.garment_type}-env'
         if config.garment_type == 'all':
             self.all_garment_types = config.all_garment_types
             self.num_eval_trials = len(self.all_garment_types)*8 # 32
             self.num_train_trials *= len(self.all_garment_types) # 400
             self.num_val_trials = len(self.all_garment_types)*3 # 12
-            
-
-        config.name = f'multi-garment-{config.garment_type}-env'
         super().__init__(config)
+
+        
+        
+        #print('num val', self.num_val_trials)
 
         
         #self.name =f'single-garment-fixed-init-env'
@@ -148,7 +152,7 @@ class MultiGarmentEnv(GarmentEnv):
             {'eid': eid, 'tier': 0, 'save_video': True}
             for eid in range(self.num_val_trials)
         ]
-        
+        print('len config', len(val_configs), 'num tiral', self.num_val_trials)
         return val_configs
 
     def get_num_episodes(self) -> np.int:

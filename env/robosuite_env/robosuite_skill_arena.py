@@ -68,7 +68,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
         # Run the skill loop
         while not skill_done:
             low_level_action = self.skill_controller.step()
-            print('low_level_action', low_level_action)
+            #print('low_level_action', low_level_action)
             info = super().step(low_level_action)
 
             reward = info["reward"]["default"]

@@ -1,16 +1,19 @@
 import collections
 import copy
 import numpy as np
-from .skills import (
-    AtomicSkill,
-    ReachSkill,
-    ReachOSCSkill,
-    GraspSkill,
-    PushSkill,
-    GripperSkill,
-)
-
-from omegaconf import OmegaConf
+# from .skills import (
+#     #AtomicSkill,
+#     #ReachSkill,
+#     ReachOSCSkill,
+#     #GraspSkill,
+#     #PushSkill,
+#     GripperSkill,
+# )
+from .reach_skill import ReachSkill
+from .push_skill import PushSkill
+from .grasp_skill import GraspSkill
+from .atomic_skill import AtomicSkill
+from .gripper_skill import GripperSkill
 
 class SkillController:
 
@@ -37,14 +40,6 @@ class SkillController:
         self._pos_is_delta = None
         self._ori_is_delta = None
         self._num_skill_repeats = 0
-
-        # robot = self._env.robots[0]
-        # skill_config_update = dict(
-        #     robot_controller_dim=robot.controller.control_dim,
-        #     robot_gripper_dim=robot.gripper.dof,
-        #     robot_controller=robot.controller,
-        # )
-        #print('skill config', skill_config_update)
 
     def _setup_config(self, config):
         default_config = dict(
@@ -80,16 +75,15 @@ class SkillController:
 
         robot = self._env.robots[0]
 
-        # Merge safely using OmegaConf
+        # Only pass simple values during config setup to avoid OmegaConf errors.
         base_skill_config['robot_controller_dim'] = robot.controller.control_dim
         base_skill_config['robot_gripper_dim'] = robot.gripper.dof
-        #base_skill_config['robot_controller'] = robot.robot_controller
+        # REMOVED: base_skill_config['robot_controller'] = robot.controller # THIS CAUSED THE OMEGACONF ERROR
         
         for skill_name in skill_names:
             
 
             skill_config = copy.deepcopy(base_skill_config)
-            #print('skill config', skill_config)
             
             if skill_name == 'atomic':
                 skill_class = AtomicSkill
@@ -97,9 +91,13 @@ class SkillController:
             elif skill_name == 'reach':
                 skill_class = ReachSkill
                 skill_config.update(self._config.get('reach_config', {}))
-            elif skill_name == 'reach_osc':
-                skill_class = ReachOSCSkill
-                skill_config.update(self._config.get('reach_config', {}))
+                # --- NEW: Add a sensible default for the new orientation threshold ---
+                if 'ori_threshold_rad' not in skill_config:
+                    skill_config['ori_threshold_rad'] = 0.05
+                # --- END NEW ---
+            # elif skill_name == 'reach_osc':
+            #     skill_class = ReachOSCSkill
+            #     skill_config.update(self._config.get('reach_config', {}))
             elif skill_name == 'grasp':
                 skill_class = GraspSkill
                 skill_config.update(self._config.get('grasp_config', {}))
@@ -116,14 +114,6 @@ class SkillController:
             )
             self._skills[skill_name] = skill_class(skill_name, **skill_config)
         
-        # for _, skill in self._skills.items():
-        #     robot = self._env.robots[0]
-        #     skill_config_update = dict(
-        #         robot_controller_dim=robot.controller.control_dim,
-        #         robot_gripper_dim=robot.gripper.dof,
-        #         robot_controller=robot.controller,
-        #     )
-        #     skill.reset()
 
         self._param_dims = None
 
@@ -137,7 +127,6 @@ class SkillController:
     def get_param_dim(self, skill_name_):
 
         for skill_name, skill in self._skills.items():
-            #print('skill_name', skill_name, skill_name_)
             if skill_name_ == skill_name:
                 return skill.get_param_dim()
             
@@ -147,19 +136,19 @@ class SkillController:
         return list(self._skills.keys())
 
     def reset(self, action):
-        #print('input action', action)
         skill_name = list(action.keys())[0]
         params = list(action.values())[0]
         self._cur_skill = self._skills[skill_name]
 
-        #self._env._reset_skill()
         robot = self._env.robots[0]
+        # This is the correct place to pass the robot controller object,
+        # as it updates the internal config after the OmegaConf initialization is complete.
         skill_config_update = dict(
             robot_controller_dim=robot.controller.control_dim,
             robot_gripper_dim=robot.gripper.dof,
-            robot_controller=robot.controller,
+            robot_controller=robot.controller, 
         )
-       # print('skill config', skill_config_update)
+       
         info = self._get_info()
         self._cur_skill.reset(params, skill_config_update, info)
         self._num_ac_calls = 0
@@ -170,13 +159,12 @@ class SkillController:
     def step(self):
         info = self._get_info()
         skill = self._cur_skill
-        #print('info', info)
         skill.update_state(info)
+        print('skill state', skill._state)
 
         pos, pos_is_delta = skill.get_pos_ac(info)
         ori, ori_is_delta = skill.get_ori_ac(info)
         g = skill.get_gripper_ac(info)
-        print('g', g)
 
         self._pos_is_delta = pos_is_delta
         self._ori_is_delta = ori_is_delta
@@ -184,14 +172,20 @@ class SkillController:
 
         robot = self._env.robots[0]
         controller = robot.controller
-        controller.use_delta = self._pos_is_delta
+        controller.use_delta = self._pos_is_delta # Only position delta is supported here
 
+        # The controller expects a 7D action: [3D pos, 3D ori (Axis-Angle), 1D gripper]
         return np.concatenate([pos, ori, g])
 
     def _get_info(self):
         info = {}
         robot = self._env.robots[0]
+        # Current Position
         info['cur_ee_pos'] = np.array(robot.sim.data.site_xpos[robot.eef_site_id])
+        # Current Rotation Matrix is required for ReachSkill to calculate orientation targets/errors
+        # Note: Robosuite stores xmat as a flattened 9-vector (R11, R12, R13, R21, R22, R23, R31, R32, R33)
+        info['cur_ee_rotmat'] = np.array(robot.sim.data.site_xmat[robot.eef_site_id]).reshape(3, 3)
+        # --- END NEW ---
         return info
 
     def ac_is_delta(self):
@@ -231,21 +225,8 @@ class SkillController:
         return reward
 
     def get_skill_name_from_action(self, action):
-        return action.keys()[0]
-        # skill_dim = self.get_skill_dim()
-        # skill_names = self.get_skill_names()
-        # if skill_dim == 0:
-        #     # there is only one skill to choose from
-        #     return skill_names[0]
+        return list(action.keys())[0]
 
-        # skill_action = action[:skill_dim]
-        # skill_idx = np.argmax(skill_action)
-        # return skill_names[skill_idx]
-
-    # def get_params_from_action(self, action):
-    #     skill_dim = self.get_skill_dim()
-    #     param_dims = len(action) - skill_dim
-    #     return action[-param_dims:]
 
     def get_skill_code(self, skill_name, default=None):
         skill_names = self.get_skill_names()

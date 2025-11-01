@@ -6,7 +6,7 @@ from agent_arena import Arena  # your abstract base
 from omegaconf import OmegaConf
 from ..video_logger import VideoLogger
 from statistics import mean
-from .osc_controller import OperationalSpaceController
+# from .osc_controller import OperationalSpaceController
 
 def to_dict(obj):
     """

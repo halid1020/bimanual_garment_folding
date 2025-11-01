@@ -12,20 +12,21 @@ def random_skill_action(skill_env):
     """
     skill_names = list(skill_env.skill_controller.get_skill_names()) # e.g. ['reach', 'grasp', 'push', 'open', 'close']
     chosen_skill = np.random.choice(skill_names)
-    chosen_skill = "reach"
+    chosen_skill = "open"
 
     num_params = skill_env.get_param_dim(chosen_skill)
-    #print('num_params', num_params)
+    print('num_params', num_params)
     
     
     params = np.random.uniform(-1.0, 1.0, size=num_params)
-    params[:3] = [-1, -1, -1]
-    params[3:6] = [0, 0, 0]
+    # params = np.zeros(num_params)
+    # params[3] = 0.5
+    # params[4:6] = 0.05
 
     return {chosen_skill: params}
 
 
-def test_skill_env(config, max_episodes=3, max_skill_steps=10, render=False):
+def test_skill_env(config, max_episodes=3, max_skill_steps=100, render=False):
     env = RoboSuiteSkillArena(config)
     save_dir = 'tmp/'
     for ep in range(max_episodes):
@@ -84,6 +85,7 @@ if __name__ == "__main__":
             "robots": ["Panda"],
             "controller_configs": {
                 "control_delta": False,
+                # "control_ori": False,
             }
             
         },
@@ -140,4 +142,4 @@ if __name__ == "__main__":
         ),
     }
     config = OmegaConf.create(cfg_dict)
-    test_skill_env(config, max_episodes=2, max_skill_steps=5, render=False)
+    test_skill_env(config, max_episodes=2, max_skill_steps=10, render=False)

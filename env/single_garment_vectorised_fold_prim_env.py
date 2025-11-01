@@ -12,7 +12,6 @@ from tqdm import tqdm
 
 
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-from .garment_env_logger import GarmentEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
 from .single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv

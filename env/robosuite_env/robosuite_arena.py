@@ -60,8 +60,8 @@ class RoboSuiteArena(Arena):
         self.resolution = config.get("resolution", (640, 480))
         self.renderer = None
 
-        self.config.env_kwargs.controller_configs = \
-            suite.load_controller_config(default_controller=self.config.env_kwargs.controller_configs)
+        self.config.env_kwargs.controller_configs.update(
+            suite.load_controller_config(default_controller=self.config.controller_name))
 
 
         env_kwargs = to_dict(config.get("env_kwargs", {}))
@@ -163,6 +163,7 @@ class RoboSuiteArena(Arena):
 
         if self.save_frames:
             frame = self.env.sim.render(camera_name="frontview", width=self.resolution[0], height=self.resolution[1])
+            frame = np.flipud(frame)
             self.video_frames.append(frame)
 
         self.sim_step += 1
@@ -200,10 +201,12 @@ class RoboSuiteArena(Arena):
         # Fallback heuristic
         success_ = self.env._check_success() if hasattr(self.env, "_check_success") else False
         return success_
+    
     def evaluate(self):
         # Standardized evaluation metric
         return {"episode_reward": self.env.reward()}
 
     def compare(self, results_1, results_2):
         # Compare based on reward or success rate
-        return results_1["episode_reward"] - results_2["episode_reward"]
+        
+        return results_1["episode_reward"][-1] - results_2["episode_reward"][-1]

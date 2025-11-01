@@ -370,7 +370,8 @@ class VanillaSAC(TrainableAgent):
         aid = arena.id
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
         obs_stack = self._process_context_for_replay(obs_list)
-        
+        # print('obs stack', obs_stack)
+        # print('next_obs', next_obs)
         # append next
         obs_list.append(self._process_obs_for_input(next_obs))
         next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])

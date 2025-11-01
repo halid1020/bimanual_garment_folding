@@ -31,14 +31,6 @@ def main(cfg: DictConfig):
 
     # arena
     arena = registered_arena[cfg.arena.name](cfg.arena)
-    # if cfg.arena.name == 'single-garment-fixed-init-env':
-    #     arena = SingleGarmentFixedInitialEnv(cfg.arena)
-    # elif cfg.arena.name == 'single-garment-vectorised-fold-prim-env':
-    #     arena = SingleGarmentVectorisedFoldPrimEnv(cfg.arena)
-    # elif cfg.arena.name == 'multi-garment-longsleeve-env':
-    #     arena = MultiGarmentEnv(cfg.arena)
-    # else:
-    #     raise NotImplementedError
 
     # task
     if cfg.task.task_name == 'centre-sleeve-folding':
@@ -60,24 +52,15 @@ def main(cfg: DictConfig):
     elif cfg.task.task_name == 'flattening':
         task = GarmentFlatteningTask(cfg.task)
         arena.set_task(task)
+    elif cfg.task.task_name == 'dummy':
+        pass
     else:
         raise NotImplementedError(f"Task {cfg.task.task_name} not supported")
 
     # agent
     agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
     print('agent', cfg.agent.name, agent)
-    # if cfg.agent.name == 'image-based-multi-primitive-sac':
-    #     agent = ImageBasedMultiPrimitiveSAC(config=cfg.agent)
-    # elif cfg.agent.name == 'vanilla-image-sac':
-    #     agent = VanillaImageSAC(config=cfg.agent)
-    # elif cfg.agent.name == 'diffusion_policy':
-    #     agent =  ag_ar.build_agent('diffusion_policy', cfg.agent)
-    #     #ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
-    #     # TODO: I have to do this because diffusion needs to initialise a demonstrator.
-    #     # I need to automate the registration process.
-    # else:
-    #     raise NotImplementedError(f"Agent {cfg.agent.name} not supported")
-
+    
     # data_augmenter
     if cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter':
         augmenter = PixelBasedPrimitiveDataAugmenter(cfg.data_augmenter)

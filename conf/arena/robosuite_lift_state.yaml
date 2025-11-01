@@ -4,6 +4,6 @@ horizon: 500
 disp: false
 use_camera_obs: false
 control_freq: 20
+controller_name: OSC_POSE
 env_kwargs:
   robots: Panda
-  controller_configs: OSC_POSE

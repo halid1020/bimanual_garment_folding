@@ -176,10 +176,15 @@ class SkillController:
         pos, pos_is_delta = skill.get_pos_ac(info)
         ori, ori_is_delta = skill.get_ori_ac(info)
         g = skill.get_gripper_ac(info)
+        print('g', g)
 
         self._pos_is_delta = pos_is_delta
         self._ori_is_delta = ori_is_delta
         self._num_ac_calls += 1
+
+        robot = self._env.robots[0]
+        controller = robot.controller
+        controller.use_delta = self._pos_is_delta
 
         return np.concatenate([pos, ori, g])
 

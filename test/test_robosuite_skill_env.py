@@ -20,6 +20,7 @@ def random_skill_action(skill_env):
     
     params = np.random.uniform(-1.0, 1.0, size=num_params)
     params[:3] = [-1, -1, -1]
+    params[3:6] = [0, 0, 0]
 
     return {chosen_skill: params}
 
@@ -41,7 +42,6 @@ def test_skill_env(config, max_episodes=3, max_skill_steps=10, render=False):
             reward = result["reward"]["cumulative_reward"]
             done = result["done"]
 
-            print(f"  -> Reward: {reward:.3f}, Done: {done}")
 
             ep_reward += reward
 
@@ -84,7 +84,6 @@ if __name__ == "__main__":
             "robots": ["Panda"],
             "controller_configs": {
                 "control_delta": False,
-                "use_delta": False
             }
             
         },

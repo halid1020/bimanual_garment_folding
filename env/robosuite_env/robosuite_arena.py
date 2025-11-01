@@ -4,6 +4,7 @@ import robosuite as suite
 from robosuite.wrappers.gym_wrapper import GymWrapper
 from agent_arena import Arena  # your abstract base
 from omegaconf import OmegaConf
+from ..video_logger import VideoLogger
 
 def to_dict(obj):
     """
@@ -83,7 +84,7 @@ class RoboSuiteArena(Arena):
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space
 
-        #self.logger = DummyLogger()
+        self.logger = VideoLogger()
         self.video_frames = []
 
         
@@ -197,11 +198,11 @@ class RoboSuiteArena(Arena):
         if hasattr(self.env, "check_success"):
             return self.env.check_success()
         # Fallback heuristic
-        return self.env._check_success() if hasattr(self.env, "_check_success") else False
-
+        success_ = self.env._check_success() if hasattr(self.env, "_check_success") else False
+        return success_
     def evaluate(self):
         # Standardized evaluation metric
-        return {"episode_reward": self.env.reward(), "success": self.success()}
+        return {"episode_reward": self.env.reward()}
 
     def compare(self, results_1, results_2):
         # Compare based on reward or success rate

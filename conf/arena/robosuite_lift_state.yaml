@@ -1,0 +1,9 @@
+name: robosuite-env
+task_name: Lift
+horizon: 500
+disp: false
+use_camera_obs: false
+control_freq: 20
+env_kwargs:
+  robots: Panda
+  controller_configs: OSC_POSE

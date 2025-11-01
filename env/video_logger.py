@@ -7,7 +7,7 @@ from agent_arena.utilities.visual_utils import save_video as sv
 from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
 from agent_arena.utilities.visual_utils import plot_pick_and_place_trajectory as pt
 
-class GarmentEnvLogger(Logger):
+class VideoLogger(Logger):
     
     def __call__(self, episode_config, result, filename=None):
 

@@ -436,6 +436,14 @@ class VanillaSAC(TrainableAgent):
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
         os.makedirs(path, exist_ok=True)
+        model_path = os.path.join(path, 'last_model.pt')
+        self._save_model(model_path)
+        replay_path = os.path.join(path, 'last_replay_buffer.pt')
+        self._save_replay_buffer(replay_path)
+        return True
+
+    def _save_model(self, model_path):
+        os.makedirs(model_path, exist_ok=True)
 
         state = {
             'actor': self.actor.state_dict(),
@@ -453,47 +461,24 @@ class VanillaSAC(TrainableAgent):
 
         if checkpoint_id is not None:
             torch.save(state, os.path.join(path, f'checkpoint_{checkpoint_id}.pt'))
-        torch.save(state, os.path.join(path, 'last_model.pt'))
-
-        # save replay
-        replay_path = os.path.join(path, 'last_replay_buffer.pt')
-        torch.save({
-            'ptr': self.replay.ptr,
-            'size': self.replay.size,
-            'capacity': self.replay.capacity,
-            'observation': torch.from_numpy(self.replay.observation),
-            'actions': torch.from_numpy(self.replay.actions),
-            'rewards': torch.from_numpy(self.replay.rewards),
-            'next_observation': torch.from_numpy(self.replay.next_observation),
-            'dones': torch.from_numpy(self.replay.dones),
-        }, replay_path)
-
-        return True
-
+        torch.save(state, model_path)
     
     def save_best(self, path: Optional[str] = None) -> bool:
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
         os.makedirs(path, exist_ok=True)
 
-        state = {
-            'actor': self.actor.state_dict(),
-            'critic': self.critic.state_dict(),
-            'critic_target': self.critic_target.state_dict(),
-            'actor_optim': self.actor_optim.state_dict(),
-            'critic_optim': self.critic_optim.state_dict(),
-            'update_steps': self.update_steps,
-            'act_steps': self.act_steps,
-        }
-
-        if self.auto_alpha_learning:
-            state['log_alpha'] =  self.log_alpha.detach().cpu()
-            state['alpha_optim'] = self.alpha_optim.state_dict()
-
-        torch.save(state, os.path.join(path, 'best_model.pt'))
-
+        os.makedirs(path, exist_ok=True)
+        model_path = os.path.join(path, 'best_model.pt')
+        self._save_model(model_path)
         # save replay
         replay_path = os.path.join(path, 'best_replay_buffer.pt')
+        self._save_replay_buffer(replay_path)
+        
+
+        return True
+    
+    def _save_replay_buffer(self, replay_path):
         torch.save({
             'ptr': self.replay.ptr,
             'size': self.replay.size,
@@ -505,19 +490,8 @@ class VanillaSAC(TrainableAgent):
             'dones': torch.from_numpy(self.replay.dones),
         }, replay_path)
 
-        return True
-
-    def load(self, path: Optional[str] = None) -> int:
-        path = path or self.save_dir
-        path = os.path.join(path, 'checkpoints')
-        model_file = os.path.join(path, 'last_model.pt')
-        replay_file = os.path.join(path, 'last_replay_buffer.pt')
-
-        if not os.path.exists(model_file):
-            print(f"[WARN] Model file not found: {model_file}")
-            return 0
-
-        state = torch.load(model_file, map_location=self.device)
+    def _load_model(self, model_path):
+        state = torch.load(model_path, map_location=self.device)
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
@@ -533,6 +507,24 @@ class VanillaSAC(TrainableAgent):
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
+    def load(self, path: Optional[str] = None) -> int:
+        path = path or self.save_dir
+        path = os.path.join(path, 'checkpoints')
+        model_file = os.path.join(path, 'last_model.pt')
+        replay_file = os.path.join(path, 'last_replay_buffer.pt')
+
+        if not os.path.exists(model_file):
+            print(f"[WARN] Model file not found: {model_file}")
+            return 0
+        self._load_model(model_file)
+        
+
+        self._load_replay_buffer(replay_file)
+
+        self.loaded = True
+        return self.update_steps
+
+    def _load_replay_buffer(self, replay_file):
         if os.path.exists(replay_file):
             replay_state = torch.load(replay_file, map_location='cpu')
             self.replay.ptr = replay_state['ptr']
@@ -543,9 +535,8 @@ class VanillaSAC(TrainableAgent):
             self.replay.rewards = replay_state['rewards'].cpu().numpy()
             self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
-
-        self.loaded = True
-        return self.update_steps
+        else:
+            raise FileNotFoundError
 
     
     def load_best(self, path: Optional[str] = None) -> int:
@@ -558,33 +549,9 @@ class VanillaSAC(TrainableAgent):
             print(f"[WARN] Model file not found: {model_file}")
             return 0
 
-        state = torch.load(model_file, map_location=self.device)
-        self.actor.load_state_dict(state['actor'])
-        self.critic.load_state_dict(state['critic'])
-        self.critic_target.load_state_dict(state['critic_target'])
+        self._load_model(model_file)
 
-        self.actor_optim.load_state_dict(state['actor_optim'])
-        self.critic_optim.load_state_dict(state['critic_optim'])
-        #self.alpha_optim.load_state_dict(state['alpha_optim'])
-
-        if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-            self.alpha_optim.load_state_dict(state['alpha_optim'])
-        
-        self.update_steps = state.get('update_steps', 0)
-        self.act_steps = state.get('act_steps', 0)
-
-        if os.path.exists(replay_file):
-            replay_state = torch.load(replay_file, map_location='cpu')
-            self.replay.ptr = replay_state['ptr']
-            self.replay.size = replay_state['size']
-            self.replay.capacity = replay_state['capacity']
-            self.replay.observation = replay_state['observation'].cpu().numpy()
-            self.replay.actions = replay_state['actions'].cpu().numpy()
-            self.replay.rewards = replay_state['rewards'].cpu().numpy()
-            self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
-            self.replay.dones = replay_state['dones'].cpu().numpy()
+        self._load_replay_buffer(replay_file)
 
         self.loaded = True
         return self.update_steps

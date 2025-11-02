@@ -66,6 +66,9 @@ class RoboSuiteArena(Arena):
         env_kwargs['controller_configs'] = \
             suite.load_controller_config(default_controller=self.config.controller_name)
 
+        self.num_eval_trials = 30
+        self.num_train_trials = 1000
+        self.num_val_trials = 10
 
         
 
@@ -232,7 +235,7 @@ class RoboSuiteArena(Arena):
     def compare(self, results_1, results_2):
         # Compare based on reward or success rate
     
-        avg_last_reward_1 = mean([ep["episode_reward"][-1] for ep in results_1])
-        avg_last_reward_2 = mean([ep["episode_reward"][-1] for ep in results_1])
+        avg_last_reward_1 = mean([sum(ep["episode_reward"]) for ep in results_1])
+        avg_last_reward_2 = mean([sum(ep["episode_reward"]) for ep in results_2])
 
         return avg_last_reward_1 - avg_last_reward_2

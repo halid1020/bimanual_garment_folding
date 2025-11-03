@@ -26,11 +26,7 @@ class AtomicSkill(BaseSkill):
         )
 
     def get_param_dim(self):
-        # Assumes the parameters map directly to the controller and gripper dimensions.
-        # Defaults to 6 for controller (3 pos, 3 ori) + 1 for gripper if not specified in config.
-        controller_dim = self._config.get('robot_controller_dim', 6)
-        gripper_dim = self._config.get('robot_gripper_dim', 1)
-        return controller_dim + gripper_dim
+        return 5
 
     def get_pos_ac(self, info):
         params = self._params
@@ -40,33 +36,24 @@ class AtomicSkill(BaseSkill):
         return pos, is_delta
 
     def get_ori_ac(self, info):
-        ori_dim = 3
-        # Orientation parameters start at index 3 (after 3 positional params)
-        start_idx = 3 
+        normalized_yaw = self._params[3] if len(self._params) > 3 else 0.0
+        delta_yaw_deg = normalized_yaw * 20
         
-        if self._config['use_ori_params']:
-            # Extract the 3 orientation delta parameters (Axis-Angle / RotVec)
-            ori = self._params[start_idx : start_idx + ori_dim].copy()
-        else:
-            # If not using ori params, the delta is zero
-            ori = np.zeros(ori_dim)
-            
+        # Construct the full target Euler vector (Roll, Pitch, Yaw)
+        delta_euler_deg = np.array([0, 0, delta_yaw_deg])
+        
+        # Convert target Euler (degrees) to Rotation object
+        self._target_rotation = R.from_euler('xyz', delta_euler_deg, degrees=True)
+        
+        # Convert Rotation object to Axis-Angle (RotVec) vector for the controller
+        ori = self._target_rotation.as_rotvec()
         is_delta = True
+        #print('ori', ori)
         return ori, is_delta
 
     def get_gripper_ac(self, info):
-        rg_dim = self._config.get('robot_gripper_dim', 1)
-        
-        # Calculate the starting index for the gripper action parameter(s)
-        # Assumes parameter order: [pos(3), ori(3, if used), gripper(rg_dim)]
-        start_idx = 3 + (3 if self._config['use_ori_params'] else 0)
-        
-        if self._config['use_gripper_params']:
-            # The gripper action is the last parameter(s) in the expected sequence
-            gripper_action = self._params[start_idx : start_idx + rg_dim].copy()
-        else:
-            # If not using params, default to open (1)
-            gripper_action = np.ones(rg_dim) 
+
+        gripper_action = self._params[-1:].copy()
 
         return gripper_action
 

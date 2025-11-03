@@ -98,19 +98,10 @@ class VanillaSAC(TrainableAgent):
         self.context_horizon = config.context_horizon
         # self.each_image_shape = config.each_image_shape
        
-        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
-        self.auto_alpha_learning = config.get('auto_alpha_learning', True)
+       
         self._make_actor_critic(config)
 
-        self.init_alpha = self.config.get("init_alpha", 1.0)
-
-
-        # entropy temperature
-        if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
-            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
-            self.target_entropy = -float(self.network_action_dim)
-
+        
         # replay
         self._init_reply_buffer(config)
  
@@ -124,6 +115,7 @@ class VanillaSAC(TrainableAgent):
         self.episode_return = 0.0
         self.episode_length = 0
         self.act_steps = 0
+        self.sim_steps = 0
         self.initial_act_steps = config.initial_act_steps
         #self.act_steps_per_update = config.act_steps_per_update
         self.total_update_steps = config.total_update_steps
@@ -131,6 +123,9 @@ class VanillaSAC(TrainableAgent):
 
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
+        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
+        self.auto_alpha_learning = config.get('auto_alpha_learning', True)
+
         self.network_action_dim = int(config.action_dim)
         self.actor = Actor(config.state_dim, config.action_dim, config.hidden_dim).to(config.device)
 
@@ -145,10 +140,20 @@ class VanillaSAC(TrainableAgent):
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
 
+        self.init_alpha = self.config.get("init_alpha", 1.0)
+        
+        # entropy temperature
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+            self.target_entropy = -float(self.network_action_dim)
+
+        self.replay_action_dim = self.network_action_dim
+
 
     def _init_reply_buffer(self, config):
         
-        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.network_action_dim, self.device)
+        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
 
 
     # ---------------------- utils ----------------------
@@ -368,7 +373,7 @@ class VanillaSAC(TrainableAgent):
             }, step=self.act_steps)
         done = next_info.get('done', False)
         self.info = next_info
-        a = next_info['applied_action']
+        #a = next_info['applied_action']
         self.last_done = done
 
         aid = arena.id
@@ -382,10 +387,14 @@ class VanillaSAC(TrainableAgent):
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
         #print('\napplied action vecotr', a, type(a))
-        self.replay.add(obs_stack, a.astype(np.float32), reward, next_obs_stack, done)
+        self.replay.add(obs_stack, self._post_process_action_to_replay(a), reward, next_obs_stack, done)
         self.act_steps += 1
+        self.sim_steps += next_info['sim_steps']
         self.episode_return += reward
         self.episode_length += 1
+    
+    def _post_process_action_to_replay(self, action):
+        return a.astype(np.float32)
 
     def _process_context_for_replay(self, context):
         context = np.stack(context).flatten()
@@ -463,6 +472,7 @@ class VanillaSAC(TrainableAgent):
             'critic_optim': self.critic_optim.state_dict(),
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
+            'sim_steps': self.sim_steps
         }
 
         if self.auto_alpha_learning:
@@ -513,6 +523,7 @@ class VanillaSAC(TrainableAgent):
         
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
+        self.sim_steps = state.get('sim_steps', 0)
 
     def load(self, path: Optional[str] = None) -> int:
         path = path or self.save_dir

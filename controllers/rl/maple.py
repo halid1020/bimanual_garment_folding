@@ -1,7 +1,5 @@
 # maple_sac.py
 from .vanilla_sac import VanillaSAC, Actor, Critic
-# Import the new PrimitiveActor
-from .networks import ConvEncoder, MLPActor, Critic  # Assuming Actor/Critic are from vanilla_sac
 from .replay_buffer import ReplayBuffer
 from .wandb_logger import WandbLogger
 from dotmap import DotMap
@@ -126,12 +124,9 @@ class MAPLE(VanillaSAC):
 
     def _make_actor_critic(self, config):
         # primitives
-        self.K = int(config.num_primitives)
-        
-        if hasattr(config, 'action_dims'):
-            self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
-        else:
-            self.network_action_dim = int(config.action_dim)
+        self.primitives = config.primitives
+        self.K = len(config.primitives)
+        self.network_action_dim = max([prim.dim for prim in self.primitives])
 
         self.replay_action_dim = 1 + self.network_action_dim
 
@@ -194,7 +189,6 @@ class MAPLE(VanillaSAC):
             self.log_alpha_theta = torch.tensor(math.log(self.init_alpha_theta), device=self.device)
             self.log_alpha_k = torch.tensor(math.log(self.init_alpha_k), device=self.device)
 
-        self.sampling_temperature = config.get('sampling_temperature', 1.0)
         self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
 
     # ---------- helpers ----------
@@ -225,7 +219,8 @@ class MAPLE(VanillaSAC):
         ctx = self._process_context_for_input(obs_list)  # (1, state_dim)
 
         with torch.no_grad():
-            prim_idx, log_prob, all_log_probs, probs = self.primitive_actor(ctx)
+            #print('ctx shape', ctx.shape)
+            prim_idx, log_prob, all_log_probs, probs = self.primitive_actor.sample(ctx)
 
             if stochastic:
                 prim_idx_tensor = prim_idx
@@ -242,28 +237,20 @@ class MAPLE(VanillaSAC):
 
             # 3. Get continuous params from continuous policy
             if stochastic:
-                best_action_tensor, _ = self.actor.sample(aug_state)
+                best_action, _ = self.actor.sample(aug_state)
+                best_action = torch.clip(best_action, \
+                    -self.config.action_range, self.config.action_range)
             else:
                 mean, _ = self.actor(aug_state)
-                best_action_tensor = torch.tanh(mean)
+                best_action = torch.tanh(mean)
 
-            
-            best_action = best_action_tensor.detach().cpu().numpy().squeeze(0)
-            
-            # TODO: clip the best action
+           
+            best_action = best_action.detach().cpu().numpy().squeeze(0)
 
-        try:
-            primitive_name, params = self.primitive_param[prim_idx]['name'], self.primitive_param[prim_idx]['params']
-            dims = self.primitive_param[prim_idx]['dims']
-            out_dict = {primitive_name: {}}
-            idx = 0
-            for param_name, dim in zip(params, dims):
-                out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
-                idx += dim
-        except AttributeError:
-            print("[WARN] `self.primitive_param` not set. Returning raw action.")
-            out_dict = {"primitive": prim_idx, "params": best_action}
-
+        primitive_name = self.primitives[prim_idx]['name']
+        dim = self.primitives[prim_idx]['dim']
+        out_dict = {primitive_name: best_action} #best_action[: dim]}
+    
 
         vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
         return out_dict, vector_action
@@ -371,6 +358,20 @@ class MAPLE(VanillaSAC):
 
         # --- Logging (Unchanged) ---
         with torch.no_grad():
+            q_stats = {
+                'q_mean': q_pi.mean().item(),
+                'q_max': q_pi.max().item(),
+                'q_min': q_pi.min().item(),
+                'logp_k_mean': log_prob_k.mean().item(),
+                'logp_k_max': log_prob_k.max().item(),
+                'logp_k_min': log_prob_k.min().item(),
+                'logp_theta_mean': logp_theta.mean().item(),
+                'logp_theta_max': logp_theta.max().item(),
+                'logp_theta_min': logp_theta.min().item(),
+                'critic_grad_norm': critic_grad_norm.item(),
+            }
+            self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
+            
             self.logger.log({
                 'loss/critic': critic_loss.item(),
                 'loss/actor_params': actor_loss.item(),
@@ -379,9 +380,26 @@ class MAPLE(VanillaSAC):
                 'alpha/k': alpha_k,
                 'loss/alpha_theta': alpha_theta_loss.item(),
                 'loss/alpha_k': alpha_k_loss.item(),
-                # ... other stats
             }, step=self.act_steps)
 
+    def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
+        prim_name = list(action.keys())[0]
+        prim_id = -1 # Initialize with a default value
+        for id_, prim in enumerate(self.primitives):
+            if prim.name == prim_name:
+                prim_id = id_
+                break
+        assert prim_id >= 0, "Primitive Id should be non-negative."
+        self.logger.log({
+            f"train/primitive_id": prim_id,
+        }, step=self.act_steps)
+
+        vector_action = list(action.values())[0] # Assume one-level of hierachy.
+        accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
+        accept_action[1:len(vector_action)+1] = vector_action
+        accept_action[0] = prim_id
+        #print('accept_action', accept_action)
+        return accept_action
 
     def _save_model(self, model_path):
         state = {

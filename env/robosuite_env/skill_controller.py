@@ -160,7 +160,7 @@ class SkillController:
         info = self._get_info()
         skill = self._cur_skill
         skill.update_state(info)
-        print('skill state', skill._state)
+        #print('skill state', skill._state)
 
         pos, pos_is_delta = skill.get_pos_ac(info)
         ori, ori_is_delta = skill.get_ori_ac(info)

@@ -1,0 +1,65 @@
+name: robosuite-skill-env
+
+# === Task setup ===
+task_name: Lift
+sim_horizon: 150         # Number of simulation steps per episode
+disp: false              # Whether to display a GUI
+use_camera_obs: false    # Disable RGB camera observations
+control_freq: 20         # Control frequency (Hz)
+controller_name: OSC_POSE
+
+# === Environment kwargs ===
+robots: Panda          # Robot model
+
+# === Observation configuration ===
+obs_keys: ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos', 'robot0_gripper_qvel', 'object-state']
+
+skill_config:
+  skills:
+    - atomic
+    - open
+    - reach
+    - grasp
+    - push
+
+  aff_penalty_fac: 15.0
+
+  base_config:
+    global_xyz_bounds:
+      - [-0.30, -0.30, 0.80]
+      - [0.15, 0.30, 0.95]
+    lift_height: 0.95
+    binary_gripper: true
+    aff_threshold: 0.06
+    aff_type: dense
+    aff_tanh_scaling: 10.0
+
+  atomic_config:
+    use_ori_params: true
+
+  reach_config:
+    use_gripper_params: false
+    local_xyz_scale: [0.0, 0.0, 0.06]
+    use_ori_params: false
+    max_ac_calls: 15
+
+  grasp_config:
+    global_xyz_bounds:
+      - [-0.30, -0.30, 0.80]
+      - [0.15, 0.30, 0.85]
+    aff_threshold: 0.03
+    local_xyz_scale: [0.0, 0.0, 0.0]
+    use_ori_params: true
+    max_ac_calls: 20
+    num_reach_steps: 2
+    num_grasp_steps: 3
+
+  push_config:
+    global_xyz_bounds:
+      - [-0.30, -0.30, 0.80]
+      - [0.15, 0.30, 0.85]
+    delta_xyz_scale: [0.25, 0.25, 0.05]
+    max_ac_calls: 20
+    use_ori_params: true
+    aff_threshold: [0.12, 0.12, 0.04]
+

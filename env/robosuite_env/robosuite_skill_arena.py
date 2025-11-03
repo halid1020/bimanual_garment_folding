@@ -1,7 +1,7 @@
 import numpy as np
 from .robosuite_arena import RoboSuiteArena
 from .skill_controller import SkillController
-
+from omegaconf import OmegaConf
 
 class RoboSuiteSkillArena(RoboSuiteArena):
     """
@@ -13,7 +13,12 @@ class RoboSuiteSkillArena(RoboSuiteArena):
     def __init__(self, config):
         super().__init__(config)
 
-        self.skill_controller = SkillController(self.env, config.skill_config)
+        # TODO: check if skill_config is omegaConfig, if so convert it to normal dict
+        skill_config = config.skill_config
+        if OmegaConf.is_config(skill_config):
+            skill_config = OmegaConf.to_container(skill_config, resolve=True)
+
+        self.skill_controller = SkillController(self.env, skill_config)
         self.max_skill_repeats = config.skill_config.get("max_skill_repeats", 1)
 
         #base_action_dim = self.get_action_space()
@@ -55,7 +60,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             )
 
         skill_name, params = list(skill_action.items())[0]
-        print(f"Executing skill '{skill_name}' with params {np.round(params, 3)}")
+        #print(f"Executing skill '{skill_name}' with params {np.round(params, 3)}")
 
         # Reset controller for this specific skill
         self.skill_controller.reset(skill_action)
@@ -79,6 +84,10 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             if info["done"]:
                 self.done = True
                 break
+            
+            if info['fail_step']:
+                self.done = True
+                break
 
         cumulative_reward = self.skill_controller.post_process_reward(cumulative_reward)
         aff_reward = self.skill_controller.get_aff_reward()
@@ -93,8 +102,12 @@ class RoboSuiteSkillArena(RoboSuiteArena):
                 "last_reward": reward,
                 "aff_reward": aff_reward,
             },
+            "evaluation": {},
+            "success": self.success(),
             "done": self.done,
-            "info": info.get("info", {}),
+            "sim_steps": low_level_steps,
+            "arena": self,
+            "arena_id": self.id,
         }
 
     def render(self):

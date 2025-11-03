@@ -4,6 +4,7 @@ from env.multi_garment_env import MultiGarmentEnv
 from env.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
 from env.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
+from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena    
 
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
@@ -25,9 +26,10 @@ from controllers.rl.image_based_multi_primitive_sac \
     import ImageBasedMultiPrimitiveSAC
 from controllers.rl.primitive2vector_sac \
     import Primitive2VectorSAC
-
 from controllers.rl.demo_sac \
     import DemoSAC
+from controllers.rl.maple \
+    import MAPLE
 
 import agent_arena as ag_ar
 
@@ -38,7 +40,8 @@ registered_arena = {
     'single-garment-subgoal-init-vectorised-fold-prim-env': SingleGarmentSubgoalInitVectorisedFoldPrimEnv,
     'multi-garment-env': MultiGarmentEnv,
     'multi-garment-vectorised-fold-prim-env': MultiGarmentVectorisedFoldPrimEnv,
-    'robosuite-env': RoboSuiteArena
+    'robosuite-env': RoboSuiteArena,
+    'robosuite-skill-env': RoboSuiteSkillArena
 }
 def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
@@ -51,3 +54,4 @@ def register_agent_arena():
     ag_ar.register_agent('image2state-sac', Image2State_SAC)
     ag_ar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
     ag_ar.register_agent('demo-sac', DemoSAC)
+    ag_ar.register_agent('maple', MAPLE)

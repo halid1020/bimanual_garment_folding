@@ -46,74 +46,61 @@ def to_dict(obj):
 
 
 class RoboSuiteArena(Arena):
-    """
-    Arena wrapper for RoboSuite environments, integrating them into the Arena API.
-    """
-
     def __init__(self, config):
-        super().__init__(config)
-        self.config = config
-        self.name = config.get("name", "robosuite_arena")
-        self.horizon = config.get("horizon", 500)
-        self.env_name = config.get("env_name", "Lift")
-        self.use_camera_obs = config.get("use_camera_obs", False)
-        self.has_renderer = config.get("disp", False)
-        self.control_freq = config.get("control_freq", 20)
-        self.resolution = config.get("resolution", (640, 480))
-        self.renderer = None
-
-        env_kwargs = to_dict(config.get("env_kwargs", {}))
-        env_kwargs['controller_configs'] = \
-            suite.load_controller_config(default_controller=self.config.controller_name)
-
         self.num_eval_trials = 30
         self.num_train_trials = 1000
         self.num_val_trials = 10
 
-        
+        super().__init__(config)
+        self.config = config
+        self.name = config.get("name", "robosuite_arena")
+        self.horizon = config.get("horizon", 500)
+        self.env_name = config.get("task_name", "Lift")  # Fix key
+        self.use_camera_obs = config.get("use_camera_obs", False)
+        self.has_renderer = config.get("disp", False)
+        self.control_freq = config.get("control_freq", 20)
+        self.resolution = config.get("resolution", (640, 480))
+        self.obs_keys = config.get("obs_keys", None)
 
+        # env_kwargs = to_dict(config.get("env_kwargs", {}))
+        # env_kwargs['controller_configs'] = \
+        #     suite.load_controller_config(default_controller=self.config["controller_name"])
         # Initialize robosuite environment
+
+        # Initialize robosuite environment (no ObservationConfig in v1.4.1)
         self.env = GymWrapper(
             suite.make(
                 env_name=self.env_name,
                 has_renderer=self.has_renderer,
                 has_offscreen_renderer=True,
                 use_camera_obs=self.use_camera_obs,
+                use_object_obs=True,   # object info
                 control_freq=self.control_freq,
                 reward_shaping=True,
                 horizon=self.horizon,
-                **env_kwargs
-            )
+                robots=self.config.robots,
+                controller_configs=suite.load_controller_config(
+                    default_controller=self.config["controller_name"]
+                )
+            ),
         )
 
-        robot = self.env.env.robots[0]  # get robot
-        #sim = self.env.env.sim           # mujoco sim
-        # eef_name = robot.robot_model.eff_name
-        # joint_indexes = robot.joints
-        # actuator_range = robot.actuator_ctrlrange
-
-        # robot.controller = OperationalSpaceController(
-        #     sim=robot.sim,
-        #     eef_name=robot.gripper.important_sites["grip_site"],
-        #     robot_name=robot.name,
-        #     joint_indexes={
-        #         "joints": robot.joint_indexes,
-        #         "qpos": robot._ref_joint_pos_indexes,
-        #         "qvel": robot._ref_joint_vel_indexes,
-        #     },
-        #     eef_rot_offset=robot.eef_rot_offset,
-        #     actuator_range=robot.torque_limits,
-        #     **env_kwargs['controller_configs']
-        # )
-
+        # Store observation filtering preferences from YAML (optional)
 
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space
+    
+    
+    def _filter_observation(self, obs_dict):
+        """
+        Filter the observation dictionary according to self.obs_filter.
+        Works in robosuite 1.4.1, where ObservationConfig isn't available.
+        """
+        if self.obs_keys is None:
+            return None
+        return np.concatenate([obs_dict[k] for k in self.obs_keys])
 
-        self.logger = VideoLogger()
-        self.video_frames = []
 
-        
     # ------------------------
     # Required Abstract Methods
     # ------------------------
@@ -144,8 +131,13 @@ class RoboSuiteArena(Arena):
         self.eid = episode_config['eid']
         self.save_frames = episode_config['save_video']
 
-        obs = self.env.reset(seed=self.eid)
-        #print('obs', obs)
+        obs_ = self.env.reset(seed=self.eid)
+        obs_dict = self.env.env._get_observations(force_update=True)
+        obs = self._filter_observation(obs_dict)
+        if obs is None:
+            obs = obs_
+
+
         self.clear_frames()
         self.sim_step = 0
         
@@ -160,7 +152,7 @@ class RoboSuiteArena(Arena):
         if self.use_camera_obs:
             info['observation']['rgb'] = obs
         else:
-            info['observation']['state'] = obs[0].astype(np.float32)
+            info['observation']['state'] = obs.astype(np.float32)
         self.info = info
         return info
 
@@ -171,9 +163,16 @@ class RoboSuiteArena(Arena):
         #print('reward', self.env.reward())
         act_success = True
         try:
-            obs, reward, done, truncated, env_info = self.env.step(action)
+            obs_, reward, done, truncated, env_info = self.env.step(action)
+            obs_dict = self.env.env._get_observations(force_update=True)
+            obs = self._filter_observation(obs_dict)
+            if obs is None:
+                obs = obs_
+
+            #obs = self._filter_observation(obs)
         except Exception:
             act_success = False
+            reward = 0
 
 
         #print('obs', obs)

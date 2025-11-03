@@ -32,16 +32,22 @@ class PrimitiveEncodingSAC(VanillaSAC):
     Replay action format (to remain compatible with existing ReplayBuffer):
         [ action_params (action_param_dim), primitive_one_hot (num_primitives) ]
     """
+    def __init__(self, config):
+        self.action_dims = config.action_dims
+        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
+        self.primitive_param = config.primitive_param
+        self.disable_one_hot = config.get('disable_one_hot', False)
+        self.update_temperature = config.get('update_temperature', 0.01)
+        self.sampling_temperature = config.get('sampling_temperature', 1.)
+        self.detach_unused_action_params = config.get('detach_unused_action_params', False)
+        self.preprocess_action_detach = False
+        super().__init__(config)
 
 
     def _make_actor_critic(self, config):
         # number of discrete primitives
         #self.critic_gradient_clip = config.get('critic_gradient_clip', False)
-        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
-        self.primitive_param = config.primitive_param
-        self.disable_one_hot = config.get('disable_one_hot', False)
-        self.update_temperature = self.config.get('update_temperature', 0.01)
-        self.sampling_temperature = self.config.get('sampling_temperature', 1.)
+        
         self.K = int(config.num_primitives)
         self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
         #print('self.network_action_dim', self.network_action_dim)
@@ -250,11 +256,44 @@ class PrimitiveEncodingSAC(VanillaSAC):
         self.critic_optim.step()
 
         # --- actor update: compute per-primitive actions & Qs for current context, softmax over Qs, weighted actor loss ---
-        aug_states_all, _ = self._expand_state_all_primitives(context)  # (B*K, aug_state_dim)
+        aug_states_all, prim_idxs_all = self._expand_state_all_primitives(context)  # (B*K, aug_state_dim)
         #print('aug_states_all shape', aug_states_all.shape)
         pi_all, logp_all = self.actor.sample(aug_states_all)  # (B*K, param_dim), (B*K,1)
         # print('update action logp_all shape', logp_all.shape)
         # print('pi all shape', pi_all.shape)
+
+        if self.detach_unused_action_params:
+            if not self.preprocess_action_detach:
+                # 1. Create a tensor of actual dimensions, repeated B times
+                # self.action_dims is assumed to be a list/tuple of length K
+                action_dims_tensor = torch.tensor(self.action_dims, device=pi_all.device, dtype=torch.long) # (K,)
+                
+                # Repeat the dimensions for all B batches
+                # prim_dims_per_action will have shape (B*K,)
+                prim_dims_per_action = action_dims_tensor[prim_idxs_all] 
+                
+                # 2. Create an index tensor for the action dimensions (0, 1, 2, ... network_action_dim-1)
+                # The action_dim_indices will have shape (1, network_action_dim)
+                action_dim_indices = torch.arange(self.network_action_dim, device=pi_all.device).unsqueeze(0)
+                
+                # 3. Compare the action parameter indices to the primitive's actual dimension
+                # (B*K, 1) < (1, network_action_dim) -> (B*K, network_action_dim) mask
+                # This mask is True for all indices that are greater than or equal to the actual dimension.
+                # e.g., if actual_dim=3, indices 0, 1, 2 are False (used), 3, 4, ... are True (unused/padded).
+                self.is_padding_mask = action_dim_indices >= prim_dims_per_action.unsqueeze(1)
+                #print(self.is_padding_mask)
+
+                self.preprocess_action_detach = True
+            # 4. Use the mask to detach the unused parts of pi_all
+            # Only the elements where the mask is True are detached and reassigned.
+            pi_all_detached = pi_all.clone()
+            
+            # The .detach() is applied to the selected elements (which is valid even if it's a view of pi_all_detached)
+            pi_all_detached[self.is_padding_mask] = pi_all_detached[self.is_padding_mask].detach()
+            
+            # Use the detached version for the critic
+            pi_all = pi_all_detached
+
         q1_all, q2_all = self.critic(aug_states_all, pi_all)
         #print('q1 all', q1_all[:5])
         #print('q1 all', q2_all[:5])

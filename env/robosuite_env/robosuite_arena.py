@@ -169,7 +169,13 @@ class RoboSuiteArena(Arena):
 
     def step(self, action):
         #print('reward', self.env.reward())
-        obs, reward, done, truncated, env_info = self.env.step(action)
+        act_success = True
+        try:
+            obs, reward, done, truncated, env_info = self.env.step(action)
+        except Exception:
+            act_success = False
+
+
         #print('obs', obs)
         info = {
             "observation": {},
@@ -179,7 +185,8 @@ class RoboSuiteArena(Arena):
             "arena_id": self.id,
             "applied_action": action,
             "evaluation": {},
-            "success": self.success()
+            "success": self.success(),
+            "fail_step": not act_success
         }
 
         if self.use_camera_obs:

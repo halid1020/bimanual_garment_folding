@@ -351,6 +351,10 @@ class VanillaSAC(TrainableAgent):
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
         next_info = arena.step(a)
+        fail_step = next_info.get("fail_step", False)
+        if fail_step:
+            self.last_done = True
+            return
 
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
@@ -438,12 +442,18 @@ class VanillaSAC(TrainableAgent):
         os.makedirs(path, exist_ok=True)
         model_path = os.path.join(path, 'last_model.pt')
         self._save_model(model_path)
+        
+        if checkpoint_id is not None:
+            model_path = os.path.join(path, f'checkpoint_{checkpoint_id}.pt')
+            self._save_model(model_path)
+
         replay_path = os.path.join(path, 'last_replay_buffer.pt')
+
         self._save_replay_buffer(replay_path)
         return True
 
     def _save_model(self, model_path):
-        os.makedirs(model_path, exist_ok=True)
+        #os.makedirs(model_path, exist_ok=True)
 
         state = {
             'actor': self.actor.state_dict(),
@@ -459,15 +469,12 @@ class VanillaSAC(TrainableAgent):
             state['log_alpha'] =  self.log_alpha.detach().cpu()
             state['alpha_optim'] = self.alpha_optim.state_dict()
 
-        if checkpoint_id is not None:
-            torch.save(state, os.path.join(path, f'checkpoint_{checkpoint_id}.pt'))
+        
         torch.save(state, model_path)
     
     def save_best(self, path: Optional[str] = None) -> bool:
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
-        os.makedirs(path, exist_ok=True)
-
         os.makedirs(path, exist_ok=True)
         model_path = os.path.join(path, 'best_model.pt')
         self._save_model(model_path)

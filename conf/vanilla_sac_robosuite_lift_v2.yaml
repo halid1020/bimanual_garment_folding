@@ -1,0 +1,8 @@
+defaults:
+  - agent: vanilla_sac_robosuite_lift_v2
+  - arena: robosuite_lift_state_v1
+  - task: dummy
+  - data_augmenter: identity
+
+exp_name: vanilla_sac_robosuite_lift_v2
+save_root: /home/hcv530/garment_folding_data

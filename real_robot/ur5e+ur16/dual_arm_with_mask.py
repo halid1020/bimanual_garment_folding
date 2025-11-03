@@ -513,6 +513,8 @@ class DualArm:
         print('lift_pick_0', lift_after_0, 'lift_pick_1', lift_after_1, 'lift_pick_1_world', transform_point(self.T_ur5e_ur16e, lift_after_1))
         self.dual_arm_stretch_and_fling(lift_after_0, transform_point(self.T_ur5e_ur16e, lift_after_1))
 
+        self.both_home()
+
 
     def dual_arm_stretch_and_fling(self, 
             ur5e_pick_point_world, 

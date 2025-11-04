@@ -349,6 +349,7 @@ class VanillaSAC(TrainableAgent):
             self.reset([arena.id])
             self.episode_return = 0.0
             self.episode_length = 0
+            self.last_done = False
 
         # sample stochastic action for exploration
         a, _ = self._select_action(self.info, stochastic=True)
@@ -356,8 +357,7 @@ class VanillaSAC(TrainableAgent):
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
         next_info = arena.step(a)
-        fail_step = next_info.get("fail_step", False)
-        if fail_step:
+        if next_info.get("fail_step", False):
             self.last_done = True
             return
 
@@ -394,7 +394,7 @@ class VanillaSAC(TrainableAgent):
         self.episode_length += 1
     
     def _post_process_action_to_replay(self, action):
-        return a.astype(np.float32)
+        return action.astype(np.float32)
 
     def _process_context_for_replay(self, context):
         context = np.stack(context).flatten()
@@ -414,6 +414,7 @@ class VanillaSAC(TrainableAgent):
             raise ValueError("SAC.train requires at least one Arena.")
         arena = arenas[0]
         self.set_train()
+        self.last_done = True
         #print('here update!!')
         with tqdm(total=update_steps, desc=f"{self.name} Training", initial=0) as pbar:
             while self.replay.size < self.initial_act_steps:

@@ -129,7 +129,7 @@ class PushSkill(BaseSkill):
     def get_gripper_ac(self, info):
         # Gripper must remain open (1) for pushing
         rg_dim = self._config['robot_gripper_dim']
-        gripper_action = np.ones(rg_dim) 
+        gripper_action = -np.ones(rg_dim) 
         return gripper_action
 
     def _get_reach_pos(self, info):

@@ -115,6 +115,12 @@ class Image2State_SAC(VanillaSAC):
         
 
     def _make_actor_critic(self, cfg):
+        
+        self.critic_grad_clip_value = cfg.get('critic_grad_clip_value', float('inf'))
+        self.auto_alpha_learning = cfg.get('auto_alpha_learning', True)
+
+        self.network_action_dim = int(cfg.action_dim)
+
         C, H, W = cfg.each_image_shape
         self.input_channel = C * self.context_horizon
         obs_shape = (self.input_channel, H, W) 
@@ -137,6 +143,16 @@ class Image2State_SAC(VanillaSAC):
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=self.config.critic_lr)
         self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=self.config.encoder_lr)
         self.network_action_dim = self.action_dim
+
+        self.init_alpha = self.config.get("init_alpha", 1.0)
+        
+        # entropy temperature
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
+            self.target_entropy = -float(self.network_action_dim)
+
+        self.replay_action_dim = self.network_action_dim
     
     def _init_reply_buffer(self, cfg):
         

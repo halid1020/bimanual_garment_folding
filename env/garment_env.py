@@ -258,7 +258,8 @@ class GarmentEnv(Arena):
             'arena': self,
             'arena_id': self.id,
             'action_space': self.get_action_space(),
-            'overstretch': self.overstretch
+            'overstretch': self.overstretch,
+            'sim_steps': self.sim_step
         })
         #print('over strech!!!', self.over_strech)
 
@@ -307,6 +308,7 @@ class GarmentEnv(Arena):
         self.evaluate_result = None
         #print('action step', self.action_step)
         self.overstretch = 0
+        self.sim_step = 0
         info = self.action_tool.step(self, action)
         
         self.action_step += 1

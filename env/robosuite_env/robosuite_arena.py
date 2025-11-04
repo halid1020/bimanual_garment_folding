@@ -89,6 +89,7 @@ class RoboSuiteArena(Arena):
 
         self.action_space = self.env.action_space
         self.observation_space = self.env.observation_space
+        self.logger = VideoLogger()
     
     
     def _filter_observation(self, obs_dict):
@@ -131,7 +132,7 @@ class RoboSuiteArena(Arena):
         self.eid = episode_config['eid']
         self.save_frames = episode_config['save_video']
 
-        obs_ = self.env.reset(seed=self.eid)
+        obs_, _ = self.env.reset(seed=self.eid)
         obs_dict = self.env.env._get_observations(force_update=True)
         obs = self._filter_observation(obs_dict)
         if obs is None:
@@ -185,7 +186,8 @@ class RoboSuiteArena(Arena):
             "applied_action": action,
             "evaluation": {},
             "success": self.success(),
-            "fail_step": not act_success
+            "fail_step": not act_success,
+            'sim_step': 1,
         }
 
         if self.use_camera_obs:

@@ -33,23 +33,29 @@ class PrimitiveEncodingSAC(VanillaSAC):
         [ action_params (action_param_dim), primitive_one_hot (num_primitives) ]
     """
     def __init__(self, config):
-        self.action_dims = config.action_dims
-        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
-        self.primitive_param = config.primitive_param
-        self.disable_one_hot = config.get('disable_one_hot', False)
-        self.update_temperature = config.get('update_temperature', 0.01)
-        self.sampling_temperature = config.get('sampling_temperature', 1.)
-        self.detach_unused_action_params = config.get('detach_unused_action_params', False)
-        self.preprocess_action_detach = False
+        #self.action_dims = config.action_dims
+        
+        #self.primitive_param = config.primitive_param
+        
         super().__init__(config)
 
 
     def _make_actor_critic(self, config):
         # number of discrete primitives
         #self.critic_gradient_clip = config.get('critic_gradient_clip', False)
-        
-        self.K = int(config.num_primitives)
-        self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
+        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
+        self.disable_one_hot = config.get('disable_one_hot', False)
+        self.update_temperature = config.get('update_temperature', 0.01)
+        self.sampling_temperature = config.get('sampling_temperature', 1.)
+        self.detach_unused_action_params = config.get('detach_unused_action_params', False)
+        self.preprocess_action_detach = False
+
+        # self.K = int(config.num_primitives)
+        # self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
+        self.primitives = config.primitives
+        self.K = len(config.primitives)
+        self.action_dims = [prim.dim for prim in self.primitives]
+        self.network_action_dim = max(self.action_dims)
         #print('self.network_action_dim', self.network_action_dim)
         self.replay_action_dim = self.network_action_dim  + 1 if not self.disable_one_hot else self.network_action_dim
 
@@ -68,6 +74,16 @@ class PrimitiveEncodingSAC(VanillaSAC):
         # optimizers
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
+
+        self.auto_alpha_learning = config.get('auto_alpha_learning', True)
+
+        self.init_alpha = self.config.get("init_alpha", 1.0)
+        
+        # entropy temperature
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+            self.target_entropy = -float(self.network_action_dim)
 
     
     def _init_reply_buffer(self, config):
@@ -163,22 +179,30 @@ class PrimitiveEncodingSAC(VanillaSAC):
         
         best_action = a_all[prim_idx].detach().cpu().numpy()
 
-        primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
-        dims = self.primitive_param[prim_idx]['dims']
-            
-        out_dict = {primitive_name: {}}
+        primitive_name = self.primitives[prim_idx]['name']
+        dim = self.primitives[prim_idx]['dim']
+        out_dict = {primitive_name: best_action} #best_action[: dim]}
+    
 
-        idx = 0
-        for param_name, dim in zip(params, dims):
-            out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
-            idx += dim
+        vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
+        return out_dict, vector_action
+
+        # primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
+        # dims = self.primitive_param[prim_idx]['dims']
+            
+        # out_dict = {primitive_name: {}}
+
+        # idx = 0
+        # for param_name, dim in zip(params, dims):
+        #     out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
+        #     idx += dim
         
-        if self.disable_one_hot:
-            return out_dict, best_action
+        # if self.disable_one_hot:
+        #     return out_dict, best_action
         
-        best_action = np.array([prim_idx] + best_action.tolist())
+        # best_action = np.array([prim_idx] + best_action.tolist())
         
-        return out_dict, best_action
+        # return out_dict, best_action
 
     # ---------- learning ----------
     def _update_networks(self, batch: dict):
@@ -340,114 +364,134 @@ class PrimitiveEncodingSAC(VanillaSAC):
             'alpha': alpha,
             'alpha_loss': alpha_loss.item()
         }, step=self.act_steps)
+    
+    def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
+        prim_name = list(action.keys())[0]
+        prim_id = -1 # Initialize with a default value
+        for id_, prim in enumerate(self.primitives):
+            if prim.name == prim_name:
+                prim_id = id_
+                break
+        assert prim_id >= 0, "Primitive Id should be non-negative."
+        self.logger.log({
+            f"train/primitive_id": prim_id,
+        }, step=self.act_steps)
+
+        vector_action = list(action.values())[0] # Assume one-level of hierachy.
+        accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
+        accept_action[1:len(vector_action)+1] = vector_action
+        accept_action[0] = prim_id
+        #print('accept_action', accept_action)
+        return accept_action
+
 
     # ---------- replay pre/post-processing ----------
     
-    def _dict_to_vector_action(self, dict_action):
-        # extract primitive_name (should be a single key)
-        primitive_name = next(iter(dict_action.keys()))
-        #print('primitive name', primitive_name)
-        params_dict = dict_action[primitive_name]
+    # def _dict_to_vector_action(self, dict_action):
+    #     # extract primitive_name (should be a single key)
+    #     primitive_name = next(iter(dict_action.keys()))
+    #     #print('primitive name', primitive_name)
+    #     params_dict = dict_action[primitive_name]
 
-        # find primitive index
-        chosen_primitive = None
-        for k, prim in enumerate(self.primitive_param):
-            pname = prim['name']
-            if pname == primitive_name:
-                chosen_primitive = k
-                break
-        if chosen_primitive is None:
-            raise ValueError(f"Unknown primitive {primitive_name}")
+    #     # find primitive index
+    #     chosen_primitive = None
+    #     for k, prim in enumerate(self.primitive_param):
+    #         pname = prim['name']
+    #         if pname == primitive_name:
+    #             chosen_primitive = k
+    #             break
+    #     if chosen_primitive is None:
+    #         raise ValueError(f"Unknown primitive {primitive_name}")
 
-        # flatten parameters in the same order as in primitive_param
-        flat_params = []
-        for i, param_name in enumerate(self.primitive_param[chosen_primitive]['params']):
-            #val = np.array(params_dict[param_name]).reshape(-1)
-            flat_params.append(params_dict[param_name])
+    #     # flatten parameters in the same order as in primitive_param
+    #     flat_params = []
+    #     for i, param_name in enumerate(self.primitive_param[chosen_primitive]['params']):
+    #         #val = np.array(params_dict[param_name]).reshape(-1)
+    #         flat_params.append(params_dict[param_name])
         
-        # prepend primitive index
-        #ret_act = np.stack(flat_params).flatten()
-        ret_act = np.concatenate(([float(chosen_primitive)], np.stack(flat_params).flatten()))
+    #     # prepend primitive index
+    #     #ret_act = np.stack(flat_params).flatten()
+    #     ret_act = np.concatenate(([float(chosen_primitive)], np.stack(flat_params).flatten()))
 
 
-        return ret_act
+    #     return ret_act
 
-    def _collect_from_arena(self, arena):
-        if self.last_done:
-            if self.info is not None:
-                evaluation = self.info['evaluation']
-                success = int(self.info['success'])
+    # def _collect_from_arena(self, arena):
+    #     if self.last_done:
+    #         if self.info is not None:
+    #             evaluation = self.info['evaluation']
+    #             success = int(self.info['success'])
 
-                for k, v in evaluation.items():
-                    self.logger.log({
-                        f"train/eps_lst_step_eval_{k}": v,
-                    }, step=self.act_steps) 
+    #             for k, v in evaluation.items():
+    #                 self.logger.log({
+    #                     f"train/eps_lst_step_eval_{k}": v,
+    #                 }, step=self.act_steps) 
                 
-                self.logger.log({
-                    "train/episode_return": self.episode_return,
-                    "train/episode_length": self.episode_length,
-                    'train/episode_success': success
-                }, step=self.act_steps)
+    #             self.logger.log({
+    #                 "train/episode_return": self.episode_return,
+    #                 "train/episode_length": self.episode_length,
+    #                 'train/episode_success': success
+    #             }, step=self.act_steps)
 
-            self.info = arena.reset()
-            self.set_train()
-            self.reset([arena.id])
-            self.episode_return = 0.0
-            self.episode_length = 0
+    #         self.info = arena.reset()
+    #         self.set_train()
+    #         self.reset([arena.id])
+    #         self.episode_return = 0.0
+    #         self.episode_length = 0
 
-        # sample stochastic action for exploration
+    #     # sample stochastic action for exploration
         
-        dict_action, vector_action = self._select_action(self.info, stochastic=True)
+    #     dict_action, vector_action = self._select_action(self.info, stochastic=True)
         
-        # print('\ngenerated dict action', dict_action)
-        # print('\ngenerated vector_action', vector_action)
+    #     # print('\ngenerated dict action', dict_action)
+    #     # print('\ngenerated vector_action', vector_action)
         
-        self.logger.log({
-            f"train/primitive_id": vector_action[0],
-        }, step=self.act_steps)
+    #     self.logger.log({
+    #         f"train/primitive_id": vector_action[0],
+    #     }, step=self.act_steps)
 
       
-        #print('produced vector action', vector_action)
-        next_info = arena.step(dict_action)
+    #     #print('produced vector action', vector_action)
+    #     next_info = arena.step(dict_action)
 
-        dict_action_ = next_info['applied_action']
-        #print('\napplied dict aciton', dict_action_)
-        vector_action_ = self._dict_to_vector_action(dict_action_)
-        #print('\napplied vector_action', vector_action_)
+    #     dict_action_ = next_info['applied_action']
+    #     #print('\napplied dict aciton', dict_action_)
+    #     vector_action_ = self._dict_to_vector_action(dict_action_)
+    #     #print('\napplied vector_action', vector_action_)
 
 
-        next_obs = [next_info['observation'][k] for k in self.obs_keys]
-        reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
-        self.logger.log(
-            {'train/step_reward': reward}, step=self.act_steps
-        )
-        evaluation = next_info.get('evaluation', {})
-        for k, v in evaluation.items():
-            self.logger.log({
-                f"train/{k}": v,
-            }, step=self.act_steps)
-        done = next_info.get('done', False)
-        self.info = next_info
-        # a = next_info['applied_action']
-        self.last_done = done
+    #     next_obs = [next_info['observation'][k] for k in self.obs_keys]
+    #     reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
+    #     self.logger.log(
+    #         {'train/step_reward': reward}, step=self.act_steps
+    #     )
+    #     evaluation = next_info.get('evaluation', {})
+    #     for k, v in evaluation.items():
+    #         self.logger.log({
+    #             f"train/{k}": v,
+    #         }, step=self.act_steps)
+    #     done = next_info.get('done', False)
+    #     self.info = next_info
+    #     # a = next_info['applied_action']
+    #     self.last_done = done
 
-        aid = arena.id
-        obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-        obs_stack = self._process_context_for_replay(obs_list)
+    #     aid = arena.id
+    #     obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
+    #     obs_stack = self._process_context_for_replay(obs_list)
         
-        # append next
-        obs_list.append(self._process_obs_for_input(next_obs))
-        next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
-        #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
+    #     # append next
+    #     obs_list.append(self._process_obs_for_input(next_obs))
+    #     next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
+    #     #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
 
-        accept_action = np.zeros(self.replay_action_dim, dtype=np.float32)
-        accept_action[:len(vector_action)] = vector_action ##!!! use the original action Alert!!!
+    #     accept_action = np.zeros(self.replay_action_dim, dtype=np.float32)
+    #     accept_action[:len(vector_action)] = vector_action ##!!! use the original action Alert!!!
 
         
-        #print('accepted vector_action to replay', accept_action)
+    #     #print('accepted vector_action to replay', accept_action)
 
-        self.replay.add(obs_stack, accept_action, reward, next_obs_stack, done)
-        self.act_steps += 1
-        self.episode_return += reward
-        self.episode_length += 1
+    #     self.replay.add(obs_stack, accept_action, reward, next_obs_stack, done)
+    #     self.act_steps += 1
+    #     self.episode_return += reward
+    #     self.episode_length += 1

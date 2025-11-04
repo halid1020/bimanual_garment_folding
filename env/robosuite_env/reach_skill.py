@@ -130,7 +130,7 @@ class ReachSkill(BaseSkill):
 
     def get_gripper_ac(self, info):
         rg_dim = self._config['robot_gripper_dim']
-        gripper_action = np.zeros(rg_dim) # Default to maintaining current gripper state (gripper 0)
+        gripper_action = np.ones(rg_dim) # Default to maintaining current gripper state (gripper 0)
 
         return gripper_action
     

@@ -31,7 +31,7 @@ and close the gripper.
 2. During this reaching phase, the reaching
 primitive keeps its gripper closed (except for the non-tabletop
 environments like door) and the grasping and pushing prim-
-itives keep their grippers open
+itives keep their grippers open  (done)
 
 3. While we assume con-
 tinuous primitive parameters we can also represent discrete
@@ -427,8 +427,6 @@ class MAPLE(VanillaSAC):
             state['log_alpha_k'] =  self.log_alpha_k.detach().cpu()
             state['alpha_k_optim'] = self.alpha_k_optim.state_dict()
 
-        if checkpoint_id is not None:
-            torch.save(state, os.path.join(path, f'checkpoint_{checkpoint_id}.pt'))
         torch.save(state, model_path)
     
     def _load_model(self, model_path):

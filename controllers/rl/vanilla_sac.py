@@ -15,7 +15,6 @@ from tqdm import tqdm
 from agent_arena import TrainableAgent
 
 from dotmap import DotMap
-from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar to your repo
 from .replay_buffer import ReplayBuffer
 
 from .wandb_logger import WandbLogger

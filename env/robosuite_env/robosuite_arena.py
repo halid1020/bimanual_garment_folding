@@ -59,7 +59,7 @@ class RoboSuiteArena(Arena):
         self.use_camera_obs = config.get("use_camera_obs", False)
         self.has_renderer = config.get("disp", False)
         self.control_freq = config.get("control_freq", 20)
-        self.resolution = config.get("resolution", (640, 480))
+        self.resolution = config.get("resolution", (128, 128))
         self.obs_keys = config.get("obs_keys", None)
 
         # env_kwargs = to_dict(config.get("env_kwargs", {}))

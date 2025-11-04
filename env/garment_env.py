@@ -77,6 +77,7 @@ class GarmentEnv(Arena):
         self.random_reset = False
         self.set_id(0)
         self.name = config.name
+        self.frame_resolution = config.get("frame_resolution", [128, 128])
         
         # Softgym Setup
         self._get_sim_config()
@@ -513,7 +514,7 @@ class GarmentEnv(Arena):
         if self.save_video:
             #print('save')
             #print('save here')
-            rgb = self._render('rgb', background=True)
+            rgb = self._render('rgb', background=True, resolution=self.frame_resolution)
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
                 particle_pos = self.get_mesh_particles_positions()          # (N, 3)

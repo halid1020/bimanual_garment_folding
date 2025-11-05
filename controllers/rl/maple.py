@@ -414,6 +414,8 @@ class MAPLE(VanillaSAC):
             
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
+            'sim_steps': self.sim_steps,
+            "wandb_run_id": self.logger.get_run_id(),
         }
         
         # Save embeddings ONLY if they are learnable
@@ -429,7 +431,7 @@ class MAPLE(VanillaSAC):
 
         torch.save(state, model_path)
     
-    def _load_model(self, model_path):
+    def _load_model(self, model_path, resume=False):
         state = torch.load(model_path, map_location=self.device)
         
         self.primitive_actor.load_state_dict(state['primitive_actor']) # ADDED
@@ -463,3 +465,24 @@ class MAPLE(VanillaSAC):
         
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
+
+        self.sim_steps = state.get('sim_steps', 0)
+
+        run_id = state.get("wandb_run_id", None)
+        #print(f"[INFO] Resuming W&B run ID: {run_id}")
+
+        if resume and (run_id is not None):
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                run_id=run_id,
+                resume=True
+            )
+        else:
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                resume=False
+            )

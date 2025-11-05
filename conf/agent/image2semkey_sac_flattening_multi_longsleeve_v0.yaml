@@ -1,6 +1,8 @@
 name: image2state-sac
 device: "cuda:1"   # fallback to cuda:0
 
+exp_name: ${exp_name}
+project_name: ${project_name}
 
 obs_keys: ['rgb']
 state_keys: ['semkey_pos']

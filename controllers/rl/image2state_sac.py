@@ -20,6 +20,8 @@ from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar 
 from .obs_state_replay_buffer import ObsStateReplayBuffer
 from .vanilla_image_sac import NatureCNNEncoder
 
+from .wandb_logger import WandbLogger
+
 class NatureCNNEncoder(nn.Module):
     def __init__(self, obs_shape=(3, 84, 84), state_dim=45, feature_dim=512):
         super().__init__()
@@ -390,53 +392,9 @@ class Image2State_SAC(VanillaSAC):
         self.encoder.train()
         self.mode = 'train'
 
-    # ---------------------- save/load ----------------------
-    def save(self, path: Optional[str] = None, checkpoint_id: Optional[int] = None) -> bool:
-        path = path or self.save_dir
-        path = os.path.join(path, 'checkpoints')
-        os.makedirs(path, exist_ok=True)
-
-        state = {
-            'actor': self.actor.state_dict(),
-            'critic': self.critic.state_dict(),
-            'encoder': self.encoder.state_dict(),
-            'critic_target': self.critic_target.state_dict(),
-            'encoder_target': self.encoder_target.state_dict(),
-            'actor_optim': self.actor_optim.state_dict(),
-            'critic_optim': self.critic_optim.state_dict(),
-            'encoder_optim': self.encoder_optim.state_dict(),
-            'log_alpha': self.log_alpha.detach().cpu(),
-            'alpha_optim': self.alpha_optim.state_dict(),
-            'update_steps': self.update_steps,
-            'act_steps': self.act_steps,
-        }
-
-        if checkpoint_id is not None:
-            torch.save(state, os.path.join(path, f'checkpoint_{checkpoint_id}.pt'))
-        torch.save(state, os.path.join(path, 'last_model.pt'))
-
-        # save replay
-        replay_path = os.path.join(path, 'last_replay_buffer.pt')
-        torch.save({
-            'ptr': self.replay.ptr,
-            'size': self.replay.size,
-            'capacity': self.replay.capacity,
-            'observation': torch.from_numpy(self.replay.observation),
-            'state':  torch.from_numpy(self.replay.state),
-            'actions': torch.from_numpy(self.replay.actions),
-            'rewards': torch.from_numpy(self.replay.rewards),
-            'next_observation': torch.from_numpy(self.replay.next_observation),
-            'next_state':  torch.from_numpy(self.replay.next_state),
-            'dones': torch.from_numpy(self.replay.dones),
-        }, replay_path)
-
-        return True
-
     
-    def save_best(self, path: Optional[str] = None) -> bool:
-        path = path or self.save_dir
-        path = os.path.join(path, 'checkpoints')
-        os.makedirs(path, exist_ok=True)
+    def _save_model(self, model_path):
+        #os.makedirs(model_path, exist_ok=True)
 
         state = {
             'actor': self.actor.state_dict(),
@@ -451,12 +409,18 @@ class Image2State_SAC(VanillaSAC):
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
+            'sim_steps': self.sim_steps,
+            "wandb_run_id": self.logger.get_run_id(),
         }
 
-        torch.save(state, os.path.join(path, 'best_model.pt'))
+        if self.auto_alpha_learning:
+            state['log_alpha'] =  self.log_alpha.detach().cpu()
+            state['alpha_optim'] = self.alpha_optim.state_dict()
 
-        # save replay
-        replay_path = os.path.join(path, 'best_replay_buffer.pt')
+        
+        torch.save(state, model_path)
+
+    def _save_replay_buffer(self, replay_path):
         torch.save({
             'ptr': self.replay.ptr,
             'size': self.replay.size,
@@ -470,19 +434,8 @@ class Image2State_SAC(VanillaSAC):
             'dones': torch.from_numpy(self.replay.dones),
         }, replay_path)
 
-        return True
-
-    def load(self, path: Optional[str] = None) -> int:
-        path = path or self.save_dir
-        path = os.path.join(path, 'checkpoints')
-        model_file = os.path.join(path, 'last_model.pt')
-        replay_file = os.path.join(path, 'last_replay_buffer.pt')
-
-        if not os.path.exists(model_file):
-            print(f"[WARN] Model file not found: {model_file}")
-            return 0
-
-        state = torch.load(model_file, map_location=self.device)
+    def _load_model(self, model_path, resume=False):
+        state = torch.load(model_path, map_location=self.device)
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
@@ -500,51 +453,28 @@ class Image2State_SAC(VanillaSAC):
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
-        if os.path.exists(replay_file):
-            replay_state = torch.load(replay_file, map_location='cpu')
-            self.replay.ptr = replay_state['ptr']
-            self.replay.size = replay_state['size']
-            self.replay.capacity = replay_state['capacity']
-            self.replay.observation = replay_state['observation'].cpu().numpy()
-            self.replay.state = replay_state['state'].cpu().numpy()
-            self.replay.actions = replay_state['actions'].cpu().numpy()
-            self.replay.rewards = replay_state['rewards'].cpu().numpy()
-            self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
-            self.replay.next_state = replay_state['next_state'].cpu().numpy()
-            self.replay.dones = replay_state['dones'].cpu().numpy()
+        run_id = state.get("wandb_run_id", None)
+        #print(f"[INFO] Resuming W&B run ID: {run_id}")
 
-        self.loaded = True
-        return self.update_steps
-
+        if resume and (run_id is not None):
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                run_id=run_id,
+                resume=True
+            )
+        else:
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                resume=False
+            )
+        
     
-    def load_best(self, path: Optional[str] = None) -> int:
-        path = path or self.save_dir
-        path = os.path.join(path, 'checkpoints')
-        model_file = os.path.join(path, 'best_model.pt')
-        replay_file = os.path.join(path, 'best_replay_buffer.pt')
-
-        if not os.path.exists(model_file):
-            print(f"[WARN] Model file not found: {model_file}")
-            return 0
-
-        state = torch.load(model_file, map_location=self.device)
-        self.actor.load_state_dict(state['actor'])
-        self.critic.load_state_dict(state['critic'])
-        self.critic_target.load_state_dict(state['critic_target'])
-        self.encoder.load_state_dict(state['encoder'])
-        self.encoder_target.load_state_dict(state['encoder_target'])
-
-        self.actor_optim.load_state_dict(state['actor_optim'])
-        self.critic_optim.load_state_dict(state['critic_optim'])
-        self.encoder_optim.load_state_dict(state['encoder_optim'])
-        
-        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
-        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
-        self.alpha_optim.load_state_dict(state['alpha_optim'])
-        
-        self.update_steps = state.get('update_steps', 0)
-        self.act_steps = state.get('act_steps', 0)
-
+   
+    def _load_replay_buffer(self, replay_file):
         if os.path.exists(replay_file):
             replay_state = torch.load(replay_file, map_location='cpu')
             self.replay.ptr = replay_state['ptr']
@@ -558,5 +488,5 @@ class Image2State_SAC(VanillaSAC):
             self.replay.next_state = replay_state['next_state'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
 
-        self.loaded = True
-        return self.update_steps
+        else:
+            raise FileNotFoundError

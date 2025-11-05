@@ -107,7 +107,11 @@ class VanillaSAC(TrainableAgent):
         # bookkeeping
         self.update_steps = 0
         self.loaded = False
-        self.logger = WandbLogger(project="vanilla-sac", name="sac-agent", config=dict(config))
+        #self.logger = WandbLogger(project="vanilla-sac", name=config.exp_name, config=dict(config))
+        
+        
+
+
         self.obs_keys = config.obs_keys
         self.reward_key = config.reward_key
         self.last_done = True
@@ -472,7 +476,8 @@ class VanillaSAC(TrainableAgent):
             'critic_optim': self.critic_optim.state_dict(),
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
-            'sim_steps': self.sim_steps
+            'sim_steps': self.sim_steps,
+            "wandb_run_id": self.logger.get_run_id(),
         }
 
         if self.auto_alpha_learning:
@@ -507,7 +512,7 @@ class VanillaSAC(TrainableAgent):
             'dones': torch.from_numpy(self.replay.dones),
         }, replay_path)
 
-    def _load_model(self, model_path):
+    def _load_model(self, model_path, resume=False):
         state = torch.load(model_path, map_location=self.device)
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
@@ -525,6 +530,25 @@ class VanillaSAC(TrainableAgent):
         self.act_steps = state.get('act_steps', 0)
         self.sim_steps = state.get('sim_steps', 0)
 
+        run_id = state.get("wandb_run_id", None)
+        #print(f"[INFO] Resuming W&B run ID: {run_id}")
+
+        if resume and (run_id is not None):
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                run_id=run_id,
+                resume=True
+            )
+        else:
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                resume=False
+            )
+
     def load(self, path: Optional[str] = None) -> int:
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
@@ -533,8 +557,17 @@ class VanillaSAC(TrainableAgent):
 
         if not os.path.exists(model_file):
             print(f"[WARN] Model file not found: {model_file}")
+
+            self.logger = WandbLogger(
+                project=config.project_name,
+                name=config.exp_name,
+                config=dict(self.config),
+                resume=False
+            )
+            
             return 0
-        self._load_model(model_file)
+
+        self._load_model(model_file, resume=True)
         
 
         self._load_replay_buffer(replay_file)

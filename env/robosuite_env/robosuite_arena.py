@@ -187,7 +187,7 @@ class RoboSuiteArena(Arena):
             "evaluation": {},
             "success": self.success(),
             "fail_step": not act_success,
-            'sim_step': 1,
+            'sim_steps': 1,
         }
 
         if self.use_camera_obs:

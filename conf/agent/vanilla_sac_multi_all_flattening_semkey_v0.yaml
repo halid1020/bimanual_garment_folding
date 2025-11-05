@@ -1,6 +1,8 @@
 name: vanilla-sac
 device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
 
+exp_name: ${exp_name}
+project_name: ${project_name}
 
 obs_keys: ['semkey_pos', 'flattened_semkey_pos']
 reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus

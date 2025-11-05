@@ -1,16 +1,23 @@
 import os
 import numpy as np
 from agent_arena.utilities.logger.logger_interface import Logger
+import wandb
 
 class WandbLogger(Logger):
-    def __init__(self, project="garment-folding", name=None, config=None):
-        try:
-            import wandb
-            self.wandb = wandb
-            self.run = wandb.init(project=project, name=name, config=config or {})
-        except Exception:
-            self.wandb = None
-            self.run = None
+    def __init__(self, project="garment-folding", name=None, config=None, run_id=None, resume=False):
+        self.project = project
+        self.name = name
+        self.config = config
+        #self.log_dir = log_dir
+
+        self.wandb = wandb.init(
+            project=project,
+            name=name,
+            config=config,
+            id=run_id,          # allow restoring
+            resume="must" if resume else "never"
+        )
+
         self.log_dir = None
 
     def set_log_dir(self, log_dir) -> None:
@@ -24,7 +31,7 @@ class WandbLogger(Logger):
         - File paths: logged as wandb.Image or wandb.Video depending on file extension.
         - NumPy arrays: automatically converted to wandb.Video.
         """
-        if self.wandb is None or self.run is None:
+        if self.wandb is None:
             return
         
         processed_metrics = {}
@@ -59,3 +66,6 @@ class WandbLogger(Logger):
     def finish(self):
         if self.wandb is not None:
             self.wandb.finish()
+        
+    def get_run_id(self):
+        return self.run.id

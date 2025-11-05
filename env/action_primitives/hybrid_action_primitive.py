@@ -71,6 +71,14 @@ class HybridActionPrimitive():
         #swap = action['swap'] if 'swap' in action else False
         if 'norm-pixel-pick-and-fling' in action:
             action = action['norm-pixel-pick-and-fling']
+            
+            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
+                dict_action = {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4]
+                }
+                action = dict_action
+            
             info = self.np_pnf.step(env, action)
             info['applied_action'] = {
                 'norm-pixel-pick-and-fling': info['applied_action']
@@ -91,6 +99,14 @@ class HybridActionPrimitive():
             }
         elif 'norm-pixel-fold' in action:
             action = action['norm-pixel-fold']
+            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
+                dict_action = {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4],
+                    'place_0': action[4:6],
+                    'place_1': action[6:8]
+                }
+                action = dict_action
             #action['swap'] = swap
             info = self.np_fold.step(env, action)
             info['applied_action'] = {

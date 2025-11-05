@@ -58,6 +58,8 @@ def main(cfg: DictConfig):
         raise NotImplementedError(f"Task {cfg.task.task_name} not supported")
 
     # agent
+    #cfg.agent.exp_name = cfg.exp_name
+    #cfg.agent.project_name = cfg.project_name
     agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
     print('agent', cfg.agent.name, agent)
     

@@ -36,10 +36,8 @@ validation_interval: 1000
 eval_checkpoint: -1
 
 
-primitive_param:
+primitives:
   - name: norm-pixel-pick-and-fling
-    params: [pick_0, pick_1]
-    dims: [2, 2]
+    dim: 4 # [pick_0, pick_1]
   - name: norm-pixel-fold
-    params: [pick_0, pick_1, place_0, place_1]
-    dims: [2, 2, 2, 2]
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]

@@ -92,13 +92,15 @@ class PixelPickAndPlace():
         #print('swap:', swap)
         pick_0 = np.asarray(action['pick_0'])
         place_0 = np.asarray(action['place_0'])
-        if self.readjust_pick:
-            mask = env._get_cloth_mask()
-            pick_0 = readjust_norm_pixel_pick(pick_0, mask)
 
-        # if swap:
-        #     pick_0 = pick_0[::-1]
-        #     place_0 = place_0[::-1]
+        mask = env._get_cloth_mask()
+        adj_pick_0, dist_0 = readjust_norm_pixel_pick(pick_0, mask)
+
+        if self.readjust_pick:
+            pick_0 = adj_pick_0
+            
+        dist_1 = 0
+
         pick_0_depth = action['pick_0_d'] if 'pick_0_d' in action else self.camera_height  - self.pick_height
         place_0_depth = action['place_0_d'] if 'place_0_d' in action else self.camera_height  - self.place_height
 
@@ -106,9 +108,11 @@ class PixelPickAndPlace():
             pick_1 = np.asarray(action['pick_1'])
             place_1 = np.asarray(action['place_1'])
 
+            adj_pick_1, dist_1 = readjust_norm_pixel_pick(pick_1, mask)
+
             if self.readjust_pick:
-                mask = env._get_cloth_mask()
-                pick_1 = readjust_norm_pixel_pick(pick_1, mask)
+                pick_1 = adj_pick_1
+                
 
             pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height
             place_1_depth = action['place_1_d'] if 'place_1_d' in action else self.camera_height - self.place_height
@@ -119,6 +123,8 @@ class PixelPickAndPlace():
             pick_1_depth = self.camera_height
             place_1_depth = self.camera_height
             action['single_operator'] = True
+
+        self.affordance_score = self._calculate_affordance(dist_0, dist_1)
         
         ref_a = np.array([1, -1])
         ref_b = np.array([1, 1])
@@ -171,6 +177,14 @@ class PixelPickAndPlace():
         }
 
         return world_action, pixel_action
+    
+    def _calculate_affordance(self, dist_0, dist_1):
+
+        return np.min([
+            1 - min(dist_0, np.sqrt(8)) / np.sqrt(8),
+            1 - min(dist_1, np.sqrt(8)) / np.sqrt(8)
+        ])
+
 
     ## It accpet action has shape (num_picker, 2, 3), where num_picker can be 1 or 2
     def step(self, env, action):
@@ -181,15 +195,11 @@ class PixelPickAndPlace():
         self.camera_pose = env.camera_extrinsic_matrix
         self.camera_size = env.camera_size
 
-        # print('camera height:', self.camera_height)
-        # print('camera intrinsics:', self.camera_intrinsics)
-        # print('camera pose:', self.camera_pose)
-        # print('camera size:', self.camera_size)
-
         world_action_ , pixel_action = self.process(env, action)
         #print('action_:', action_)
         info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
+        info['action_affordance_score'] = self.affordance_score
         # self.action_step += 1
         # info['done'] = self.action_step >= self.action_horizon
         #print(f"Pixel Step: {self.action_step}, Done: {info['done']}")

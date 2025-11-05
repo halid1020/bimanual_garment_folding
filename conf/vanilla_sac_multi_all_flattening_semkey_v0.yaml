@@ -1,7 +1,7 @@
 defaults:
   - agent: vanilla_sac_multi_all_flattening_semkey_v0
   - arena: multi_all_vectorised_fold_readjust_pick_provide_semkey_pos
-  - task: flattening_overstretch_penality_1
+  - task: flattening_overstretch_penalty_1
   - data_augmenter: identity
 
 exp_name: vanilla_sac_multi_all_flattening_semkey_v0

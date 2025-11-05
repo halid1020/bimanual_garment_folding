@@ -87,6 +87,14 @@ class PixelPickAndFling():
     
     def reset(self, env):
         return self.action_tool.reset(env)
+
+    
+    def _calculate_affordance(self, dist_0, dist_1):
+
+        return np.min([
+            1 - min(dist_0, np.sqrt(8)) / np.sqrt(8),
+            1 - min(dist_1, np.sqrt(8)) / np.sqrt(8)
+        ])
     
     def process(self, env, action):
         #action = action['norm_pixel_pick_and_fling']
@@ -94,12 +102,17 @@ class PixelPickAndFling():
         p0 = np.asarray(action['pick_0'])
         p1 = np.asarray(action['pick_1'])
 
-        if self.readjust_pick:
-            mask = env._get_cloth_mask()
-            p0 = readjust_norm_pixel_pick(p0, mask)
-            p1 = readjust_norm_pixel_pick(p1, mask)
-
+        mask = env._get_cloth_mask()
+        adj_p0, dist_0 = readjust_norm_pixel_pick(p0, mask)
+        adj_p1, dist_1 = readjust_norm_pixel_pick(p1, mask)
        
+
+        if self.readjust_pick:
+           p0 = adj_p0
+           p1 = adj_p1
+        
+        self.affordance_score =  self._calculate_affordance(dist_0, dist_1)
+           
 
         ref_a = np.array([-1, 1])
         ref_b = np.array([1, 1])
@@ -165,4 +178,5 @@ class PixelPickAndFling():
         world_action_, pixel_action = self.process(env, action)
         info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
+        info['action_affordance_score'] = self.affordance_score
         return info

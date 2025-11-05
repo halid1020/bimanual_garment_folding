@@ -559,8 +559,8 @@ class VanillaSAC(TrainableAgent):
             print(f"[WARN] Model file not found: {model_file}")
 
             self.logger = WandbLogger(
-                project=config.project_name,
-                name=config.exp_name,
+                project=self.config.project_name,
+                name=self.config.exp_name,
                 config=dict(self.config),
                 resume=False
             )

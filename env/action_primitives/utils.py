@@ -43,7 +43,8 @@ def readjust_norm_pixel_pick(pick_point, mask):
     pixel_action = np.clip(pixel_action, 0, [H-1, W-1])
     points = [(pixel_action[0], pixel_action[1])]
     pixel_action = (adjust_points(points, mask)[0][0]/np.array([H, W])) * 2 - 1
-    return pixel_action
+    dist = np.linalg.norm(pick_point - pixel_action)
+    return pixel_action, dist
 
 def adjust_points(points, mask, min_distance=2):
     """

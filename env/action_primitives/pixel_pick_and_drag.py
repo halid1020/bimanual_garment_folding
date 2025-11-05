@@ -88,16 +88,29 @@ class PixelPickAndDrag():
     def reset(self, env):
         #self.action_step = 0
         return self.action_tool.reset(env)
+    
+    def _calculate_affordance(self, dist_0, dist_1):
+
+        return np.min([
+            1 - min(dist_0, np.sqrt(8)) / np.sqrt(8),
+            1 - min(dist_1, np.sqrt(8)) / np.sqrt(8)
+        ])
         
     def process(self, env, action):
         pick_0 = np.asarray(action['pick_0'])
         #print('pick_0 before', pick_0)
         pick_1 = np.asarray(action['pick_1'])
-        if self.readjust_pick:
-            mask = env._get_cloth_mask()
-            pick_0 = readjust_norm_pixel_pick(pick_0, mask)
-            pick_1 = readjust_norm_pixel_pick(pick_1, mask)
+        mask = env._get_cloth_mask()
 
+        adj_pick_0, dist_0 = readjust_norm_pixel_pick(pick_0, mask)
+        adj_pick_1, dist_1 = readjust_norm_pixel_pick(pick_1, mask)
+
+        if self.readjust_pick:
+            pick_0 = adj_pick_0
+            pick_1 = adj_pick_1
+
+        self.affordance_score =  self._calculate_affordance(dist_0, dist_1)
+        
         # pick_0 = np.asarray(action['pick_0'])
         place_0 = np.asarray(action['place_0'])
         # if swap:
@@ -179,5 +192,6 @@ class PixelPickAndDrag():
         # self.action_step += 1
         # info['done'] = self.action_step >= self.action_horizon
         info['applied_action'] = applied_pixel_action
+        info['action_affordance_score'] = self.affordance_score
         #print(f"Pixel Step: {self.action_step}, Done: {info['done']}")
         return info

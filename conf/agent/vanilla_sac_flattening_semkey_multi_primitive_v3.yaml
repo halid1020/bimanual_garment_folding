@@ -1,9 +1,11 @@
 name: primitive-encoding-sac
 device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
 
+exp_name: ${exp_name}
+project_name: ${project_name}
 
 obs_keys: [semkey_pos]
-reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
+reward_key: coverage_alignment_with_stretch_penalty_high_coverage_bonus
 update_temperature: 0.01 #1.0
 sampling_temperature: 1.0
 init_alpha: 0.1

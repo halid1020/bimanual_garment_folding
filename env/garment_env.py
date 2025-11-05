@@ -228,7 +228,7 @@ class GarmentEnv(Arena):
             self.last_flattened_step = 0
         
         
-        self.info = self._process_info({})
+        self.info = self._process_info()
         self.clear_frames()
 
         

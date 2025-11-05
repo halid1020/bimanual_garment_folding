@@ -5,7 +5,7 @@ exp_name: ${exp_name}
 project_name: ${project_name}
 
 obs_keys: ['semkey_pos', 'flattened_semkey_pos']
-reward_key: coverage_alignment_with_stretch_penality_high_coverage_bonus
+reward_key: coverage_alignment_with_stretch_penalty_high_coverage_bonus
 
 context_horizon: 1
 

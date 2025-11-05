@@ -46,15 +46,20 @@ class GarmentFlatteningTask(GarmentTask):
         if info['evaluation']['normalised_coverage'] > 0.7:
             reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
 
-        threshold =  self.config.get('overstretch_penality_threshold', 0)
+        threshold =  self.config.get('overstretch_penalty_threshold', 0)
         if info['overstretch'] > threshold:
            
-            reward_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+            reward_ -= self.config.get("overstretch_penalty_scale", 0) * (info['overstretch'] - threshold)
+        
+        reward_2 = reward_
+        aff_score_rev = (1 - info.get('action_affordance_score', 1))
+        reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_rev
     
-
+        print('rev aff score', aff_score_rev)
         return {
             'coverage_alignment': reward,
-            'coverage_alignment_with_stretch_penality_high_coverage_bonus': reward_
+            'coverage_alignment_with_stretch_penalty_high_coverage_bonus': reward_,
+            'coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus': reward_2
         }
     
     def evaluate(self, arena):

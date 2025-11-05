@@ -1,0 +1,41 @@
+name: maple
+device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
+
+exp_name: ${exp_name}
+project_name: ${project_name}
+
+obs_keys: [semkey_pos]
+reward_key: coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus
+
+embedding_type: 'onehot'
+init_alpha_theta: 0.1
+init_alpha_k: 0.1
+auto_alpha_learning: True
+
+context_horizon: 1
+hidden_dim: 256
+state_dim: 45
+action_range: 1.0
+
+primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]
+  - name: norm-pixel-fold
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+
+actor_lr: 3e-4
+critic_lr: 3e-4
+alpha_lr: 3e-4
+tau: 0.005
+gamma: 0.99
+batch_size: 256
+
+replay_capacity: 100000 
+initial_act_steps: 100
+train_freq: 1
+gradient_steps: 1 #1
+target_update_interval: 1
+
+total_update_steps: 100000
+validation_interval: 1000
+eval_checkpoint: -1

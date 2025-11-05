@@ -68,4 +68,4 @@ class WandbLogger(Logger):
             self.wandb.finish()
         
     def get_run_id(self):
-        return self.run.id
+        return self.wandb.id

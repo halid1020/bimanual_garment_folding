@@ -55,7 +55,7 @@ class GarmentFlatteningTask(GarmentTask):
         aff_score_rev = (1 - info.get('action_affordance_score', 1))
         reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_rev
     
-        print('rev aff score', aff_score_rev)
+        #print('rev aff score', aff_score_rev)
         return {
             'coverage_alignment': reward,
             'coverage_alignment_with_stretch_penalty_high_coverage_bonus': reward_,

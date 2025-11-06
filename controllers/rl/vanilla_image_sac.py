@@ -21,39 +21,6 @@ from .replay_buffer import ReplayBuffer
 
 
 
-class NatureCNNEncoder(nn.Module):
-    """
-    NatureCNN-style encoder used in Stable Baselines3 for image-based SAC.
-    Input: (C, H, W), default (3, 84, 84)
-    Output: feature vector of size `feature_dim` (default 512)
-    """
-    def __init__(self, obs_shape=(3, 84, 84), feature_dim=512):
-        super().__init__()
-        assert len(obs_shape) == 3, "Input must be 3D (C,H,W)"
-        self.conv_net = nn.Sequential(
-            nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4),  # 84x84 -> 20x20
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),           # 20x20 -> 9x9
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),           # 9x9 -> 7x7
-            nn.ReLU()
-        )
-
-        # Compute flatten size
-        with torch.no_grad():
-            n_flatten = self.conv_net(torch.zeros(1, *obs_shape)).view(1, -1).size(1)
-
-        self.fc = nn.Linear(n_flatten, feature_dim)
-
-    def forward(self, obs):
-        # Normalize image to [0,1]
-        x = obs / 255.0
-        x = self.conv_net(x)
-        x = x.reshape(x.size(0), -1)
-        x = self.fc(x)
-        return F.relu(x)
-
-
 
 class Critic(nn.Module):
     def __init__(self, obs_shape, action_dim, feature_dim=512, hidden_dim=256):

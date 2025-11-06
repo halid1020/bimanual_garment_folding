@@ -18,7 +18,7 @@ from agent_arena.utilities.logger.logger_interface import Logger
 from dotmap import DotMap
 from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar to your repo
 from .obs_state_replay_buffer import ObsStateReplayBuffer
-from .vanilla_image_sac import NatureCNNEncoder
+# from .vanilla_image_sac import NatureCNNEncoder
 
 from .wandb_logger import WandbLogger
 

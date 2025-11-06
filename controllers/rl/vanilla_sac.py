@@ -364,7 +364,10 @@ class VanillaSAC(TrainableAgent):
             self.last_done = True
             return
 
-        next_obs = [next_info['observation'][k] for k in self.obs_keys]
+        
+        
+        next_obs_for_process =  self._get_next_obs_for_process(next_info)
+
         reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
         self.logger.log(
             {'train/step_reward': reward}, step=self.act_steps
@@ -381,21 +384,31 @@ class VanillaSAC(TrainableAgent):
 
         aid = arena.id
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-        obs_stack = self._process_context_for_replay(obs_list)
+        obs_for_replay = self._process_context_for_replay(obs_list)
         # print('obs stack', obs_stack)
         # print('next_obs', next_obs)
         # append next
-        obs_list.append(self._process_obs_for_input(next_obs))
-        next_obs_stack = self._process_context_for_replay(obs_list[-self.context_horizon:])
+        obs_list.append(self._process_obs_for_input(next_obs_for_process))
+        next_obs_for_replay = self._process_context_for_replay(obs_list[-self.context_horizon:])
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
         #print('\napplied action vecotr', a, type(a))
-        self.replay.add(obs_stack, self._post_process_action_to_replay(a), reward, next_obs_stack, done)
+        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a), reward, next_obs_for_replay, done)
+        
+        
         self.act_steps += 1
         self.sim_steps += next_info['sim_steps']
         self.episode_return += reward
         self.episode_length += 1
     
+    def _add_transition_replay(self, obs_for_replay, a, reward, next_obs_for_replay, done):
+       
+        self.replay.add(obs_for_replay, a, reward, next_obs_for_replay,  done)
+
+    def _get_next_obs_for_process(self, next_info):
+        next_obs = [next_info['observation'][k] for k in self.obs_keys]
+
+
     def _post_process_action_to_replay(self, action):
         return action.astype(np.float32)
 

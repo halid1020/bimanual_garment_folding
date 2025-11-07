@@ -84,84 +84,116 @@ def get_IoU(mask1, mask2):
 
     return max_iou, best_mask
 
-def get_mask_v2(mask_generator, rgb):
-        """
-        Generate a mask for the given RGB image that is most different from the background.
-        
-        Parameters:
-        - rgb: A NumPy array representing the RGB image.
-        
-        Returns:
-        - A binary mask as a NumPy array with the same height and width as the input image.
-        """
-        # Generate potential masks from the mask generator
-        results = mask_generator.generate(rgb)
-        
-        final_mask = None
-        max_color_difference = 0
-        print('Processing mask results...')
-        save_color(rgb, 'rgb')
-        mask_data = []
+import numpy as np
+import cv2
 
-        # Iterate over each generated mask result
-        for i, result in enumerate(results):
-            segmentation_mask = result['segmentation']
-            mask_shape = rgb.shape[:2]
+def intrinsics_to_matrix(intrinsics):
+    """
+    Convert a pyrealsense2.intrinsics object to a 3x3 NumPy camera matrix.
+    """
+    K = np.array([
+        [intrinsics.fx, 0, intrinsics.ppx],
+        [0, intrinsics.fy, intrinsics.ppy],
+        [0, 0, 1]
+    ], dtype=float)
+    return K
 
-            ## count no mask corner of the mask
-            margin = 5
-            mask_corner_value = 1.0*segmentation_mask[margin, margin] + 1.0*segmentation_mask[margin, -margin] + \
-                                1.0*segmentation_mask[-margin, margin] + 1.0*segmentation_mask[-margin, -margin]
-            
-            
+def get_orthographic_view(image, T_base_cam, K, z_plane=0.0,
+                                  output_size=(720, 1280), max_scale=None,
+                                  rotate_90=90, flip_x=False, flip_y=False):
+    """
+    Generate an orthogonal top-down view with automatic centering, scaling, and orientation correction.
 
-            #print('mask corner value', mask_corner_value)
-            # Ensure the mask is in the correct format
-            orginal_mask = segmentation_mask.copy()
-            segmentation_mask = segmentation_mask.astype(np.uint8) * 255
-            
-            # Calculate the masked region and the background region
-            masked_region = cv2.bitwise_and(rgb, rgb, mask=segmentation_mask)
-            background_region = cv2.bitwise_and(rgb, rgb, mask=cv2.bitwise_not(segmentation_mask))
-            
-            # Calculate the average color of the masked region
-            masked_pixels = masked_region[segmentation_mask == 255]
-            if masked_pixels.size == 0:
-                continue
-            avg_masked_color = np.mean(masked_pixels, axis=0)
-            
-            # Calculate the average color of the background region
-            background_pixels = background_region[segmentation_mask == 0]
-            if background_pixels.size == 0:
-                continue
-            avg_background_color = np.mean(background_pixels, axis=0)
-            
-            # Calculate the Euclidean distance between the average colors
-            color_difference = np.linalg.norm(avg_masked_color - avg_background_color)
-            #print(f'color difference {i} color_difference {color_difference}')
-            #save_mask(orginal_mask, f'mask_candidate_{i}')
-            
-            # Select the mask with the maximum color difference from the background
-            mask_region_size = np.sum(segmentation_mask == 255)
+    Args:
+        image (np.ndarray): Input RGB image.
+        T_base_cam (np.ndarray): 4x4 extrinsic matrix (base → camera).
+        K (np.ndarray or pyrealsense2.intrinsics): Camera intrinsics.
+        z_plane (float): Height of target plane (meters).
+        output_size (tuple): (width, height) in pixels for output image.
+        max_scale (float): Optional maximum pixels per meter.
+        rotate_90 (int): Number of 90° clockwise rotations to apply (0,1,2,3).
+        flip_x (bool): If True, flip output horizontally.
+        flip_y (bool): If True, flip output vertically.
 
-            if mask_corner_value >= 2:
-                # if the mask has more than 2 corners, the flip the value
-                orginal_mask = 1 - orginal_mask
+    Returns:
+        np.ndarray: Orthographic top-down image.
+    """
 
-            mask_data.append({
-                'mask': orginal_mask,
-                'color_difference': color_difference,
-                'mask_region_size': mask_region_size,
-            })
-        
-        top_5_masks = sorted(mask_data, key=lambda x: x['color_difference'], reverse=True)[:5]
-        final_mask_data = sorted(top_5_masks, key=lambda x: x['mask_region_size'], reverse=True)[0]
-        final_mask = final_mask_data['mask']
-        
-        #save_mask(final_mask, 'final_mask')
-        print('Final mask generated.')
+    print('T_base_cam', T_base_cam)
+    print('K', K)
 
-        return final_mask
+    # --- Convert intrinsics to 3x3 matrix ---
+    if not isinstance(K, np.ndarray):
+        if hasattr(K, 'fx'):
+            K = np.array([[K.fx, 0, K.ppx],
+                          [0, K.fy, K.ppy],
+                          [0, 0, 1]], dtype=float)
+        else:
+            raise ValueError("K must be a 3x3 array or pyrealsense2.intrinsics object")
+
+    # --- Extract rotation and translation ---
+    R = T_base_cam[:3, :3]
+    t = T_base_cam[:3, 3]
+
+    # --- Plane definition ---
+    n = np.array([0, 0, 1])
+    d = -z_plane
+
+    # --- Homography ---
+    if abs(d) < 1e-6:
+        H = K @ np.hstack((R[:, :2], t.reshape(3,1)))
+    else:
+        H = K @ (R - np.outer(t, n)/d)
+
+    H_inv = np.linalg.inv(H)
+
+    # --- Project image corners to plane ---
+    h, w = image.shape[:2]
+    corners_img = np.array([[0,0,1], [w,0,1], [w,h,1], [0,h,1]]).T
+    corners_plane = H_inv @ corners_img
+    corners_plane /= corners_plane[2,:]
+
+    # --- Bounding box ---
+    min_x, max_x = corners_plane[0,:].min(), corners_plane[0,:].max()
+    min_y, max_y = corners_plane[1,:].min(), corners_plane[1,:].max()
+    bbox_width = max_x - min_x
+    bbox_height = max_y - min_y
+
+    # --- Automatic scale ---
+    scale_x = output_size[0] / bbox_width
+    scale_y = output_size[1] / bbox_height
+    scale = min(scale_x, scale_y)
+    if max_scale is not None:
+        scale = min(scale, max_scale)
+
+    # --- Centering ---
+    center_x = (min_x + max_x)/2
+    center_y = (min_y + max_y)/2
+    S = np.array([
+        [scale, 0, output_size[0]/2 - scale*center_x],
+        [0, -scale, output_size[1]/2 - scale*center_y],
+        [0, 0, 1]
+    ])
+
+    # --- Warp ---
+    M = S @ H_inv
+    ortho_view = cv2.warpPerspective(image, M, output_size)
+
+    # --- Orientation correction ---
+    # Rotate by multiples of 90°
+    if rotate_90 % 4 != 0:
+        rotate_flags = {1: cv2.ROTATE_90_CLOCKWISE,
+                        2: cv2.ROTATE_180,
+                        3: cv2.ROTATE_90_COUNTERCLOCKWISE}
+        ortho_view = cv2.rotate(ortho_view, rotate_flags[rotate_90 % 4])
+
+    # Flip axes if needed
+    if flip_x:
+        ortho_view = cv2.flip(ortho_view, 1)  # horizontal
+    if flip_y:
+        ortho_view = cv2.flip(ortho_view, 0)  # vertical
+
+    return ortho_view
 
 def wait_for_user_input(timeout=1):
     """

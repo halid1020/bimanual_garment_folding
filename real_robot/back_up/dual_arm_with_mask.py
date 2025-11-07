@@ -20,7 +20,10 @@ from utils import (
     points_to_fling_path,
     transform_pose,
     click_points_pick_and_fling,
-    pixels2base_on_table
+    pixels2base_on_table,
+    get_orthographic_view,
+    intrinsics_to_matrix,
+    save_color
 )
 from mask_utils import get_mask_generator, get_mask_v2
 
@@ -268,6 +271,10 @@ class DualArm:
             print(f"[Error] Camera capture failed: {e}")
             return
         
+        save_color(rgb, 'rgb', './tmp')
+        orthogonal_rgb = get_orthographic_view(rgb, 
+            self.T_ur5e_cam, intrinsics_to_matrix(self.intr), z_plane=0.1, max_scale=300)
+        save_color(orthogonal_rgb, 'orthogonal_rgb', './tmp')
         cloth_mask = get_mask_v2(self.mask_generator, rgb)
         rgb = self.apply_workspace_mask(rgb)
         

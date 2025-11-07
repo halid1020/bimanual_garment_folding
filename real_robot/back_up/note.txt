@@ -5,25 +5,6 @@ sudo ip addr add 192.168.1.20/24 dev enp2s0 # set up the ip of my laptop
 ping 192.168.1.10 # try to communicate with robot ur5e
 ping 192.168.1.102 # try to communicate with robot ur16
 
-We need to install librealsense from the source in the GPU laptop as it uses ubuntu 20.0
-
-```
-
-## git clone source, then do the fllow
-
-sudo make uninstall   # if any previous install exists
-sudo make clean
-cmake .. -DBUILD_EXAMPLES=true -DBUILD_GRAPHICAL_EXAMPLES=true
-make -j$(nproc)
-sudo make install
-sudo ldconfig
-
-sudo cp config/99-realsense-libusb.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-
-
-```
 
 
 

@@ -17,7 +17,7 @@ def get_mask_generator():
     sam.to(device=DEVICE)
     return SamAutomaticMaskGenerator(sam)
 
-def get_mask_v2(mask_generator, rgb, mask_treshold_min=10000, mask_treshold_max=250000,
+def get_mask_v2(mask_generator, rgb, mask_treshold_min=10000, mask_treshold_max=360000,
                 dark_threshold=80, min_variance=200, max_variance=5000,
                 debug=False,
                 save_dir="./tmp"):

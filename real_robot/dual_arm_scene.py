@@ -5,7 +5,7 @@ from thread_utils import ThreadWithResult
 from constants import *
 from motion_utils import safe_movel, safe_gripper, safe_home
 from scene_utils import load_camera_to_base, load_camera_to_gripper
-from transform_utils import tcp_pose_to_transform, pixels2base_on_table
+from transform_utils import tcp_pose_to_transform, pixels2base_on_table, transform_pose
 from ur import UR_RTDE
 from realsense_camera import RealsenseCamera
 
@@ -90,6 +90,19 @@ class DualArmScene:
         t1.start(); t2.start()
         t1.join(); t2.join()
         return True
+    
+    def both_fling(self, ur5e_path, ur16e_path, speed, acc):
+        r = self.both_movel(ur5e_path[0], ur16e_path[0], speed=speed, acc=acc)
+        if not r: return False
+        r = self.both_movel(ur5e_path[1:], ur16e_path[1:], speed=speed, acc=acc)
+        return r
+    
+    def get_tcp_distance(self):
+        ur5e_tcp_pose = self.ur5e.get_tcp_pose()
+        ur16e_tcp_pose = transform_pose(self.T_ur5e_ur16e,
+            self.ur16e.get_tcp_pose())
+        tcp_distance = np.linalg.norm((ur16e_tcp_pose - ur5e_tcp_pose)[:3])
+        return tcp_distance
 
     def go_camera_pos(self):
         self.both_home()

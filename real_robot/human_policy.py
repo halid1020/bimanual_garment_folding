@@ -67,7 +67,7 @@ class HumanPolicy:
         # Pick & Fling
         # -------------------------------
         elif skill_type == "pick_and_fling":
-            clicks = click_points_pick_and_fling("Pick & Fling", rgb, mask)
+            clicks = click_points_pick_and_fling("Pick & Fling", display_rgb, mask)
 
             pick_0, pick_1 = clicks
 

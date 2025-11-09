@@ -11,6 +11,9 @@ from mask_utils import get_mask_generator, get_mask_v2
 from camera_utils import get_birdeye_rgb_and_pose, intrinsics_to_matrix
 from save_utils import save_colour
 from pick_and_place import PickAndPlaceSkill
+from pick_and_fling import PickAndFlingSkill
+from save_utils import save_mask, save_colour
+
 class DualArmArena():
     """
     Real Dual-Arm Arena implementation using UR5e and UR16e robots.
@@ -30,6 +33,7 @@ class DualArmArena():
         )
 
         self.pick_and_place_skill = PickAndPlaceSkill(self.dual_arm)
+        self.pick_and_fling_skill = PickAndFlingSkill(self.dual_arm)
 
         self.mask_generator = get_mask_generator()
 
@@ -45,6 +49,8 @@ class DualArmArena():
         self.debug=config.get("debug", False)
 
         self.resolution = (512, 512)
+        self.action_step = 0
+        self.horizon = self.config.horizon
 
         print('Finished init DualArmArena')
 
@@ -60,12 +66,18 @@ class DualArmArena():
         self.eid = episode_config.get("eid", np.random.randint(0, 9999)) if episode_config else 0
         print(f"[Arena] Resetting episode {self.eid}")
 
-        self.clear_frames()
+        self.flattened_obs = None
+        self.get_flattened_obs()
+
+        self.action_step = 0
+        
         # Reset robot to safe state
-        return self._get_info()
+        info = self._get_info()
+        self.clear_frames()
+        return info
 
     
-    def _get_info(self):
+    def _get_info(self, task_related=True, flattened_obs=True):
         # Return to camera position after manipulation
         self.dual_arm.both_open_gripper()
         self.dual_arm.both_home()
@@ -76,7 +88,7 @@ class DualArmArena():
         # -----------------------------
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
         print('raw_rgb shape', raw_rgb.shape)
-        raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb)
+        raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb, debug=True)
         workspace_mask_0, workspace_mask_1 = self.dual_arm.get_workspace_masks()
 
         # Bird’s-eye transformation
@@ -141,18 +153,90 @@ class DualArmArena():
         # -----------------------------
         # Store and return information
         # -----------------------------
-        self.info = {
-            "rgb": resized_rgb,
-            "depth": resized_depth,
+        info = {
+            'observation': {
+                "rgb": resized_rgb,
+                "depth": resized_depth,
+                "mask": resized_mask.astype(np.bool),
+            },
             "workspace_mask_0": resized_workspace_mask_0.astype(np.bool),
             "workspace_mask_1": resized_workspace_mask_1.astype(np.bool),
-            "mask": resized_mask.astype(np.bool),
-            "done": False,
             "eid": self.eid,
+            
         }
 
+        if flattened_obs:
+            info['flattened_obs'] = self.get_flattened_obs()
+
+            for k, v in info['flattened_obs'].items():
+                info['observation'][f'flattened-{k}'] = v
+
+        info['done'] = self.action_step >= self.horizon
+
+        if task_related:
+            info['evaluation'] = self.evaluate()
+            if info['evaluation'].get('normalised_coverage', 0) > 0.9:
+                self.last_flattened_step = self.action_step
+
+            
+           
+            info['observation']['last_flattened_step'] = self.last_flattened_step
+            
+            info['success'] =  self.success()
+            if info['success']:
+                info['done'] = True
+            
+            #print('ev', info['evaluation'])
+            if info['evaluation'] != {}:
+                #print('self.last_info', self.last_info)
+                #print(info['evaluation'])
+                info['reward'] = self.task.reward(self.last_info, None, info)
+            
+
+            goals = self.task.get_goals()
+            if len(goals) > 0:
+                goal = goals[0]
+                info['goal'] = {}
+                for k, v in goal[-1]['observation'].items():
+                    info['goal'][k] = v
+
         
-        return self.info
+        return info
+    
+    def get_flattened_obs(self):
+        """
+        Ask the user to manually set the garment to the flattened position,
+        then capture and store that observation as the reference (goal) state.
+        """
+        if self.flattened_obs is None:
+            print("\n" + "=" * 60)
+            print("🧺  Please prepare the flattened garment position manually.")
+            print("    - Adjust the cloth so it is as flat and spread as possible.")
+            print("    - When you are ready, press [Enter] to capture the flattened observation.")
+            print("=" * 60)
+            input("👉 Press [Enter] to capture the flattened cloth state...")
+
+            # Capture flattened observation (without triggering evaluation)
+            self.flattened_obs = self._get_info(task_related=False, flattened_obs=False)
+
+            # Compute flatten coverage ratio (cloth area / total area)
+            mask = self.flattened_obs['observation']["mask"]
+            save_colour(self.flattened_obs['observation']['rgb'], 'flattended_rgb', 'tmp')
+            save_mask(mask, 'flattened_mask', 'tmp')
+            cloth_pixels = np.sum(mask)
+            total_pixels = mask.size
+            self.flatten_coverage = cloth_pixels / total_pixels
+
+            print(f"\n✅ Flattened observation captured successfully.")
+            print(f"   Cloth coverage ratio: {self.flatten_coverage:.3f}")
+            print("=" * 60 + "\n")
+
+        else:
+            print("[Arena] Using cached flattened observation.")
+
+        return self.flattened_obs
+
+
 
     def step(self, action):
         """
@@ -180,6 +264,11 @@ class DualArmArena():
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
             self.pick_and_place_skill.step(points_orig)
+        elif action_type == 'norm-pixel-pick-and-fling':
+            self.pick_and_fling_skill.reset()
+            self.pick_and_fling_skill.step(points_orig)
+        
+        self.action_step += 1
 
         # --- Step 4: Capture new state ---
         return self._get_info()
@@ -188,6 +277,9 @@ class DualArmArena():
     def get_frames(self) -> List[np.ndarray]:
         return self.frames
 
+    def success(self):
+        return self.task.success(self)
+    
     def clear_frames(self):
         self.frames = []
 
@@ -208,6 +300,14 @@ class DualArmArena():
 
     def get_action_horizon(self) -> int:
         return self.action_horizon
+    
+    def evaluate(self):
+        if (self.evaluate_result is None) or (self.action_step == 0):
+            self.evaluate_result = self.task.evaluate(self)
+        return self.evaluate_result
+
+    def set_task(self, task):
+        self.task = task
 
     # ------------------------------------------------------------------
     # Optional convenience methods

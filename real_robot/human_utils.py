@@ -59,19 +59,34 @@ def click_points_pick_and_place(window_name, img, mask=None):
 
     return clicks[0], clicks[1], clicks[2], clicks[3]
 
-def click_points_pick_and_fling(window_name, img):
+def click_points_pick_and_fling(window_name, img, mask=None):
     clicks = []
     clone = img.copy()
+
+    # If a mask is provided, overlay it transparently on the RGB
+    if mask is not None:
+        # Ensure mask is binary
+        if len(mask.shape) == 3:
+            mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        else:
+            mask_gray = mask
+
+        mask_color = np.zeros_like(clone)
+        mask_color[mask_gray > 0] = (0, 255, 0)  # green overlay
+        alpha = 0.4
+        overlay = cv2.addWeighted(clone, 1 - alpha, mask_color, alpha, 0)
+    else:
+        overlay = clone
 
     def mouse_cb(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             clicks.append((int(x), int(y)))
             cv2.circle(clone, (int(x), int(y)), 5, (0,255,0), -1)
-            cv2.imshow(window_name, clone)
+            cv2.imshow(window_name, overlay)
 
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1280, 720) 
-    cv2.imshow(window_name, clone)
+    cv2.imshow(window_name, overlay)
     cv2.setMouseCallback(window_name, mouse_cb)
 
     print("Please click PICK point then PLACE point on the image window.")

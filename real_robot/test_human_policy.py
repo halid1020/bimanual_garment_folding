@@ -17,7 +17,7 @@ def main():
 
     while not info['done']:
         action = policy.single_act(info)
-        #info = arena.step(action)
+        info = arena.step(action)
 
 if __name__ == "__main__":
     main()

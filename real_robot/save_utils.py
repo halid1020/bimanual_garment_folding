@@ -21,5 +21,6 @@ def save_depth(depth, filename='depth', directory=".", colour=False):
     cv2.imwrite('{}/{}.png'.format(directory, filename), depth)
 
 def save_mask(mask, filename='mask', directory="."):
-    mask = mask.astype(np.int8)*255
-    cv2.imwrite('{}/{}.png'.format(directory, filename), mask)
+    os.makedirs(directory, exist_ok=True)
+    mask = (mask > 0).astype(np.uint8) * 255  # convert to 0 or 255 uint8
+    cv2.imwrite(f'{directory}/{filename}.png', mask)

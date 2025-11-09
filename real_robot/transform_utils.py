@@ -2,6 +2,37 @@ from scipy.spatial.transform import Rotation
 import numpy as np
 from camera_utils import intrinsic_to_params
 
+
+def pixel_to_camera_point(pixel, depth_m, intr):
+    """Convert image pixel + depth (meters) to 3D camera coordinates."""
+    u, v = pixel[0], pixel[1]
+    fx, fy, cx, cy = intrinsic_to_params(intr)
+    x = (u - cx) * depth_m / fx
+    y = (v - cy) * depth_m / fy
+    z = depth_m
+    return np.array([x, y, z])
+
+
+
+def point_on_table_base(u, v, intr, cam2base, table_z):
+    """
+    Convert a pixel to a 3D point on a planar table at table_z in base frame.
+    """
+    # Direction vector in camera frame (depth=1)
+    p_cam = pixel_to_camera_point((u,v), 1.0, intr)  # returns 3x1 vector
+
+    # Rotate to base frame
+    p_dir_base = cam2base[:3,:3] @ p_cam
+    cam_origin_base = cam2base[:3,3]
+
+    # Compute scale factor
+    s = (table_z - cam_origin_base[2]) / p_dir_base[2]
+
+    # Compute base-frame point
+    p_base = cam_origin_base + s * p_dir_base
+    return p_base
+
+
 def transform_point(T, p):
     """Apply 4x4 transform T to 3D point p (len 3). Returns len-3 point."""
     p_h = np.ones(4)

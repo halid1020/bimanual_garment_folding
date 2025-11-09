@@ -10,6 +10,7 @@ from dual_arm_scene import DualArmScene  # <-- your robot class path
 from mask_utils import get_mask_generator, get_mask_v2
 from camera_utils import get_birdeye_rgb_and_pose, intrinsics_to_matrix
 from save_utils import save_colour
+from pick_and_place import PickAndPlaceSkill
 class DualArmArena():
     """
     Real Dual-Arm Arena implementation using UR5e and UR16e robots.
@@ -28,6 +29,8 @@ class DualArmArena():
             dry_run=dry_run
         )
 
+        self.pick_and_place_skill = PickAndPlaceSkill(self.dual_arm)
+
         self.mask_generator = get_mask_generator()
 
         # Arena parameters
@@ -40,6 +43,8 @@ class DualArmArena():
         self.frames = []
         self.goal = None
         self.debug=config.get("debug", False)
+
+        self.resolution = (512, 512)
 
         print('Finished init DualArmArena')
 
@@ -55,39 +60,12 @@ class DualArmArena():
         self.eid = episode_config.get("eid", np.random.randint(0, 9999)) if episode_config else 0
         print(f"[Arena] Resetting episode {self.eid}")
 
+        self.clear_frames()
         # Reset robot to safe state
-        self.dual_arm.both_open_gripper()
-        self.dual_arm.go_camera_pos()
+        return self._get_info()
 
-        # Capture initial scene
-        raw_rgb, raw_depth = self.dual_arm.take_rgbd()
-        raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb)
-
-        # # -----------------------------
-        # # Randomly sample pick position on the cloth
-        # # -----------------------------
-        # ys, xs = np.where(raw_cloth_mask > 0)
-        # if len(xs) > 0:
-        #     idx = np.random.randint(len(xs))
-        #     pick_pos_px = np.array([xs[idx], ys[idx]])
-        #     pick_depth = raw_depth[pick_pos_px[1], pick_pos_px[0]]
-
-        #     # Convert pick pixel to 3D world coordinates
-        #     pick_pos_3d = self.dual_arm.pixel_to_3d(
-        #         pick_pos_px, pick_depth, self.dual_arm.get_camera_intrinsic(), self.dual_arm.get_T_base_cam()
-        #     )
-
-        #     # Move to pick position, grasp, lift randomly, and drop
-        #     self.dual_arm.move_to(pick_pos_3d + np.array([0, 0, 0.05]))  # approach
-        #     self.dual_arm.move_to(pick_pos_3d)
-        #     self.dual_arm.close_gripper()
-
-        #     # Random release position and height
-        #     release_offset = np.random.uniform([-0.1, -0.1, 0.05], [0.1, 0.1, 0.2])
-        #     release_pos_3d = pick_pos_3d + release_offset
-        #     self.dual_arm.move_to(release_pos_3d)
-        #     self.dual_arm.open_gripper()
-
+    
+    def _get_info(self):
         # Return to camera position after manipulation
         self.dual_arm.both_open_gripper()
         self.dual_arm.both_home()
@@ -97,25 +75,27 @@ class DualArmArena():
         # Capture post-interaction scene
         # -----------------------------
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
+        print('raw_rgb shape', raw_rgb.shape)
         raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb)
         workspace_mask_0, workspace_mask_1 = self.dual_arm.get_workspace_masks()
 
         # Bird’s-eye transformation
-        rgb_bird_eye, map_x, map_y, _, _ = get_birdeye_rgb_and_pose(
+        rgb_bird_eye, self.map_x, self.map_y, _, _ = get_birdeye_rgb_and_pose(
             raw_rgb,
             self.dual_arm.get_T_base_cam(),
             intrinsics_to_matrix(self.dual_arm.get_camera_intrinsic()),
             rotate_ccw=False,
         )
+        print('rgb_bird_eye.shape', rgb_bird_eye.shape)
 
         if self.debug:
             save_colour(rgb_bird_eye, 'rgb_bird_eye', './tmp')
             save_colour(raw_rgb, 'raw_rgb', './tmp')
 
-        depth_bird_eye = cv2.remap(raw_depth, map_x, map_y, interpolation=cv2.INTER_NEAREST)
-        mask_bird_eye = cv2.remap(raw_cloth_mask.astype(np.uint8), map_x, map_y, interpolation=cv2.INTER_NEAREST)
-        workspace_mask_0_be = cv2.remap(workspace_mask_0.astype(np.uint8), map_x, map_y, interpolation=cv2.INTER_NEAREST)
-        workspace_mask_1_be = cv2.remap(workspace_mask_1.astype(np.uint8), map_x, map_y, interpolation=cv2.INTER_NEAREST)
+        depth_bird_eye = cv2.remap(raw_depth, self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        mask_bird_eye = cv2.remap(raw_cloth_mask.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        workspace_mask_0_be = cv2.remap(workspace_mask_0.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        workspace_mask_1_be = cv2.remap(workspace_mask_1.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
 
         # -----------------------------
         # Center crop bird’s-eye view around cloth
@@ -136,6 +116,10 @@ class DualArmArena():
 
         x2, y2 = x1 + crop_size, y1 + crop_size
 
+        self.x1 = x1
+        self.y1 = y1
+        self.crop_size = crop_size
+
         # Perform crops
         crop_rgb = rgb_bird_eye[y1:y2, x1:x2]
         crop_depth = depth_bird_eye[y1:y2, x1:x2]
@@ -143,60 +127,63 @@ class DualArmArena():
         crop_workspace_mask_0 = workspace_mask_0_be[y1:y2, x1:x2]
         crop_workspace_mask_1 = workspace_mask_1_be[y1:y2, x1:x2]
 
+        ## Resize images
+        self.cropped_resolution = crop_rgb.shape[:2]
+        resized_rgb = cv2.resize(crop_rgb, self.resolution)
+        resized_depth = cv2.resize(crop_depth, self.resolution)
+        resized_mask = cv2.resize(crop_mask, self.resolution)
+        resized_workspace_mask_0 = cv2.resize(crop_workspace_mask_0, self.resolution)
+        resized_workspace_mask_1 = cv2.resize(crop_workspace_mask_1, self.resolution)
+        
+        print('max resized mask', np.max(resized_mask), resized_mask.dtype)
+    
+
         # -----------------------------
         # Store and return information
         # -----------------------------
         self.info = {
-            "rgb": crop_rgb,
-            "depth": crop_depth,
-            "workspace_mask_0": crop_workspace_mask_0,
-            "workspace_mask_1": crop_workspace_mask_1,
-            "mask": crop_mask,
+            "rgb": resized_rgb,
+            "depth": resized_depth,
+            "workspace_mask_0": resized_workspace_mask_0.astype(np.bool),
+            "workspace_mask_1": resized_workspace_mask_1.astype(np.bool),
+            "mask": resized_mask.astype(np.bool),
             "done": False,
             "eid": self.eid,
         }
 
-        self.clear_frames()
+        
         return self.info
 
-    def step(self, action: np.ndarray) -> Dict[str, Any]:
+    def step(self, action):
         """
-        Execute a low-level robot command (or abstract high-level action).
+        Convert normalized bird-eye pixels to original RGB image coordinates and perform skill action.
         """
-        assert action.shape == (12,), f"Expected action of shape (12,), got {action.shape}"
+        norm_pixels = np.array(list(action.values())[0]).reshape(-1, 2)
+        action_type = list(action.keys())[0]
 
-        ur5e_pose_delta = action[:6]
-        ur16e_pose_delta = action[6:]
+        # --- Step 1: Convert normalized → crop → full bird-eye pixels ---
+        standard_pixel_bird_eye = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
 
-        # Apply relative move (real robot)
-        print(f"[Arena] Executing action for episode {self.eid}")
-        current_step = self.current_episode["step"]
-        self.dual_arm.both_movel(
-            ur5e_pose_delta,
-            ur16e_pose_delta,
-            speed=0.2,
-            acceleration=0.1,
-            blocking=True
-        )
+        # add crop offset (x1, y1)
+        standard_pixel_bird_eye += np.array([self.x1, self.y1])
 
-        # Observe new state
-        rgb, depth = None, None
-        if not self.dual_arm.dry_run:
-            try:
-                rgb, depth = self.dual_arm.camera.take_rgbd()
-            except Exception as e:
-                print(f"[Error] Camera capture failed during step: {e}")
+        # --- Step 2: Map back to original RGB image coordinates ---
+        points_orig = []
+        for pixel in standard_pixel_bird_eye:
+            x, y = pixel  # pixel = [x, y]
+            u = self.map_x[y, x]
+            v = self.map_y[y, x]
+            points_orig.append((u, v))
+        points_orig = np.array(points_orig).flatten()
 
-        self.frames.append(rgb)
-        self.current_episode["step"] = current_step + 1
+        # --- Step 3: Execute robot skill ---
+        if action_type == 'norm-pixel-pick-and-place':
+            self.pick_and_place_skill.reset()
+            self.pick_and_place_skill.step(points_orig)
 
-        info = {
-            "rgb": rgb,
-            "depth": depth,
-            "step": self.current_episode["step"],
-            "done": False
-        }
-        return info
+        # --- Step 4: Capture new state ---
+        return self._get_info()
+
 
     def get_frames(self) -> List[np.ndarray]:
         return self.frames

@@ -262,12 +262,11 @@ class GarmentEnv(Arena):
             'overstretch': self.overstretch,
             'sim_steps': self.sim_step
         })
-        #print('over strech!!!', self.over_strech)
 
         if flatten_obs:
             info['flattened_obs'] = self.get_flattened_obs()
 
-            for k, v in info['flattened_obs'].items():
+            for k, v in info['flattened_obs']['observation'].items():
                 info['observation'][f'flattened-{k}'] = v
 
         info['done'] = self.action_step >= self.horizon
@@ -621,6 +620,27 @@ class GarmentEnv(Arena):
                 pos = self.flattened_obs['observation']['particle_positions'][pid]
                 semkey_positions.append(pos)
             obs['flattened_semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
+
+        if flatten_obs and self.config.get("provide_semkey_norm_pixel", False) and obs['semkey2pid']:
+            particle_pos = obs['particle_positions']          # (N, 3)
+            semkey2pid = obs['semkey2pid']                    # dict {name: pid}
+            keypids = list(semkey2pid.values())
+            key_particles = particle_pos[keypids]                 # (K, 3)
+            key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+            H, W = self.camera_size
+            norm_pixels = key_pixels/np.array([H, W]) * 2 - 1
+            obs['semkey_norm_pixel'] = norm_pixels.flatten()
+
+        if flatten_obs and self.config.get("provide_flattened_semkey_norm_pixel", False) and obs['semkey2pid']:
+            particle_pos = self.flattened_obs['observation']['particle_positions']          # (N, 3)
+            semkey2pid = obs['semkey2pid']                    # dict {name: pid}
+            keypids = list(semkey2pid.values())
+            key_particles = particle_pos[keypids]                 # (K, 3)
+            key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+            H, W = self.camera_size
+            norm_pixels = key_pixels/np.array([H, W]) * 2 - 1
+            obs['flattened_semkey_norm_pixel'] = norm_pixels.flatten()
+
 
         obs['action_step'] = self.action_step
 

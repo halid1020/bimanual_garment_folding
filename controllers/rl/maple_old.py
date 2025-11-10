@@ -79,9 +79,12 @@ Target Parameter Policy Entropy − maxa da
 13. For the inference primtive policy, choose the most probable action primtive.
 """
 
+# ... (Place PrimitiveActor class definition here) ...
+# (Assuming PrimitiveActor from the previous step is here)
 class PrimitiveActor(nn.Module):
     """
-    Discrete policy network with optional Gumbel-Softmax sampling.
+    A simple discrete policy network.
+    Outputs logits for K primitives.
     """
     def __init__(self, state_dim, hidden_dim, num_primitives):
         super().__init__()
@@ -93,41 +96,18 @@ class PrimitiveActor(nn.Module):
     def forward(self, obs):
         x = F.relu(self.fc1(obs))
         x = F.relu(self.fc2(x))
-        logits = self.logits(x)  # (B, K)
+        logits = self.logits(x)
         return logits
 
-    def sample(self, obs, temperature=1.0, hard=False):
-        """
-        Standard categorical sample (used for inference)
-        """
+    def sample(self, obs, temperature=1.0):
         logits = self.forward(obs) / temperature
         dist = torch.distributions.Categorical(logits=logits)
         prim_idx = dist.sample()
         log_prob = dist.log_prob(prim_idx).unsqueeze(-1)
-        all_log_probs = F.log_softmax(logits, dim=-1)
-        probs = F.softmax(logits, dim=-1)
+        # For actor loss, we need log_probs of *all* actions
+        all_log_probs = F.log_softmax(logits, dim=-1) # (B, K)
+        probs = F.softmax(logits, dim=-1) # (B, K)
         return prim_idx, log_prob, all_log_probs, probs
-
-    def sample_gumbel(self, obs, temperature=1.0, hard=True):
-        """
-        Differentiable Gumbel-Softmax sample
-        Returns:
-            y_hard: (B, K) one-hot or soft vector (if hard=False, soft)
-            log_prob: (B,1) log prob of selected primitive (for entropy)
-        """
-        logits = self.forward(obs)
-        y_soft = F.gumbel_softmax(logits, tau=temperature, hard=hard, dim=-1)  # (B, K)
-        # Compute log_prob for entropy regularization
-        log_probs = F.log_softmax(logits, dim=-1)  # (B, K)
-        # For entropy term, get log_prob of selected primitive
-        if hard:
-            prim_idx = y_soft.argmax(dim=-1)
-            log_prob = log_probs.gather(1, prim_idx.unsqueeze(-1))  # (B,1)
-        else:
-            # soft vector: sum_i y_i * log p_i
-            log_prob = (y_soft * log_probs).sum(dim=-1, keepdim=True)
-        return y_soft, log_prob
-
 
 
 class MAPLE(VanillaSAC):
@@ -211,18 +191,12 @@ class MAPLE(VanillaSAC):
 
         self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
 
-    def _augment_state_with_embedding(self, state: torch.Tensor, prim_repr: torch.Tensor) -> torch.Tensor:
-        """
-        prim_repr: either LongTensor (B,) for hard index OR FloatTensor (B, K) for Gumbel-Softmax
-        """
+    # ---------- helpers ----------
+    def _augment_state_with_embedding(self, state: torch.Tensor, prim_idx: torch.LongTensor) -> torch.Tensor:
+        # state: (B, state_dim), prim_idx: (B,)
         B = state.shape[0]
-        if prim_repr.dim() == 1:  # hard index
-            emb = self.primitive_embeddings[prim_repr]  # (B, code_dim)
-        else:  # soft one-hot vector
-            # (B, K) x (K, code_dim) = (B, code_dim)
-            emb = prim_repr @ self.primitive_embeddings
+        emb = self.primitive_embeddings[prim_idx]  # (B, code_dim)
         return torch.cat([state, emb], dim=-1)  # (B, aug_state_dim)
-
 
     def _split_actions_from_replay(self, actions: torch.Tensor):
         # actions: (B, 1 + network_action_dim) stored in buffer
@@ -232,10 +206,7 @@ class MAPLE(VanillaSAC):
 
     # ---------- selection / acting ----------
     def _select_action(self, info: dict, stochastic: bool = False):
-        """
-        Select action using MAPLE with Gumbel-Softmax for primitives.
-        """
-        # 1️⃣ Process observation/context
+        # ... (obs processing is the same as your draft) ...
         obs = [info['observation'][k] for k in self.obs_keys]
         obs = self._process_obs_for_input(obs)
         aid = info['arena_id']
@@ -248,87 +219,84 @@ class MAPLE(VanillaSAC):
         ctx = self._process_context_for_input(obs_list)  # (1, state_dim)
 
         with torch.no_grad():
-            # 2️⃣ Primitive selection
+            #print('ctx shape', ctx.shape)
+            prim_idx, log_prob, all_log_probs, probs = self.primitive_actor.sample(ctx)
+
             if stochastic:
-                # Sample using Gumbel-Softmax (soft) for exploration
-                prim_onehot, _ = self.primitive_actor.sample_gumbel(ctx, temperature=1.0, hard=False)
-                prim_idx_tensor = torch.argmax(prim_onehot, dim=-1)
+                prim_idx_tensor = prim_idx
             else:
-                # Deterministic: argmax
-                logits = self.primitive_actor(ctx)
-                prim_idx_tensor = torch.argmax(logits, dim=-1)
-                prim_onehot = F.one_hot(prim_idx_tensor, num_classes=self.K).float()
+                # Inference: Choose the most probable action primitive (argmax)
+                prim_idx_tensor = torch.argmax(probs, dim=-1)
 
-            # 3️⃣ Augment state with primitive embedding
-            if self.embedding_type == 'learnable':
-                # Use soft embedding for learnable case
-                emb = prim_onehot @ self.primitive_embeddings  # (1, code_dim)
-            else:  # one-hot
-                emb = prim_onehot
 
-            aug_state = torch.cat([ctx, emb], dim=-1)  # (1, aug_state_dim)
+            prim_idx = prim_idx_tensor.item()
 
-            # 4️⃣ Continuous action selection
+            # 2. Augment state with chosen primitive's embedding
+            aug_state = self._augment_state_with_embedding(ctx, prim_idx_tensor) # (1, aug_state_dim)
+
+
+            # 3. Get continuous params from continuous policy
             if stochastic:
-                action, _ = self.actor.sample(aug_state)
-                action = torch.clip(action, -self.config.action_range, self.config.action_range)
+                best_action, _ = self.actor.sample(aug_state)
+                best_action = torch.clip(best_action, \
+                    -self.config.action_range, self.config.action_range)
             else:
                 mean, _ = self.actor(aug_state)
-                action = torch.tanh(mean)
+                best_action = torch.tanh(mean)
 
-            # 5️⃣ Prepare output
-            prim_idx = prim_idx_tensor.item()
-            primitive_name = self.primitives[prim_idx]['name']
-            dim = self.primitives[prim_idx]['dim']
-            out_dict = {primitive_name: action.cpu().numpy().squeeze(0)}
+           
+            best_action = best_action.detach().cpu().numpy().squeeze(0)
 
-            vector_action = np.concatenate(([float(prim_idx)], action.cpu().numpy().flatten()))
+        primitive_name = self.primitives[prim_idx]['name']
+        dim = self.primitives[prim_idx]['dim']
+        out_dict = {primitive_name: best_action} #best_action[: dim]}
+    
 
+        vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
         return out_dict, vector_action
 
+
+    # ---------- learning ----------
     def _update_networks(self, batch: dict):
-        """
-        Full MAPLE update with Gumbel-Softmax for discrete primitives.
-        """
         config = self.config
         device = self.device
         context, action, reward, next_context, done = batch.values()
         B = context.shape[0]
 
-        # Split actions
         action_params_taken, prim_idx_taken = self._split_actions_from_replay(action)
 
-        # Alphas
+        # Get alphas
         alpha_k = self.log_alpha_k.exp().detach()
         alpha_theta = self.log_alpha_theta.exp().detach()
 
-        # ====================
-        # 1️⃣ Critic Target
-        # ====================
+        # --- 1. Compute Target Q Value (MODIFIED) ---
+        # We now compute a sampled target, not the expected value V(s')
         with torch.no_grad():
-            # Sample next primitive with Gumbel-Softmax (soft or hard)
-            y_next_soft, log_prob_k_next = self.primitive_actor.sample_gumbel(next_context, temperature=1.0, hard=True)
+            # 1. Sample *one* next primitive k' ~ pi_k(s')
+            next_prim_idx_k, next_log_prob_k, _, _ = self.primitive_actor.sample(next_context) # (B,), (B, 1)
 
-            # Augment next state with primitive
-            next_aug_state = self._augment_state_with_embedding(next_context, y_next_soft)
-
-            # Sample continuous action
-            a_next, logp_next = self.actor.sample(next_aug_state)
-
-            # Q targets
+            # 2. Get Q_pi(s', k') for *only* that sampled k'
+            # Augment s' with the sampled k'
+            next_aug_state = self._augment_state_with_embedding(next_context, next_prim_idx_k) # (B, aug_state_dim)
+            
+            # Sample a'_k' ~ pi_theta(s', k')
+            a_next, logp_next = self.actor.sample(next_aug_state) # (B, param_dim), (B, 1)
+            
+            # Get Q_target(s', k', a'_k')
             q1_next, q2_next = self.critic_target(next_aug_state, a_next)
-            q_next = torch.min(q1_next, q2_next)
+            q_next = torch.min(q1_next, q2_next) # (B, 1)
+            
+            # Q_pi(s', k') = Q_target(...) - alpha_theta * log pi_theta(...)
+            q_pi_next = q_next - alpha_theta * logp_next # (B, 1)
+            
+            # 3. Compute the target value component from the sampled primitive
+            # y_k = Q_pi(s', k') - alpha_k * log pi_k(k'|s')
+            target_q_k_component = q_pi_next - alpha_k * next_log_prob_k # (B, 1)
+            
+            # 4. Compute the final Bellman target
+            target_q = reward + (1.0 - done) * config.gamma * target_q_k_component  # (B,1)
 
-            # Q_pi(s', k') = Q_target - alpha_theta * log pi_theta(a'|s', k')
-            q_pi_next = q_next - alpha_theta * logp_next
-
-            # Bellman target for critic
-            target_q = reward + (1.0 - done) * config.gamma * (q_pi_next - alpha_k * log_prob_k_next)
-
-        # ====================
-        # 2️⃣ Critic Update
-        # ====================
-        # Use replayed primitive for critic input
+        # --- 2. Critic Loss ---
         aug_state_taken = self._augment_state_with_embedding(context, prim_idx_taken)
         q1_pred, q2_pred = self.critic(aug_state_taken, action_params_taken.view(B, -1))
         critic_loss = 0.5 * (F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
@@ -338,65 +306,57 @@ class MAPLE(VanillaSAC):
         critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_grad_clip_value)
         self.critic_optim.step()
 
-        # ====================
-        # 3️⃣ Primitive Actor Update (Gumbel-Softmax)
-        # ====================
-        y_soft, log_prob_k = self.primitive_actor.sample_gumbel(context, temperature=1.0, hard=True)
-        aug_state_prim = self._augment_state_with_embedding(context, y_soft)
+       
+        
+         # --- 3. Primitive Actor Loss (pi_k) (MODIFIED TO USE REPLAYED PRIMITIVE) ---
+        # aug_state_taken already contains (s, k_replayed)
+        prim_idx_k, log_prob_k, _, _ = self.primitive_actor.sample(context)
+        aug_state = self._augment_state_with_embedding(context, prim_idx_k)
 
-        # Evaluate continuous actor for Q
-        pi_theta_action, logp_theta = self.actor.sample(aug_state_prim)
-        q1_pi, q2_pi = self.critic(aug_state_prim, pi_theta_action)
+        
+        pi_theta, logp_theta = self.actor.sample(aug_state.detach())
+        q1_pi, q2_pi = self.critic(aug_state, pi_theta)
         q_pi = torch.min(q1_pi, q2_pi)
 
-        # Differentiable primitive actor loss
-        primitive_actor_loss = (alpha_k * log_prob_k - q_pi).mean()
+        primitive_actor_loss = (alpha_k * log_prob_k - q_pi.detach()).mean()
 
         self.primitive_actor_optim.zero_grad()
         primitive_actor_loss.backward()
         self.primitive_actor_optim.step()
+        
 
-        # ====================
-        # 4️⃣ Continuous Actor Update
-        # ====================
-        # Reuse y_soft for continuous actor
-        aug_state_actor = self._augment_state_with_embedding(context, y_soft)
-        pi_theta_action, logp_theta = self.actor.sample(aug_state_actor)
-        q1_pi, q2_pi = self.critic(aug_state_actor, pi_theta_action)
-        q_pi = torch.min(q1_pi, q2_pi)
-
+        # --- 4. Parameter Actor Loss (pi_theta) ---
         actor_loss = (alpha_theta * logp_theta - q_pi).mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
         self.actor_optim.step()
 
-        # ====================
-        # 5️⃣ Alpha Updates
-        # ====================
+       
+
+        # --- 5. Alpha (Entropy) Updates ---
+        # (This section remains unchanged)
         alpha_k_loss = torch.tensor(0.0, device=device)
         alpha_theta_loss = torch.tensor(0.0, device=device)
-
+        
         if self.auto_alpha_learning:
+            # Alpha_theta loss
             alpha_theta_loss = -(self.log_alpha_theta * (logp_theta + self.target_entropy_theta).detach()).mean()
             self.alpha_theta_optim.zero_grad()
             alpha_theta_loss.backward()
             self.alpha_theta_optim.step()
 
+            # Alpha_k loss
             alpha_k_loss = -(self.log_alpha_k * (log_prob_k + self.target_entropy_k).detach()).mean()
             self.alpha_k_optim.zero_grad()
             alpha_k_loss.backward()
             self.alpha_k_optim.step()
 
-        # ====================
-        # 6️⃣ Soft target update
-        # ====================
+        # --- Soft target update ---
         if self.update_steps % self.config.target_update_interval == 0:
             self._soft_update(self.critic, self.critic_target, config.tau)
 
-        # ====================
-        # Logging
-        # ====================
+        # --- Logging (Unchanged) ---
         with torch.no_grad():
             q_stats = {
                 'q_mean': q_pi.mean().item(),
@@ -411,6 +371,7 @@ class MAPLE(VanillaSAC):
                 'critic_grad_norm': critic_grad_norm.item(),
             }
             self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
+            
             self.logger.log({
                 'loss/critic': critic_loss.item(),
                 'loss/actor_params': actor_loss.item(),

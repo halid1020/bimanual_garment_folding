@@ -49,12 +49,12 @@ class RoboSuiteArena(Arena):
     def __init__(self, config):
         self.num_eval_trials = 30
         self.num_train_trials = 1000
-        self.num_val_trials = 10
+        self.num_val_trials = 5
 
         super().__init__(config)
         self.config = config
         self.name = config.get("name", "robosuite_arena")
-        self.horizon = config.get("horizon", 500)
+        self.sim_horizon = config.get("sim_horizon", 500)
         self.env_name = config.get("task_name", "Lift")  # Fix key
         self.use_camera_obs = config.get("use_camera_obs", False)
         self.has_renderer = config.get("disp", False)
@@ -77,7 +77,7 @@ class RoboSuiteArena(Arena):
                 use_object_obs=True,   # object info
                 control_freq=self.control_freq,
                 reward_shaping=True,
-                horizon=self.horizon,
+                horizon=self.sim_horizon,
                 robots=self.config.robots,
                 controller_configs=suite.load_controller_config(
                     default_controller=self.config["controller_name"]
@@ -226,7 +226,7 @@ class RoboSuiteArena(Arena):
         return np.zeros_like(self.action_space.sample())
 
     def get_action_horizon(self):
-        return self.horizon
+        return self.sim_horizon
 
     # Optional override
     def success(self):

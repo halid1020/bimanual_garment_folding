@@ -146,6 +146,7 @@ class GraspSkill(BaseSkill):
         return pos
 
     def is_success(self, info):
+        #print('max grasp steps', self._config['num_grasp_steps'], 'self._num_grasp_steps', self._num_grasp_steps)
         return self._num_grasp_steps >= self._config['num_grasp_steps']
 
     def _reached_goal_ori(self, info):

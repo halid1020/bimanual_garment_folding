@@ -22,92 +22,119 @@ from .obs_state_replay_buffer import ObsStateReplayBuffer
 
 from .wandb_logger import WandbLogger
 
+
 class NatureCNNEncoder(nn.Module):
-    def __init__(self, obs_shape=(3, 84, 84), state_dim=45, feature_dim=512):
+    def __init__(self, 
+                 obs_shape=(3, 84, 84),
+                 state_dim=45,
+                 feature_dim=512,
+                 conv_layers: Optional[list] = None):
+        """
+        Args:
+            obs_shape: (C, H, W)
+            state_dim: output state dimension
+            feature_dim: intermediate feature dimension before regression
+            conv_layers: list of dicts, e.g.
+                [
+                    {"out_channels": 32, "kernel_size": 8, "stride": 4},
+                    {"out_channels": 64, "kernel_size": 4, "stride": 2},
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1}
+                ]
+        """
         super().__init__()
         assert len(obs_shape) == 3, "Input must be 3D (C,H,W)"
-        self.conv_net = nn.Sequential(
-            nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4),  # 84x84 -> 20x20
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),           # 20x20 -> 9x9
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),           # 9x9 -> 7x7
-            nn.ReLU()
-        )
+        C, H, W = obs_shape
 
-        # Compute flatten size
+        # Default to classic NatureCNN layout if not provided
+        if conv_layers is None:
+            conv_layers = [
+                {"out_channels": 32, "kernel_size": 8, "stride": 4},
+                {"out_channels": 64, "kernel_size": 4, "stride": 2},
+                {"out_channels": 64, "kernel_size": 3, "stride": 1}
+            ]
+
+        conv_modules = []
+        in_channels = C
+        for layer_cfg in conv_layers:
+            conv_modules += [
+                nn.Conv2d(
+                    in_channels,
+                    layer_cfg["out_channels"],
+                    kernel_size=layer_cfg["kernel_size"],
+                    stride=layer_cfg["stride"]
+                ),
+                nn.ReLU()
+            ]
+            in_channels = layer_cfg["out_channels"]
+
+        self.conv_net = nn.Sequential(*conv_modules)
+
+        # compute flatten size
         with torch.no_grad():
             n_flatten = self.conv_net(torch.zeros(1, *obs_shape)).view(1, -1).size(1)
 
         self.fc = nn.Linear(n_flatten, feature_dim)
-
         self.regressor = nn.Linear(feature_dim, state_dim)
 
     def forward(self, obs):
-        # Normalize image to [0,1]
         x = obs / 255.0
         x = self.conv_net(x)
         x = x.reshape(x.size(0), -1)
-        x = self.fc(x)
-        e = F.relu(x)
+        e = F.relu(self.fc(x))
         x = self.regressor(e)
         return e, x
 
-
-class Critic(nn.Module):
-    def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
-        super().__init__()
-        self.q1_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
-        self.q1_2 = nn.Linear(hidden_dim, hidden_dim)
-        self.q1_3 = nn.Linear(hidden_dim, 1)
-       
-        self.q2_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
-        self.q2_2 = nn.Linear(hidden_dim, hidden_dim)
-        self.q2_3 = nn.Linear(hidden_dim, 1)
-
-
-    def forward(self, obs_emb, action):
-        x = torch.cat([obs_emb, action], dim=-1)
-        # Q1
-        q1 = F.relu(self.q1_1(x))
-        q1 = F.relu(self.q1_2(q1))
-        q1 = self.q1_3(q1)
-        # Q2
-        q2 = F.relu(self.q2_1(x))
-        q2 = F.relu(self.q2_2(q2))
-        q2 = self.q2_3(q2)
-        return q1, q2
-
 class Actor(nn.Module):
-    def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
+    def __init__(self, action_dim, feature_dim=512, hidden_dims=[256, 256]):
         super().__init__()
-        self.fc1 = nn.Linear(feature_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.mean = nn.Linear(hidden_dim, action_dim)
-        self.log_std = nn.Linear(hidden_dim, action_dim)
-
+        layers = []
+        input_dim = feature_dim
+        for h in hidden_dims:
+            layers += [nn.Linear(input_dim, h), nn.ReLU()]
+            input_dim = h
+        self.mlp = nn.Sequential(*layers)
+        self.mean = nn.Linear(input_dim, action_dim)
+        self.log_std = nn.Linear(input_dim, action_dim)
 
     def forward(self, obs_emb):
-        x = F.relu(self.fc1(obs_emb))
-        x = F.relu(self.fc2(x))
+        x = self.mlp(obs_emb)
         mean = self.mean(x)
-        log_std = self.log_std(x)
-        log_std = torch.clamp(log_std, -20, 2)
+        log_std = torch.clamp(self.log_std(x), -20, 2)
         std = log_std.exp()
         return mean, std
 
-
     def sample(self, obs_emb):
-        #print('obs shape', obs.shape)
         mean, std = self(obs_emb)
         normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample() # reparameterization trick
+        x_t = normal.rsample()
         y_t = torch.tanh(x_t)
         action = y_t
         log_prob = normal.log_prob(x_t)
         log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
         log_prob = log_prob.sum(1, keepdim=True)
         return action, log_prob
+
+class Critic(nn.Module):
+    def __init__(self, action_dim, feature_dim=512, hidden_dims=[256, 256]):
+        super().__init__()
+        input_dim = feature_dim + action_dim
+        self.q1_net = self._build_q_net(input_dim, hidden_dims)
+        self.q2_net = self._build_q_net(input_dim, hidden_dims)
+
+    def _build_q_net(self, input_dim, hidden_dims):
+        layers = []
+        for h in hidden_dims:
+            layers += [nn.Linear(input_dim, h), nn.ReLU()]
+            input_dim = h
+        layers += [nn.Linear(input_dim, 1)]
+        return nn.Sequential(*layers)
+
+    def forward(self, obs_emb, action):
+        x = torch.cat([obs_emb, action], dim=-1)
+        q1 = self.q1_net(x)
+        q2 = self.q2_net(x)
+        return q1, q2
+
 
 class Image2State_SAC(VanillaSAC):
 
@@ -117,62 +144,123 @@ class Image2State_SAC(VanillaSAC):
         
 
     def _make_actor_critic(self, cfg):
-        
         self.critic_grad_clip_value = cfg.get('critic_grad_clip_value', float('inf'))
         self.auto_alpha_learning = cfg.get('auto_alpha_learning', True)
-
         self.network_action_dim = int(cfg.action_dim)
 
         C, H, W = cfg.each_image_shape
         self.input_channel = C * self.context_horizon
-        obs_shape = (self.input_channel, H, W) 
+        obs_shape = (self.input_channel, H, W)
 
-        # actor and critics (two critics for twin-Q)
-        self.action_dim = int(cfg.action_dim)
-        self.encoder = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
-        self.actor = Actor(cfg.action_dim, cfg.feature_dim, cfg.hidden_dim).to(self.device)
+        # --- NEW CONFIGURABLE NETWORK PARAMETERS ---
+        conv_layers = cfg.get("conv_layers", None)
+        actor_hidden_dims = cfg.get("actor_hidden_dims", [cfg.hidden_dim, cfg.hidden_dim])
+        critic_hidden_dims = cfg.get("critic_hidden_dims", [cfg.hidden_dim, cfg.hidden_dim])
 
-        self.critic = Critic(cfg.action_dim, cfg.feature_dim).to(self.device)
-       
+        # --- Create networks ---
+        self.encoder = NatureCNNEncoder(
+            obs_shape=obs_shape,
+            state_dim=cfg.state_dim,
+            feature_dim=cfg.feature_dim,
+            conv_layers=conv_layers
+        ).to(self.device)
 
-        self.critic_target = Critic(cfg.action_dim, cfg.feature_dim).to(self.device)
+        self.actor = Actor(
+            action_dim=cfg.action_dim,
+            feature_dim=cfg.feature_dim,
+            hidden_dims=actor_hidden_dims
+        ).to(self.device)
+
+        self.critic = Critic(
+            action_dim=cfg.action_dim,
+            feature_dim=cfg.feature_dim,
+            hidden_dims=critic_hidden_dims
+        ).to(self.device)
+
+        self.critic_target = Critic(cfg.action_dim, cfg.feature_dim, hidden_dims=critic_hidden_dims).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
+
+        self.encoder_target = NatureCNNEncoder(obs_shape, cfg.state_dim, cfg.feature_dim, conv_layers=conv_layers).to(self.device)
         self.encoder_target.load_state_dict(self.encoder.state_dict())
 
-        # optimizers
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=self.config.actor_lr)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=self.config.critic_lr)
-        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=self.config.encoder_lr)
-        self.network_action_dim = self.action_dim
+        # --- Optimizers ---
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
+        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
 
-        self.init_alpha = self.config.get("init_alpha", 1.0)
-        
-        # entropy temperature
+        self.init_alpha = cfg.get("init_alpha", 1.0)
         if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), device=self.device))
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
             self.target_entropy = -float(self.network_action_dim)
 
         self.replay_action_dim = self.network_action_dim
-    
+
+
     def _init_reply_buffer(self, cfg):
         
         C, H, W = cfg.each_image_shape
         self.input_channel = C * self.context_horizon
         obs_shape = (self.input_channel, H, W)
         
-        self.replay = ObsStateReplayBuffer(cfg.replay_capacity, obs_shape, cfg.state_dim, self.action_dim, self.device)
+        self.replay = ObsStateReplayBuffer(cfg.replay_capacity, obs_shape, cfg.state_dim, self.replay_action_dim, self.device)
 
 
     def _process_obs_for_input(self, obs_and_state):
+        """
+        Preprocess observation (multi-image RGB stack + state vector).
+        Keeps all channels (e.g. 6 for rgb+goal-rgb).
+        """
         rgb, state = obs_and_state
         state = np.concatenate(state).flatten()
-        rgb = np.concatenate(rgb, axis=-1)
+        rgb = np.concatenate(rgb, axis=-1)  # e.g. (480, 480, 6)
+        #print('rgb shape before resize:', rgb.shape)
+
         if rgb.dtype != np.float32:
             rgb = rgb.astype(np.float32)
-        rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
+
+        # Target shape from config
+        target_w = self.config.each_image_shape[2]
+        target_h = self.config.each_image_shape[1]
+
+        # Use the safe multi-channel resize
+        rgb_resized = self._resize_multichannel(rgb, target_w, target_h)
+
+        # Final shape: (C, H, W)
         return (rgb_resized.transpose(2, 0, 1), state)
+    
+    def _resize_multichannel(self, rgb, target_w, target_h):
+        """
+        Resize multi-RGB-channel image (supports 3, 6, 9, ... channels).
+        Each group of 3 channels is resized separately and then concatenated back.
+        """
+        num_channels = rgb.shape[-1]
+        resized_parts = []
+
+        for i in range(0, num_channels, 3):
+            # Slice 3-channel block
+            rgb_part = rgb[..., i:i+3]
+
+            # Safety check (in case num_channels isn't multiple of 3)
+            if rgb_part.shape[-1] == 0:
+                continue
+
+            # Resize each 3-channel block independently
+            resized = cv2.resize(rgb_part, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            resized_parts.append(resized)
+
+        # Concatenate all resized triplets back
+        return np.concatenate(resized_parts, axis=-1)
+
+    # def _process_obs_for_input(self, obs_and_state):
+    #     rgb, state = obs_and_state
+    #     state = np.concatenate(state).flatten()
+    #     rgb = np.concatenate(rgb, axis=-1)
+    #     print('rgb shape', rgb.shape)
+    #     if rgb.dtype != np.float32:
+    #         rgb = rgb.astype(np.float32)
+    #     rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
+    #     return (rgb_resized.transpose(2, 0, 1), state)
 
     def _process_context_for_replay(self, context):
         rgb = [c[0] for c in context]
@@ -276,6 +364,7 @@ class Image2State_SAC(VanillaSAC):
     
     def _select_action(self, info: dict, stochastic: bool = False):
         #print('info observation keys', info['observation'].keys())
+        # print('observation keys', info['observation'].keys())
         obs = [info['observation'][k] for k in self.obs_keys]
         state = [info['observation'][k] for k in self.config.state_keys]
         
@@ -288,15 +377,6 @@ class Image2State_SAC(VanillaSAC):
         while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
             self.internal_states[aid]['obs_que'].append((obs, state))
         obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-       
-
-        # encoder expects either (B, C*N, H, W) or (B, C, N, H, W) depending on your ConvEncoder
-        # follow the same pattern as the framework: reshape to (B, C, N, H, W) then pass
-        # B = obs_t.shape[0]
-        # C = self.each_image_shape[0]
-        # N = self.context_horizon
-        # H, W = self.each_image_shape[1:]
-        # z = self.encoder(obs_t.reshape(B, C, N, H, W))
 
         obs_stack, state_stack = self._process_context_for_input(obs_list)
         e, _ = self.encoder(obs_stack)

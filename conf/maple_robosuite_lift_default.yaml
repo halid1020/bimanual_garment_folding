@@ -1,0 +1,9 @@
+defaults:
+  - agent: maple_robosuite_lift_default
+  - arena: robosuite_skill_lift_default
+  - task: dummy
+  - data_augmenter: identity
+
+exp_name: maple_robosuite_lift_default
+project_name: "bimanual_garment_folding"
+save_root: /home/hcv530/garment_folding_data

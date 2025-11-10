@@ -1,19 +1,5 @@
-import os
-import h5py
 import numpy as np
-import cv2
-import json
 
-from softgym.action_space.action_space import Picker
-from softgym.utils.env_utils import get_coverage
-import pyflex
-from agent_arena import Arena
-from tqdm import tqdm
-
-
-from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-from .utils.env_utils import set_scene
-from .utils.camera_utils import get_camera_matrix
 from .multi_garment_env import MultiGarmentEnv
 
 global ENV_NUM
@@ -23,15 +9,12 @@ ENV_NUM = 0
 class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
     
     def __init__(self, config):
-        #config.name = f'single-garment-fixed-init-env'
         super().__init__(config)
-        #self.name =f'single-garment-fixed-init-env'
 
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
         self.overstretch = 0
-        print('action', action)
         dict_action = {
             'norm-pixel-fold': {
                 'pick_0': action[:2],

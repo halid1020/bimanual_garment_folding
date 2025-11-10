@@ -1,0 +1,9 @@
+defaults:
+  - agent: fabric_gpt_single_longsleeve
+  - arena:  single_longsleeve_readjust_pick_provide_semkey_pos
+  - task: flattening_overstretch_penalty_0_1
+  - data_augmenter: identity
+
+exp_name: fabric_gpt_single_longsleeve
+project_name: bimanual_garment_folding
+save_root: /home/hcv530/garment_folding_data

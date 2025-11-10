@@ -81,6 +81,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             low_level_steps += 1
 
             skill_done = self.skill_controller.done()
+            #print(f'done? {skill_done} at sim step{low_level_steps}')
             if info["done"]:
                 self.done = True
                 break
@@ -89,7 +90,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
                 self.done = True
                 break
 
-        cumulative_reward = self.skill_controller.post_process_reward(cumulative_reward)
+        cumulative_reward_ = self.skill_controller.post_process_reward(cumulative_reward)
         aff_reward = self.skill_controller.get_aff_reward()
 
         self.current_obs = info["observation"]
@@ -99,6 +100,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             "observation": self.current_obs,
             "reward": {
                 "cumulative_reward": cumulative_reward,
+                "cumulative_reward_with_affordance_penalty": cumulative_reward_,
                 "last_reward": reward,
                 "aff_reward": aff_reward,
             },

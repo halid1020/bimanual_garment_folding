@@ -119,6 +119,7 @@ class VanillaSAC(TrainableAgent):
         self.episode_length = 0
         self.act_steps = 0
         self.sim_steps = 0
+        self.last_sim_steps = 0
         self.initial_act_steps = config.initial_act_steps
         #self.act_steps_per_update = config.act_steps_per_update
         self.total_update_steps = config.total_update_steps
@@ -344,7 +345,9 @@ class VanillaSAC(TrainableAgent):
                 self.logger.log({
                     "train/episode_return": self.episode_return,
                     "train/episode_length": self.episode_length,
-                    'train/episode_success': success
+                    'train/episode_success': success,
+                    'train/episode_sim_steps': self.sim_steps - self.last_sim_steps,
+                    'train/total_sim_steps': self.sim_steps 
                 }, step=self.act_steps)
 
             self.info = arena.reset()
@@ -353,6 +356,7 @@ class VanillaSAC(TrainableAgent):
             self.episode_return = 0.0
             self.episode_length = 0
             self.last_done = False
+            self.last_sim_steps = self.sim_steps
 
         # sample stochastic action for exploration
         a, _ = self._select_action(self.info, stochastic=True)
@@ -388,6 +392,7 @@ class VanillaSAC(TrainableAgent):
         # print('obs stack', obs_stack)
         # print('next_obs', next_obs)
         # append next
+        #print(next_obs_for_process)
         obs_list.append(self._process_obs_for_input(next_obs_for_process))
         next_obs_for_replay = self._process_context_for_replay(obs_list[-self.context_horizon:])
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
@@ -407,6 +412,7 @@ class VanillaSAC(TrainableAgent):
 
     def _get_next_obs_for_process(self, next_info):
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
+        return next_obs
 
 
     def _post_process_action_to_replay(self, action):
@@ -542,6 +548,7 @@ class VanillaSAC(TrainableAgent):
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
         self.sim_steps = state.get('sim_steps', 0)
+        self.last_sim_steps = self.sim_steps
 
         run_id = state.get("wandb_run_id", None)
         #print(f"[INFO] Resuming W&B run ID: {run_id}")

@@ -153,6 +153,8 @@ class SkillController:
         self._cur_skill.reset(params, skill_config_update, info)
         self._num_ac_calls = 0
         self._max_ac_calls = self._cur_skill.get_max_ac_calls()
+        # print('skill name', skill_name)
+        # print('max low-level stesp',  self._max_ac_calls )
         self._pos_is_delta = None
         self._ori_is_delta = None
 

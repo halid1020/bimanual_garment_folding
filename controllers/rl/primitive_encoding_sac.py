@@ -39,6 +39,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
         
         super().__init__(config)
 
+        self.reward_scale = config.get('reward_scale', 1.0)
+
 
     def _make_actor_critic(self, config):
         # number of discrete primitives
@@ -217,6 +219,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
         config = self.config
         device = self.device
         context, action, reward, next_context, done = batch.values()
+        print('context max', context.max())
+        print('context max', context.min())
         #print('action', action[:2, :3])
 
         B = context.shape[0]
@@ -257,8 +261,8 @@ class PrimitiveEncodingSAC(VanillaSAC):
             #print('weight shape', w_next.shape)
 
             # compute weighted target Q per batch: note q_next_all already (B,K)
-            
-            target_q = reward + (1 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
+            #print('rl reward scale', self.reward_scale)
+            target_q = self.reward_scale * reward + (1 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
             
             # print('done', done)
         

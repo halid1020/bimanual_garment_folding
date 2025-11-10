@@ -27,6 +27,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
 
         #self.action_space = None  # not used directly now
         self.observation_space = self.env.observation_space
+        self.reward_scale = config.get('reward_scale', 1.0)
 
         self.current_obs = None
         self.done = False
@@ -77,7 +78,8 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             info = super().step(low_level_action)
 
             reward = info["reward"]["default"]
-            cumulative_reward += reward
+            #print('reward scale', self.reward_scale)
+            cumulative_reward += reward * self.reward_scale
             low_level_steps += 1
 
             skill_done = self.skill_controller.done()

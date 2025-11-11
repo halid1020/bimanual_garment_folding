@@ -342,11 +342,11 @@ class MAPLE(VanillaSAC):
         # 3️⃣ Primitive Actor Update (Gumbel-Softmax)
         # ====================
         y_soft, log_prob_k = self.primitive_actor.sample_gumbel(context, temperature=1.0, hard=True)
-        aug_state_prim = self._augment_state_with_embedding(context, y_soft)
+        aug_state = self._augment_state_with_embedding(context, y_soft)
 
         # Evaluate continuous actor for Q
-        pi_theta_action, logp_theta = self.actor.sample(aug_state_prim)
-        q1_pi, q2_pi = self.critic(aug_state_prim, pi_theta_action)
+        pi_theta_action, logp_theta = self.actor.sample(aug_state)
+        q1_pi, q2_pi = self.critic(aug_state, pi_theta_action)
         q_pi = torch.min(q1_pi, q2_pi)
 
         # Differentiable primitive actor loss
@@ -360,9 +360,9 @@ class MAPLE(VanillaSAC):
         # 4️⃣ Continuous Actor Update
         # ====================
         # Reuse y_soft for continuous actor
-        aug_state_actor = self._augment_state_with_embedding(context, y_soft)
-        pi_theta_action, logp_theta = self.actor.sample(aug_state_actor)
-        q1_pi, q2_pi = self.critic(aug_state_actor, pi_theta_action)
+        #aug_state = self._augment_state_with_embedding(context, y_soft)
+        pi_theta_action, logp_theta = self.actor.sample(aug_state.detach())
+        q1_pi, q2_pi = self.critic(aug_state.detach(), pi_theta_action)
         q_pi = torch.min(q1_pi, q2_pi)
 
         actor_loss = (alpha_theta * logp_theta - q_pi).mean()

@@ -23,7 +23,7 @@ skill_config:
     - grasp
     - push
 
-  aff_penalty_fac: 3 #3*5 probably
+  aff_penalty_fac: 1 #3*5 probably
 
   base_config:
     global_xyz_bounds:

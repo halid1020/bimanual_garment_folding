@@ -93,6 +93,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
                 break
 
         cumulative_reward_ = self.skill_controller.post_process_reward(cumulative_reward)
+        reward_ = self.skill_controller.post_process_reward(reward)
         aff_reward = self.skill_controller.get_aff_reward()
 
         self.current_obs = info["observation"]
@@ -104,6 +105,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
                 "cumulative_reward": cumulative_reward,
                 "cumulative_reward_with_affordance_penalty": cumulative_reward_,
                 "last_reward": reward,
+                "last_reward_with_affordance_penalty": reward_,
                 "aff_reward": aff_reward,
             },
             "evaluation": {},

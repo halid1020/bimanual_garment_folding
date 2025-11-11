@@ -1,0 +1,48 @@
+name: maple
+device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
+replay_device: Disk
+
+exp_name: ${exp_name}
+project_name: ${project_name}
+
+obs_keys: ['state']
+reward_key: cumulative_reward
+
+embedding_type: 'onehot'
+init_alpha_theta: 0.1
+init_alpha_k: 0.1
+auto_alpha_learning: True
+
+context_horizon: 1
+hidden_dim: 256
+state_dim: 21
+action_range: 1.0
+
+primitives:
+  - name: reach
+    dim: 4 #x, y, z, gripper_yaw
+  - name: atomic
+    dim: 5 #x, y, z, gripper_yaw, gripper_open_close
+  - name: push
+    dim: 7 #x, y, z, grippre_yaw, dx, dy, dz
+  - name: grasp
+    dim: 4 #x, y, z, gripper_yaw
+  - name: open
+    dim: 0 # no parameter 
+
+actor_lr: 3e-4
+critic_lr: 3e-4
+alpha_lr: 3e-4
+tau: 0.005
+gamma: 0.99
+batch_size: 256
+
+replay_capacity: 1000000 
+initial_act_steps: 10000
+train_freq: 1
+gradient_steps: 1 #1
+target_update_interval: 1
+
+total_update_steps: 1000000
+validation_interval: 10000
+eval_checkpoint: -1

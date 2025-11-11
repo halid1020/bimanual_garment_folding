@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, Optional
+from typing import Optional
 
+import zarr
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import cv2
-from collections import deque
-from tqdm import tqdm
 from .vanilla_sac import VanillaSAC
 
-from agent_arena import TrainableAgent
-from agent_arena.utilities.logger.logger_interface import Logger
-from dotmap import DotMap
-from .networks import ConvEncoder, MLPActor, Critic  # expects networks similar to your repo
+from .networks import  Critic  # expects networks similar to your repo
 from .obs_state_replay_buffer import ObsStateReplayBuffer
+from .obs_state_replay_buffer_zarr import ObsStateReplayBufferZarr
 # from .vanilla_image_sac import NatureCNNEncoder
 
 from .wandb_logger import WandbLogger
@@ -197,13 +194,20 @@ class Image2State_SAC(VanillaSAC):
         self.replay_action_dim = self.network_action_dim
 
 
-    def _init_reply_buffer(self, cfg):
+    def _init_reply_buffer(self, config):
         
-        C, H, W = cfg.each_image_shape
+        C, H, W = config.each_image_shape
         self.input_channel = C * self.context_horizon
         obs_shape = (self.input_channel, H, W)
         
-        self.replay = ObsStateReplayBuffer(cfg.replay_capacity, obs_shape, cfg.state_dim, self.replay_action_dim, self.device)
+        self.replay_device = config.get('replay_device', 'RAM')
+        if self.replay_device == 'RAM':
+            self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
+        elif self.replay_device == 'Disk':
+            self.replay = ObsStateReplayBufferZarr(
+                config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
+                self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
+        self.init_reply = True
 
 
     def _process_obs_for_input(self, obs_and_state):
@@ -501,18 +505,36 @@ class Image2State_SAC(VanillaSAC):
         torch.save(state, model_path)
 
     def _save_replay_buffer(self, replay_path):
-        torch.save({
-            'ptr': self.replay.ptr,
-            'size': self.replay.size,
-            'capacity': self.replay.capacity,
-            'observation': torch.from_numpy(self.replay.observation),
-            'state':  torch.from_numpy(self.replay.state),
-            'actions': torch.from_numpy(self.replay.actions),
-            'rewards': torch.from_numpy(self.replay.rewards),
-            'next_observation': torch.from_numpy(self.replay.next_observation),
-            'next_state':  torch.from_numpy(self.replay.next_state),
-            'dones': torch.from_numpy(self.replay.dones),
-        }, replay_path)
+        """Save the replay buffer to disk, handling both RAM and Zarr cases."""
+        if self.replay_device == 'RAM':
+            # Standard in-memory version
+            torch.save({
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'observation': torch.from_numpy(self.replay.observation),
+                'state':  torch.from_numpy(self.replay.state),
+                'actions': torch.from_numpy(self.replay.actions),
+                'rewards': torch.from_numpy(self.replay.rewards),
+                'next_observation': torch.from_numpy(self.replay.next_observation),
+                'next_state':  torch.from_numpy(self.replay.next_state),
+                'dones': torch.from_numpy(self.replay.dones),
+            }, replay_path)
+
+        elif self.replay_device == 'Disk':
+            # For Zarr version, we only save small metadata
+            meta = {
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'zarr_path': str(self.replay.zarr_path)
+            }
+            torch.save(meta, replay_path)
+            # Zarr arrays are already persisted automatically
+
+        else:
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")
+    
 
     def _load_model(self, model_path, resume=False):
         state = torch.load(model_path, map_location=self.device)
@@ -553,10 +575,15 @@ class Image2State_SAC(VanillaSAC):
             )
         
     
-   
     def _load_replay_buffer(self, replay_file):
-        if os.path.exists(replay_file):
-            replay_state = torch.load(replay_file, map_location='cpu')
+        """Load replay buffer metadata (and data if using RAM)."""
+        if not os.path.exists(replay_file):
+            raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
+
+        replay_state = torch.load(replay_file, map_location='cpu')
+
+        if self.replay_device == 'RAM':
+            # Restore full in-memory buffer
             self.replay.ptr = replay_state['ptr']
             self.replay.size = replay_state['size']
             self.replay.capacity = replay_state['capacity']
@@ -568,5 +595,28 @@ class Image2State_SAC(VanillaSAC):
             self.replay.next_state = replay_state['next_state'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
 
+        elif self.replay_device == 'Disk':
+            # Just reload Zarr arrays and metadata
+            self.replay.ptr = replay_state['ptr']
+            self.replay.size = replay_state['size']
+            self.replay.capacity = replay_state['capacity']
+
+            # Reopen the Zarr store (in case a new session started)
+            zarr_path = replay_state.get('zarr_path', getattr(self.replay, "zarr_path", None))
+            if zarr_path is None:
+                raise ValueError("Missing zarr_path in replay state for Disk mode.")
+
+            store = zarr.DirectoryStore(zarr_path)
+            self.replay.root = zarr.open_group(store=store, mode='a')
+
+            # Rebind dataset references
+            self.replay.observation = self.replay.root["observation"]
+            self.replay.state = self.replay.root["state"]
+            self.replay.actions = self.replay.root["actions"]
+            self.replay.rewards = self.replay.root["rewards"]
+            self.replay.next_observation = self.replay.root["next_observation"]
+            self.replay.next_state = self.replay.root["next_state"]
+            self.replay.dones = self.replay.root["dones"]
+
         else:
-            raise FileNotFoundError
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")

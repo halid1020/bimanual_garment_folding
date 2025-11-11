@@ -7,7 +7,7 @@ disp: false              # Whether to display a GUI
 use_camera_obs: false    # Disable RGB camera observations
 control_freq: 10         # Control frequency (Hz)
 controller_name: OSC_POSE
-reward_scale: 5.0
+reward_scale: 1.0
 
 # === Environment kwargs ===
 robots: Panda          # Robot model
@@ -23,7 +23,7 @@ skill_config:
     - grasp
     - push
 
-  aff_penalty_fac: 3 #3*5 probably
+  aff_penalty_fac: 1 #3*5 probably
 
   base_config:
     global_xyz_bounds:

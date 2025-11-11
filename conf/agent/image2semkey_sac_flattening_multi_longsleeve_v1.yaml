@@ -1,5 +1,6 @@
 name: image2state-sac
 device: "cuda:1"
+replay_device: Disk
 
 exp_name: ${exp_name}
 project_name: ${project_name}

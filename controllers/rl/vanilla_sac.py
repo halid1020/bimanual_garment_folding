@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import torch
@@ -13,9 +13,9 @@ from collections import deque
 from tqdm import tqdm
 
 from agent_arena import TrainableAgent
-
-from dotmap import DotMap
+import zarr
 from .replay_buffer import ReplayBuffer
+from .replay_buffer_zarr import ReplayBufferZarr
 
 from .wandb_logger import WandbLogger
 
@@ -102,8 +102,8 @@ class VanillaSAC(TrainableAgent):
 
         
         # replay
-        self._init_reply_buffer(config)
- 
+        #self._init_reply_buffer(config)
+        self.init_reply = False
         # bookkeeping
         self.update_steps = 0
         self.loaded = False
@@ -156,8 +156,14 @@ class VanillaSAC(TrainableAgent):
 
 
     def _init_reply_buffer(self, config):
-        
-        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+        self.replay_device = config.get('replay_device', 'RAM')
+        if self.replay_device == 'RAM':
+            self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+        elif self.replay_device == 'Disk':
+            self.replay = ReplayBufferZarr(
+                config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
+                self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
+        self.init_reply = True
 
 
     # ---------------------- utils ----------------------
@@ -432,6 +438,9 @@ class VanillaSAC(TrainableAgent):
 
 
     def train(self, update_steps, arenas) -> bool:
+        if not self.init_reply:
+            self._init_reply_buffer(self.config)
+
         if arenas is None or len(arenas) == 0:
             raise ValueError("SAC.train requires at least one Arena.")
         arena = arenas[0]
@@ -520,17 +529,34 @@ class VanillaSAC(TrainableAgent):
         return True
     
     def _save_replay_buffer(self, replay_path):
-        torch.save({
-            'ptr': self.replay.ptr,
-            'size': self.replay.size,
-            'capacity': self.replay.capacity,
-            'observation': torch.from_numpy(self.replay.observation),
-            'actions': torch.from_numpy(self.replay.actions),
-            'rewards': torch.from_numpy(self.replay.rewards),
-            'next_observation': torch.from_numpy(self.replay.next_observation),
-            'dones': torch.from_numpy(self.replay.dones),
-        }, replay_path)
+        """Save the replay buffer to disk, handling both RAM and Zarr cases."""
+        if self.replay_device == 'RAM':
+            # Standard in-memory version
+            torch.save({
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'observation': torch.from_numpy(self.replay.observation),
+                'actions': torch.from_numpy(self.replay.actions),
+                'rewards': torch.from_numpy(self.replay.rewards),
+                'next_observation': torch.from_numpy(self.replay.next_observation),
+                'dones': torch.from_numpy(self.replay.dones),
+            }, replay_path)
 
+        elif self.replay_device == 'Disk':
+            # For Zarr version, we only save small metadata
+            meta = {
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'zarr_path': str(self.replay.zarr_path)
+            }
+            torch.save(meta, replay_path)
+            # Zarr arrays are already persisted automatically
+
+        else:
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")
+    
     def _load_model(self, model_path, resume=False):
         state = torch.load(model_path, map_location=self.device)
         self.actor.load_state_dict(state['actor'])
@@ -596,8 +622,14 @@ class VanillaSAC(TrainableAgent):
         return self.update_steps
 
     def _load_replay_buffer(self, replay_file):
-        if os.path.exists(replay_file):
-            replay_state = torch.load(replay_file, map_location='cpu')
+        """Load replay buffer metadata (and data if using RAM)."""
+        if not os.path.exists(replay_file):
+            raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
+
+        replay_state = torch.load(replay_file, map_location='cpu')
+
+        if self.replay_device == 'RAM':
+            # Restore full in-memory buffer
             self.replay.ptr = replay_state['ptr']
             self.replay.size = replay_state['size']
             self.replay.capacity = replay_state['capacity']
@@ -606,8 +638,32 @@ class VanillaSAC(TrainableAgent):
             self.replay.rewards = replay_state['rewards'].cpu().numpy()
             self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
             self.replay.dones = replay_state['dones'].cpu().numpy()
+
+        elif self.replay_device == 'Disk':
+            # Just reload Zarr arrays and metadata
+            self.replay.ptr = replay_state['ptr']
+            self.replay.size = replay_state['size']
+            self.replay.capacity = replay_state['capacity']
+
+            # Reopen the Zarr store (in case a new session started)
+            zarr_path = replay_state.get('zarr_path', getattr(self.replay, "zarr_path", None))
+            if zarr_path is None:
+                raise ValueError("Missing zarr_path in replay state for Disk mode.")
+
+            store = zarr.DirectoryStore(zarr_path)
+            self.replay.root = zarr.open_group(store=store, mode='a')
+
+            # Rebind dataset references
+            self.replay.observation = self.replay.root["observation"]
+            self.replay.actions = self.replay.root["actions"]
+            self.replay.rewards = self.replay.root["rewards"]
+            self.replay.next_observation = self.replay.root["next_observation"]
+            self.replay.dones = self.replay.root["dones"]
+
         else:
-            raise FileNotFoundError
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")
+
+
 
     
     def load_best(self, path: Optional[str] = None) -> int:

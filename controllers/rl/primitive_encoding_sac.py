@@ -88,9 +88,17 @@ class PrimitiveEncodingSAC(VanillaSAC):
             self.target_entropy = -float(self.network_action_dim)
 
     
-    def _init_reply_buffer(self, config):
-        self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+    # def _init_reply_buffer(self, config):
+    #     self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
 
+    # def _init_reply_buffer(self, config):
+    #     self.replay_device = config.get('replay_device', 'RAM')
+    #     if self.replay_device == 'RAM':
+    #         self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+    #     elif self.replay_device == 'Disk':
+    #         self.replay = ReplayBufferZarr(
+    #             config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
+    #             self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
 
 
     # ---------- helpers ----------

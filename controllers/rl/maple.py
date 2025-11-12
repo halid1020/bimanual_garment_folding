@@ -250,9 +250,14 @@ class MAPLE(VanillaSAC):
         with torch.no_grad():
             # 2️⃣ Primitive selection
             if stochastic:
+                #rint('stochastic')
                 # Sample using Gumbel-Softmax (soft) for exploration
-                prim_onehot, _ = self.primitive_actor.sample_gumbel(ctx, temperature=1.0, hard=False)
-                prim_idx_tensor = torch.argmax(prim_onehot, dim=-1)
+                logits = self.primitive_actor(ctx)
+                #print('logits',logits)
+                dist = torch.distributions.Categorical(logits=logits)
+                prim_idx_tensor = dist.sample()  # <-- Random sample according to probabilities
+                prim_onehot = F.one_hot(prim_idx_tensor, num_classes=self.K).float()
+
             else:
                 # Deterministic: argmax
                 logits = self.primitive_actor(ctx)

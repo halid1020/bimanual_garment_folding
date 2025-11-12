@@ -1,5 +1,6 @@
 name: primitive-encoding-sac
 device: ${oc.env:DEVICE,cuda:1}   # fallback to cuda:0
+replay_device: Disk
 
 exp_name: ${exp_name}
 project_name: ${project_name}

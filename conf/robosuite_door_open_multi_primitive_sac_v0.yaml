@@ -1,0 +1,9 @@
+defaults:
+  - agent: robosuite_door_open_multi_primitive_sac_v0
+  - arena: robosuite_skill_door_open_afford_0_5_reward_1
+  - task: dummy
+  - data_augmenter: identity
+
+exp_name: robosuite_door_open_multi_primitive_sac_v0
+project_name: bimanual_garment_folding
+save_root: /home/hcv530/garment_folding_data

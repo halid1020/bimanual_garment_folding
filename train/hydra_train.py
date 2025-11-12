@@ -63,7 +63,7 @@ def main(cfg: DictConfig):
     
     # data_augmenter
     if cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter':
-        augmenter = PixelBasedPrimitiveDataAugmenter(cfg.data_augmenter)
+        augmenter = PixelBasedMultiPrimitiveDataAugmenter(cfg.data_augmenter)
         agent.set_data_augmenter(augmenter)
     elif cfg.data_augmenter.name == 'pixel-based-fold-data-augmenter':
         data_augmenter = PixelBasedFoldDataAugmenter(cfg.data_augmenter)

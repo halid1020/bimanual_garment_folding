@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import zarr
 import cv2
 from collections import deque
 from tqdm import tqdm
@@ -19,63 +20,9 @@ from dotmap import DotMap
 from .vanilla_sac import VanillaSAC
 from .networks import NatureCNNEncoderRegressor  # reuse the encoder
 from .obs_state_replay_buffer import ObsStateReplayBuffer
+from .obs_state_replay_buffer_zarr import ObsStateReplayBufferZarr
 from .wandb_logger import WandbLogger
 from .vanilla_sac import VanillaSAC, Actor, Critic
-
-# class Critic(nn.Module):
-#     def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
-#         super().__init__()
-#         self.q1_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
-#         self.q1_2 = nn.Linear(hidden_dim, hidden_dim)
-#         self.q1_3 = nn.Linear(hidden_dim, 1)
-       
-#         self.q2_1 = nn.Linear(feature_dim + action_dim, hidden_dim)
-#         self.q2_2 = nn.Linear(hidden_dim, hidden_dim)
-#         self.q2_3 = nn.Linear(hidden_dim, 1)
-
-
-#     def forward(self, obs_emb, action):
-#         x = torch.cat([obs_emb, action], dim=-1)
-#         # Q1
-#         q1 = F.relu(self.q1_1(x))
-#         q1 = F.relu(self.q1_2(q1))
-#         q1 = self.q1_3(q1)
-#         # Q2
-#         q2 = F.relu(self.q2_1(x))
-#         q2 = F.relu(self.q2_2(q2))
-#         q2 = self.q2_3(q2)
-#         return q1, q2
-
-# class Actor(nn.Module):
-#     def __init__(self, action_dim, feature_dim=512, hidden_dim=256):
-#         super().__init__()
-#         self.fc1 = nn.Linear(feature_dim, hidden_dim)
-#         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-#         self.mean = nn.Linear(hidden_dim, action_dim)
-#         self.log_std = nn.Linear(hidden_dim, action_dim)
-
-
-#     def forward(self, obs_emb):
-#         x = F.relu(self.fc1(obs_emb))
-#         x = F.relu(self.fc2(x))
-#         mean = self.mean(x)
-#         log_std = self.log_std(x)
-#         log_std = torch.clamp(log_std, -20, 2)
-#         std = log_std.exp()
-#         return mean, std
-
-
-#     def sample(self, obs_emb):
-#         #print('obs shape', obs.shape)
-#         mean, std = self(obs_emb)
-#         normal = torch.distributions.Normal(mean, std)
-#         x_t = normal.rsample() # reparameterization trick
-#         y_t = torch.tanh(x_t)
-#         action = y_t
-#         log_prob = normal.log_prob(x_t)
-#         log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
-#         log_prob = log_prob.sum(1, keepdim=True)
-#         return action, log_prob
 
 class Image2StateMultiPrimitiveSAC(VanillaSAC):
     """
@@ -106,10 +53,12 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.encoder_target.load_state_dict(self.encoder.state_dict())
 
         # primitive one-hot toggles
+        self.critic_grad_clip_value = cfg.get('critic_grad_clip_value', float('inf'))
         self.disable_one_hot = cfg.get('disable_one_hot', False)
-        self.one_hot_scalar = float(cfg.get('one_hot_scalar', 0.1))
-        self.sampling_temperature = cfg.get('sampling_temperature', 1.0)
         self.update_temperature = cfg.get('update_temperature', 0.01)
+        self.sampling_temperature = cfg.get('sampling_temperature', 1.)
+        self.detach_unused_action_params = cfg.get('detach_unused_action_params', False)
+        self.preprocess_action_detach = False
 
         # augmented feature dim (embedding + one-hot K)
         self.feature_dim = int(cfg.feature_dim)
@@ -123,8 +72,6 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
 
         self.critic_target = Critic(self.feature_aug_dim, self.network_action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.encoder_target = NatureCNNEncoderRegressor(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
-        self.encoder_target.load_state_dict(self.encoder.state_dict())
 
 
         # optimizers
@@ -134,28 +81,40 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
 
         # alpha
         self.auto_alpha_learning = cfg.get('auto_alpha_learning', True)
-        self.init_alpha = cfg.get('init_alpha', 1.0)
+        self.init_alpha = cfg.get("init_alpha", 1.0)
         if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.log_alpha = torch.nn.Parameter(
+                torch.tensor([math.log(self.init_alpha)], device=self.device, requires_grad=True)
+            )
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
             self.target_entropy = -float(self.network_action_dim)
 
-        # detach unused action params logic
-        self.detach_unused_action_params = cfg.get('detach_unused_action_params', False)
-        self.preprocess_action_detach = False
 
-    def _init_reply_buffer(self, cfg):
-        C, H, W = cfg.each_image_shape
-        obs_shape = (C * self.context_horizon, H, W)
-        # use ObsStateReplayBuffer to store images + state
-        self.replay = ObsStateReplayBuffer(cfg.replay_capacity, obs_shape, cfg.state_dim, self.replay_action_dim, self.device)
+    def _init_reply_buffer(self, config):
+        
+        C, H, W = config.each_image_shape
+        self.input_channel = C * self.context_horizon
+        obs_shape = (self.input_channel, H, W)
+        
+        self.replay_device = config.get('replay_device', 'RAM')
+        if self.replay_device == 'RAM':
+            self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
+        elif self.replay_device == 'Disk':
+            self.replay = ObsStateReplayBufferZarr(
+                config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
+                self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
+        self.init_reply = True
 
     # ------------------------ primitive helpers ------------------------
     def _one_hot(self, idxs: torch.LongTensor) -> torch.Tensor:
+        assert torch.all((idxs >= 0) & (idxs < self.K)), \
+            f"Primitive indices out of range! idxs={idxs}, valid range=[0,{self.K-1}]"
         B = idxs.shape[0]
         one_hot = torch.zeros((B, self.K), device=idxs.device, dtype=torch.float32)
         one_hot.scatter_(1, idxs.unsqueeze(1), 1.0)
-        return one_hot * self.one_hot_scalar
+        scalar = float(self.config.get("one_hot_scalar", 0.1))
+        one_hot = one_hot * scalar
+        return one_hot
 
     def _augment_emb_with_code(self, emb: torch.Tensor, prim_idx: torch.LongTensor) -> torch.Tensor:
         # emb: (B, feature_dim); prim_idx: (B,)
@@ -173,29 +132,68 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         return emb_aug, prim_idxs
 
     def _split_actions_from_replay(self, actions: torch.Tensor):
-        # actions: (B, 1 + network_action_dim) stored in buffer
+        # actions: (B, action_param_dim + K) as stored in buffer
+        if self.disable_one_hot:
+            return actions, None
         prim_idx = actions[:, 0].long()
-        action_params = actions[:, 1: 1 + self.network_action_dim]
+        action_params = actions[:, 1: self.network_action_dim+1]  # (B, param_dim)
         return action_params, prim_idx
 
     # ------------------------ I/O processing ------------------------
     def _process_obs_for_input(self, obs_and_state):
-        # same logic as Image2State_SAC._process_obs_for_input
+        """
+        Preprocess observation (multi-image RGB stack + state vector).
+        Keeps all channels (e.g. 6 for rgb+goal-rgb).
+        """
         rgb, state = obs_and_state
         state = np.concatenate(state).flatten()
-        rgb = np.concatenate(rgb, axis=-1)
+        rgb = np.concatenate(rgb, axis=-1)  # e.g. (480, 480, 6)
+        #print('rgb shape before resize:', rgb.shape)
+
         if rgb.dtype != np.float32:
             rgb = rgb.astype(np.float32)
-        rgb_resized = cv2.resize(rgb, (self.config.each_image_shape[2], self.config.each_image_shape[1]), interpolation=cv2.INTER_AREA)
+
+        # Target shape from config
+        target_w = self.config.each_image_shape[2]
+        target_h = self.config.each_image_shape[1]
+
+        # Use the safe multi-channel resize
+        rgb_resized = self._resize_multichannel(rgb, target_w, target_h)
+
+        # Final shape: (C, H, W)
         return (rgb_resized.transpose(2, 0, 1), state)
+    
+    def _resize_multichannel(self, rgb, target_w, target_h):
+        """
+        Resize multi-RGB-channel image (supports 3, 6, 9, ... channels).
+        Each group of 3 channels is resized separately and then concatenated back.
+        """
+        num_channels = rgb.shape[-1]
+        resized_parts = []
+
+        for i in range(0, num_channels, 3):
+            # Slice 3-channel block
+            rgb_part = rgb[..., i:i+3]
+
+            # Safety check (in case num_channels isn't multiple of 3)
+            if rgb_part.shape[-1] == 0:
+                continue
+
+            # Resize each 3-channel block independently
+            resized = cv2.resize(rgb_part, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            resized_parts.append(resized)
+
+        # Concatenate all resized triplets back
+        return np.concatenate(resized_parts, axis=-1)
 
     def _process_context_for_replay(self, context):
         rgb = [c[0] for c in context]
         state = [c[1] for c in context]
-        rgb_stack = np.stack(rgb).reshape(
-            self.config.context_horizon * self.config.each_image_shape[0],
+        rgb_stack =  np.stack(rgb).reshape(
+            self.config.context_horizon * self.config.each_image_shape[0], 
             *self.config.each_image_shape[1:])
         state_stack = np.stack(state).flatten()
+
         return rgb_stack, state_stack
 
     def _process_context_for_input(self, context):
@@ -251,23 +249,46 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
         return out_dict, vector_action
     
-    def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
-        prim_name = list(action.keys())[0]
-        prim_id = -1 # Initialize with a default value
-        for id_, prim in enumerate(self.primitives):
-            if prim.name == prim_name:
-                prim_id = id_
-                break
-        assert prim_id >= 0, "Primitive Id should be non-negative."
-        self.logger.log({
-            f"train/primitive_id": prim_id,
-        }, step=self.act_steps)
+    # def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
+    #     prim_name = list(action.keys())[0]
+        
+    #     prim_id = -1 # Initialize with a default value
+    #     for id_, prim in enumerate(self.primitives):
+    #         if prim.name == prim_name:
+    #             prim_id = id_
+    #             break
+    #     assert prim_id >= 0, "Primitive Id should be non-negative."
+    #     self.logger.log({
+    #         f"train/primitive_id": prim_id,
+    #     }, step=self.act_steps)
 
-        vector_action = list(action.values())[0] # Assume one-level of hierachy.
+    #     vector_action = list(action.values())[0] # Assume one-level of hierachy.
+    #     accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
+    #     accept_action[1:len(vector_action)+1] = vector_action
+    #     accept_action[0] = prim_id
+    #     #print('accept_action', accept_action)
+    #     return accept_action
+
+    def _post_process_action_to_replay(self, action):
+        # Find primitive id safely
+        prim_name = list(action.keys())[0]
+        vector_action = list(action.values())[0]
+        prim_id = next((i for i, prim in enumerate(self.primitives) if prim.name == prim_name), -1)
+        if prim_id < 0:
+            available = [p.name for p in self.primitives]
+            raise ValueError(
+                f"Primitive name '{prim_name}' not found in primitives list! "
+                f"Available primitives: {available}"
+            )
         accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
         accept_action[1:len(vector_action)+1] = vector_action
         accept_action[0] = prim_id
-        #print('accept_action', accept_action)
+
+        # print('\naction', action)
+        # print('prim id', prim_id)
+        # print('vector action', vector_action)
+        # print('accepted action', accept_action)
+
         return accept_action
 
     # ------------------------ learning (update) ------------------------
@@ -283,16 +304,16 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         # forward current context through encoder
         e, pred_state = self.encoder(obs)
         aug_state_taken = self._augment_emb_with_code(e.detach(), prim_idx_taken)
-        pi_taken, logp_taken = self.actor.sample(aug_state_taken)
+        pi, logp_taken = self.actor.sample(aug_state_taken)
         alpha = self.log_alpha.exp().detach()
         alpha_loss = -(self.log_alpha * (logp_taken + self.target_entropy).detach()).mean()
+        
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
         self.alpha_optim.step()
 
         # --- compute target Q via enumeration/soft-weighting on next_obs ---
         with torch.no_grad():
-            next_e, _ = self.encoder(next_obs)
             next_e_target, _ = self.encoder_target(next_obs)
             next_aug_all, prim_idxs_all = self._expand_emb_all_primitives(next_e_target)  # (B*K, feat_aug)
             a_next_all, logp_next_all = self.actor.sample(next_aug_all)  # (B*K, param_dim), (B*K,1)
@@ -313,7 +334,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         critic_loss = 0.5 * (F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
         self.critic_optim.zero_grad()
         critic_loss.backward()
-        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=cfg.get('critic_grad_clip_value', float('inf')))
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_grad_clip_value)
         self.critic_optim.step()
 
         # --- encoder regressor loss (state prediction) ---
@@ -391,3 +412,147 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         next_obs = [next_info['observation'][k] for k in self.obs_keys]
         next_state = [next_info['observation'][k] for k in self.config.state_keys]
         return next_obs, next_state
+    
+    def _save_model(self, model_path):
+        #os.makedirs(model_path, exist_ok=True)
+
+        state = {
+            'actor': self.actor.state_dict(),
+            'critic': self.critic.state_dict(),
+            'encoder': self.encoder.state_dict(),
+            'critic_target': self.critic_target.state_dict(),
+            'encoder_target': self.encoder_target.state_dict(),
+            'actor_optim': self.actor_optim.state_dict(),
+            'critic_optim': self.critic_optim.state_dict(),
+            'encoder_optim': self.encoder_optim.state_dict(),
+            'log_alpha': self.log_alpha.detach().cpu(),
+            'alpha_optim': self.alpha_optim.state_dict(),
+            'update_steps': self.update_steps,
+            'act_steps': self.act_steps,
+            'sim_steps': self.sim_steps,
+            "wandb_run_id": self.logger.get_run_id(),
+        }
+
+        if self.auto_alpha_learning:
+            state['log_alpha'] =  self.log_alpha.detach().cpu()
+            state['alpha_optim'] = self.alpha_optim.state_dict()
+
+        
+        torch.save(state, model_path)
+
+    def _save_replay_buffer(self, replay_path):
+        """Save the replay buffer to disk, handling both RAM and Zarr cases."""
+        if self.replay_device == 'RAM':
+            # Standard in-memory version
+            torch.save({
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'observation': torch.from_numpy(self.replay.observation),
+                'state':  torch.from_numpy(self.replay.state),
+                'actions': torch.from_numpy(self.replay.actions),
+                'rewards': torch.from_numpy(self.replay.rewards),
+                'next_observation': torch.from_numpy(self.replay.next_observation),
+                'next_state':  torch.from_numpy(self.replay.next_state),
+                'dones': torch.from_numpy(self.replay.dones),
+            }, replay_path)
+
+        elif self.replay_device == 'Disk':
+            # For Zarr version, we only save small metadata
+            meta = {
+                'ptr': self.replay.ptr,
+                'size': self.replay.size,
+                'capacity': self.replay.capacity,
+                'zarr_path': str(self.replay.zarr_path)
+            }
+            torch.save(meta, replay_path)
+            # Zarr arrays are already persisted automatically
+
+        else:
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")
+    
+
+    def _load_model(self, model_path, resume=False):
+        state = torch.load(model_path, map_location=self.device)
+        self.actor.load_state_dict(state['actor'])
+        self.critic.load_state_dict(state['critic'])
+        self.critic_target.load_state_dict(state['critic_target'])
+        self.encoder.load_state_dict(state['encoder'])
+        self.encoder_target.load_state_dict(state['encoder_target'])
+
+        self.actor_optim.load_state_dict(state['actor_optim'])
+        self.critic_optim.load_state_dict(state['critic_optim'])
+        self.encoder_optim.load_state_dict(state['encoder_optim'])
+        
+        self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+        self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
+        self.alpha_optim.load_state_dict(state['alpha_optim'])
+
+        self.update_steps = state.get('update_steps', 0)
+        self.act_steps = state.get('act_steps', 0)
+
+        run_id = state.get("wandb_run_id", None)
+        #print(f"[INFO] Resuming W&B run ID: {run_id}")
+
+        if resume and (run_id is not None):
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                run_id=run_id,
+                resume=True
+            )
+        else:
+            self.logger = WandbLogger(
+                project=self.config.project_name,
+                name=self.config.exp_name,
+                config=dict(self.config),
+                resume=False
+            )
+        
+    
+    def _load_replay_buffer(self, replay_file):
+        """Load replay buffer metadata (and data if using RAM)."""
+        if not os.path.exists(replay_file):
+            raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
+
+        replay_state = torch.load(replay_file, map_location='cpu')
+
+        if self.replay_device == 'RAM':
+            # Restore full in-memory buffer
+            self.replay.ptr = replay_state['ptr']
+            self.replay.size = replay_state['size']
+            self.replay.capacity = replay_state['capacity']
+            self.replay.observation = replay_state['observation'].cpu().numpy()
+            self.replay.state = replay_state['state'].cpu().numpy()
+            self.replay.actions = replay_state['actions'].cpu().numpy()
+            self.replay.rewards = replay_state['rewards'].cpu().numpy()
+            self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
+            self.replay.next_state = replay_state['next_state'].cpu().numpy()
+            self.replay.dones = replay_state['dones'].cpu().numpy()
+
+        elif self.replay_device == 'Disk':
+            # Just reload Zarr arrays and metadata
+            self.replay.ptr = replay_state['ptr']
+            self.replay.size = replay_state['size']
+            self.replay.capacity = replay_state['capacity']
+
+            # Reopen the Zarr store (in case a new session started)
+            zarr_path = replay_state.get('zarr_path', getattr(self.replay, "zarr_path", None))
+            if zarr_path is None:
+                raise ValueError("Missing zarr_path in replay state for Disk mode.")
+
+            store = zarr.DirectoryStore(zarr_path)
+            self.replay.root = zarr.open_group(store=store, mode='a')
+
+            # Rebind dataset references
+            self.replay.observation = self.replay.root["observation"]
+            self.replay.state = self.replay.root["state"]
+            self.replay.actions = self.replay.root["actions"]
+            self.replay.rewards = self.replay.root["rewards"]
+            self.replay.next_observation = self.replay.root["next_observation"]
+            self.replay.next_state = self.replay.root["next_state"]
+            self.replay.dones = self.replay.root["dones"]
+
+        else:
+            raise ValueError(f"Unknown replay device type: {self.replay_device}")

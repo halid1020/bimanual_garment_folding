@@ -103,6 +103,7 @@ class VanillaSAC(TrainableAgent):
         
         # replay
         #self._init_reply_buffer(config)
+        self.replay_device = config.get('replay_device', 'RAM')
         self.init_reply = False
         # bookkeeping
         self.update_steps = 0
@@ -148,7 +149,9 @@ class VanillaSAC(TrainableAgent):
         
         # entropy temperature
         if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.log_alpha = torch.nn.Parameter(
+                torch.tensor([math.log(self.init_alpha)], device=self.device, requires_grad=True)
+            )
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
             self.target_entropy = -float(self.network_action_dim)
 
@@ -156,14 +159,14 @@ class VanillaSAC(TrainableAgent):
 
 
     def _init_reply_buffer(self, config):
-        self.replay_device = config.get('replay_device', 'RAM')
-        if self.replay_device == 'RAM':
-            self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
-        elif self.replay_device == 'Disk':
-            self.replay = ReplayBufferZarr(
-                config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
-                self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
-        self.init_reply = True
+        if not self.init_reply:
+            if self.replay_device == 'RAM':
+                self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+            elif self.replay_device == 'Disk':
+                self.replay = ReplayBufferZarr(
+                    config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
+                    self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
+            self.init_reply = True
 
 
     # ---------------------- utils ----------------------
@@ -567,33 +570,53 @@ class VanillaSAC(TrainableAgent):
         self.critic_optim.load_state_dict(state['critic_optim'])
         
         if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
+            # restore log_alpha safely
+            log_alpha_value = state['log_alpha'].detach().clone().to(self.device)
+            if log_alpha_value.ndim == 0:
+                log_alpha_value = log_alpha_value.unsqueeze(0)
+            self.log_alpha = torch.nn.Parameter(log_alpha_value.requires_grad_(True))
+            print('loaded log alpha', self.log_alpha)
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
-            self.alpha_optim.load_state_dict(state['alpha_optim'])
+            if 'alpha_optim' in state:
+                self.alpha_optim.load_state_dict(state['alpha_optim'])
+                for s in self.alpha_optim.state.values():
+                    for k, v in s.items():
+                        if torch.is_tensor(v) and v.shape == torch.Size([]):
+                            s[k] = v.unsqueeze(0)
+
+            print("log_alpha shape:", self.log_alpha.shape)
+            for p in self.alpha_optim.param_groups[0]['params']:
+                print("alpha_optim param shape:", p.shape)
         
+        # Restore counters
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
         self.sim_steps = state.get('sim_steps', 0)
         self.last_sim_steps = self.sim_steps
 
+        # ---- W&B resume handling ----
         run_id = state.get("wandb_run_id", None)
-        #print(f"[INFO] Resuming W&B run ID: {run_id}")
-
-        if resume and (run_id is not None):
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                run_id=run_id,
-                resume=True
-            )
-        else:
+        try:
+            if resume and run_id is not None:
+                print(f"[INFO] Attempting to resume W&B run ID: {run_id}")
+                self.logger = WandbLogger(
+                    project=self.config.project_name,
+                    name=self.config.exp_name,
+                    config=dict(self.config),
+                    run_id=run_id,
+                    resume=True
+                )
+            else:
+                raise ValueError("No valid run_id for resuming.")
+        except Exception as e:
+            print(f"[WARN] W&B resume failed ({e}). Starting a new run instead.")
             self.logger = WandbLogger(
                 project=self.config.project_name,
                 name=self.config.exp_name,
                 config=dict(self.config),
                 resume=False
             )
+
 
     def load(self, path: Optional[str] = None) -> int:
         path = path or self.save_dir
@@ -626,6 +649,7 @@ class VanillaSAC(TrainableAgent):
         if not os.path.exists(replay_file):
             raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
 
+        self._init_reply_buffer(self.config)
         replay_state = torch.load(replay_file, map_location='cpu')
 
         if self.replay_device == 'RAM':

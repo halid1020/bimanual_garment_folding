@@ -579,6 +579,7 @@ class Image2State_SAC(VanillaSAC):
         """Load replay buffer metadata (and data if using RAM)."""
         if not os.path.exists(replay_file):
             raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
+        self._init_reply_buffer(self.config)
 
         replay_state = torch.load(replay_file, map_location='cpu')
 

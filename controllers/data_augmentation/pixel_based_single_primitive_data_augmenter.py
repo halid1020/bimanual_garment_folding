@@ -68,6 +68,7 @@ class PixelBasedSinglePrimitiveDataAugmenter:
 
     def __call__(self, sample):
         observation = sample['observation']/255.0  # B*C*H*W, [0, 255]
+        #self.device = observation.device
         state = sample['state']
         next_observation = sample['next_observation']/255.0
         action = sample['action']

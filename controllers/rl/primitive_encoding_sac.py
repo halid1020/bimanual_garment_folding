@@ -83,7 +83,9 @@ class PrimitiveEncodingSAC(VanillaSAC):
         
         # entropy temperature
         if self.auto_alpha_learning:
-            self.log_alpha = torch.nn.Parameter(torch.tensor(math.log(self.init_alpha), requires_grad=True, device=self.device))
+            self.log_alpha = torch.nn.Parameter(
+                torch.tensor([math.log(self.init_alpha)], device=self.device, requires_grad=True)
+            )
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
             self.target_entropy = -float(self.network_action_dim)
 
@@ -224,11 +226,12 @@ class PrimitiveEncodingSAC(VanillaSAC):
             next_context: (B, state_dim)
             done: (B,1)
         """
+
         config = self.config
         device = self.device
         context, action, reward, next_context, done = batch.values()
-        print('context max', context.max())
-        print('context max', context.min())
+        # print('context max', context.max())
+        # print('context max', context.min())
         #print('action', action[:2, :3])
 
         B = context.shape[0]
@@ -241,8 +244,15 @@ class PrimitiveEncodingSAC(VanillaSAC):
         alpha = self.log_alpha.exp().detach() # !!! Important Change
         alpha_loss = -(self.log_alpha * (logp + self.target_entropy).detach()).mean()
         
+        print('alpha loss', alpha_loss)
+        print("log_alpha shape:", self.log_alpha.shape)
+        for p in self.alpha_optim.param_groups[0]['params']:
+            print("alpha_optim param shape:", p.shape)
+        
+
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
+        print("grad shape:", self.log_alpha.grad.shape)
         self.alpha_optim.step()
 
 

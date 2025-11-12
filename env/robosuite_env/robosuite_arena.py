@@ -135,6 +135,7 @@ class RoboSuiteArena(Arena):
         obs_, _ = self.env.reset(seed=self.eid)
         obs_dict = self.env.env._get_observations(force_update=True)
         obs = self._filter_observation(obs_dict)
+        #print('obs len', len(obs))
         if obs is None:
             obs = obs_
 

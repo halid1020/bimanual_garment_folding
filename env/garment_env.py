@@ -240,7 +240,7 @@ class GarmentEnv(Arena):
     def get_id(self):
         return self.id
 
-    def get_num_episodes(self) -> np.int:
+    def get_num_episodes(self):
         if self.mode == 'eval':
             return 1
         elif self.mode == 'train':

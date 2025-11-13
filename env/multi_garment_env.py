@@ -155,7 +155,7 @@ class MultiGarmentEnv(GarmentEnv):
         print('len config', len(val_configs), 'num tiral', self.num_val_trials)
         return val_configs
 
-    def get_num_episodes(self) -> np.int:
+    def get_num_episodes(self):
         if self.mode == 'eval':
             return self.num_eval_trials
         elif self.mode == 'val':

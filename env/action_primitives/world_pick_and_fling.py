@@ -26,7 +26,7 @@ class WorldPickAndFling():
         release_vel=1e-2,
         ready_pos = [[1, 1, 0.6], [-1, 1, 0.6]],
         no_cloth_vel = 0.3,
-        adaptive_fling_momentum=1,
+        adaptive_fling_momentum=1.5,
         lower_height=0.015,
         action_horizon=20,
 
@@ -115,6 +115,12 @@ class WorldPickAndFling():
 
         pick_0_position = action['pick_0_position']
         pick_1_position = action['pick_1_position']
+
+        # Fix: np.align → np.linalg
+        if np.linalg.norm(pick_0_position - pick_1_position) < 0.1:
+            print('Reject Pick and Fling, Two picks are too close.')
+            return {}
+
         
         
         
@@ -190,7 +196,7 @@ class WorldPickAndFling():
         cloth_height = np.max(cloth_positions[:, 2]) - np.min(cloth_positions[:, 2])
 
         # Fling the cloth
-        fling_y = cloth_height * 0.5
+        fling_y = 0.25
 
         back_fling_pos = np.array([
             [grasp_dist/2, fling_y, hang_height],
@@ -206,9 +212,9 @@ class WorldPickAndFling():
 
         ## Lower the cloth
 
-        release_y = fling_y * 0.9 * self.adaptive_fling_momentum
+        release_y = fling_y * self.adaptive_fling_momentum
         drag_y = fling_y * self.adaptive_fling_momentum
-
+        print('adaptive fling', self.adaptive_fling_momentum)
         self.action_tool.movep(env, [[grasp_dist/2,  release_y, lower_height],
                     [-grasp_dist/2, release_y, lower_height]], release_vel)
         self.action_tool.movep(env,[[grasp_dist/2, drag_y, lower_height],

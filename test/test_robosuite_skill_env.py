@@ -12,7 +12,7 @@ def random_skill_action(skill_env):
     """
     skill_names = list(skill_env.skill_controller.get_skill_names()) # e.g. ['reach', 'grasp', 'push', 'open', 'close']
     chosen_skill = np.random.choice(skill_names)
-    chosen_skill = "push"
+    chosen_skill = "grasp"
 
     num_params = skill_env.get_param_dim(chosen_skill)
     print('num_params', num_params)
@@ -20,7 +20,7 @@ def random_skill_action(skill_env):
     
     params = np.random.uniform(-1.0, 1.0, size=num_params)
     #params[3] = 1
-    # params = np.zeros(num_params)
+    params = np.ones(num_params)*0.5
     # params[3] = 0.5
     # params[4:6] = 0.05
 

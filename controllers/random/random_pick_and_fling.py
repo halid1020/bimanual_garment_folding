@@ -6,7 +6,7 @@ class RandomPickAndFling(Agent):
     
         def __init__(self, config):
             #self.config = config
-            self.name = "human-pixel-pick-and-fling"
+            self.name = "random-pixel-pick-and-fling"
 
         def act(self, info_list, update=False):
             """
@@ -18,8 +18,11 @@ class RandomPickAndFling(Agent):
                 actions.append(self.single_act(info))
             
             return actions
+        
+        def reset(self, arena_ids):
+            self.internal_states = {arena_id: {} for arena_id in arena_ids}
 
-        def single_act(self, state):
+        def single_act(self, state, update=False):
 
             mask = state['observation']['mask']
             if len(mask.shape) == 3:
@@ -47,13 +50,10 @@ class RandomPickAndFling(Agent):
                 'pick_0': pick0_pixel,
                 'pick_1': pick1_pixel,
             }
-
+            action["norm-pixel-pick-and-fling"] = {
+                'pick_0': pick0_pixel,
+                'pick_1': pick1_pixel,
+            }
             return action
             
-            
-        def get_phase(self):
-            return "default"
-        
-        def terminate(self):
-            return self.step >= 1
     

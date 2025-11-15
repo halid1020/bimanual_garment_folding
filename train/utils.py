@@ -4,7 +4,8 @@ from env.multi_garment_env import MultiGarmentEnv
 from env.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
 from env.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
-from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena    
+from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
+from env.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
 
 from env.tasks.garment_folding import GarmentFoldingTask
 from env.tasks.garment_flattening import GarmentFlatteningTask
@@ -41,7 +42,8 @@ registered_arena = {
     'multi-garment-env': MultiGarmentEnv,
     'multi-garment-vectorised-fold-prim-env': MultiGarmentVectorisedFoldPrimEnv,
     'robosuite-env': RoboSuiteArena,
-    'robosuite-skill-env': RoboSuiteSkillArena
+    'robosuite-skill-env': RoboSuiteSkillArena,
+    'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv
 }
 def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)

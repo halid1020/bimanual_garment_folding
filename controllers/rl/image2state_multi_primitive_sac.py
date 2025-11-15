@@ -92,18 +92,20 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
 
     def _init_reply_buffer(self, config):
         
-        C, H, W = config.each_image_shape
-        self.input_channel = C * self.context_horizon
-        obs_shape = (self.input_channel, H, W)
+        if not self.init_reply:
+            C, H, W = config.each_image_shape
+            self.input_channel = C * self.context_horizon
+            obs_shape = (self.input_channel, H, W)
+            
+            self.replay_device = config.get('replay_device', 'RAM')
+            if self.replay_device == 'RAM':
+                self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
+            elif self.replay_device == 'Disk':
+                self.replay = ObsStateReplayBufferZarr(
+                    config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
+                    self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
         
-        self.replay_device = config.get('replay_device', 'RAM')
-        if self.replay_device == 'RAM':
-            self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
-        elif self.replay_device == 'Disk':
-            self.replay = ObsStateReplayBufferZarr(
-                config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
-                self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
-        self.init_reply = True
+            self.init_reply = True
 
     # ------------------------ primitive helpers ------------------------
     def _one_hot(self, idxs: torch.LongTensor) -> torch.Tensor:
@@ -513,6 +515,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
     
     def _load_replay_buffer(self, replay_file):
         """Load replay buffer metadata (and data if using RAM)."""
+        self._init_reply_buffer(self.config)
         if not os.path.exists(replay_file):
             raise FileNotFoundError(f"Replay buffer file not found: {replay_file}")
 

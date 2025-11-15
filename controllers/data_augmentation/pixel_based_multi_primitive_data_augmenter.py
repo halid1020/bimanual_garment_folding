@@ -35,7 +35,7 @@ class PixelBasedMultiPrimitiveDataAugmenter:
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
         self.debug = self.config.get('debug', False)
-        self.device = self.config.get('device', 'cpu')
+        #self.device = self.config.get('device', 'cpu')
 
         if self.depth_blur:
             kernel_size = self.config.depth_blur_kernel_size
@@ -69,7 +69,7 @@ class PixelBasedMultiPrimitiveDataAugmenter:
 
     def __call__(self, sample):
         observation = sample['observation']/255.0  # B*C*H*W, [0, 255]
-        #self.device = observation.device
+        self.device = observation.device
         state = sample['state']
         next_observation = sample['next_observation']/255.0
         action = sample['action']

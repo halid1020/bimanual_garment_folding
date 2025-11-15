@@ -25,7 +25,7 @@ def segment_distance(p1, p2, q1, q2):
     dP = w + sc * u - tc * v
     return np.linalg.norm(dP)
 
-def check_trajectories_close(pre_pick_positions, pick_positions, place_positions, threshold=0.03):
+def check_trajectories_close(pre_pick_positions, pick_positions, place_positions, threshold=0.1):
     """Check if the two trajectories come closer than threshold (m)."""
     traj0 = [pre_pick_positions[0], pick_positions[0], place_positions[0]]
     traj1 = [pre_pick_positions[1], pick_positions[1], place_positions[1]]

@@ -77,7 +77,7 @@ class GarmentEnv(Arena):
         self.random_reset = False
         self.set_id(0)
         self.name = config.name
-        self.frame_resolution = config.get("frame_resolution", [128, 128])
+        self.frame_resolution = config.get("frame_resolution", [256, 256])
         
         # Softgym Setup
         self._get_sim_config()
@@ -152,8 +152,8 @@ class GarmentEnv(Arena):
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
         self.default_config = get_default_config(
-            particle_radius = 0.01,
-            cloth_stiffness = (0.75, .02, .02),
+            particle_radius = 0.015,
+            cloth_stiffness = (0.15, .01, .02),
             scale=0.8,
         )
 

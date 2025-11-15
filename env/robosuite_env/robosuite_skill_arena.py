@@ -77,9 +77,9 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             #print('low_level_action', low_level_action)
             info = super().step(low_level_action)
 
-            reward = info["reward"]["default"]
+            reward = info["reward"]["default"] * self.reward_scale
             #print('reward scale', self.reward_scale)
-            cumulative_reward += reward * self.reward_scale
+            cumulative_reward += reward
             low_level_steps += 1
 
             skill_done = self.skill_controller.done()

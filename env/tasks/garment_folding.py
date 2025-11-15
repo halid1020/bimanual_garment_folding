@@ -2,17 +2,13 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-import json
-from tqdm import tqdm
 from statistics import median
 from statistics import mean
 
-from scipy.spatial.distance import cdist
-from agent_arena import Task
 from agent_arena import save_video
 from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
 
-from .utils import get_max_IoU
+from .utils import get_max_IoU, NC_FLATTENING_TRESHOLD
 from .folding_rewards import *
 from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align

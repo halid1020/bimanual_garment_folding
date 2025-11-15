@@ -244,15 +244,15 @@ class PrimitiveEncodingSAC(VanillaSAC):
         alpha = self.log_alpha.exp().detach() # !!! Important Change
         alpha_loss = -(self.log_alpha * (logp + self.target_entropy).detach()).mean()
         
-        print('alpha loss', alpha_loss)
-        print("log_alpha shape:", self.log_alpha.shape)
-        for p in self.alpha_optim.param_groups[0]['params']:
-            print("alpha_optim param shape:", p.shape)
+        # print('alpha loss', alpha_loss)
+        # print("log_alpha shape:", self.log_alpha.shape)
+        # for p in self.alpha_optim.param_groups[0]['params']:
+        #     print("alpha_optim param shape:", p.shape)
         
 
         self.alpha_optim.zero_grad()
         alpha_loss.backward()
-        print("grad shape:", self.log_alpha.grad.shape)
+        #print("grad shape:", self.log_alpha.grad.shape)
         self.alpha_optim.step()
 
 

@@ -16,17 +16,17 @@ class PixelPickAndFling():
         pregrasp_height=0.3,
         pregrasp_vel=0.1,
         tograsp_vel=0.05,
-        prefling_height=0.7,#
+        prefling_height=0.3, #7,#
         prefling_vel=0.01,
         fling_pos_y=0.3,
         lift_vel=0.02, #0.01,
-        adaptive_fling_momentum=0.8,
+        #adaptive_fling_momentum=1.0,
         action_horizon=20,
         hang_adjust_vel=0.01,
         stretch_adjust_vel=0.01,
         fling_vel= 0.02, #0.008,
         release_vel=0.01,
-        drag_vel=0.01,
+        drag_vel=0.005,
         lower_height=0.06,
         readjust_pick=False,
 
@@ -53,7 +53,7 @@ class PixelPickAndFling():
         self.prefling_vel = prefling_vel
         self.fling_pos_y = fling_pos_y
         self.lift_vel = lift_vel
-        self.adaptive_fling_momentum = adaptive_fling_momentum
+        #self.adaptive_fling_momentum = adaptive_fling_momentum
         self.pick_height = pick_height
         self.hang_adjust_vel = hang_adjust_vel
         self.stretch_adjust_vel = stretch_adjust_vel

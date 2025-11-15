@@ -1,3 +1,4 @@
+conda activate mp-fold
 if [ -d "../softgym" ]; then
   cd ../softgym
   . ./setup.sh

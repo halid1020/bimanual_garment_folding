@@ -31,6 +31,7 @@ from controllers.rl.maple \
     import MAPLE
 from controllers.rl.image2state_multi_primitive_sac \
     import Image2StateMultiPrimitiveSAC
+from controllers.gpt_fabric.adapter import GPTFabricAdapter
 
 import agent_arena as ag_ar
 
@@ -43,7 +44,7 @@ registered_arena = {
     'multi-garment-vectorised-fold-prim-env': MultiGarmentVectorisedFoldPrimEnv,
     'robosuite-env': RoboSuiteArena,
     'robosuite-skill-env': RoboSuiteSkillArena,
-    'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv
+    'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv,
 }
 def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
@@ -57,3 +58,4 @@ def register_agent_arena():
     ag_ar.register_agent('demo-sac', DemoSAC)
     ag_ar.register_agent('maple', MAPLE)
     ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
+    ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)

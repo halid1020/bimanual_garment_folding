@@ -1,0 +1,2 @@
+name: arena-builder
+config_str: "softgym|domain:mono-square-fabric,task:flattening,horizon:20,initial:crumpled,action:pixel-pick-and-place"

@@ -35,7 +35,7 @@ train_freq: 1
 gradient_steps: 1 #1
 target_update_interval: 1
 
-total_update_steps: 1000000
+total_update_steps: 2000000
 validation_interval: 10000
 eval_checkpoint: -1
 

@@ -1,4 +1,7 @@
 from .utils import METHODS
+from agent_arena import Agent
+from .rgbd_manipulation_part_obs import RGBD_manipulation_part_obs
+from openai import OpenAI
 
 class GPTFabricAdapter(Agent):
 
@@ -10,20 +13,31 @@ class GPTFabricAdapter(Agent):
         self.method_config = METHODS[self.method_name]
 
 
-        self.manual = self.method_config['manual'] if "manual" in method else False
-        self.need_box=method['need_box'] if 'need_box' in method else False
-        self.depth_reasoning=method['depth_reasoning'] if "depth_reasoning" in method else False
-        self.memory=method['memory'] if "memory" in method else False
-        self.in_context_learning=method['in_context_learning'] if "in_context_learning" in method else False
-        self.goal_config=method['goal_config'] if "goal_config" in method else False
-        self.system_prompt_path=method['system_prompt_path'] if "system_prompt_path" in method else "system_prompts/RGBD_prompt.txt"
-        self.demo_dir=method['demo_dir'] if "demo_dir" in method else None
-        self.img_size=method['img_size'] if "img_size" in method else 720
-        self.fine_tuning=method["fine_tuning"] if "fine_tuning" in method else False
-        self.fine_tuning_model_path=method["fine_tuning_model_path"] if "fine_tuning_model_path" in method else None
-        self.corner_limit=method['corner_limit'] if 'corner_limit' in method else 10
+        self.manual = self.method_config['manual'] if "manual" in self.method_config else False
+        self.need_box=self.method_config['need_box'] if 'need_box' in self.method_config else False
+        self.depth_reasoning=self.method_config['depth_reasoning'] if "depth_reasoning" in self.method_config else False
+        self.memory=self.method_config['memory'] if "memory" in self.method_config else False
+        self.in_context_learning=self.method_config['in_context_learning'] if "in_context_learning" in self.method_config else False
+        self.goal_config=self.method_config['goal_config'] if "goal_config" in self.method_config else False
+        self.system_prompt_path=self.method_config['system_prompt_path'] if "system_prompt_path" in self.method_config else "system_prompts/RGBD_prompt.txt"
+        self.demo_dir=self.method_config['demo_dir'] if "demo_dir" in self.method_config else None
+        self.img_size=self.method_config['img_size'] if "img_size" in self.method_config else 720
+        self.fine_tuning=self.method_config["fine_tuning"] if "fine_tuning" in self.method_config else False
+        self.fine_tuning_model_path=self.method_config["fine_tuning_model_path"] if "fine_tuning_model_path" in self.method_config else None
+        self.corner_limit=self.method_config['corner_limit'] if 'corner_limit' in self.method_config else 10
 
         self.method = RGBD_manipulation_part_obs()
+        # Set up the API key for GPT-4 communication
+        with open("./assets/GPT-API-KEY.txt", "r") as f:
+            api_key = f.read().strip()
+
+        self.client = OpenAI(api_key=api_key)
+
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
             # env=env,
             # env_name=method["env_name"],
             # obs_dir=save_obs_dir,
@@ -33,7 +47,12 @@ class GPTFabricAdapter(Agent):
             # img_size=img_size,
             # in_context_learning=in_context_learning,
             # demo_dir=demo_dir,
-            
+        
+    def reset(self, arena_ids):
+        for aid in arena_ids:
+            self.internal_states[aid] = {}
+            self.internal_states[aid]['messages'] = []
+            self.internal_states[aid]['last_step_info'] = None
 
     def single_act(self, info, update=False):
         goal_image = info['goal']['rgb']
@@ -41,23 +60,29 @@ class GPTFabricAdapter(Agent):
 
         # I need to figure what is following
         # goal_depth=np.round(goal_depth[:,:,3:].squeeze(),3)
+        aid = info['arena_id']
         messages = self.internal_states[aid]['messages']
 
         messages,last_step_info, pick_point, place_point = self.method.gpt_single_step(
-            rgb, depth,
-            headers=headers,
+            info,
+            self.headers, info['observation']['rgb'], 
+            info['observation']['depth'], 
+            info['observation']['mask'],
             messages=messages,
-            system_prompt_path=system_prompt_path,
-            memory=memory,
-            need_box=need_box,
-            corner_limit=corner_limit,
-            last_step_info=last_step_info,
-            depth_reasoning=depth_reasoning,
+            goal_config=self.goal_config,
+            system_prompt_path=self.system_prompt_path,
+            memory=self.memory,
+            need_box=self.need_box,
+            corner_limit=self.corner_limit,
+            last_step_info=self.internal_states[aid]['last_step_info'],
+            depth_reasoning=self.depth_reasoning,
             direction_seg=self.direction_seg,
             distance_seg=self.distance_seg,
-            specifier="step"+str(i))
-
+            specifier="step"+str(info['observation']['action_step']))
+        
+        self.internal_states[aid]['last_step_info'] = last_step_info
         self.internal_states[aid]['messages'] = messages
+        
         
 
         return {

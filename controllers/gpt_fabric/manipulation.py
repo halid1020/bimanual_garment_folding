@@ -1,39 +1,13 @@
-import os
 import os.path as osp
-import argparse
-import time
 
 import base64
-import re
-import requests
-from openai import OpenAI
+
 
 import numpy as np
 import cv2 as cv
-import datetime
-
-from abc import ABC, abstractmethod
-
-from softgym.registered_env import env_arg_dict, SOFTGYM_ENVS
-from softgym.utils.normalized_env import normalize
-from softgym.utils.visualization import save_numpy_as_gif
-from softgym.utils import camera_utils
-
-import pyflex
-from matplotlib import pyplot as plt
 from PIL import Image
 
 
-# Set up the API key for GPT-4 communication
-with open("GPT-API-Key.txt", "r") as f:
-    api_key = f.read().strip()
-
-client = OpenAI(api_key=api_key)
-
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {api_key}"
-}
 
 
 # Function to encode the image to base64 for input to the GPT-4 API
@@ -59,13 +33,8 @@ class manipulation():
         goal_image: the goal image (flattened fabric image, use softgym to set the fabric to be flatten and then save the image)
         goal_config: whether to use the goal image (True or False) for the manipulation
     """
-    def __init__(self,env,env_name,obs_dir,goal_image,goal_config):
-        self.env=env
-        self.env_name=env_name
-        self.obs_dir=obs_dir
-        self.goal_image=goal_image
-        self.goal_config=goal_config
-
+    def __init__(self):
+        pass
         
     def save_obs(self):
         return NotImplementedError
@@ -126,13 +95,11 @@ class RGB_manipulation(manipulation):
         We use the goal_height and goal_width to help discretize the moving distance.
 
     """
-    def __init__(self,env,env_name,obs_dir,goal_image,goal_config,goal_depth,img_size):
-        super().__init__(env,env_name,obs_dir,goal_image,goal_config)
-        self.img_size=img_size
-        self.goal_depth=goal_depth
-        top,bottom,left,right=self.get_bounds(self.goal_depth)
-        self.goal_height=top-bottom
-        self.goal_width=right-left
+    def __init__(self):
+        super().__init__()
+        # top,bottom,left,right=self.get_bounds(self.goal_depth)
+        # self.goal_height=top-bottom
+        # self.goal_width=right-left
     
     def save_obs(self,obs,depth=False,specifier="init"):
         """
@@ -153,7 +120,7 @@ class RGB_manipulation(manipulation):
         return save_path
         
     
-    def get_corners_img(self,img,depth,specifier,corner_limit=10):
+    def get_corners_img(self,img,specifier,corner_limit=10):
         """
         Get the corners of the fabric in the image and save the image with corners marked.
         Input:
@@ -182,6 +149,7 @@ class RGB_manipulation(manipulation):
         blue_color = np.array([255, 255, 255], dtype=np.uint8)
 
         # Change the pink areas to blue
+        #print('img shape', img.shape, 'mask shape', mask.shape)
         img[mask != 0] = blue_color
         
         img = cv.cvtColor(img, cv.COLOR_HSV2RGB)
@@ -196,20 +164,20 @@ class RGB_manipulation(manipulation):
         
         new_corners=np.squeeze(corners,axis=1)
         
-        save_name=osp.join(self.obs_dir,specifier)# specifier should be used for step count e.g.: specifier="step_1_"
-        with open(save_name+"_corners.txt", "w+") as p:
-            p.write(f"The corners are :{new_corners}")   
+        # save_name=osp.join(self.obs_dir,specifier)# specifier should be used for step count e.g.: specifier="step_1_"
+        # with open(save_name+"_corners.txt", "w+") as p:
+        #     p.write(f"The corners are :{new_corners}")   
 
-            for i in corners:
-                x,y = i.ravel()
-                cv.circle(img_copy,(x,y),3,255,-1)
+        for i in corners:
+            x,y = i.ravel()
+            cv.circle(img_copy,(x,y),3,255,-1)
 
             
-        cv.imwrite(img_path,img_copy)
+        #cv.imwrite(img_path,img_copy)
         
         
         
-        return new_corners,img
+        return new_corners, img_copy
     
     def map_depth_to_image(self, depth_array, output_range=(0, 255),RGB=True):
         
@@ -248,7 +216,7 @@ class RGB_manipulation(manipulation):
 
         return output_image
 
-    def aug_background(self,img,depth,color=[40,40,40]):
+    def aug_background(self,img,mask,color=[40,40,40]):
         """
         Turn the background (we use depth image to define) of the fabric into a specific color (default to be black) 
         for better corner detection result.
@@ -259,14 +227,13 @@ class RGB_manipulation(manipulation):
         Output:
             img: the image with the background turned into the specific color
         """
-        mask = depth == 0    
         for c in range(3):  # Loop through each color channel
-            img[:, :, c][mask] = color[c]
+            img[:, :, c][~mask] = color[c]
                             
                         
         return img
     
-    def get_bounds(self,depth):
+    def get_bounds(self,mask):
         """
         Get the bounds of the fabric with the help of the depth image.
         Input:
@@ -277,7 +244,7 @@ class RGB_manipulation(manipulation):
             left: the left bound of the fabric
             right: the right bound of the fabric
         """
-        locations=np.nonzero(depth)
+        locations=np.nonzero(mask)
         top=max(locations[0])
         bottom=min(locations[0])
         

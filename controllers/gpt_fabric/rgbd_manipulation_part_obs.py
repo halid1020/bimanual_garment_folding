@@ -1,7 +1,11 @@
 import cv2 as cv
 import numpy as np
-
+import os
+import re
+import requests
+import time
 from .manipulation import RGB_manipulation, encode_image
+from agent_arena.utilities.save_utils import save_mask, save_colour
 
 class RGBD_manipulation_part_obs(RGB_manipulation):
     """
@@ -13,9 +17,9 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
     
     """
     
-    def __init__(self, obs_dir,goal_image,goal_config,goal_depth,re_consider=True,in_context_learning=False,demo_dir="./demo/Manual_test14",img_size=720):
+    def __init__(self, re_consider=True,in_context_learning=False,demo_dir="./tmp/Manual_test14"):
         
-        super().__init__(obs_dir=obs_dir,goal_image=goal_image,goal_config=goal_config,goal_depth=goal_depth,img_size=img_size)
+        super().__init__()
         self.re_consider=re_consider
         self.in_context_learning=in_context_learning
         self.demo_dir=demo_dir
@@ -49,7 +53,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
 
 
     
-    def get_center_point_bounding_box(self,rgb,depth,need_box=False):
+    def get_center_point_bounding_box(self,rgb,mask,need_box=False, goal_config=False):
         """
         Get the center point of the bounding box of the fabric in the image and save the image with the center point marked.
         
@@ -64,7 +68,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         """
         
         
-        top,bottom,left,right=self.get_bounds(depth)
+        top,bottom,left,right=self.get_bounds(mask)
 
         
         center_point_pixel=[((right-left)//2)+left,((top-bottom)//2)+bottom]        
@@ -81,7 +85,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
                 rgb[top][j]=[255,0,0]
                 
                 
-        if self.goal_config:
+        if goal_config:
             goal_top=center_point_pixel[0]+(self.goal_height)//2
             goal_bottom=center_point_pixel[0]-(self.goal_height)//2
             goal_left=center_point_pixel[1]-(self.goal_height)//2
@@ -607,6 +611,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
                     center_point_pixel,
                     curr_coverage,
                     last_step_info,
+                    goal_config=False,
                     direction_seg=8,
                     distance_seg=4):
         """
@@ -678,7 +683,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
             
         # 1.b If the goal configuration is enabled, add the goal configuration information to the user prompt
-        if self.goal_config:
+        if goal_config:
             goal_config_information="\nTo help you with the task while planning, the image also has a white rectangular box around the cloth representing the goal configuration of the cloth which is the flattened cloth's outline. Please use it for reference"
             # goal_config_information could have the pixel values of the bounding box
             text_user_prompt["text"]+=goal_config_information
@@ -691,6 +696,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
                 "detail":"high"
             }
         }
+        print('content', content)
         content.append(image_user_prompt)
         
         message={
@@ -1127,11 +1133,14 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
            
 
     
-    def gpt_single_step(self,headers,
+    def gpt_single_step(self,
+                    info,
+                    headers,
                     rgb, #RGB-D for current step
                     depth,
-                    frames=[],
+                    mask,
                     messages=[],
+                    goal_config=False,
                     memory=True,
                     system_prompt_path=".system_prompts/COT_no_KP.txt",
                     need_box=True,
@@ -1190,7 +1199,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         # step 0.a : get and save obs before interaction:
         image = rgb # RGB in [0, 255]
         
-        obs = #combine rgb and depth
+        obs = np.concatenate([rgb, depth], axis=-1) #combine rgb and depth
         
         # Do we need the following?
         # self.pixel_coords=camera_utils.get_world_coords(rgb=image,depth=depth,env=self.env)[:,:,:-1]
@@ -1198,10 +1207,11 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         # step 0.b : to process the image and depth image
         
         if aug_background:
-            image=self.aug_background(image,depth)
+            save_mask(mask, 'gpt-mask', 'tmp')
+            image=self.aug_background(image, mask)
         
         if depth_reasoning:
-            self.depth_image=self.aug_background(self.depth_image,depth,color=[140,70,250])
+            self.depth_image=self.aug_background(self.depth_image,mask,color=[140,70,250])
             # self.depth_image=Image.fromarray(self.depth_image)
             
                
@@ -1211,10 +1221,12 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
         
         # step 0.c: get the corners on the image as well as the corner coordinates
-        corners, img=self.get_corners_img(obs,depth=depth,specifier=specifier,corner_limit=corner_limit)# The imgs will have corners marked at this stage
-        
+        corners, img=self.get_corners_img(image, specifier=specifier,corner_limit=corner_limit)# The imgs will have corners marked at this stage
+        print('corners', corners)
         # step 0.d: get the center point via bounding box of the fabric:
-        center_point_pixel,preprocessed_img=self.get_center_point_bounding_box(obs,depth=depth,need_box=need_box)
+        save_colour(image, 'gpt-rgb-before', 'tmp')
+        center_point_pixel,preprocessed_img=self.get_center_point_bounding_box(img,mask,need_box=need_box)
+        save_colour(preprocessed_img, 'gpt-rgb', 'tmp')
         
         # step 0.e: get last step's info here. 
         if (last_step_info is not None) and ('place_pixel' in last_step_info): 
@@ -1228,7 +1240,8 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
         #preprocessed_img_path=self.paths['processed image']
         self._step_image=preprocessed_img
-        #cv.imwrite(preprocessed_img_path,preprocessed_img)# processed image (image_3)
+        #cv.imwrite('./tmp/processed_img_for_gpt.png', preprocessed_img) # processed image (image_3)
+        
         encoded_image=encode_image(preprocessed_img)
         
         
@@ -1251,9 +1264,9 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         # step 1 : get coverage, improvement before action
         
         #info=self.env._get_info()
-        improvement=info["normalized_performance"]
+        improvement=info["evaluation"]["normalised_improvement"]
         improvement=np.round(improvement,3)
-        curr_coverage=info["normalized_performance_2"]
+        curr_coverage=info["evaluation"]['normalised_coverage']
         curr_coverage=np.round(curr_coverage,3)
         
         
@@ -1273,7 +1286,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         self.str_directions = f"[{', '.join(self.directions)}]"
         self.str_distances  = f"[{', '.join(self.distances)}]"
         
-        
+        system_prompt_path = os.path.join('./controllers/gpt_fabric/', system_prompt_path)
         with open(system_prompt_path,"r") as file:
             system_prompt_text=file.read()
         
@@ -1286,7 +1299,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         }
         system_prompt.append(text_sys_prompt)
         
-        if self.goal_config:
+        if goal_config:
             system_prompt[0]["text"]+="Also, I have listed the image of the goal configuration of the fabric (cloth) for you to inference."
             image_sys_prompt={
                 "type":"image_url",
@@ -1365,6 +1378,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
             
         else: 
             pick_point,place_point,messages,last_step_info=self.communicate(headers=headers,
+                                                goal_config=goal_config,
                                                 messages=messages,
                                                 curr_coverage=curr_coverage,
                                                 last_step_info=last_step_info,

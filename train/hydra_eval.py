@@ -13,6 +13,7 @@ from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter i
 from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
 
 from train.utils import register_agent_arena, registered_arena
+from agent_arena.arena.builder import ArenaBuilder
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
@@ -21,32 +22,35 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
     # arena
-    arena = registered_arena[cfg.arena.name](cfg.arena)
-
-    # task
-    if cfg.task.task_name == 'centre-sleeve-folding':
-        demonstrator = CentreSleeveFoldingStochasticPolicy({"debug": False})
-        task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
-        arena.set_task(task)
-    elif cfg.task.task_name == 'waist-leg-alignment-folding':
-        from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
-            import WaistLegFoldingStochasticPolicy
-        demonstrator = WaistLegFoldingStochasticPolicy({"debug": False})
-        task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
-        arena.set_task(task)
-    elif cfg.task.task_name == 'waist-hem-alignment-folding':
-        from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
-            import WaistHemAlignmentFoldingStochasticPolicy
-        demonstrator = WaistHemAlignmentFoldingStochasticPolicy({"debug": False})
-        task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
-        arena.set_task(task)
-    elif cfg.task.task_name == 'flattening':
-        task = GarmentFlatteningTask(cfg.task)
-        arena.set_task(task)
-    elif cfg.task.task_name == 'dummy':
-        pass
+    if cfg.arena.name == 'arena-builder':
+        arena = ArenaBuilder.build(cfg.arena.config_str)
     else:
-        raise NotImplementedError(f"Task {cfg.task.task_name} not supported")
+        arena = registered_arena[cfg.arena.name](cfg.arena)
+
+        # task
+        if cfg.task.task_name == 'centre-sleeve-folding':
+            demonstrator = CentreSleeveFoldingStochasticPolicy({"debug": False})
+            task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
+            arena.set_task(task)
+        elif cfg.task.task_name == 'waist-leg-alignment-folding':
+            from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
+                import WaistLegFoldingStochasticPolicy
+            demonstrator = WaistLegFoldingStochasticPolicy({"debug": False})
+            task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
+            arena.set_task(task)
+        elif cfg.task.task_name == 'waist-hem-alignment-folding':
+            from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
+                import WaistHemAlignmentFoldingStochasticPolicy
+            demonstrator = WaistHemAlignmentFoldingStochasticPolicy({"debug": False})
+            task = GarmentFoldingTask(DotMap({**cfg.task, "demonstrator": demonstrator}))
+            arena.set_task(task)
+        elif cfg.task.task_name == 'flattening':
+            task = GarmentFlatteningTask(cfg.task)
+            arena.set_task(task)
+        elif cfg.task.task_name == 'dummy':
+            pass
+        else:
+            raise NotImplementedError(f"Task {cfg.task.task_name} not supported")
 
     agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
     print('agent', cfg.agent.name, agent)
@@ -75,9 +79,7 @@ def main(cfg: DictConfig):
     ag_ar.evaluate(
         agent,
         arena,
-        cfg.agent.validation_interval,
-        cfg.agent.total_update_steps,
-        cfg.agent.eval_checkpoint,
+        -1,
     )
 
 

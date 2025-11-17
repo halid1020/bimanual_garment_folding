@@ -1,7 +1,7 @@
 defaults:
-  - agent: fabric_gpt_single_longsleeve
-  - arena:  single_longsleeve_readjust_pick_provide_semkey_pos
-  - task: flattening_overstretch_penalty_0_1
+  - agent: fabric_gpt_single_longsleeve_v0
+  - arena: mono-square-fabric
+  - task: flattening
   - data_augmenter: identity
 
 exp_name: fabric_gpt_single_longsleeve

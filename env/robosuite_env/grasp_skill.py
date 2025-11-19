@@ -132,7 +132,7 @@ class GraspSkill(BaseSkill):
         gripper_action = np.zeros(rg_dim)
         
         # When reaching or grasped, close the gripper (-1)
-        print('state', self._state)
+        #print('state', self._state)
         if self._state in ['GRASPED', 'REACHED']:
             gripper_action[:] = 1 # Close gripper
         else:

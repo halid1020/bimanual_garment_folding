@@ -21,6 +21,8 @@ from .vanilla_sac import VanillaSAC
 from .networks import NatureCNNEncoderRegressor  # reuse the encoder
 from .obs_state_replay_buffer import ObsStateReplayBuffer
 from .obs_state_replay_buffer_zarr import ObsStateReplayBufferZarr
+from .replay_buffer import ReplayBuffer
+from .replay_buffer_zarr import ReplayBufferZarr
 from .wandb_logger import WandbLogger
 from .vanilla_sac import VanillaSAC, Actor, Critic
 
@@ -42,43 +44,54 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.primitives = cfg.primitives
         self.K = len(self.primitives)
         self.action_dims = [prim['dim'] if isinstance(prim, dict) else prim.dim for prim in self.primitives]
-        self.network_action_dim = max(self.action_dims)
-        self.replay_action_dim = self.network_action_dim + 1  # prim id + params
+        self.obs_type = cfg.obs_type 
+       
+
+        if cfg.primitive_integration == 'expand_as_input':
+            self.network_action_dim = max(self.action_dims)
+            self.replay_action_dim = self.network_action_dim + 1  # prim id + params
+            self.update_temperature = cfg.get('update_temperature', 0.01)
+            self.sampling_temperature = cfg.get('sampling_temperature', 1.)
+            self.state_dim = self.feature_dim + (0 if self.disable_one_hot else self.K)
+
+        elif cfg.primitive_integration == 'predict_bin_as_output':
+            self.network_action_dim = max(self.action_dims) + 1
+            self.replay_action_dim = self.network_action_dim
+        else:
+            raise NotImplementedError
 
         # encoder & targets
-        C, H, W = cfg.each_image_shape
-        obs_shape = (C * self.context_horizon, H, W)
-        self.encoder = NatureCNNEncoderRegressor(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
-        self.encoder_target = NatureCNNEncoderRegressor(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
-        self.encoder_target.load_state_dict(self.encoder.state_dict())
+        if cfg.obs_type == 'image':
+            self.feature_dim = int(cfg.feature_dim)
+            C, H, W = cfg.each_image_shape
+            obs_shape = (C * self.context_horizon, H, W)
+            self.encoder = NatureCNNEncoderRegressor(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
+            self.encoder_target = NatureCNNEncoderRegressor(obs_shape, cfg.state_dim, cfg.feature_dim).to(self.device)
+            self.encoder_target.load_state_dict(self.encoder.state_dict())
+            self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
+        elif cfg.obs_type == 'state':
+            self.state_dim = cfg.state_dim
 
         # primitive one-hot toggles
         self.critic_grad_clip_value = cfg.get('critic_grad_clip_value', float('inf'))
         self.disable_one_hot = cfg.get('disable_one_hot', False)
-        self.update_temperature = cfg.get('update_temperature', 0.01)
-        self.sampling_temperature = cfg.get('sampling_temperature', 1.)
+        
         self.detach_unused_action_params = cfg.get('detach_unused_action_params', False)
         self.preprocess_action_detach = False
 
-        # augmented feature dim (embedding + one-hot K)
-        self.feature_dim = int(cfg.feature_dim)
-        self.feature_aug_dim = self.feature_dim + (0 if self.disable_one_hot else self.K)
+        self.actor = Actor(self.state_dim, self.network_action_dim, cfg.hidden_dim).to(self.device)
 
-
-        self.actor = Actor(self.feature_aug_dim, self.network_action_dim, cfg.hidden_dim).to(self.device)
-
-        self.critic = Critic(self.feature_aug_dim, self.network_action_dim).to(self.device)
+        self.critic = Critic(self.state_dim, self.network_action_dim).to(self.device)
        
 
-        self.critic_target = Critic(self.feature_aug_dim, self.network_action_dim).to(self.device)
+        self.critic_target = Critic(self.state_dim, self.network_action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
 
         # optimizers
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
-        self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
-
+        
         # alpha
         self.auto_alpha_learning = cfg.get('auto_alpha_learning', True)
         self.init_alpha = cfg.get("init_alpha", 1.0)
@@ -93,17 +106,25 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
     def _init_reply_buffer(self, config):
         
         if not self.init_reply:
-            C, H, W = config.each_image_shape
-            self.input_channel = C * self.context_horizon
-            obs_shape = (self.input_channel, H, W)
-            
-            self.replay_device = config.get('replay_device', 'RAM')
-            if self.replay_device == 'RAM':
-                self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
-            elif self.replay_device == 'Disk':
-                self.replay = ObsStateReplayBufferZarr(
-                    config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
-                    self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
+            if config.obs_type == 'image':
+                C, H, W = config.each_image_shape
+                self.input_channel = C * self.context_horizon
+                obs_shape = (self.input_channel, H, W)
+                
+                self.replay_device = config.get('replay_device', 'RAM')
+                if self.replay_device == 'RAM':
+                    self.replay = ObsStateReplayBuffer(config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, self.device)
+                elif self.replay_device == 'Disk':
+                    self.replay = ObsStateReplayBufferZarr(
+                        config.replay_capacity, obs_shape, config.state_dim, self.replay_action_dim, 
+                        self.device, zarr_path=os.path.join(self.save_dir, 'replay_buffer.zarr'))
+            elif config.obs_type == 'state':
+                if self.replay_device == 'RAM':
+                    self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+                elif self.replay_device == 'Disk':
+                    self.replay = ReplayBufferZarr(
+                        config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
+                        self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
         
             self.init_reply = True
 
@@ -142,28 +163,31 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         return action_params, prim_idx
 
     # ------------------------ I/O processing ------------------------
-    def _process_obs_for_input(self, obs_and_state):
+    def _process_obs_for_input(self, obs):
         """
         Preprocess observation (multi-image RGB stack + state vector).
         Keeps all channels (e.g. 6 for rgb+goal-rgb).
         """
-        rgb, state = obs_and_state
-        state = np.concatenate(state).flatten()
-        rgb = np.concatenate(rgb, axis=-1)  # e.g. (480, 480, 6)
-        #print('rgb shape before resize:', rgb.shape)
+        if self.obs_type == 'image':
+            rgb, state = obs
+            state = np.concatenate(state).flatten()
+            rgb = np.concatenate(rgb, axis=-1)  # e.g. (480, 480, 6)
+            #print('rgb shape before resize:', rgb.shape)
 
-        if rgb.dtype != np.float32:
-            rgb = rgb.astype(np.float32)
+            if rgb.dtype != np.float32:
+                rgb = rgb.astype(np.float32)
 
-        # Target shape from config
-        target_w = self.config.each_image_shape[2]
-        target_h = self.config.each_image_shape[1]
+            # Target shape from config
+            target_w = self.config.each_image_shape[2]
+            target_h = self.config.each_image_shape[1]
 
-        # Use the safe multi-channel resize
-        rgb_resized = self._resize_multichannel(rgb, target_w, target_h)
+            # Use the safe multi-channel resize
+            rgb_resized = self._resize_multichannel(rgb, target_w, target_h)
 
-        # Final shape: (C, H, W)
-        return (rgb_resized.transpose(2, 0, 1), state)
+            # Final shape: (C, H, W)
+            return (rgb_resized.transpose(2, 0, 1), state)
+        elif self.obs_type == 'state':
+            return np.concatenate(obs).flatten()
     
     def _resize_multichannel(self, rgb, target_w, target_h):
         """
@@ -189,124 +213,194 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         return np.concatenate(resized_parts, axis=-1)
 
     def _process_context_for_replay(self, context):
-        rgb = [c[0] for c in context]
-        state = [c[1] for c in context]
-        rgb_stack =  np.stack(rgb).reshape(
-            self.config.context_horizon * self.config.each_image_shape[0], 
-            *self.config.each_image_shape[1:])
-        state_stack = np.stack(state).flatten()
+        if self.obs_type == 'image':
+            rgb = [c[0] for c in context]
+            state = [c[1] for c in context]
+            rgb_stack =  np.stack(rgb).reshape(
+                self.config.context_horizon * self.config.each_image_shape[0], 
+                *self.config.each_image_shape[1:])
+            state_stack = np.stack(state).flatten()
 
-        return rgb_stack, state_stack
+            return rgb_stack, state_stack
+        elif self.obs_type == 'state':
+            context = np.stack(context).flatten()
+
+            ## This is for integrating all garments.
+            if context.shape[0] < self.config.state_dim:
+                base = np.zeros((self.config.state_dim), dtype=np.float32)
+                base[:context.shape[-1]] = context
+                context = base
+                
+            return context
 
     def _process_context_for_input(self, context):
-        rgb = [c[0] for c in context]
-        state = [c[1] for c in context]
-        rgb = torch.as_tensor(rgb, dtype=torch.float32, device=self.device)
-        state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        return rgb, state
+        if self.obs_type == 'image':
+            rgb = [c[0] for c in context]
+            state = [c[1] for c in context]
+            rgb = torch.as_tensor(rgb, dtype=torch.float32, device=self.device)
+            state = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+            return rgb, state
+        elif self.obs_type == 'state':
+            context = np.stack(context, axis=0)
+        
+            context = torch.as_tensor(context, dtype=torch.float32, device=self.device)
+
+            ## This is for integrating all garments.
+            if context.shape[-1] < self.config.state_dim:
+                base = torch.zeros((context.shape[0], self.config.state_dim), dtype=torch.float32, device=self.device)
+                base[:, :context.shape[-1]] = context
+                context = base
+                
+            return context
+        else:
+            raise NotImplementedError
 
     # ------------------------ action selection / env interaction ------------------------
     def _select_action(self, info: dict, stochastic: bool = False):
         # build context (obs images and state)
-        obs = [info['observation'][k] for k in self.obs_keys]
-        state = [info['observation'][k] for k in self.config.state_keys]
-        obs, state = self._process_obs_for_input((obs, state))
-        aid = info['arena_id']
-        if aid not in self.internal_states:
-            self.reset([aid])
-        self.internal_states[aid]['obs_que'].append((obs, state))
-        while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
+        if self.obs_type == 'image':
+            obs = [info['observation'][k] for k in self.obs_keys]
+            state = [info['observation'][k] for k in self.config.state_keys]
+            obs, state = self._process_obs_for_input((obs, state))
+            aid = info['arena_id']
+            if aid not in self.internal_states:
+                self.reset([aid])
             self.internal_states[aid]['obs_que'].append((obs, state))
-        obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-        obs_stack, state_stack = self._process_context_for_input(obs_list)
-        # encoder forward (embedding)
-        e, _ = self.encoder(obs_stack)
-
-        B = e.shape[0]  # usually 1 for acting
-        with torch.no_grad():
-            emb_all, _ = self._expand_emb_all_primitives(e)  # (B*K, feature_aug_dim)
-            #print('emb_all shape', emb_all.shape)
-            if stochastic:
-                a_all, logp_all = self.actor.sample(emb_all)
-            else:
-                mean, _ = self.actor(emb_all)
-                a_all = torch.tanh(mean)
-                logp_all = None
-
-            # critic Qs
-            q1_all, q2_all = self.critic(emb_all, a_all.view(B * self.K, -1))
-            q_all = torch.min(q1_all, q2_all).view(B, self.K)  # (B, K)
-            probs = torch.softmax(q_all / self.sampling_temperature, dim=-1)
-
-            if stochastic:
-                prim_idx = torch.multinomial(probs, num_samples=1).squeeze(-1).detach().cpu().item()
-            else:
-                prim_idx = torch.argmax(probs, dim=-1).detach().cpu().item()
-
-            a_all = torch.clip(a_all, -self.config.action_range, self.config.action_range)
-
-        best_action = a_all[prim_idx].detach().cpu().numpy()
-        prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
-        out_dict = {prim_name: best_action}
-        vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
-        return out_dict, vector_action
-    
-    # def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
-    #     prim_name = list(action.keys())[0]
+            while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
+                self.internal_states[aid]['obs_que'].append((obs, state))
+            obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
         
-    #     prim_id = -1 # Initialize with a default value
-    #     for id_, prim in enumerate(self.primitives):
-    #         if prim.name == prim_name:
-    #             prim_id = id_
-    #             break
-    #     assert prim_id >= 0, "Primitive Id should be non-negative."
-    #     self.logger.log({
-    #         f"train/primitive_id": prim_id,
-    #     }, step=self.act_steps)
+            obs_stack, state_stack = self._process_context_for_input(obs_list)
+            # encoder forward (embedding)
+            e, _ = self.encoder(obs_stack)
 
-    #     vector_action = list(action.values())[0] # Assume one-level of hierachy.
-    #     accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
-    #     accept_action[1:len(vector_action)+1] = vector_action
-    #     accept_action[0] = prim_id
-    #     #print('accept_action', accept_action)
-    #     return accept_action
+            B = e.shape[0]  # usually 1 for acting
+        elif self.obs_type == 'state':
+            obs = [info['observation'][k] for k in self.obs_keys]
+        
+            obs = self._process_obs_for_input(obs)
+            aid = info['arena_id']
+            # maintain obs queue per arena
+            if aid not in self.internal_states:
+                self.reset([aid])
+            self.internal_states[aid]['obs_que'].append(obs)
+            while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
+                self.internal_states[aid]['obs_que'].append(obs)
+            obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
+            e = self._process_context_for_input(obs_list)
+
+        with torch.no_grad():
+            if self.config.primitive_integration == 'expand_as_input':
+                emb_all, _ = self._expand_emb_all_primitives(e)  # (B*K, feature_aug_dim)
+                #print('emb_all shape', emb_all.shape)
+                if stochastic:
+                    a_all, logp_all = self.actor.sample(emb_all)
+                else:
+                    mean, _ = self.actor(emb_all)
+                    a_all = torch.tanh(mean)
+                    logp_all = None
+
+                # critic Qs
+                q1_all, q2_all = self.critic(emb_all, a_all.view(B * self.K, -1))
+                q_all = torch.min(q1_all, q2_all).view(B, self.K)  # (B, K)
+                probs = torch.softmax(q_all / self.sampling_temperature, dim=-1)
+
+                if stochastic:
+                    prim_idx = torch.multinomial(probs, num_samples=1).squeeze(-1).detach().cpu().item()
+                else:
+                    prim_idx = torch.argmax(probs, dim=-1).detach().cpu().item()
+
+                a_all = torch.clip(a_all, -self.config.action_range, self.config.action_range)
+
+                best_action = a_all[prim_idx].detach().cpu().numpy()
+                prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
+                out_dict = {prim_name: best_action}
+                vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
+                return out_dict, out_dict
+    
+            elif self.config.primitive_integration == 'predict_bin_as_output':
+                if stochastic:
+                    a_all, logp_all = self.actor.sample(e)
+                else:
+                    mean, _ = self.actor(emb_all)
+                    a_all = torch.tanh(mean)
+                    logp_all = None
+                
+                a_all = a_all[0]
+                prim_logit = a_all[0].detach().cpu().item()
+                prim_idx = int(((prim_logit + 1)/2)*self.K)
+                best_action = a_all[1:].detach().cpu().numpy()
+                prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
+                out_dict = {prim_name: best_action}
+                vector_action = a_all.detach().cpu().numpy()
+                return out_dict, vector_action
+            else:
+                raise NotImplementedError
+            
 
     def _post_process_action_to_replay(self, action):
         # Find primitive id safely
-        prim_name = list(action.keys())[0]
-        vector_action = list(action.values())[0]
-        prim_id = next((i for i, prim in enumerate(self.primitives) if prim.name == prim_name), -1)
-        if prim_id < 0:
-            available = [p.name for p in self.primitives]
-            raise ValueError(
-                f"Primitive name '{prim_name}' not found in primitives list! "
-                f"Available primitives: {available}"
-            )
-        accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
-        accept_action[1:len(vector_action)+1] = vector_action
-        accept_action[0] = prim_id
-
-        # print('\naction', action)
-        # print('prim id', prim_id)
-        # print('vector action', vector_action)
-        # print('accepted action', accept_action)
-
-        return accept_action
+        if self.config.primitive_integration == 'expand_as_input':
+            prim_name = list(action.keys())[0]
+            vector_action = list(action.values())[0]
+            prim_id = next((i for i, prim in enumerate(self.primitives) if prim.name == prim_name), -1)
+            if prim_id < 0:
+                available = [p.name for p in self.primitives]
+                raise ValueError(
+                    f"Primitive name '{prim_name}' not found in primitives list! "
+                    f"Available primitives: {available}"
+                )
+            accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
+            accept_action[1:len(vector_action)+1] = vector_action
+            accept_action[0] = prim_id
+            self.logger.log({
+                f"train/primitive_id": prim_id,
+            }, step=self.act_steps)
+            
+            return accept_action
+        elif self.config.primitive_integration == 'predict_bin_as_output':
+            # assume input is the action generated by the actor network
+            prim_id = int((action[0] + 1)/2*self.K)
+            self.logger.log({
+                f"train/primitive_id": prim_id,
+            }, step=self.act_steps)
+            return action.astype(np.float32)
+        else:
+            raise NotImplementedError
 
     # ------------------------ learning (update) ------------------------
     def _update_networks(self, batch: dict):
         cfg = self.config
         device = self.device
         # Expect batch.values() -> obs, state, action, reward, next_obs, next_state, done
-        obs, state, action, reward, next_obs, next_state, done = batch.values()
-        B = obs.shape[0]
+        if self.obs_type == 'image':
+            obs, state, action, reward, next_obs, next_state, done = batch.values()
+            B = obs.shape[0]
+            e, pred_state = self.encoder(obs)
+            
+            # --- encoder regressor loss (state prediction) ---
+            encoder_loss = F.mse_loss(pred_state, state)
+            self.encoder_optim.zero_grad()
+            encoder_loss.backward()
+            self.encoder_optim.step()
 
-        # alpha update (we update alpha later, but compute pi/logp for current taken primitive embedding)
-        action_params_taken, prim_idx_taken = self._split_actions_from_replay(action)  # (B, param_dim), (B,)
-        # forward current context through encoder
-        e, pred_state = self.encoder(obs)
-        aug_state_taken = self._augment_emb_with_code(e.detach(), prim_idx_taken)
-        pi, logp_taken = self.actor.sample(aug_state_taken)
+        elif self.obs_type == 'state':
+            context, action, reward, next_context, done = batch.values()
+            B = context.shape[0]
+            e = context
+       
+        
+        if self.config.primitive_integration == 'expand_as_input':
+            action_params_taken, prim_idx_taken = self._split_actions_from_replay(action)  # (B, param_dim), (B,)
+            aug_state_taken = self._augment_emb_with_code(e.detach(), prim_idx_taken)
+            pi, logp_taken = self.actor.sample(aug_state_taken)
+            input_action = action_params_taken
+        elif self.config.primitive_integration == 'predict_bin_as_output':
+            input_action = action
+            pi, logp_taken = self.actor.sample(e.detach())
+        else:
+            raise NotImplementedError
+        
         alpha = self.log_alpha.exp().detach()
         alpha_loss = -(self.log_alpha * (logp_taken + self.target_entropy).detach()).mean()
         
@@ -316,60 +410,75 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
 
         # --- compute target Q via enumeration/soft-weighting on next_obs ---
         with torch.no_grad():
-            next_e_target, _ = self.encoder_target(next_obs)
-            next_aug_all, prim_idxs_all = self._expand_emb_all_primitives(next_e_target)  # (B*K, feat_aug)
-            a_next_all, logp_next_all = self.actor.sample(next_aug_all)  # (B*K, param_dim), (B*K,1)
-            q1_next_all, q2_next_all = self.critic_target(next_aug_all, a_next_all.view(B * self.K, -1))
-            q_next_all = torch.min(q1_next_all, q2_next_all)  # (B*K,1)
+            if self.obs_type == 'image':
+                next_e_target, _ = self.encoder_target(next_obs)
+            elif self.obs_type == 'state':
+                next_e_target = next_context
 
-            if self.K == 1:
-                weighted_q_minus_alpha_logp = q_next_all - alpha * logp_next_all
-            else:
-                w_next = torch.softmax(q_next_all.view(B, self.K) / self.update_temperature, dim=-1).detach()
-                weighted_q_minus_alpha_logp = (w_next * (q_next_all.view(B, self.K) - alpha * logp_next_all.view(B, self.K)))
-                weighted_q_minus_alpha_logp = weighted_q_minus_alpha_logp.sum(dim=-1, keepdim=True)
+            if self.config.primitive_integration == 'expand_as_input':
+                next_aug_all, prim_idxs_all = self._expand_emb_all_primitives(next_e_target)  # (B*K, feat_aug)
+                a_next_all, logp_next_all = self.actor.sample(next_aug_all)  # (B*K, param_dim), (B*K,1)
+                q1_next_all, q2_next_all = self.critic_target(next_aug_all, a_next_all.view(B * self.K, -1))
+                q_next_all = torch.min(q1_next_all, q2_next_all)  # (B*K,1)
 
-            target_q = reward + (1 - done) * cfg.gamma * weighted_q_minus_alpha_logp  # (B,1)
+                if self.K == 1:
+                    weighted_q_minus_alpha_logp = q_next_all - alpha * logp_next_all
+                else:
+                    w_next = torch.softmax(q_next_all.view(B, self.K) / self.update_temperature, dim=-1).detach()
+                    weighted_q_minus_alpha_logp = (w_next * (q_next_all.view(B, self.K) - alpha * logp_next_all.view(B, self.K)))
+                    weighted_q_minus_alpha_logp = weighted_q_minus_alpha_logp.sum(dim=-1, keepdim=True)
+                
+                target_q = reward + (1 - done) * cfg.gamma * weighted_q_minus_alpha_logp  # (B,1)
+
+            elif self.config.primitive_integration == 'predict_bin_as_output':
+                a_next, logp_next = self.actor.sample(next_e_target)
+                q1_next, q2_next = self.critic_target(next_e_target, a_next)
+                q_next = torch.min(q1_next, q2_next)
+                target_q = reward + (1 - done) * cfg.gamma * (q_next - alpha * logp_next)
+            
 
         # --- critic update for taken actions ---
-        q1_pred, q2_pred = self.critic(aug_state_taken, action_params_taken.view(B, -1))
+        input_state = aug_state_taken if self.config.primitive_integration == 'expand_as_input' else e.detach()
+        q1_pred, q2_pred = self.critic(input_state, input_action)
         critic_loss = 0.5 * (F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
         self.critic_optim.zero_grad()
         critic_loss.backward()
         critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_grad_clip_value)
         self.critic_optim.step()
 
-        # --- encoder regressor loss (state prediction) ---
-        encoder_loss = F.mse_loss(pred_state, state)
-        self.encoder_optim.zero_grad()
-        encoder_loss.backward()
-        self.encoder_optim.step()
+       
 
         # --- actor update: compute per-primitive actions and weighted policy loss ---
-        aug_states_all, prim_idxs_all = self._expand_emb_all_primitives(e.detach())
-        pi_all, logp_all = self.actor.sample(aug_states_all)
+        if self.config.primitive_integration == 'expand_as_input':
+            aug_states_all, prim_idxs_all = self._expand_emb_all_primitives(e.detach())
+            pi_all, logp_all = self.actor.sample(aug_states_all)
 
-        # optionally detach unused padded action dims
-        if self.detach_unused_action_params:
-            if not self.preprocess_action_detach:
-                action_dims_tensor = torch.tensor(self.action_dims, device=pi_all.device, dtype=torch.long)
-                prim_dims_per_action = action_dims_tensor[prim_idxs_all]  # (B*K,)
-                action_dim_indices = torch.arange(self.network_action_dim, device=pi_all.device).unsqueeze(0)
-                self.is_padding_mask = action_dim_indices >= prim_dims_per_action.unsqueeze(1)
-                self.preprocess_action_detach = True
-            pi_all_detached = pi_all.clone()
-            pi_all_detached[self.is_padding_mask] = pi_all_detached[self.is_padding_mask].detach()
-            pi_all = pi_all_detached
+            # optionally detach unused padded action dims
+            if self.detach_unused_action_params:
+                if not self.preprocess_action_detach:
+                    action_dims_tensor = torch.tensor(self.action_dims, device=pi_all.device, dtype=torch.long)
+                    prim_dims_per_action = action_dims_tensor[prim_idxs_all]  # (B*K,)
+                    action_dim_indices = torch.arange(self.network_action_dim, device=pi_all.device).unsqueeze(0)
+                    self.is_padding_mask = action_dim_indices >= prim_dims_per_action.unsqueeze(1)
+                    self.preprocess_action_detach = True
+                pi_all_detached = pi_all.clone()
+                pi_all_detached[self.is_padding_mask] = pi_all_detached[self.is_padding_mask].detach()
+                pi_all = pi_all_detached
 
-        q1_all, q2_all = self.critic(aug_states_all, pi_all)
-        q_all = torch.min(q1_all, q2_all)  # (B*K,1)
+            q1_all, q2_all = self.critic(aug_states_all, pi_all)
+            q_all = torch.min(q1_all, q2_all)  # (B*K,1)
 
-        if self.K == 1:
+            if self.K == 1:
+                actor_loss = (alpha * logp_all - q_all).mean()
+            else:
+                w_pi = torch.softmax(q_all.view(B, self.K) / self.update_temperature, dim=-1).detach()  # (B,K)
+                actor_loss_per = w_pi * (alpha * logp_all.view(B, self.K) - q_all.view(B, self.K))
+                actor_loss = actor_loss_per.sum(dim=-1).mean()
+        elif self.config.primitive_integration == 'predict_bin_as_output':
+            pi, logp_all = self.actor.sample(e.detach())
+            q1_pi, q2_pi = self.critic(e.detach(), pi)
+            q_all = torch.min(q1_pi, q2_pi)
             actor_loss = (alpha * logp_all - q_all).mean()
-        else:
-            w_pi = torch.softmax(q_all.view(B, self.K) / self.update_temperature, dim=-1).detach()  # (B,K)
-            actor_loss_per = w_pi * (alpha * logp_all.view(B, self.K) - q_all.view(B, self.K))
-            actor_loss = actor_loss_per.sum(dim=-1).mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
@@ -380,7 +489,8 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         # soft updates
         if self.update_steps % cfg.target_update_interval == 0:
             self._soft_update(self.critic, self.critic_target, cfg.tau)
-            self._soft_update(self.encoder, self.encoder_target, cfg.tau)
+            if self.obs_type == 'image':
+                self._soft_update(self.encoder, self.encoder_target, cfg.tau)
 
         # logging
         with torch.no_grad():
@@ -398,22 +508,35 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.logger.log({
             'critic_loss': critic_loss.item(),
             'actor_loss': actor_loss.item(),
-            'encoder_loss': encoder_loss.item(),
             'alpha': self.log_alpha.exp().item(),
             'alpha_loss': alpha_loss.item()
         }, step=self.act_steps)
 
+        if self.obs_type == 'image':
+            self.logger.log({
+                'encoder_loss': encoder_loss.item(),
+            }, step=self.act_steps)
+
     def _add_transition_replay(self, obs_for_replay, a, reward, next_obs_for_replay, done):
 
-        obs_stack, state_stack = obs_for_replay
-        next_obs_stack, next_state_stack = next_obs_for_replay
-       
-        self.replay.add(obs_stack, state_stack, a, reward, next_obs_stack, next_state_stack,  done)
+        if self.obs_type == 'image':
+            obs_stack, state_stack = obs_for_replay
+            next_obs_stack, next_state_stack = next_obs_for_replay
+        
+            self.replay.add(obs_stack, state_stack, a, reward, next_obs_stack, next_state_stack,  done)
+        elif self.obs_type == 'state':
+            self.replay.add(obs_for_replay, a, reward, next_obs_for_replay,  done)
 
     def _get_next_obs_for_process(self, next_info):
-        next_obs = [next_info['observation'][k] for k in self.obs_keys]
-        next_state = [next_info['observation'][k] for k in self.config.state_keys]
-        return next_obs, next_state
+        if self.obs_type == 'image':
+            next_obs = [next_info['observation'][k] for k in self.obs_keys]
+            next_state = [next_info['observation'][k] for k in self.config.state_keys]
+            return next_obs, next_state
+        elif self.obs_type == 'state':
+            next_obs = [next_info['observation'][k] for k in self.obs_keys]
+            return next_obs
+        else:
+            raise NotImplementedError
     
     def _save_model(self, model_path):
         #os.makedirs(model_path, exist_ok=True)
@@ -421,12 +544,12 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         state = {
             'actor': self.actor.state_dict(),
             'critic': self.critic.state_dict(),
-            'encoder': self.encoder.state_dict(),
+            
             'critic_target': self.critic_target.state_dict(),
-            'encoder_target': self.encoder_target.state_dict(),
+            
             'actor_optim': self.actor_optim.state_dict(),
             'critic_optim': self.critic_optim.state_dict(),
-            'encoder_optim': self.encoder_optim.state_dict(),
+            
             'log_alpha': self.log_alpha.detach().cpu(),
             'alpha_optim': self.alpha_optim.state_dict(),
             'update_steps': self.update_steps,
@@ -434,6 +557,12 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             'sim_steps': self.sim_steps,
             "wandb_run_id": self.logger.get_run_id(),
         }
+        if self.obs_type == 'image':
+            state.update({
+                'encoder_optim': self.encoder_optim.state_dict(),
+                'encoder': self.encoder.state_dict(),
+                'encoder_target': self.encoder_target.state_dict(),
+            })
 
         if self.auto_alpha_learning:
             state['log_alpha'] =  self.log_alpha.detach().cpu()
@@ -446,18 +575,24 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         """Save the replay buffer to disk, handling both RAM and Zarr cases."""
         if self.replay_device == 'RAM':
             # Standard in-memory version
-            torch.save({
+            save_state = {
                 'ptr': self.replay.ptr,
                 'size': self.replay.size,
                 'capacity': self.replay.capacity,
                 'observation': torch.from_numpy(self.replay.observation),
-                'state':  torch.from_numpy(self.replay.state),
+               
                 'actions': torch.from_numpy(self.replay.actions),
                 'rewards': torch.from_numpy(self.replay.rewards),
                 'next_observation': torch.from_numpy(self.replay.next_observation),
-                'next_state':  torch.from_numpy(self.replay.next_state),
+                
                 'dones': torch.from_numpy(self.replay.dones),
-            }, replay_path)
+            }
+            if self.obs_type == 'image':
+                save_state.update({
+                    'state':  torch.from_numpy(self.replay.state),
+                    'next_state':  torch.from_numpy(self.replay.next_state),
+                })
+            torch.save(save_state, replay_path)
 
         elif self.replay_device == 'Disk':
             # For Zarr version, we only save small metadata
@@ -479,12 +614,15 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.actor.load_state_dict(state['actor'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
-        self.encoder.load_state_dict(state['encoder'])
-        self.encoder_target.load_state_dict(state['encoder_target'])
+        
+        if self.obs_type == 'image':
+            self.encoder.load_state_dict(state['encoder'])
+            self.encoder_target.load_state_dict(state['encoder_target'])
+            self.encoder_optim.load_state_dict(state['encoder_optim'])
 
         self.actor_optim.load_state_dict(state['actor_optim'])
         self.critic_optim.load_state_dict(state['critic_optim'])
-        self.encoder_optim.load_state_dict(state['encoder_optim'])
+        
         
         self.log_alpha = torch.nn.Parameter(state['log_alpha'].to(self.device).clone().requires_grad_(True))
         self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=self.config.alpha_lr)
@@ -527,11 +665,14 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             self.replay.size = replay_state['size']
             self.replay.capacity = replay_state['capacity']
             self.replay.observation = replay_state['observation'].cpu().numpy()
-            self.replay.state = replay_state['state'].cpu().numpy()
+            if self.obs_type == 'image':
+                self.replay.state = replay_state['state'].cpu().numpy()
+                self.replay.next_state = replay_state['next_state'].cpu().numpy()
+
             self.replay.actions = replay_state['actions'].cpu().numpy()
             self.replay.rewards = replay_state['rewards'].cpu().numpy()
             self.replay.next_observation = replay_state['next_observation'].cpu().numpy()
-            self.replay.next_state = replay_state['next_state'].cpu().numpy()
+            
             self.replay.dones = replay_state['dones'].cpu().numpy()
 
         elif self.replay_device == 'Disk':
@@ -550,12 +691,13 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
 
             # Rebind dataset references
             self.replay.observation = self.replay.root["observation"]
-            self.replay.state = self.replay.root["state"]
             self.replay.actions = self.replay.root["actions"]
             self.replay.rewards = self.replay.root["rewards"]
             self.replay.next_observation = self.replay.root["next_observation"]
-            self.replay.next_state = self.replay.root["next_state"]
             self.replay.dones = self.replay.root["dones"]
+            if self.obs_type == 'image':
+                self.replay.state = replay_state['state'].cpu().numpy()
+                self.replay.next_state = replay_state['next_state'].cpu().numpy()
 
         else:
             raise ValueError(f"Unknown replay device type: {self.replay_device}")

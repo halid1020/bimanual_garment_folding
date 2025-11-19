@@ -368,7 +368,7 @@ class VanillaSAC(TrainableAgent):
             self.last_sim_steps = self.sim_steps
 
         # sample stochastic action for exploration
-        a, _ = self._select_action(self.info, stochastic=True)
+        a, a_add = self._select_action(self.info, stochastic=True)
         # clip to action range
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
@@ -407,7 +407,7 @@ class VanillaSAC(TrainableAgent):
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
         #print('\napplied action vecotr', a, type(a))
-        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a), reward, next_obs_for_replay, done)
+        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a_add), reward, next_obs_for_replay, done)
         
         
         self.act_steps += 1

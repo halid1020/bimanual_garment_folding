@@ -214,7 +214,7 @@ class WorldPickAndFling():
 
         release_y = fling_y * self.adaptive_fling_momentum
         drag_y = fling_y * self.adaptive_fling_momentum
-        print('adaptive fling', self.adaptive_fling_momentum)
+        #print('adaptive fling', self.adaptive_fling_momentum)
         self.action_tool.movep(env, [[grasp_dist/2,  release_y, lower_height],
                     [-grasp_dist/2, release_y, lower_height]], release_vel)
         self.action_tool.movep(env,[[grasp_dist/2, drag_y, lower_height],

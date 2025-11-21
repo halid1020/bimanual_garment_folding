@@ -289,7 +289,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         
             obs_stack, state_stack = self._process_context_for_input(obs_list)
             # encoder forward (embedding)
-            e, _ = self.encoder(obs_stack)
+            e, _, _ = self.encoder(obs_stack)
 
             B = e.shape[0]  # usually 1 for acting
         elif self.obs_type == 'state':
@@ -395,11 +395,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             B = obs.size(0)
 
             # Forward pass
-            if self.use_decoder:
-                e, pred_state, recon = self.encoder(obs)
-            else:
-                e, pred_state = self.encoder(obs)
-
+            e, pred_state, recon = self.encoder(obs)
             # --- State prediction loss ---
             state_loss = F.mse_loss(pred_state, state)
 
@@ -420,7 +416,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             # Optimize
             self.encoder_optim.zero_grad(set_to_none=True)
             encoder_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.encoder_max_grad_norm)
             self.encoder_optim.step()
 
         elif self.obs_type == 'state':
@@ -450,7 +446,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         # --- compute target Q via enumeration/soft-weighting on next_obs ---
         with torch.no_grad():
             if self.obs_type == 'image':
-                next_e_target, _ = self.encoder_target(next_obs)
+                next_e_target, _, _ = self.encoder_target(next_obs)
             elif self.obs_type == 'state':
                 next_e_target = next_context
 

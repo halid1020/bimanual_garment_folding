@@ -87,7 +87,7 @@ def get_default_config(
                     'cam_position': [0, 2.0, 0],
                     'cam_angle': [0, -90 / 180. * np.pi, 0.], #[np.pi/2, -np.pi / 2, 0],
                     'cam_size': [480, 480],
-                    'cam_fov': 39.5978 / 180 * np.pi
+                    'cam_fov': 45 / 180 * np.pi
                 }
             },
         'scene_config': {

@@ -6,6 +6,11 @@ import requests
 import time
 from .manipulation import RGB_manipulation, encode_image
 from agent_arena.utilities.save_utils import save_mask, save_colour
+from huggingface_hub import login
+HF_TOKEN = os.environ["HF_TOKEN"]
+login(token=HF_TOKEN)
+from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+import torch
 
 class RGBD_manipulation_part_obs(RGB_manipulation):
     """
@@ -24,7 +29,15 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         self.in_context_learning=in_context_learning
         self.demo_dir=demo_dir
         
-        
+
+        model_id = "google/gemma-3-4b-it"
+
+        self.model = Gemma3ForConditionalGeneration.from_pretrained(
+            model_id, device_map="cuda:0",
+        ).eval()
+
+        self.processor = AutoProcessor.from_pretrained(model_id)
+
         
         
     def save_obs(self, image, rgbd=None, specifier="init"):
@@ -110,7 +123,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
 
     
 
-    def response_process(self,response,messages=None):
+    def response_process(self,response_message,messages=None):
         """
         Process the response from GPT to get the picking point, direction, distance. Map the picking pixel to 3D coordinate
         and then use move direction and distance to calculate the placing point.
@@ -129,74 +142,66 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
         """
         
-        if 'choices' not in response.json():
-            # GPT has some common error.
-            print(response.json())
-            return None, None,None,None
-        else:
-            # GPT doesn't run into error.
-            response_message=response.json()['choices'][0]['message']['content']
-            print(response_message)
-            
-            # Use regular expression to extract the pick point, direction and distance.
-            pick_pattern = r'Pick point:.*?\[(.*?)\]'
-            direction_pattern=r'Moving direction:.*?(\d+/\d+)'
-            distance_pattern=r'Moving distance:.*?(\d+\.?\d*)'
+        
+        # Use regular expression to extract the pick point, direction and distance.
+        pick_pattern = r'Pick point:.*?\[(.*?)\]'
+        direction_pattern=r'Moving direction:.*?(\d+/\d+)'
+        distance_pattern=r'Moving distance:.*?(\d+\.?\d*)'
 
-            pick_match = re.search(pick_pattern, response_message)
-            direction_match = re.search(direction_pattern, response_message)
-            distance_match = re.search(distance_pattern, response_message)
+        pick_match = re.search(pick_pattern, response_message)
+        direction_match = re.search(direction_pattern, response_message)
+        distance_match = re.search(distance_pattern, response_message)
 
-            # Get pick point (pixel) from GPT response and transform it to 3D coordinate.
-            if not pick_match:
-                return None,None,None,None
-            pick_coords = [int(val) for val in pick_match.group(1).split(',')]
-            pick_pixel=pick_coords
+        # Get pick point (pixel) from GPT response and transform it to 3D coordinate.
+        if not pick_match:
+            return None,None,None,None
+        pick_coords = [int(val) for val in pick_match.group(1).split(',')]
+        pick_pixel=pick_coords
+        
+        pick_coords=camera_utils.find_nearest(self.pixel_coords,pick_coords[1],pick_coords[0])# map the pixel to 3D coordinate
+        
+        pick_coords=self.pixel_coords[pick_coords[0]][pick_coords[1]] # The 3D coordinate of the picking point
+        
             
-            pick_coords=camera_utils.find_nearest(self.pixel_coords,pick_coords[1],pick_coords[0])# map the pixel to 3D coordinate
-            
-            pick_coords=self.pixel_coords[pick_coords[0]][pick_coords[1]] # The 3D coordinate of the picking point
-            
-             
-            # Get moving direction and distance from GPT response.
-            moving_direction = direction_match.group(1) if direction_match else None
-            if moving_direction is None:
-                return None,None,None,None
+        # Get moving direction and distance from GPT response.
+        moving_direction = direction_match.group(1) if direction_match else None
+        if moving_direction is None:
+            return None,None,None,None
 
-            numerator, denominator = moving_direction.split('/')
-            moving_direction=float(numerator)/float(denominator)
-            
-            
-            moving_distance = float(distance_match.group(1)) if distance_match else None
-            if moving_distance is None:
-                return None,None,None,None
+        numerator, denominator = moving_direction.split('/')
+        moving_direction=float(numerator)/float(denominator)
+        
+        
+        moving_distance = float(distance_match.group(1)) if distance_match else None
+        if moving_distance is None:
+            return None,None,None,None
 
-            # Calculate the placing point based on the picking point, moving direction and distance.
-            curr_config=self.env.get_current_config()
-            dimx,dimy=curr_config['ClothSize']
-            size=max(dimx,dimy)*self.env.cloth_particle_radius
+        # Calculate the placing point based on the picking point, moving direction and distance.
+        curr_config=self.env.get_current_config()
+        dimx,dimy=curr_config['ClothSize']
+        size=max(dimx,dimy)*self.env.cloth_particle_radius
 
-            actual_direction=moving_direction*np.pi
-            actual_distance=moving_distance*size
+        actual_direction=moving_direction*np.pi
+        actual_distance=moving_distance*size
 
-            delta_x=actual_distance*np.sin(actual_direction)
-            delta_y=actual_distance*np.cos(actual_direction)
+        delta_x=actual_distance*np.sin(actual_direction)
+        delta_y=actual_distance*np.cos(actual_direction)
 
 
-            place_coords = pick_coords.copy()
-            place_coords[0]+=delta_x
-            place_coords[2]+=delta_y
-            
-            
-            # calculate the pixel coordinate of the placing point
-            pixel_size=max(self.goal_height,self.goal_width)
-            delta_x_pixel=int(pixel_size*np.cos(actual_direction)*moving_distance)
-            delta_y_pixel=int(pixel_size*np.sin(actual_direction)*moving_distance)
-            
-            place_pixel=[pick_pixel[0]+delta_x_pixel,pick_pixel[1]-delta_y_pixel]
+        place_coords = pick_coords.copy()
+        place_coords[0]+=delta_x
+        place_coords[2]+=delta_y
+        
+        
+        # calculate the pixel coordinate of the placing point
+        pixel_size=max(self.goal_height,self.goal_width)
+        delta_x_pixel=int(pixel_size*np.cos(actual_direction)*moving_distance)
+        delta_y_pixel=int(pixel_size*np.sin(actual_direction)*moving_distance)
+        
+        place_pixel=[pick_pixel[0]+delta_x_pixel,pick_pixel[1]-delta_y_pixel]
 
             
-        return pick_coords, place_coords, pick_pixel,place_pixel
+        return pick_pixel,place_pixel
     
     
     
@@ -435,23 +440,32 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
             response_message: the response message from GPT
         """
         
-        # 0. Setup the parameters and GPT agent
-        payload={
-            "model":"gpt-4-vision-preview",
-            "messages":messages,
-            "max_tokens": 1024,
-            "temperature":0.1,
-            "top_p":1,
-            "frequency_penalty":0,
-            "presence_penalty":0
-        }
+
         re_cal=True
         
         # 1. Deal with different types of errors from GPT
         while re_cal:
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-                    
-            pick_point,place_point,pick_pixel,_=self.response_process(response)
+            inputs = self.processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(self.model.device)
+
+            input_len = inputs["input_ids"].shape[-1]
+
+            with torch.inference_mode():
+                generation = self.model.generate(**inputs, max_new_tokens=3000, do_sample=False)
+                generation = generation[0][input_len:]
+
+            
+            decoded = self.processor.decode(generation, skip_special_tokens=True)
+            print(decoded)
+
+            #response = self.processor.batch_decode(outputs[:, inputs["input_ids"].shape[-1]:])[0]
+                                
+            pick_point,place_point,pick_pixel,_=self.response_process(decoded)
             
             if 'choices' in response.json():
                 # GPT doesn't run into error.                
@@ -689,6 +703,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
             text_user_prompt["text"]+=goal_config_information
             
         content.append(text_user_prompt)
+        print('message', content)
         image_user_prompt={
             "type":"image_url",
             "image_url":{
@@ -696,7 +711,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
                 "detail":"high"
             }
         }
-        print('content', content)
+        #print('content', content)
         content.append(image_user_prompt)
         
         message={
@@ -705,7 +720,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         }
         messages.append(message)
         
-        
+       
         # 2. Pass the user prompt and system prompt to GPT and get the response
         pick_point,place_point,pick_pixel,place_pixel,response_message=self.get_pick_place(messages=messages,headers=headers)
         

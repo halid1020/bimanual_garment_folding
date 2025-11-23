@@ -58,8 +58,6 @@ class GPTFabricAdapter(Agent):
         goal_image = info['goal']['rgb']
         goal_depth = info['goal']['depth']
 
-        # I need to figure what is following
-        # goal_depth=np.round(goal_depth[:,:,3:].squeeze(),3)
         aid = info['arena_id']
         messages = self.internal_states[aid]['messages']
 
@@ -68,6 +66,9 @@ class GPTFabricAdapter(Agent):
             self.headers, info['observation']['rgb'], 
             info['observation']['depth'], 
             info['observation']['mask'],
+            cloth_size=info['cloth_size'],
+            cloth_particle_radius=info['arena']._env.cloth_particle_radius,
+            goal_mask=info['arena'].flatten_obs['mask'],
             messages=messages,
             goal_config=self.goal_config,
             system_prompt_path=self.system_prompt_path,
@@ -78,16 +79,36 @@ class GPTFabricAdapter(Agent):
             depth_reasoning=self.depth_reasoning,
             direction_seg=self.direction_seg,
             distance_seg=self.distance_seg,
-            specifier="step"+str(info['observation']['action_step']))
-        
+            specifier="step"+str(info['observation']['action_step'])
+        )
+
         self.internal_states[aid]['last_step_info'] = last_step_info
         self.internal_states[aid]['messages'] = messages
-        
-        
+
+        H, W, _ = info['observation']['rgb'].shape
+        print('H, W', H, W)
+        print('result pick pixel', pick_point)
+        print('result place pixel', place_point)
+
+        # Normalize after swapping axes
+        def normalize_pixel(px, H, W):
+            # Swap: (x, y) -> (y, x)
+            y, x = px
+
+            x_norm = (1.0*x / W ) * 2 - 1
+            y_norm = (1.0*y / H) * 2 - 1
+            return [x_norm, y_norm]
+
+        pick_point_norm = normalize_pixel(pick_point, H, W)
+        place_point_norm = normalize_pixel(place_point, H, W)
+        print('norm pick', pick_point_norm)
+        print('norm place', place_point_norm)
 
         return {
             'norm-pixel-pick-and-place': {
-                'pick_0': pick_point,
-                'place_0': place_point
-            }
+                'pick_0': pick_point_norm,
+                'place_0': place_point_norm
+            },
+            'pick_0': pick_point_norm,
+            'place_0': place_point_norm
         }

@@ -110,6 +110,8 @@ class PixelPickAndFling():
         if self.readjust_pick:
            p0 = adj_p0
            p1 = adj_p1
+
+           print('Fling readjust picks')
         
         self.affordance_score =  self._calculate_affordance(dist_0, dist_1)
            

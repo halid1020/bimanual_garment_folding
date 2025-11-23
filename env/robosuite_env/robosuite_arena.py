@@ -243,8 +243,14 @@ class RoboSuiteArena(Arena):
 
     def compare(self, results_1, results_2):
         # Compare based on reward or success rate
-    
-        avg_last_reward_1 = mean([sum(ep["episode_reward"]) for ep in results_1])
-        avg_last_reward_2 = mean([sum(ep["episode_reward"]) for ep in results_2])
+        
+        avg_last_reward_1 = mean(ep["episode_reward"][-1] for ep in results_1)
+        avg_last_reward_2 = mean(ep["episode_reward"][-1] for ep in results_2)
+
+        # If the rewards are close, compare by average episode length
+        if abs(avg_last_reward_1 - avg_last_reward_2) < 1e-6:
+            avg_length_1 = mean(len(ep["episode_reward"]) for ep in results_1)
+            avg_length_2 = mean(len(ep["episode_reward"]) for ep in results_2)
+            return avg_length_2 - avg_length_1
 
         return avg_last_reward_1 - avg_last_reward_2

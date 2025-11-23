@@ -47,12 +47,12 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             self.replay_action_dim = self.network_action_dim + 1  # prim id + params
             self.update_temperature = cfg.get('update_temperature', 0.01)
             self.sampling_temperature = cfg.get('sampling_temperature', 1.)
-            self.state_dim = cfg.feature_dim + (0 if self.disable_one_hot else self.K)
+            #self.state_dim = cfg.feature_dim + (0 if self.disable_one_hot else self.K)
 
         elif cfg.primitive_integration == 'predict_bin_as_output':
             self.network_action_dim = max(self.action_dims) + 1
             self.replay_action_dim = self.network_action_dim
-            self.state_dim = cfg.feature_dim
+            #self.state_dim = cfg.feature_dim
         else:
             raise NotImplementedError
 
@@ -85,9 +85,14 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             self.state_loss_coef = cfg.get('state_loss_coef', 0.1)
             self.recon_loss_coef = cfg.get('recon_loss_coef', 2.0)
             self.encoder_max_grad_norm = cfg.get('encoder_max_grad_norm', 5)
+            self.state_dim = cfg.feature_dim
+            if cfg.primitive_integration == 'expand_as_input':
+                self.state_dim = cfg.feature_dim + (0 if self.disable_one_hot else self.K)
 
         elif cfg.obs_type == 'state':
             self.state_dim = cfg.state_dim
+            if cfg.primitive_integration == 'expand_as_input':
+                self.state_dim = cfg.state + (0 if self.disable_one_hot else self.K)
 
         # primitive one-hot toggles
         self.critic_grad_clip_value = cfg.get('critic_grad_clip_value', float('inf'))
@@ -717,11 +722,8 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             self.replay.capacity = replay_state['capacity']
 
             # Reopen the Zarr store (in case a new session started)
-            zarr_path = replay_state.get('zarr_path', getattr(self.replay, "zarr_path", None))
-            if zarr_path is None:
-                raise ValueError("Missing zarr_path in replay state for Disk mode.")
 
-            store = zarr.DirectoryStore(zarr_path)
+            store = zarr.DirectoryStore(self.replay.zarr_path)
             self.replay.root = zarr.open_group(store=store, mode='a')
 
             # Rebind dataset references
@@ -731,8 +733,8 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             self.replay.next_observation = self.replay.root["next_observation"]
             self.replay.dones = self.replay.root["dones"]
             if self.obs_type == 'image':
-                self.replay.state = replay_state['state'].cpu().numpy()
-                self.replay.next_state = replay_state['next_state'].cpu().numpy()
+                self.replay.state = self.replay.root['state']
+                self.replay.next_state = self.replay.root['next_state']
 
         else:
             raise ValueError(f"Unknown replay device type: {self.replay_device}")

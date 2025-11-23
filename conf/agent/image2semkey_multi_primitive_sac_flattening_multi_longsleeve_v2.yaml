@@ -58,7 +58,7 @@ primitives:
     dim: 4 # [pick_0, pick_1]name: image2state-sac
   - name: norm-pixel-fold
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
-
+save_success: True
 
 # === Training Schedule ===
 total_update_steps: 100000

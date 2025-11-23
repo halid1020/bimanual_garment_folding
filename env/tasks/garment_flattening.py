@@ -52,8 +52,8 @@ class GarmentFlatteningTask(GarmentTask):
             reward_ -= self.config.get("overstretch_penalty_scale", 0) * (info['overstretch'] - threshold)
         
         reward_2 = reward_
-        aff_score_rev = (1 - info.get('action_affordance_score', 1))
-        reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_rev
+        aff_score_pen = (1 - info.get('action_affordance_score', 1))
+        reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_pen
     
         #print('rev aff score', aff_score_rev)
         return {

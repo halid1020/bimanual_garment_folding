@@ -15,7 +15,8 @@ class WandbLogger(Logger):
             name=name,
             config=config,
             id=run_id,          # allow restoring
-            resume="must" if resume else "never"
+            resume="must" if resume else "never",
+            dir='/mnt/ssd'
         )
 
         self.log_dir = None
@@ -62,6 +63,89 @@ class WandbLogger(Logger):
                 processed_metrics[key] = value
 
         self.wandb.log(processed_metrics, step=step)
+
+    def log_frames(self, frames, key="video", step=None, fps=100, format="mp4"):
+        """
+        Logs video to WandB.
+
+        Final logged shape is always: T×C×H×W
+
+        Accepts:
+            - list of H×W×C or C×H×W frames
+            - numpy T×H×W×C
+            - numpy T×C×H×W
+            - single frame in either format (expanded to T=1)
+        """
+
+        if self.wandb is None or frames is None:
+            return
+
+        # --------------------------------------------------------
+        # 1. Convert input to numpy array
+        # --------------------------------------------------------
+        if isinstance(frames, list):
+            if len(frames) == 0:
+                return
+
+            processed = []
+
+            for f in frames:
+                f = np.asarray(f)
+
+                # CHW → HWC
+                if f.ndim == 3 and f.shape[0] in [1, 3]:
+                    f = np.transpose(f, (1, 2, 0))
+
+                processed.append(f)
+
+            video = np.stack(processed, axis=0)  # Now T×H×W×C
+
+        else:
+            video = np.asarray(frames)
+
+            # Single frame: expand T
+            if video.ndim == 3:
+                # CHW → HWC
+                if video.shape[0] in [1, 3]:
+                    video = np.transpose(video, (1, 2, 0))
+                video = video[None]  # T=1
+
+        # --------------------------------------------------------
+        # 2. Validate now (should be T×H×W×C)
+        # --------------------------------------------------------
+        if video.ndim != 4:
+            raise ValueError(
+                f"log_frames(): Expected 4D input (T,H,W,C), got {video.shape}"
+            )
+
+        T, H, W, C = video.shape
+
+        if C not in [1, 3]:
+            raise ValueError(
+                f"log_frames(): expected channel dim 1 or 3, got {C}"
+            )
+
+        # --------------------------------------------------------
+        # 3. Convert to T×C×H×W
+        # --------------------------------------------------------
+        video = np.transpose(video, (0, 3, 1, 2))  # (T,H,W,C) → (T,C,H,W)
+
+        # --------------------------------------------------------
+        # 4. Float → uint8 normalization
+        # --------------------------------------------------------
+        if video.dtype != np.uint8:
+            video = np.clip(video * 255, 0, 255).astype(np.uint8)
+
+        # --------------------------------------------------------
+        # 5. Log to WandB
+        # --------------------------------------------------------
+        self.wandb.log(
+            {
+                key: wandb.Video(video, fps=fps, format=format)
+            },
+            step=step
+        )
+
 
     def finish(self):
         if self.wandb is not None:

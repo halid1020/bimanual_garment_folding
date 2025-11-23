@@ -125,6 +125,7 @@ class VanillaSAC(TrainableAgent):
         #self.act_steps_per_update = config.act_steps_per_update
         self.total_update_steps = config.total_update_steps
         self.info = None
+        self.save_success = config.get('save_success', False)
 
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
@@ -359,7 +360,14 @@ class VanillaSAC(TrainableAgent):
                     'train/total_sim_steps': self.sim_steps 
                 }, step=self.act_steps)
 
+                if success and self.save_success:
+                    print('About to Save Success')
+                    self.logger.log_frames(arena.get_frames(), key='success episodes', step=self.act_steps)
+
             self.info = arena.reset()
+            if self.save_success:
+                print('set arena save videos')
+                arena.save_video = True
             self.set_train()
             self.reset([arena.id])
             self.episode_return = 0.0

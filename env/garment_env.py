@@ -151,11 +151,11 @@ class GarmentEnv(Arena):
 
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
-        self.default_config = get_default_config(
-            particle_radius = 0.015,
-            cloth_stiffness = (0.15, .01, .02),
-            scale=0.8,
-        )
+        self.default_config = get_default_config()
+            # particle_radius = 0.015,
+            # cloth_stiffness = (0.15, .01, .02),
+            # scale=0.8,
+        #)
 
     def set_task(self, task):
         self.task = task
@@ -271,9 +271,6 @@ class GarmentEnv(Arena):
 
         info['done'] = self.action_step >= self.horizon
         
-        if 'done' not in info:
-            info['done'] = False
-        
         if task_related:
             info['evaluation'] = self.evaluate()
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
@@ -325,7 +322,7 @@ class GarmentEnv(Arena):
         return self.action_tool.get_action_space()
     
     def get_frames(self):
-        return self.video_frames.copy()
+        return self.video_frames
     
     def _get_particle_distance_matrix(self):
         mesh_particles = self.get_mesh_particles_positions()

@@ -2,9 +2,9 @@ import torch
 from torch import nn
 from torch import distributions as torchd
 
-import models
-import networks
-import tools
+from .models import *
+from .networks import *
+from .tools import *
 
 
 class Random(nn.Module):
@@ -15,7 +15,7 @@ class Random(nn.Module):
 
     def actor(self, feat):
         if self._config.actor["dist"] == "onehot":
-            return tools.OneHotDist(
+            return OneHotDist(
                 torch.zeros(
                     self._config.num_actions, device=self._config.device
                 ).repeat(self._config.envs, 1)
@@ -43,7 +43,7 @@ class Plan2Explore(nn.Module):
         self._config = config
         self._use_amp = True if config.precision == 16 else False
         self._reward = reward
-        self._behavior = models.ImagBehavior(config, world_model)
+        self._behavior = ImagBehavior(config, world_model)
         self.actor = self._behavior.actor
         if config.dyn_discrete:
             feat_size = config.dyn_stoch * config.dyn_discrete + config.dyn_deter
@@ -68,10 +68,10 @@ class Plan2Explore(nn.Module):
             act=config.act,
         )
         self._networks = nn.ModuleList(
-            [networks.MLP(**kw) for _ in range(config.disag_models)]
+            [MLP(**kw) for _ in range(config.disag_models)]
         )
         kw = dict(wd=config.weight_decay, opt=config.opt, use_amp=self._use_amp)
-        self._expl_opt = tools.Optimizer(
+        self._expl_opt = Optimizer(
             "explorer",
             self._networks.parameters(),
             config.model_lr,
@@ -81,7 +81,7 @@ class Plan2Explore(nn.Module):
         )
 
     def train(self, start, context, data):
-        with tools.RequiresGrad(self._networks):
+        with RequiresGrad(self._networks):
             metrics = {}
             stoch = start["stoch"]
             if self._config.dyn_discrete:

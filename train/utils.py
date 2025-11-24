@@ -1,14 +1,15 @@
-from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
-from env.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
-from env.multi_garment_env import MultiGarmentEnv
-from env.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
-from env.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
+from env.softgym_garment.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
+from env.softgym_garment.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
+from env.softgym_garment.multi_garment_env import MultiGarmentEnv
+from env.softgym_garment.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
+from env.softgym_garment.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
+from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
 from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
-from env.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
+from env.dm_control.dmc_arena import DMC_Arena
 
-from env.tasks.garment_folding import GarmentFoldingTask
-from env.tasks.garment_flattening import GarmentFlatteningTask
+from env.softgym_garment.tasks.garment_folding import GarmentFoldingTask
+from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
 
 
 from controllers.rl.primitive_encoding_sac \
@@ -32,8 +33,10 @@ from controllers.rl.maple \
 from controllers.rl.image2state_multi_primitive_sac \
     import Image2StateMultiPrimitiveSAC
 from controllers.gpt_fabric.adapter import GPTFabricAdapter
+from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 
 import agent_arena as ag_ar
+from dotmap import DotMap
 
 
 registered_arena = {
@@ -45,6 +48,7 @@ registered_arena = {
     'robosuite-env': RoboSuiteArena,
     'robosuite-skill-env': RoboSuiteSkillArena,
     'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv,
+    'dm_control': DMC_Arena
 }
 def register_agent_arena():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
@@ -59,3 +63,32 @@ def register_agent_arena():
     ag_ar.register_agent('maple', MAPLE)
     ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
     ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)
+    ag_ar.register_agent('dreamerV3', DreamerV3Adapter)
+
+
+def build_task(task_cfg):
+    # task
+    if task_cfg.task_name == 'centre-sleeve-folding':
+        demonstrator = CentreSleeveFoldingStochasticPolicy({"debug": False})
+        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+       
+    elif task_cfg.task_name == 'waist-leg-alignment-folding':
+        from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
+            import WaistLegFoldingStochasticPolicy
+        demonstrator = WaistLegFoldingStochasticPolicy({"debug": False})
+        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+       
+    elif task_cfg.task_name == 'waist-hem-alignment-folding':
+        from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
+            import WaistHemAlignmentFoldingStochasticPolicy
+        demonstrator = WaistHemAlignmentFoldingStochasticPolicy({"debug": False})
+        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+        
+    elif task_cfg.task_name == 'flattening':
+        task = GarmentFlatteningTask(task_cfg)
+       
+    elif task_cfg.task_name == 'dummy':
+        task = None
+    else:
+        raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
+    return task

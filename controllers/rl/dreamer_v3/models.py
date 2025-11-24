@@ -2,8 +2,8 @@ import copy
 import torch
 from torch import nn
 
-import networks
-import tools
+from .networks import *
+from .tools import *
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -33,9 +33,9 @@ class WorldModel(nn.Module):
         self._use_amp = True if config.precision == 16 else False
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
-        self.encoder = networks.MultiEncoder(shapes, **config.encoder)
+        self.encoder = MultiEncoder(shapes, **config.encoder)
         self.embed_size = self.encoder.outdim
-        self.dynamics = networks.RSSM(
+        self.dynamics = RSSM(
             config.dyn_stoch,
             config.dyn_deter,
             config.dyn_hidden,
@@ -57,10 +57,10 @@ class WorldModel(nn.Module):
             feat_size = config.dyn_stoch * config.dyn_discrete + config.dyn_deter
         else:
             feat_size = config.dyn_stoch + config.dyn_deter
-        self.heads["decoder"] = networks.MultiDecoder(
+        self.heads["decoder"] = MultiDecoder(
             feat_size, shapes, **config.decoder
         )
-        self.heads["reward"] = networks.MLP(
+        self.heads["reward"] = MLP(
             feat_size,
             (255,) if config.reward_head["dist"] == "symlog_disc" else (),
             config.reward_head["layers"],
@@ -72,7 +72,7 @@ class WorldModel(nn.Module):
             device=config.device,
             name="Reward",
         )
-        self.heads["cont"] = networks.MLP(
+        self.heads["cont"] = MLP(
             feat_size,
             (),
             config.cont_head["layers"],
@@ -86,7 +86,7 @@ class WorldModel(nn.Module):
         )
         for name in config.grad_heads:
             assert name in self.heads, name
-        self._model_opt = tools.Optimizer(
+        self._model_opt = Optimizer(
             "model",
             self.parameters(),
             config.model_lr,
@@ -112,7 +112,7 @@ class WorldModel(nn.Module):
         # discount (batch_size, batch_length)
         data = self.preprocess(data)
 
-        with tools.RequiresGrad(self):
+        with RequiresGrad(self):
             with torch.cuda.amp.autocast(self._use_amp):
                 embed = self.encoder(data)
                 post, prior = self.dynamics.observe(
@@ -222,7 +222,7 @@ class ImagBehavior(nn.Module):
             feat_size = config.dyn_stoch * config.dyn_discrete + config.dyn_deter
         else:
             feat_size = config.dyn_stoch + config.dyn_deter
-        self.actor = networks.MLP(
+        self.actor = MLP(
             feat_size,
             (config.num_actions,),
             config.actor["layers"],
@@ -239,7 +239,7 @@ class ImagBehavior(nn.Module):
             outscale=config.actor["outscale"],
             name="Actor",
         )
-        self.value = networks.MLP(
+        self.value = MLP(
             feat_size,
             (255,) if config.critic["dist"] == "symlog_disc" else (),
             config.critic["layers"],
@@ -255,7 +255,7 @@ class ImagBehavior(nn.Module):
             self._slow_value = copy.deepcopy(self.value)
             self._updates = 0
         kw = dict(wd=config.weight_decay, opt=config.opt, use_amp=self._use_amp)
-        self._actor_opt = tools.Optimizer(
+        self._actor_opt = Optimizer(
             "actor",
             self.actor.parameters(),
             config.actor["lr"],
@@ -266,7 +266,7 @@ class ImagBehavior(nn.Module):
         print(
             f"Optimizer actor_opt has {sum(param.numel() for param in self.actor.parameters())} variables."
         )
-        self._value_opt = tools.Optimizer(
+        self._value_opt = Optimizer(
             "value",
             self.value.parameters(),
             config.critic["lr"],
@@ -292,7 +292,7 @@ class ImagBehavior(nn.Module):
         self._update_slow_target()
         metrics = {}
 
-        with tools.RequiresGrad(self.actor):
+        with RequiresGrad(self.actor):
             with torch.cuda.amp.autocast(self._use_amp):
                 imag_feat, imag_state, imag_action = self._imagine(
                     start, self.actor, self._config.imag_horizon
@@ -316,7 +316,7 @@ class ImagBehavior(nn.Module):
                 metrics.update(mets)
                 value_input = imag_feat
 
-        with tools.RequiresGrad(self.value):
+        with RequiresGrad(self.value):
             with torch.cuda.amp.autocast(self._use_amp):
                 value = self.value(value_input[:-1].detach())
                 target = torch.stack(target, dim=1)
@@ -328,19 +328,19 @@ class ImagBehavior(nn.Module):
                 # (time, batch, 1), (time, batch, 1) -> (1,)
                 value_loss = torch.mean(weights[:-1] * value_loss[:, :, None])
 
-        metrics.update(tools.tensorstats(value.mode(), "value"))
-        metrics.update(tools.tensorstats(target, "target"))
-        metrics.update(tools.tensorstats(reward, "imag_reward"))
+        metrics.update(tensorstats(value.mode(), "value"))
+        metrics.update(tensorstats(target, "target"))
+        metrics.update(tensorstats(reward, "imag_reward"))
         if self._config.actor["dist"] in ["onehot"]:
             metrics.update(
-                tools.tensorstats(
+                tensorstats(
                     torch.argmax(imag_action, dim=-1).float(), "imag_action"
                 )
             )
         else:
-            metrics.update(tools.tensorstats(imag_action, "imag_action"))
+            metrics.update(tensorstats(imag_action, "imag_action"))
         metrics["actor_entropy"] = to_np(torch.mean(actor_ent))
-        with tools.RequiresGrad(self):
+        with RequiresGrad(self):
             metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
             metrics.update(self._value_opt(value_loss, self.value.parameters()))
         return imag_feat, imag_state, imag_action, weights, metrics
@@ -358,7 +358,7 @@ class ImagBehavior(nn.Module):
             succ = dynamics.img_step(state, action)
             return succ, feat, action
 
-        succ, feats, actions = tools.static_scan(
+        succ, feats, actions = static_scan(
             step, [torch.arange(horizon)], (start, None, None)
         )
         states = {k: torch.cat([start[k][None], v[:-1]], 0) for k, v in succ.items()}
@@ -372,7 +372,7 @@ class ImagBehavior(nn.Module):
         else:
             discount = self._config.discount * torch.ones_like(reward)
         value = self.value(imag_feat).mode()
-        target = tools.lambda_return(
+        target = lambda_return(
             reward[1:],
             value[:-1],
             discount[1:],
@@ -403,7 +403,7 @@ class ImagBehavior(nn.Module):
             normed_target = (target - offset) / scale
             normed_base = (base - offset) / scale
             adv = normed_target - normed_base
-            metrics.update(tools.tensorstats(normed_target, "normed_target"))
+            metrics.update(tensorstats(normed_target, "normed_target"))
             metrics["EMA_005"] = to_np(self.ema_vals[0])
             metrics["EMA_095"] = to_np(self.ema_vals[1])
 

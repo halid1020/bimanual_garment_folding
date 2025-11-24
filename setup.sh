@@ -10,3 +10,4 @@ cd ../bimanual_garment_folding
 
 export PYTHONPATH=${PWD}:$PYTHONPATH
 export AGENT_ARENA_PATH='../agent_arena_v0/agent_arena'
+

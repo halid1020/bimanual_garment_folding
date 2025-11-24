@@ -82,9 +82,9 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             ).to(self.device)
             self.encoder_target.load_state_dict(self.encoder.state_dict())
             self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
-            self.state_loss_coef = cfg.get('state_loss_coef', 0.1)
+            self.state_loss_coef = cfg.get('state_loss_coef', 1.0)
             self.recon_loss_coef = cfg.get('recon_loss_coef', 2.0)
-            self.encoder_max_grad_norm = cfg.get('encoder_max_grad_norm', 5)
+            self.encoder_max_grad_norm = cfg.get('encoder_max_grad_norm', float('inf'))
             self.state_dim = cfg.feature_dim
             if cfg.primitive_integration == 'expand_as_input':
                 self.state_dim = cfg.feature_dim + (0 if self.disable_one_hot else self.K)
@@ -419,7 +419,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             )
 
             # Optimize
-            self.encoder_optim.zero_grad(set_to_none=True)
+            self.encoder_optim.zero_grad()
             encoder_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.encoder_max_grad_norm)
             self.encoder_optim.step()

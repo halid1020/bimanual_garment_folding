@@ -36,7 +36,7 @@ class HybridActionPrimitive():
         space_high = np.concatenate([pick_upper_bound, place_upper_bound]*self.num_pickers)\
             .reshape(self.num_pickers, -1).astype(np.float32)
         #self.action_horizon = action_horizon
-        self.action_step = 0
+        #self.action_step = 0
     
     def get_no_op(self):
         return self.no_op
@@ -61,7 +61,7 @@ class HybridActionPrimitive():
     def reset(self, env):
         self.np_pnf.reset(env)
         info = env.get_info()
-        self.action_step = 0
+        #self.action_step = 0
         return info
     
     ## It accpet action has shape (num_picker, 2, 3), where num_picker can be 1 or 2

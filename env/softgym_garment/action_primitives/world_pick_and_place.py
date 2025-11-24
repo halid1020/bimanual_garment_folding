@@ -54,7 +54,7 @@ class WorldPickAndPlace():
         self.tograsp_vel = tograsp_vel
         self.no_cloth_vel = 0.3
 
-        self.action_step = 0
+        #self.action_step = 0
         self.action_horizon = action_horizon
         self.action_mode = 'world-pick-and-place'
         self.horizon = self.action_horizon
@@ -79,11 +79,11 @@ class WorldPickAndPlace():
     #     return info
 
     def reset(self, env):
-        self.action_step = 0
+        #self.action_step = 0
         return env.get_info()
     
-    def get_step(self):
-        return self.action_step
+    # def get_step(self):
+    #     return self.action_step
     
     def process(self, action):
         if 'tograsp_vel' not in action:
@@ -213,6 +213,6 @@ class WorldPickAndPlace():
         self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
 
         env.wait_until_stable()
-        self.action_step += 1
+        #self.action_step += 1
         #info['done'] = self.action_step >= self.action_horizon
         return {} #self._process_info({})

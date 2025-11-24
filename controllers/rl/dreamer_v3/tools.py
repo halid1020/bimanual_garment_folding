@@ -1,21 +1,24 @@
-import datetime
 import collections
 import io
 import os
 import json
 import pathlib
-import re
+import datetime
 import time
 import random
 
 import numpy as np
+import uuid
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch import distributions as torchd
-from torch.utils.tensorboard import SummaryWriter
 
+import wandb
+
+def count_steps(folder):
+    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -55,9 +58,11 @@ class TimeRecording:
 
 
 class Logger:
-    def __init__(self, logdir, step):
+    
+    def __init__(self, logdir, step, project, name, config, run_id=None, resume=False):
+        
+        
         self._logdir = logdir
-        self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
         self._last_step = None
         self._last_time = None
         self._scalars = {}
@@ -65,40 +70,81 @@ class Logger:
         self._videos = {}
         self.step = step
 
+        self.project = project
+        self.name = name
+        self.config = config
+
+        # initialize wandb run
+        self.wandb = wandb.init(
+            project=project,
+            name=name,
+            config=config,
+            id=run_id,
+            resume="must" if resume else "never",
+            dir=str(logdir)     # <-- IMPORTANT FIX
+        )
+
+    def _compute_fps(self, step):
+        now = time.time()
+        if self._last_time is None:
+            self._last_time = now
+            self._last_step = step
+            return 0.0
+        fps = (step - self._last_step) / (now - self._last_time)
+        self._last_time = now
+        self._last_step = step
+        return fps
+
     def scalar(self, name, value):
         self._scalars[name] = float(value)
 
     def image(self, name, value):
+        # Expect HWC or CHW image array
         self._images[name] = np.array(value)
 
     def video(self, name, value):
+        # Expect B T H W C or T H W C (adjust as needed)
         self._videos[name] = np.array(value)
 
     def write(self, fps=False, step=False):
         if not step:
             step = self.step
+
         scalars = list(self._scalars.items())
         if fps:
             scalars.append(("fps", self._compute_fps(step)))
+
+        # Print summary
         print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
+
+        # Write json metrics file
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
-        for name, value in scalars:
-            if "/" not in name:
-                self._writer.add_scalar("scalars/" + name, value, step)
-            else:
-                self._writer.add_scalar(name, value, step)
-        for name, value in self._images.items():
-            self._writer.add_image(name, value, step)
-        for name, value in self._videos.items():
-            name = name if isinstance(name, str) else name.decode("utf-8")
+
+        # Log scalars
+        wandb_logs = {k: v for k, v in scalars}
+
+        # Log images
+        for name, img in self._images.items():
+            wandb_logs[name] = wandb.Image(img)
+
+        # Log videos
+        for name, vid in self._videos.items():
+            value = vid
+            # Convert floats to uint8 video
             if np.issubdtype(value.dtype, np.floating):
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
-            B, T, H, W, C = value.shape
-            value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-            self._writer.add_video(name, value, step, 16)
 
-        self._writer.flush()
+            # wandb accepts (T, H, W, C)
+            if value.ndim == 5:  # B T H W C — take first batch
+                value = value[0]
+
+            wandb_logs[name] = wandb.Video(value, fps=16, format="mp4")
+
+        # Commit step
+        wandb.log(wandb_logs, step=step)
+
+        # Clear buffers
         self._scalars = {}
         self._images = {}
         self._videos = {}
@@ -131,7 +177,6 @@ def simulate(
     cache,
     directory,
     logger,
-    is_eval=False,
     limit=None,
     steps=0,
     episodes=0,
@@ -154,22 +199,21 @@ def simulate(
             results = [envs[i].reset() for i in indices]
             results = [r() for r in results]
             for index, result in zip(indices, results):
-                t = result.copy()
+                t = result['observation'].copy()
                 t = {k: convert(v) for k, v in t.items()}
                 # action will be added to transition in add_to_cache
                 t["reward"] = 0.0
                 t["discount"] = 1.0
                 # initial state should be added to cache
-                add_to_cache(cache, envs[index].id, t)
+                add_to_cache(cache, envs[index].aid, t)
                 # replace obs with done by initial state
-                obs[index] = result
+                obs[index] = t.copy()
         # step agents
         obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
             action = [
-                {k: np.array(action[k][i].detach().cpu()) for k in action}
-                for i in range(len(envs))
+                np.array(action['action'][i].detach().cpu()) for i in range(len(envs))
             ]
         else:
             action = np.array(action)
@@ -177,7 +221,7 @@ def simulate(
         # step envs
         results = [e.step(a) for e, a in zip(envs, action)]
         results = [r() for r in results]
-        obs, reward, done = zip(*[p[:3] for p in results])
+        obs, reward, done = zip(*[(p["observation"], p["reward"], p["done"]) for p in results])
         obs = list(obs)
         reward = list(reward)
         done = np.stack(done)
@@ -187,7 +231,7 @@ def simulate(
         length *= 1 - done
         # add to cache
         for a, result, env in zip(action, results, envs):
-            o, r, d, info = result
+            o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
             if isinstance(a, dict):
@@ -195,57 +239,36 @@ def simulate(
             else:
                 transition["action"] = a
             transition["reward"] = r
-            transition["discount"] = info.get("discount", np.array(1 - float(d)))
-            add_to_cache(cache, env.id, transition)
+            transition["discount"] = discount
+            add_to_cache(cache, env.aid, transition)
 
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                save_episodes(directory, {envs[i].id: cache[envs[i].id]})
-                length = len(cache[envs[i].id]["reward"]) - 1
-                score = float(np.array(cache[envs[i].id]["reward"]).sum())
-                video = cache[envs[i].id]["image"]
+                timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+                save_str = f'{timestamp}-{str(uuid.uuid4().hex)}-{envs[i].aid}'
+                save_episodes(directory, {save_str: cache[envs[i].aid]})
+                length = len(cache[envs[i].aid]["reward"]) - 1
+                score = float(np.array(cache[envs[i].aid]["reward"]).sum())
+                video = cache[envs[i].aid]["image"]
                 # record logs given from environments
-                for key in list(cache[envs[i].id].keys()):
+                for key in list(cache[envs[i].aid].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].id][key]).sum())
+                            key, float(np.array(cache[envs[i].aid][key]).sum())
                         )
                         # log items won't be used later
-                        cache[envs[i].id].pop(key)
+                        cache[envs[i].aid].pop(key)
 
-                if not is_eval:
-                    step_in_dataset = erase_over_episodes(cache, limit)
-                    logger.scalar(f"dataset_size", step_in_dataset)
-                    logger.scalar(f"train_return", score)
-                    logger.scalar(f"train_length", length)
-                    logger.scalar(f"train_episodes", len(cache))
-                    logger.write(step=logger.step)
-                else:
-                    if not "eval_lengths" in locals():
-                        eval_lengths = []
-                        eval_scores = []
-                        eval_done = False
-                    # start counting scores for evaluation
-                    eval_scores.append(score)
-                    eval_lengths.append(length)
-
-                    score = sum(eval_scores) / len(eval_scores)
-                    length = sum(eval_lengths) / len(eval_lengths)
-                    logger.video(f"eval_policy", np.array(video)[None])
-
-                    if len(eval_scores) >= episodes and not eval_done:
-                        logger.scalar(f"eval_return", score)
-                        logger.scalar(f"eval_length", length)
-                        logger.scalar(f"eval_episodes", len(eval_scores))
-                        logger.write(step=logger.step)
-                        eval_done = True
-    if is_eval:
-        # keep only last item for saving memory. this cache is used for video_pred later
-        while len(cache) > 1:
-            # FIFO
-            cache.popitem(last=False)
+                
+                step_in_dataset = erase_over_episodes(cache, limit)
+                logger.scalar(f"dataset_size", step_in_dataset)
+                logger.scalar(f"train_return", score)
+                logger.scalar(f"train_length", length)
+                logger.scalar(f"train_episodes", len(cache))
+                logger.write(step=logger.step)
+                
     return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
 
 
@@ -998,3 +1021,8 @@ def recursively_load_optim_state_dict(obj, optimizers_state_dicts):
         for key in keys:
             obj_now = getattr(obj_now, key)
         obj_now.load_state_dict(state_dict)
+
+def make_dataset(episodes, config):
+    generator = sample_episodes(episodes, config.batch_length)
+    dataset = from_generator(generator, config.batch_size)
+    return dataset

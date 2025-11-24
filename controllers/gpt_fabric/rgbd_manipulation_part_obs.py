@@ -236,7 +236,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         # Get moving direction and distance from GPT response.
         moving_direction = direction_match.group(1) if direction_match else None
         if moving_direction is None:
-            return None,None,None,None
+            return None,None
 
         numerator, denominator = moving_direction.split('/')
         moving_direction=float(numerator)/float(denominator)
@@ -244,7 +244,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
         moving_distance = float(distance_match.group(1)) if distance_match else None
         if moving_distance is None:
-            return None,None,None,None
+            return None,None
 
         # Calculate the placing point based on the picking point, moving direction and distance.
         #curr_config=self.env.get_current_config()
@@ -274,7 +274,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         save_colour(place_rgb, 'gpt_place_rgb', './tmp')
 
             
-        return pick_pixel,place_pixel
+        return pick_pixel, place_pixel
     
     
     

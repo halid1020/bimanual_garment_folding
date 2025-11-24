@@ -13,7 +13,7 @@ from scipy.spatial.distance import cdist
 
 from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-from .video_logger import VideoLogger
+from ..video_logger import VideoLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
 
@@ -157,19 +157,8 @@ class GarmentEnv(Arena):
             # scale=0.8,
         #)
 
-    def set_task(self, task):
-        self.task = task
 
-    def get_goal(self):
-        return self.task.get_goal()
 
-    def set_logdir(self, log_dir):
-        self.logger.set_log_dir(log_dir)
-
-    ## TODO: put this into the interface
-    def get_action_horizon(self):
-        return self.horizon
-       
     ## TODO: if eid is out of range, we need to raise an error.   
     def reset(self, episode_config=None):
         if episode_config == None:
@@ -237,8 +226,7 @@ class GarmentEnv(Arena):
     def get_episode_config(self):
         return self.episode_config
     
-    def get_id(self):
-        return self.id
+   
 
     def get_num_episodes(self):
         if self.mode == 'eval':
@@ -257,7 +245,7 @@ class GarmentEnv(Arena):
             'observation': self._get_obs(flatten_obs),
             
             'arena': self,
-            'arena_id': self.id,
+            'arena_id': self.aid,
             'action_space': self.get_action_space(),
             'overstretch': self.overstretch,
             'sim_steps': self.sim_step
@@ -359,14 +347,6 @@ class GarmentEnv(Arena):
         
         return self.flattened_obs
     
-    def get_eval_configs(self):
-
-        raise NotImplementedError
-
-    
-    def get_val_configs(self):
-        raise NotImplementedError
-    
     def get_no_op(self):
         return self.action_tool.get_no_op()
     
@@ -379,9 +359,6 @@ class GarmentEnv(Arena):
             self.evaluate_result = self.task.evaluate(self)
         return self.evaluate_result
         
-
-    def success(self):
-        return self.task.success(self)
     
     def observation_shape(self):
         return {'rgb': self._observation_image_shape, 
@@ -391,8 +368,7 @@ class GarmentEnv(Arena):
         return self.action_tool.sample_random_action()
 
     # TODO: we may need to modify this.
-    def set_id(self, id):
-        self.id = id
+    
     
     # these funcitons is required by the action_tool
     def get_picker_position(self):

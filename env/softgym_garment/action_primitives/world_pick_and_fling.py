@@ -64,7 +64,7 @@ class WorldPickAndFling():
         self.lower_height = lower_height
         self.num_picker = 2
         self.grasping = False
-        self.action_step = 0
+        # self.action_step = 0
     
     def get_no_op(self):
         return self.ready_pos
@@ -80,14 +80,14 @@ class WorldPickAndFling():
 
 
     def reset(self, env):
-        self.action_step = 0
+        # self.action_step = 0
         
         
         return self.reset_pickers(env)
         
     
-    def get_step(self):
-        return self.action_step
+    # def get_step(self):
+    #     return self.action_step
     
 
     def process(self, action):
@@ -175,7 +175,7 @@ class WorldPickAndFling():
 
         env.wait_until_stable()
 
-        self.action_step += 1
+        # self.action_step += 1
         # done = self.action_step >= self.action_horizon
         # info['done'] = done
         return info

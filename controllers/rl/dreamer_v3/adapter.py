@@ -1,137 +1,75 @@
-import importlib
-import os
+
 import pathlib
-import sys
-from functools import partial as bind
 
-folder = pathlib.Path(__file__).parent
-sys.path.insert(0, str(folder.parent))
-sys.path.insert(1, str(folder.parent.parent))
-__package__ = folder.name
-
-import elements
-import embodied
-import numpy as np
-import portal
-import ruamel.yaml as yaml
-import tools
+from .tools import *
 from controllers.rl.dreamer_v3.dreamer import Dreamer
+from agent_arena import TrainableAgent
 
 class DreamerV3Adapter(TrainableAgent):
   
     def __init__(self, config):
-        tools.set_seed_everywhere(config.seed)
+        set_seed_everywhere(config.seed)
         if config.deterministic_run:
-            tools.enable_deterministic_run()
+            enable_deterministic_run()
+        self.config = config
+        self.config.steps //= config.action_repeat
+        self.loaded_model = False
+        self.loaded_dataset = False
+        self.initialised_agent = False
         
-        config.steps //= config.action_repeat
-        config.eval_every //= config.action_repeat
-        config.log_every //= config.action_repeat
-        config.time_limit //= config.action_repeat
-
-        self.logger = WandbLogger() # from agent-arena
-
-        self.replay = # initialise
-
-        self.dreamer  = Dreamer(
-            config.observation_space,
-            config.action_space,
-            config,
-            self.logger,
-            self.replay,
-        ).to(config.device)
-
-
-    def _collect_from_arena(self, arenas):
-        if self.last_done:
-            if self.info is not None:
-                evaluation = self.info['evaluation']
-                success = int(self.info['success'])
-
-                for k, v in evaluation.items():
-                    self.logger.log({
-                        f"train/eps_lst_step_eval_{k}": v,
-                    }, step=self.act_steps) 
-                
-                self.logger.log({
-                    "train/episode_return": self.episode_return,
-                    "train/episode_length": self.episode_length,
-                    'train/episode_success': success,
-                    'train/episode_sim_steps': self.sim_steps - self.last_sim_steps,
-                    'train/total_sim_steps': self.sim_steps 
-                }, step=self.act_steps)
-
-            self.info = arena.reset()
-            self.set_train()
-            self.reset([arena.id])
-            self.episode_return = 0.0
-            self.episode_length = 0
-            self.last_done = False
-            self.last_sim_steps = self.sim_steps
-
-        # sample stochastic action for exploration
-        a, _ = self._select_action(self.info, stochastic=True)
-        # clip to action range
-        #a = np.clip(a, -self.config.action_range, self.config.action_range)
-        #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
-        next_info = arena.step(a)
-        if next_info.get("fail_step", False):
-            self.last_done = True
-            return
-
+    
+    def set_log_dir(self, log_dir):
+        logdir = pathlib.Path(log_dir).expanduser()
+        self.config.traindir = self.config.traindir or logdir / "train_eps"
+        self.config.evaldir = self.config.evaldir or logdir / "eval_eps"
         
-        
-        next_obs_for_process =  self._get_next_obs_for_process(next_info)
+        self.config.eval_every //= self.config.action_repeat
+        self.config.log_every //= self.config.action_repeat
+        self.config.time_limit //= self.config.action_repeat
 
-        reward = next_info.get('reward', 0.0)[self.reward_key] if isinstance(next_info.get('reward', 0.0), dict) else next_info.get('reward', 0.0)
-        self.logger.log(
-            {'train/step_reward': reward}, step=self.act_steps
-        )
-        evaluation = next_info.get('evaluation', {})
-        for k, v in evaluation.items():
-            self.logger.log({
-                f"train/{k}": v,
-            }, step=self.act_steps)
-        done = next_info.get('done', False)
-        self.info = next_info
-        #a = next_info['applied_action']
-        self.last_done = done
+        print("Logdir", logdir)
+        logdir.mkdir(parents=True, exist_ok=True)
+        self.config.traindir.mkdir(parents=True, exist_ok=True)
+        self.config.evaldir.mkdir(parents=True, exist_ok=True)
 
-        aid = arena.id
-        obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
-        obs_for_replay = self._process_context_for_replay(obs_list)
-        # print('obs stack', obs_stack)
-        # print('next_obs', next_obs)
-        # append next
-        #print(next_obs_for_process)
-        obs_list.append(self._process_obs_for_input(next_obs_for_process))
-        next_obs_for_replay = self._process_context_for_replay(obs_list[-self.context_horizon:])
-        #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
+        self.step = count_steps(self.config.traindir)
+        # step in logger is environmental step
+        self.logger = Logger(logdir, 
+            self.config.action_repeat * self.step, 
+            self.config.project_name,
+            name=self.config.exp_name,
+            config=dict(self.config))
+        
+        # if self.config.offline_evaldir:
+        #     directory = self.config.offline_evaldir.format(**vars(self.config))
+        # else:
+        #     directory = self.config.evaldir
+        # self.eval_eps = load_episodes(directory, limit=1)
 
-        #print('\napplied action vecotr', a, type(a))
-        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a), reward, next_obs_for_replay, done)
-        
-        
-        self.act_steps += 1
-        self.sim_steps += next_info['sim_steps']
-        self.episode_return += reward
-        self.episode_length += 1
+        if self.config.offline_traindir:
+            directory = self.config.offline_traindir.format(**vars(self.config))
+        else:
+            directory = self.config.traindir
+        self.logdir = logdir
+        self.train_eps = load_episodes(directory, limit=self.config.dataset_size)
 
-    def train(self, update_steps, arenas) -> bool:
-        
-       
-        if not config.offline_traindir:
-            prefill = max(0, config.prefill - self.replay.get_action_steps())
+    def _prefill_dataset(self, arenas):
+        self.train_state = None
+        num_env = len(arenas)
+        if not self.config.offline_traindir:
+            prefill = max(0, self.config.prefill - count_steps(self.config.traindir))
             print(f"Prefill dataset ({prefill} steps).")
-            if config.action_type ==  "discrete":
-                random_actor = tools.OneHotDist(
-                    torch.zeros(config.num_actions).repeat(config.envs, 1)
+            acts = arenas[0].get_action_space()() # Future object, that is why
+            if hasattr(acts, "discrete"):
+                random_actor = OneHotDist(
+                    torch.zeros(self.config.num_actions).repeat(num_env, 1)
                 )
             else:
+                
                 random_actor = torchd.independent.Independent(
                     torchd.uniform.Uniform(
-                        torch.tensor(acts.low).repeat(config.envs, 1),
-                        torch.tensor(acts.high).repeat(config.envs, 1),
+                        torch.tensor(acts.low).repeat(num_env, 1),
+                        torch.tensor(acts.high).repeat(num_env, 1),
                     ),
                     1,
                 )
@@ -141,36 +79,114 @@ class DreamerV3Adapter(TrainableAgent):
                 logprob = random_actor.log_prob(action)
                 return {"action": action, "logprob": logprob}, None
 
-            state = tools.simulate(
+            self.train_state = simulate(
                 random_agent,
                 arenas,
-                self.replay,
-                # config.traindir,
+                self.train_eps,
+                self.config.traindir,
                 self.logger,
-                limit=config.dataset_size,
+                limit=self.config.dataset_size,
                 steps=prefill,
             )
-        
-        self.dreamer.requires_grad_(requires_grad=False)
+            self.logger.step += prefill * self.config.action_repeat
+            print(f"Logger: ({self.logger.step} steps).")
 
-            
-        state = tools.simulate(
-            self.dreamer,
-            arenas,
-            self.replay,
-            #config.traindir,
+    def _load_dataset(self):
+        if self.loaded_dataset:
+            return
+        self.train_dataset = make_dataset(self.train_eps, self.config)
+        self.loaded_dataset = True
+
+    def _init_agent(self, arenas):
+        if self.initialised_agent:
+            return
+        self.agent = Dreamer(
+            arenas[0].observation_space,
+            arenas[0].get_action_space()(),
+            self.config,
             self.logger,
-            limit=self.config.dataset_size,
-            steps=update_steps,
-            state=state,
-        )
+            self.train_dataset,
+        ).to(self.config.device)
+        self.agent.requires_grad_(requires_grad=False)
+        self.load()
+            
+        self.initialised_agent = True
+    
+    def init(self, info_list):
+        for info in info_list:
+            self.internale_state[info['aid']]['done'] = False
+            self.internale_state[info['aid']]['agent_state'] = None
+
+    def update(self, info_list, actions):
+        for info in info_list:
+            self.internale_state[info['aid']]['done'] = info['done']
+
+    def single_act(self, info, update=False):
+        
+        agent_state = self.internale_state[info['aid']]['agent_state']
+        obs = info['observation']['image']
+        done = info['aid']['done']
+
+        action, agent_state = self.agent(obs, done, agent_state, training=self.training)
+        
+        self.internale_state[info['aid']]['agent_state'] = agent_state
+
+        return action['action']
+
+    def train(self, update_steps, arenas) -> bool:
+        self._prefill_dataset(arenas)
+        self._load_dataset()
+        self._init_agent(arenas)
+
+        target_steps = min(self.agent._step + update_steps, self.config.steps)
+
+        while self.agent._step <  target_steps:
+            self.logger.write()
+            self.train_state = simulate(
+                self.agent,
+                arenas,
+                self.train_eps,
+                self.config.traindir,
+                self.logger,
+                limit=self.config.dataset_size,
+                steps=self.config.eval_every,
+                state=self.train_state,
+            )
+    
+    def save(self):
+        items_to_save = {
+            "agent_state_dict": self.agent.state_dict(),
+            "optims_state_dict": recursively_collect_optim_state_dict(self.agent),
+        }
+        torch.save(items_to_save, self.logdir / "latest.pt")
+
+    def save_best(self):
+
+        items_to_save = {
+            "agent_state_dict": self.agent.state_dict(),
+            "optims_state_dict": recursively_collect_optim_state_dict(self.agent),
+        }
+        torch.save(items_to_save, self.logdir / "best.pt")
+        
 
 
     def load(self):
-        if (self.save_dir / "latest.pt").exists():
-            checkpoint = torch.load(logdir / "latest.pt")
-            self.dreamer.load_state_dict(checkpoint["agent_state_dict"])
-            tools.recursively_load_optim_state_dict(self.dreamer, checkpoint["optims_state_dict"])
-            self.dreamer._should_pretrain._once = False
+        if self.loaded_model:
+            return
+        
+        if (self.logdir / "latest.pt").exists():
+            checkpoint = torch.load(self.logdir / "latest.pt")
+            self.agent.load_state_dict(checkpoint["agent_state_dict"])
+            recursively_load_optim_state_dict(self.agent, checkpoint["optims_state_dict"])
+            self.agent._should_pretrain._once = False
 
+        self.loaded_model = True
+
+        return self.step
+
+    def set_eval(self):
+        self.training=False
+    
+    def set_train(self):
+        self.training=True
             

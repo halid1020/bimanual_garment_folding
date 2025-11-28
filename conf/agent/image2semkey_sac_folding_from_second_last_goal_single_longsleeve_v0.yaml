@@ -1,9 +1,9 @@
 name: image2state-sac
-device: "cuda:0"
-replay_device: Disk
-
 exp_name: ${exp_name}
 project_name: ${project_name}
+replay_device: Disk
+device: "cuda:0"   # fallback to cuda:0
+
 
 # === Inputs ===
 obs_keys: ['rgb']
@@ -14,10 +14,10 @@ context_horizon: 1
 each_image_shape: [3, 128, 128]   # Increased from 84x84
 
 # === Network Dimensions ===
-init_alpha: 0.1
+init_alpha: 1.0
 hidden_dim: 256
 state_dim: 30 # 15*2*2
-feature_dim: 25
+feature_dim: 15
 action_dim: 8
 action_range: 1.0
 
@@ -44,12 +44,14 @@ tau: 0.005
 gamma: 0.99
 batch_size: 256
 replay_capacity: 100000
-initial_act_steps: 100
+initial_act_steps: 200
 train_freq: 1
-gradient_steps: 2
+gradient_steps: 4
 target_update_interval: 1
 
 # === Training Schedule ===
 total_update_steps: 100000
 validation_interval: 1000
 eval_checkpoint: -1
+
+save_success: True

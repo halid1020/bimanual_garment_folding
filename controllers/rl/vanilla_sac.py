@@ -455,6 +455,7 @@ class VanillaSAC(TrainableAgent):
         if arenas is None or len(arenas) == 0:
             raise ValueError("SAC.train requires at least one Arena.")
         arena = arenas[0]
+        print('arena mode', arena.get_mode())
         self.set_train()
         self.last_done = True
         #print('here update!!')

@@ -63,15 +63,21 @@ class DMC_Arena(Arena):
             # eid equals to the number of episodes%CLOTH_FUNNEL_ENV_NUM = self.id
             if self.mode == 'train':
                 episode_config['eid'] = np.random.randint(self.num_train_trials)
-                seed = episode_config['eid'] + self.num_val_trials + self.num_eval_trials
             elif self.mode == 'val':
                 episode_config['eid'] = np.random.randint(self.num_val_trials)
-                seed = episode_config['eid'] + self.num_eval_trials
             else:
                 episode_config['eid'] = np.random.randint(self.num_eval_trials)
-                seed = episode_config['eid']
         
         self.eid = episode_config['eid']
+        if self.mode == 'train':
+            seed = episode_config['eid'] + self.num_val_trials + self.num_eval_trials
+        elif self.mode == 'val':
+            seed = episode_config['eid'] + self.num_eval_trials
+        else:
+            seed = episode_config['eid']
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
         
         self.save_video = episode_config['save_video']
         self.episode_config = episode_config
@@ -89,11 +95,13 @@ class DMC_Arena(Arena):
         obs = dict(time_step.observation)
         obs = {key: [val] if len(val.shape) == 0 else val for key, val in obs.items()}
         obs["image"] = self.render(resolution=self.image_resolution)
-        obs["is_terminal"] = False if time_step.first() else time_step.discount == 0
-        obs["is_first"] = time_step.first()
+        obs["is_terminal"] = False
+        obs["is_first"] = True
+        self.total_reward = 0
         self.clear_frames()
         return {
-            'observation': obs
+            'observation': obs,
+            'arena_id': self.aid
         }
 
     def step(self, action):
@@ -111,21 +119,24 @@ class DMC_Arena(Arena):
                 self.video_frames.append(rgb)
             if time_step.last():
                 break
-            
+        self.total_reward += reward
         obs = dict(time_step.observation)
         obs = {key: [val] if len(val.shape) == 0 else val for key, val in obs.items()}
         obs["image"] = self.render(resolution=self.image_resolution)
         # There is no terminal state in DMC
-        obs["is_terminal"] = False if time_step.first() else time_step.discount == 0
-        obs["is_first"] = time_step.first()
-        done = time_step.last()
+        obs["is_terminal"] = False
+        obs["is_first"] = False
         self.action_step += 1
-        done |= (self.action_step > self.action_horizon)
+        done = False
+        if self.action_step >= self.action_horizon:
+            done = True
+            obs["is_terminal"] = True
         self.info = {
             'observation': obs,
             'reward': reward,
             'done': done,
-            'discount': np.array(time_step.discount, np.float32)
+            'discount': np.array(time_step.discount, np.float32),
+            'arena_id': self.aid
         }
         return self.info
 
@@ -133,6 +144,15 @@ class DMC_Arena(Arena):
         if mode != "rgb_array":
             raise ValueError("Only render mode 'rgb_array' is supported.")
         return self._env.physics.render(*resolution, camera_id=0)
+    
+    def evaluate(self):
+        return {
+            'return': self.total_reward
+        }
+
+    def success(self):
+        # Example threshold; adjust for your task
+        return self.total_reward >= self.action_horizon * 0.5
     
     @property
     def observation_space(self):
@@ -146,7 +166,7 @@ class DMC_Arena(Arena):
         spaces["image"] = gym.spaces.Box(0, 255, self.image_resolution + (3,), dtype=np.uint8)
         return gym.spaces.Dict(spaces)
 
-    
+
     def get_action_space(self):
         return self.action_space
     

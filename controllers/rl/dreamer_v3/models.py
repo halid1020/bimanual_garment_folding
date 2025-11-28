@@ -27,7 +27,7 @@ class RewardEMA:
 
 
 class WorldModel(nn.Module):
-    def __init__(self, obs_space, act_space, step, config):
+    def __init__(self, obs_space, step, config):
         super(WorldModel, self).__init__()
         self._step = step
         self._use_amp = True if config.precision == 16 else False
@@ -172,6 +172,7 @@ class WorldModel(nn.Module):
 
     # this function is called during both rollout and training
     def preprocess(self, obs):
+        #print('obs keys', obs.keys())
         obs = {
             k: torch.tensor(v, device=self._config.device, dtype=torch.float32)
             for k, v in obs.items()

@@ -1,6 +1,8 @@
 import os
 import h5py
 import numpy as np
+import uuid
+import datetime
 
 from itertools import zip_longest
 
@@ -61,8 +63,11 @@ class MultiGarmentEnv(GarmentEnv):
            
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
-        episode_config['eid'] = episode_config['eid']
+        #episode_config['eid'] = episode_config['eid']
         self.eid = episode_config['eid']
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
 
         self.sim_step = 0
         self.video_frames = []
@@ -125,6 +130,9 @@ class MultiGarmentEnv(GarmentEnv):
         self.overstretch = 0
         self.info = self._process_info({})
         self.clear_frames()
+
+        self.info['observation']['is_first'] = True
+        self.info['observation']['is_terminal'] = False
 
         
         return self.info
@@ -250,6 +258,7 @@ class MultiGarmentEnv(GarmentEnv):
             # print('here')
 
         if self.mode == 'train':
+            print('get from train keys')
             keys = self.train_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
         elif self.mode == 'eval':

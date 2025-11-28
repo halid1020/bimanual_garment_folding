@@ -1,5 +1,6 @@
 import numpy as np
-
+import gym
+from .multi_garment_env import MultiGarmentEnv
 from .multi_garment_env import MultiGarmentEnv
 
 global ENV_NUM
@@ -10,6 +11,7 @@ class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
     
     def __init__(self, config):
         super().__init__(config)
+        self.action_space = gym.spaces.Box(-1, 1, (8, ), dtype=np.float32)
 
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
@@ -35,4 +37,6 @@ class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
         vector_action = np.stack(vector_action).flatten()
 
         self.info['applied_action'] = vector_action
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['done']
         return self.info

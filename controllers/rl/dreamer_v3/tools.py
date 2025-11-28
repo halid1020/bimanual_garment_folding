@@ -9,6 +9,7 @@ import random
 
 import numpy as np
 import uuid
+from agent_arena.utilities.logger.logger_interface import Logger
 
 import torch
 from torch import nn
@@ -57,7 +58,7 @@ class TimeRecording:
         print(self._comment, self._st.elapsed_time(self._nd) / 1000)
 
 
-class Logger:
+class WandbLogger(Logger):
     
     def __init__(self, logdir, step, project, name, config, run_id=None, resume=False):
         
@@ -139,6 +140,8 @@ class Logger:
             if value.ndim == 5:  # B T H W C — take first batch
                 value = value[0]
 
+            value = np.transpose(value, (0, 3, 1, 2))  # (T,H,W,C) → (T,C,H,W)
+
             wandb_logs[name] = wandb.Video(value, fps=16, format="mp4")
 
         # Commit step
@@ -173,6 +176,7 @@ class Logger:
 
 def simulate(
     agent,
+    policy,
     envs,
     cache,
     directory,
@@ -181,9 +185,13 @@ def simulate(
     steps=0,
     episodes=0,
     state=None,
+    parallel=True,
+    restart=True,
+    obs_keys=['image', 'is_first', 'is_terminal'],
+    reward_key='default'
 ):
     # initialize or unpack simulation state
-    if state is None:
+    if (state is None) or restart:
         step, episode = 0, 0
         done = np.ones(len(envs), bool)
         length = np.zeros(len(envs), np.int32)
@@ -197,20 +205,21 @@ def simulate(
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             results = [envs[i].reset() for i in indices]
-            results = [r() for r in results]
+            if parallel:
+                results = [r() for r in results]
             for index, result in zip(indices, results):
                 t = result['observation'].copy()
-                t = {k: convert(v) for k, v in t.items()}
+                t = {k: convert(v) for k, v in t.items() if k in obs_keys}
                 # action will be added to transition in add_to_cache
                 t["reward"] = 0.0
                 t["discount"] = 1.0
                 # initial state should be added to cache
-                add_to_cache(cache, envs[index].aid, t)
+                add_to_cache(cache, envs[index].uid, t)
                 # replace obs with done by initial state
                 obs[index] = t.copy()
         # step agents
-        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
-        action, agent_state = agent(obs, done, agent_state)
+        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if ("log_" not in k) and (k in obs_keys)}
+        action, agent_state = policy(obs, done, agent_state)
         if isinstance(action, dict):
             action = [
                 np.array(action['action'][i].detach().cpu()) for i in range(len(envs))
@@ -218,9 +227,20 @@ def simulate(
         else:
             action = np.array(action)
         assert len(action) == len(envs)
+
+        if agent.primitive_integration == 'none':
+            action_for_env = action
+        elif agent.primitive_integration == 'predict_bin_as_output':
+            #print('action', action)
+            action_for_env = [{agent.primitives[int(((action[i][0] + 1)/2)*agent.K - 1e-6)]['name']: action[i][1:]} for i in range(len(action))]
+        else:
+            raise NotImplementedError
+        
+
         # step envs
-        results = [e.step(a) for e, a in zip(envs, action)]
-        results = [r() for r in results]
+        results = [e.step(a) for e, a in zip(envs, action_for_env)]
+        if parallel:
+            results = [r() for r in results]
         obs, reward, done = zip(*[(p["observation"], p["reward"], p["done"]) for p in results])
         obs = list(obs)
         reward = list(reward)
@@ -228,38 +248,39 @@ def simulate(
         episode += int(done.sum())
         length += 1
         step += len(envs)
+        #print('simulation step', step)
         length *= 1 - done
         # add to cache
         for a, result, env in zip(action, results, envs):
             o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
-            o = {k: convert(v) for k, v in o.items()}
+            o = {k: convert(v) for k, v in o.items() if k in obs_keys}
             transition = o.copy()
             if isinstance(a, dict):
                 transition.update(a)
             else:
                 transition["action"] = a
-            transition["reward"] = r
+            transition["reward"] = r[reward_key]
             transition["discount"] = discount
-            add_to_cache(cache, env.aid, transition)
+            add_to_cache(cache, env.uid, transition)
 
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-                save_str = f'{timestamp}-{str(uuid.uuid4().hex)}-{envs[i].aid}'
-                save_episodes(directory, {save_str: cache[envs[i].aid]})
-                length = len(cache[envs[i].aid]["reward"]) - 1
-                score = float(np.array(cache[envs[i].aid]["reward"]).sum())
-                video = cache[envs[i].aid]["image"]
+                
+                #print('save episoeds')
+                save_episodes(directory, {envs[i].uid: cache[envs[i].uid]})
+                length = len(cache[envs[i].uid]["reward"]) - 1
+                score = float(np.array(cache[envs[i].uid]["reward"]).sum())
+                #video = cache[envs[i].uid]["image"]
                 # record logs given from environments
-                for key in list(cache[envs[i].aid].keys()):
+                for key in list(cache[envs[i].uid].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].aid][key]).sum())
+                            key, float(np.array(cache[envs[i].uid][key]).sum())
                         )
                         # log items won't be used later
-                        cache[envs[i].aid].pop(key)
+                        cache[envs[i].uid].pop(key)
 
                 
                 step_in_dataset = erase_over_episodes(cache, limit)
@@ -284,6 +305,7 @@ def add_to_cache(cache, id, transition):
                 cache[id][key] = [convert(0 * val)]
                 cache[id][key].append(convert(val))
             else:
+                #print('key', key)
                 cache[id][key].append(convert(val))
 
 

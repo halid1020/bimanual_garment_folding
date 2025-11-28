@@ -10,6 +10,7 @@ import pyflex
 from agent_arena import Arena
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
+import gym
 
 from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
@@ -78,6 +79,7 @@ class GarmentEnv(Arena):
         self.set_id(0)
         self.name = config.name
         self.frame_resolution = config.get("frame_resolution", [256, 256])
+        self.obs_resolution =  config.get("frame_resolution", [128, 128])
         
         # Softgym Setup
         self._get_sim_config()
@@ -120,7 +122,7 @@ class GarmentEnv(Arena):
         self.init_mode = self.config.get('init_mode', 'crumpled')
         self.action_step = 0
         self.last_info = None
-        self.horizon = self.config.horizon
+        self.action_horizon = self.config.action_horizon
 
         self.overstretch = 0
     
@@ -257,7 +259,8 @@ class GarmentEnv(Arena):
             for k, v in info['flattened_obs']['observation'].items():
                 info['observation'][f'flattened-{k}'] = v
 
-        info['done'] = self.action_step >= self.horizon
+        info['done'] = self.action_step >= self.action_horizon
+        info['discount'] = 0.99 # For dreamer
         
         if task_related:
             info['evaluation'] = self.evaluate()
@@ -269,8 +272,8 @@ class GarmentEnv(Arena):
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
             info['success'] =  self.success()
-            if info['success']:
-                info['done'] = True
+            # if info['success']:
+            #     info['done'] = True
             
             #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
@@ -298,10 +301,18 @@ class GarmentEnv(Arena):
         
         self.action_step += 1
         self.info = self._process_info(info)
+
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['done']
         
         #print('reward', info['reward'])
         return self.info
     
+    @property
+    def observation_space(self):
+        spaces = {}
+        spaces["image"] = gym.spaces.Box(0, 255, tuple(self.obs_resolution) + (3,), dtype=np.uint8)
+        return gym.spaces.Dict(spaces)
 
     def clear_frames(self):
         self.video_frames = []
@@ -570,8 +581,9 @@ class GarmentEnv(Arena):
     def _get_obs(self, flatten_obs=True):
         obs = {}
         # print('get obs here')
-        rgbd = self._render(mode='rgbd')
+        rgbd = self._render(mode='rgbd', resolution=self.obs_resolution)
         obs['rgb'] = rgbd[:, :, :3].astype(np.uint8)
+        obs['image'] = obs['rgb']
         obs['depth'] = rgbd[:, :, 3:]
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
         self.cloth_mask = obs['mask']

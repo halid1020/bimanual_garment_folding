@@ -18,7 +18,7 @@ to_np = lambda x: x.detach().cpu().numpy()
 
 
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, act_space, config, logger, dataset):
+    def __init__(self, obs_space, rnd_act_space, config, logger, dataset):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
@@ -33,7 +33,7 @@ class Dreamer(nn.Module):
         self._step = logger.step // config.action_repeat
         self._update_count = 0
         self._dataset = dataset
-        self._wm = WorldModel(obs_space, act_space, self._step, config)
+        self._wm = WorldModel(obs_space, self._step, config)
         self._task_behavior = ImagBehavior(config, self._wm)
         if (
             config.compile and os.name != "nt"
@@ -43,12 +43,13 @@ class Dreamer(nn.Module):
         reward = lambda f, s, a: self._wm.heads["reward"](f).mean()
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
-            random=lambda: Random(config, act_space),
+            random=lambda: Random(config, rnd_act_space),
             plan2explore=lambda: Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
 
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
+        #print('dreamer step', step)
         if training:
             steps = (
                 self._config.pretrain

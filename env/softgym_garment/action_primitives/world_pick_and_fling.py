@@ -26,7 +26,7 @@ class WorldPickAndFling():
         release_vel=1e-2,
         ready_pos = [[1, 1, 0.6], [-1, 1, 0.6]],
         no_cloth_vel = 0.3,
-        adaptive_fling_momentum=1.5,
+        adaptive_fling_momentum=1.3,
         lower_height=0.015,
         action_horizon=20,
 
@@ -196,18 +196,20 @@ class WorldPickAndFling():
         cloth_height = np.max(cloth_positions[:, 2]) - np.min(cloth_positions[:, 2])
 
         # Fling the cloth
-        fling_y = 0.25
+        fling_y = 0.5
 
-        back_fling_pos = np.array([
-            [grasp_dist/2, fling_y, hang_height],
-            [-grasp_dist/2, fling_y, hang_height]
+        front_fling_pos = np.array([
+            [grasp_dist/2, -fling_y, hang_height],
+            [-grasp_dist/2, -fling_y, hang_height]
         ])
-        front_fling_pos = back_fling_pos.copy()
-        front_fling_pos[:, 1] = -fling_y
+        back_fling_pos = np.array([
+            [grasp_dist/2, fling_y/2, hang_height],
+            [-grasp_dist/2, fling_y/2, hang_height]
+        ])
         
         #print('fling_vel', fling_vel)
-        info = self.action_tool.movep(env, back_fling_pos, fling_vel)
         info = self.action_tool.movep(env, front_fling_pos, fling_vel)
+        info = self.action_tool.movep(env, back_fling_pos, fling_vel/2)
         
 
         ## Lower the cloth
@@ -275,6 +277,8 @@ class WorldPickAndFling():
                     dist = np.linalg.norm(closest_cloth_particle_to_picker_mid - picker_mid_pos)
 
                     stable = dist < 0.07  # top is within 7 cm
+                    # print('stable', stable)
+                    # print('picker_mid_pos', picker_mid_pos)
                     if stable:
                         stable_steps += 1
                     else:
@@ -282,6 +286,7 @@ class WorldPickAndFling():
 
                     stretched = stable_steps > 1
                     if stretched:
+                        #print('break because of stable')
                         break
                     if stretch_steps > max_steps:
                         break

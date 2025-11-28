@@ -9,7 +9,7 @@ from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelB
 
 
 from train.utils import register_agent_arena, registered_arena, build_task
-from parallel import Parallel
+from env.parallel import Parallel
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
@@ -47,6 +47,7 @@ def main(cfg: DictConfig):
         arena = registered_arena[cfg.arena.name](cfg.arena) #We want to bulid this with agent arena.
         task = build_task(cfg.task)
         arena.set_task(task)
+        arena.set_log_dir(save_dir)
 
         res = ag_ar.train_and_evaluate_single(
             agent,
@@ -66,8 +67,12 @@ def main(cfg: DictConfig):
             arn.set_id(i)
 
         eval_arena = registered_arena[cfg.arena.name](cfg.arena)
+        eval_arena.set_task(task)
+        eval_arena.set_log_dir(save_dir)
         
         val_arena = registered_arena[cfg.arena.name](cfg.arena)
+        val_arena.set_task(task)
+        val_arena.set_log_dir(save_dir)
 
         res = ag_ar.train_plural_eval_single(
             agent,

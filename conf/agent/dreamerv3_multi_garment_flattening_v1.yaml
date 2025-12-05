@@ -58,7 +58,7 @@ initial: 'learned'
 
 # Training
 batch_size: 16
-batch_length: s64
+batch_length: 20
 train_ratio: 512
 pretrain: 100
 model_lr: 1e-4

@@ -2,7 +2,6 @@ name: pixel-based-fold-data-augmenter
 
 img_dim: [96, 96]
 remap_image: [0, 1]
-device: "cuda:0"
 rgb_norm_mode: ['remap']
 rgb_norm_param:
   remap_range: [0, 1]

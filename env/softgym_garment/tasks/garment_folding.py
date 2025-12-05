@@ -8,7 +8,7 @@ from statistics import mean
 from agent_arena import save_video
 from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
 
-from .utils import get_max_IoU, NC_FLATTENING_TRESHOLD
+from .utils import get_max_IoU, NC_FLATTENING_TRESHOLD, IOU_FLATTENING_TRESHOLD
 from .folding_rewards import *
 from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
@@ -333,13 +333,16 @@ class GarmentFoldingTask(GarmentTask):
                 multi_stage_reward = i + particle_distance_reward(cur_mdp)
             
         if info['success']:
-            multi_stage_reward += self.config.goal_steps*(info['arena'].horizon - info['observation']['action_step'])
-            pdr_ += (info['arena'].horizon - info['observation']['action_step'])
+            multi_stage_reward += self.config.goal_steps*(info['arena'].action_horizon - info['observation']['action_step'])
+            pdr_ += (info['arena'].action_horizon - info['observation']['action_step'])
 
-        threshold =  self.config.get('overstretch_penality_threshold', 0)
+        threshold =  self.config.get('overstretch_penalty_threshold', 0)
         if info['overstretch'] > threshold:
-            pdr_ -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
-            #multi_stage_reward -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+            pdr_ -= self.config.get("overstretch_penalty_scale", 0) * (info['overstretch'] - threshold)
+            multi_stage_reward -= self.config.get("overstretch_penality_scale", 0) * (info['overstretch'] - threshold)
+        
+        aff_score_pen = (1 - info.get('action_affordance_score', 1))
+        multi_stage_reward -= self.config.get("affordance_penalty_scale", 0) * aff_score_pen
 
         return {
             'particle_distance': pdr,

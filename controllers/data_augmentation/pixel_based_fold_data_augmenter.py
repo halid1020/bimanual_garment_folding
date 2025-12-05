@@ -40,7 +40,7 @@ class PixelBasedFoldDataAugmenter:
         if self.depth_blur:
             kernel_size = self.config.depth_blur_kernel_size
             sigma = 1.0
-            self.kernel = gaussian_kernel(kernel_size, sigma).to(self.config.device)
+            self.kernel = gaussian_kernel(kernel_size, sigma)
             self.kernel = self.kernel.expand(1, 1, kernel_size, kernel_size)
             if kernel_size % 2 == 1:
                 self.padding = (kernel_size - 1) // 2
@@ -53,6 +53,7 @@ class PixelBasedFoldDataAugmenter:
         #print('before preprocess goal-rgb', sample['goal-rgb'].shape)
         # batch is assumed to have the shape B*T*C*H*W
         #print('transform!!!!')
+        
         allowed_keys = ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                         'goal-depth', 'goal-mask', 'action', 'reward', 'terminal']
         if 'observation' in sample_in:
@@ -60,6 +61,8 @@ class PixelBasedFoldDataAugmenter:
         else:
             sample = sample_in
         
+        device = sample['rgb'].device
+
         if 'action' in sample_in:
             # if sample action is a dict
             if isinstance(sample_in['action'], dict):
@@ -75,9 +78,9 @@ class PixelBasedFoldDataAugmenter:
             #print(k, v.shape)
             #print('self.device', self.config.device)
             if isinstance(v, np.ndarray):
-                sample[k] = np_to_ts(v.copy(), self.config.device)
+                sample[k] = np_to_ts(v.copy(), device)
             else:
-                sample[k] = v.to(self.config.device)
+                sample[k] = v.to(device)
             
             #sample[k] = sample[k].unsqueeze(0)
             sample[k] = sample[k].float()
@@ -173,7 +176,7 @@ class PixelBasedFoldDataAugmenter:
 
                 rot = torch.stack([
                     torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
-                ], dim=0).to(self.config.device)
+                ], dim=0).to(device)
 
                 rot_inv = rot.transpose(-1, -2) 
 
@@ -195,7 +198,7 @@ class PixelBasedFoldDataAugmenter:
                 #sample['action'] = rotated_action
 
                 # Rotate observations
-                affine_matrix = torch.zeros(B*T, 2, 3, device=self.config.device)
+                affine_matrix = torch.zeros(B*T, 2, 3, device=device)
                 affine_matrix[:, :2, :2] = rot.expand(B*T, 2, 2)
 
 
@@ -483,7 +486,7 @@ class PixelBasedFoldDataAugmenter:
         depth_process = train and self.process_depth
 
         depth_noise = \
-            torch.randn(depth.shape, device=self.config.device) \
+            torch.randn(depth.shape, device=depth.device) \
                 * (self.config.depth_noise_var if depth_process else 0)
 
         if self.depth_blur and depth_process:

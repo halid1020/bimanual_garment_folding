@@ -188,7 +188,8 @@ def simulate(
     parallel=True,
     restart=True,
     obs_keys=['image', 'is_first', 'is_terminal'],
-    reward_key='default'
+    reward_key='default',
+    save_success=False
 ):
     # initialize or unpack simulation state
     if (state is None) or restart:
@@ -232,7 +233,13 @@ def simulate(
             action_for_env = action
         elif agent.primitive_integration == 'predict_bin_as_output':
             #print('action', action)
-            action_for_env = [{agent.primitives[int(((action[i][0] + 1)/2)*agent.K - 1e-6)]['name']: action[i][1:]} for i in range(len(action))]
+            prim_id = [int(((action[i][0] + 1)/2)*agent.K - 1e-6) for i in range(len(action))]
+            action_for_env = [{agent.primitives[prim_id[i]]['name']: action[i][1:]} for i in range(len(action))]
+            logger.log({
+                f"train/prim_id": prim_id[0],
+            }, step=step)
+
+        
         else:
             raise NotImplementedError
         
@@ -242,6 +249,7 @@ def simulate(
         if parallel:
             results = [r() for r in results]
         obs, reward, done = zip(*[(p["observation"], p["reward"], p["done"]) for p in results])
+        
         obs = list(obs)
         reward = list(reward)
         done = np.stack(done)
@@ -253,6 +261,9 @@ def simulate(
         # add to cache
         for a, result, env in zip(action, results, envs):
             o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
+            if result['success'] and save_success:
+               logger.log_frames(env.get_frames(), key='success episodes', step=steps)
+
             o = {k: convert(v) for k, v in o.items() if k in obs_keys}
             transition = o.copy()
             if isinstance(a, dict):
@@ -285,6 +296,7 @@ def simulate(
                 
                 step_in_dataset = erase_over_episodes(cache, limit)
                 logger.scalar(f"dataset_size", step_in_dataset)
+                
                 logger.scalar(f"train_return", score)
                 logger.scalar(f"train_length", length)
                 logger.scalar(f"train_episodes", len(cache))

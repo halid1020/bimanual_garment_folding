@@ -183,15 +183,17 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
         arena_id = info['arena_id']
         semkey2pid = info['observation']['semkey2pid']
         particle_pos = info['observation']['particle_positions']
-        rgb = info['observation']['rgb']
-        cloth_mask = info['observation']['mask']
+        
         arena = info['arena']
 
         keypids = list(semkey2pid.values())
         key_particles = particle_pos[keypids]
         key_pixels, visibility = arena.get_visibility(key_particles)
+        #rgb = arena._render()
+        cloth_mask = arena._render(mode='mask')
+        #print('cloth maks shape', cloth_mask.shape)
 
-        H, W, _ = rgb.shape
+
         step = self.internal_states[arena_id]['step']
 
         if step == 0:

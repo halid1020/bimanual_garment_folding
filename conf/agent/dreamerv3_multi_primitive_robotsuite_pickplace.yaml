@@ -7,7 +7,6 @@ offline_evaldir: ''
 seed: 0
 deterministic_run: False
 steps: 1e5
-parallel: False
 # eval_every: 1e4
 # eval_episode_num: 10
 log_every: 1e3
@@ -17,7 +16,7 @@ compile: True
 precision: 32
 debug: False
 train_video_pred_log: True
-
+parallel: False
 
 # time_limit: 1000
 grayscale: False
@@ -58,7 +57,7 @@ initial: 'learned'
 
 # Training
 batch_size: 16
-batch_length: s64
+batch_length: 64
 train_ratio: 512
 pretrain: 100
 model_lr: 1e-4
@@ -93,18 +92,29 @@ restart: true
 # eval_video_pred_log: true
 
 
-
-dataset_size: 100000
-total_update_steps: 1e5 #This is action steps actually in dreamer
+dataset_size: 1000000
+total_update_steps: 5e6 #This is action steps actually in dreamer
 eval_checkpoint: -1
 size: [128, 128]
 action_repeat: 1
-prefill: 250
-validation_interval: 1000
-num_actions: 8
+prefill: 2500
+validation_interval: 10000
 obs_keys: ['image', 'is_first', 'is_terminal']
-reward_key: coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus
-
+reward_key: last_reward_with_affordance_penalty
+primitive_integration: 'predict_bin_as_output'
+primitives:
+  - name: reach
+    dim: 4 #x, y, z, gripper_yaw
+  - name: atomic
+    dim: 5 #x, y, z, gripper_yaw, gripper_open_close
+  - name: push
+    dim: 7 #x, y, z, grippre_yaw, dx, dy, dz
+  - name: grasp
+    dim: 4 #x, y, z, gripper_yaw
+  - name: open
+    dim: 0 # no parameter 
+save_success: True
+num_actions: 'to_be_defined'
 
 exp_name: ${exp_name}
 project_name: ${project_name}

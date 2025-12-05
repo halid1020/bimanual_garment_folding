@@ -29,7 +29,8 @@ class DreamerV3Adapter(TrainableAgent):
     
     def set_log_dir(self, log_dir):
         logdir = pathlib.Path(log_dir).expanduser()
-        self.save_dir = logdir
+        super().set_log_dir(log_dir)
+        
         self.config.traindir = self.config.traindir or logdir / "train_eps"
         #self.config.evaldir = self.config.evaldir or logdir / "eval_eps"
         
@@ -43,12 +44,13 @@ class DreamerV3Adapter(TrainableAgent):
         #self.config.evaldir.mkdir(parents=True, exist_ok=True)
 
         self.step = count_steps(self.config.traindir)
+        self.logger.step = self.config.action_repeat * self.step
         # step in logger is environmental step
-        self.logger = WandbLogger(logdir, 
-            self.config.action_repeat * self.step, 
-            self.config.project_name,
-            name=self.config.exp_name,
-            config=dict(self.config))
+        # self.logger = WandbLogger(logdir, 
+        #     self.config.action_repeat * self.step, 
+        #     self.config.project_name,
+        #     name=self.config.exp_name,
+        #     config=dict(self.config))
         
         # if self.config.offline_evaldir:
         #     directory = self.config.offline_evaldir.format(**vars(self.config))
@@ -101,7 +103,8 @@ class DreamerV3Adapter(TrainableAgent):
                 steps=prefill,
                 parallel=self.config.parallel,
                 obs_keys = self.config.obs_keys,
-                reward_key = self.config.reward_key
+                reward_key = self.config.reward_key,
+                save_success = self.config.get('save_success', False)
             )
             self.logger.step += prefill * self.config.action_repeat
             self.step = count_steps(self.config.traindir)

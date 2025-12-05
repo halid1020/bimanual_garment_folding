@@ -1,0 +1,11 @@
+defaults:
+  - agent: diffusion_multi_longsleeve_folding_v0
+  - arena: multi_longsleeve_from_flattened
+  - task: centre_sleeve_folding_overstretch_penalty_1_affordance_penalty_1
+  - data_augmenter: pixel-based-fold-data-augmenter
+
+
+exp_name: diffusion_multi_longsleeve_folding_v0
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

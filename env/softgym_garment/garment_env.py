@@ -148,6 +148,8 @@ class GarmentEnv(Arena):
                 camera_angle, 
                 self.camera_config['cam_size'], 
                 self.camera_config['cam_fov'])
+        self.camera_pos = camera_pos
+        self.camera_angle = camera_angle
         
         self.camera_size = self.camera_config['cam_size']
 
@@ -260,7 +262,7 @@ class GarmentEnv(Arena):
                 info['observation'][f'flattened-{k}'] = v
 
         info['done'] = self.action_step >= self.action_horizon
-        info['discount'] = 0.99 # For dreamer
+        info['discount'] = 1.0 # For dreamer
         
         if task_related:
             info['evaluation'] = self.evaluate()
@@ -566,6 +568,8 @@ class GarmentEnv(Arena):
             pass
         elif mode == 'depth':
             img = depth_img
+        elif mode == 'mask':
+            img = img.sum(axis=2) > 0
         else:
             raise NotImplementedError
         
@@ -690,7 +694,7 @@ class GarmentEnv(Arena):
     def _get_init_state_params(self, eid):
         raise NotImplementedError
     
-    def get_visibility(self, particle_positions):
+    def get_visibility(self, particle_positions, resolution=None):
         """
         Project world-space particle positions into image pixels
         and check if each particle is visible in the current camera view.
@@ -715,19 +719,34 @@ class GarmentEnv(Arena):
         cam_pts = cam_pts_h[:, :3]  # (N, 3)
 
         # ---- Camera → Pixel ----
-        proj = (self.camera_intrinsic_matrix @ cam_pts.T).T  # (N, 3)
+        if resolution is not None:
+            camera_intrinsic_matrix, _ = \
+                get_camera_matrix(
+                    self.camera_pos, 
+                    self.camera_angle, 
+                    resolution, 
+                    self.camera_config['cam_fov'])
+        else:
+            camera_intrinsic_matrix = self.camera_intrinsic_matrix
+            
+        proj = (camera_intrinsic_matrix @ cam_pts.T).T  # (N, 3)
         z = proj[:, 2]
         # avoid div by zero
         z_safe = np.where(z == 0, 1e-6, z)
         pixels = proj[:, :2] / z_safe[:, None]  # (u, v) = (x/z, y/z)
 
         # ---- Visibility ----
-        H, W = self.camera_size
+        if resolution is None:
+            H, W = self.camera_size
+            
+        else:
+            H, W = resolution
+        # print('Visibility H, W', H, W)
         u, v = pixels[:, 0], pixels[:, 1]
 
         # Rendered depth map (same size as camera)
         # print('vis here')
-        depth_img = self._render('depth').reshape(H, W)  # (H, W, 1)
+        depth_img = self._render('depth', resolution=resolution).reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds
         visible = (z > 0) & (u >= 0) & (u < W) & (v >= 0) & (v < H)

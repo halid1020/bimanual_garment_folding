@@ -126,6 +126,7 @@ class DreamerV3Adapter(TrainableAgent):
             self.config,
             self.logger,
             self.train_dataset,
+            self.data_augmenter
         ).to(self.config.device)
         self.dreamer.requires_grad_(requires_grad=False)
         self.load()
@@ -169,7 +170,6 @@ class DreamerV3Adapter(TrainableAgent):
             return out_dict
         else:
             raise NotImplementedError
-    
 
     def train(self, update_steps, arenas) -> bool:
         

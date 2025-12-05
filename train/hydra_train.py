@@ -6,7 +6,7 @@ import agent_arena.api as ag_ar
 from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
 from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
 from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
-
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
 
 from train.utils import register_agent_arena, registered_arena, build_task
 from env.parallel import Parallel
@@ -24,18 +24,18 @@ def main(cfg: DictConfig):
     # data_augmenter
     if cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter':
         augmenter = PixelBasedMultiPrimitiveDataAugmenter(cfg.data_augmenter)
-        agent.set_data_augmenter(augmenter)
     elif cfg.data_augmenter.name == 'pixel-based-fold-data-augmenter':
-        data_augmenter = PixelBasedFoldDataAugmenter(cfg.data_augmenter)
-        agent.set_data_augmenter(data_augmenter)
+        augmenter = PixelBasedFoldDataAugmenter(cfg.data_augmenter)
     elif cfg.data_augmenter.name == 'pixel-based-single-primitive-augmenter':
-        data_augmenter = PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
-        agent.set_data_augmenter(data_augmenter)
+        augmenter = PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
+    elif cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter-for-dreamer':
+        augmenter = PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg.data_augmenter)
     elif cfg.data_augmenter.name == 'identity':
-        pass
+        augmenter = lambda x: x
     else:
         raise NotImplementedError(f"Data augmenter {cfg.data_augmenter.name} not supported")
 
+    agent.set_data_augmenter(augmenter)
     # logging
     save_dir = os.path.join(cfg.save_root, cfg.exp_name)
     

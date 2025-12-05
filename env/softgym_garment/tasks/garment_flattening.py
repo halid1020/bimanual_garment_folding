@@ -38,7 +38,7 @@ class GarmentFlatteningTask(GarmentTask):
 
     def reward(self, last_info, action, info):#
         reward = coverage_alignment_reward(last_info, action, info)
-        if info['success']:
+        if info['success'] and self.config.get('big_success_bonus', True):
             reward = info['arena'].action_horizon - info['observation']['action_step']
         
         reward_ = reward

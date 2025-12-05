@@ -5,7 +5,7 @@ task_name: PickPlace
 sim_horizon: 1500         # Number of simulation steps per episode
 action_horizon: 100
 disp: false              # Whether to display a GUI
-use_camera_obs: false    # Disable RGB camera observations
+use_camera_obs: true    # Disable RGB camera observations
 control_freq: 10         # Control frequency (Hz)
 controller_name: OSC_POSE
 reward_scale: 5.0

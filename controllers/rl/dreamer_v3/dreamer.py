@@ -18,7 +18,7 @@ to_np = lambda x: x.detach().cpu().numpy()
 
 
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, rnd_act_space, config, logger, dataset):
+    def __init__(self, obs_space, rnd_act_space, config, logger, dataset, data_augmenter):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
@@ -46,6 +46,7 @@ class Dreamer(nn.Module):
             random=lambda: Random(config, rnd_act_space),
             plan2explore=lambda: Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
+        self.data_augmenter = data_augmenter
 
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
@@ -110,6 +111,10 @@ class Dreamer(nn.Module):
 
     def _train(self, data):
         metrics = {}
+        print('train data keys', data.keys())
+        print('train data image states min and max', data['image'].min(),  data['image'].max())
+        data = self.data_augmenter(data)
+        print('augment data keys', data.keys())
         post, context, mets = self._wm._train(data)
         metrics.update(mets)
         start = post

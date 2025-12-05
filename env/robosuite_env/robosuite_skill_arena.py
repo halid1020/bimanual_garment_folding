@@ -124,8 +124,6 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             "discount": 1.0 if not self.done else 0.0
         }
 
-    def render(self):
-        return super().render()
 
     def close(self):
         super().close()

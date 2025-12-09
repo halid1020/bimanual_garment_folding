@@ -4,7 +4,7 @@ picker_radius: 0.03
 picker_threshold: 0.007
 picker_low: [-5, 0, -5]
 picker_high: [5, 5, 5]
-grasp_mode: {closest: 1.0}
+grasp_mode: {around: 1.0}
 picker_initial_pos: [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]]
 image_resolution: [512, 512]
 init_state_path: assets/init_states

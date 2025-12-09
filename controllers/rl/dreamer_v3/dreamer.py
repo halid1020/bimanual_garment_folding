@@ -24,7 +24,9 @@ class Dreamer(nn.Module):
         self._logger = logger
         self._should_log = Every(config.log_every)
         batch_steps = config.batch_size * config.batch_length
-        self._should_train = Every(batch_steps / config.train_ratio)
+        train_every = batch_steps / config.train_ratio
+        #print('train every', train_every)
+        self._should_train = Every(train_every)
         self._should_pretrain = Once()
         self._should_reset = Every(config.reset_every)
         self._should_expl = Until(int(config.expl_until / config.action_repeat))
@@ -32,6 +34,9 @@ class Dreamer(nn.Module):
         self._metrics = {}
         # this is update step
         self._step = logger.step // config.action_repeat
+        if self._step > 0:
+            self._should_pretrain()
+        #print('init step', self._step)
         self._update_count = 0
         self._dataset = dataset
         self._wm = WorldModel(obs_space, self._step, config)
@@ -51,25 +56,46 @@ class Dreamer(nn.Module):
 
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
-        #print('dreamer step', step)
+        #print('training', training, 'step', step)
         if training:
             steps = (
                 self._config.pretrain
                 if self._should_pretrain()
                 else self._should_train(step) * self._updates_per_step
             )
+            #print('update steps', steps)
             for _ in range(steps):
                 self._train(next(self._dataset))
                 #print('train!!!')
                 self._update_count += 1
                 self._metrics["update_count"] = self._update_count
             if self._should_log(step):
+                print(f'[dreamerV3] Log training at step {step}')
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
                 if self._config.train_video_pred_log:
-                    openl = self._wm.video_pred(next(self._dataset))
-                    self._logger.video("train_openl", to_np(openl))
+                    openl = self._wm.video_pred(next(self._dataset))  # B, T, H, W, C
+
+                    # Convert openl to T, H, B*W, C
+                    B, T, H, W, C = openl.shape
+
+                    # permute to (T, H, B, W, C)
+                    x = openl.permute(1, 2, 0, 3, 4)
+
+                    # reshape to (T, H, B*W, C)
+                    convert_openl = x.reshape(T, H, B * W, C)
+                    self._logger.video("train_openl", to_np(convert_openl))
+
+                    # First sample
+                    single_openl = openl[0]  # (T, H, W, C)
+
+                    # Convert to (H, T*W, C)
+                    convert_single_openl = single_openl.permute(1, 0, 2, 3).reshape(H, T * W, C)
+
+                    self._logger.image("train_recon", to_np(convert_single_openl))
+                        
+                    
                 self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)

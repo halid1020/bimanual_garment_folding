@@ -95,6 +95,8 @@ evaluate_method: 'simulate'
 eval_video_pred_log: true
 
 num_actions: 6
+obs_keys: 'image'
+reward_key: 'default'
 
 validation_interval: 10000
 total_update_steps: 1e6 #This is action steps actually in dreamer

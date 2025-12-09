@@ -14,14 +14,14 @@ class HumanMultiPrimitive(Agent):
         super().__init__(config)
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
-            "norm-pixel-pick-and-place",
-            "norm-pixel-pick-and-drag",
+            # "norm-pixel-pick-and-place",
+            # "norm-pixel-pick-and-drag",
             "norm-pixel-fold",
         ]
         self.primitive_instances = [
             PixelHumanFling(config),
-            PixelHumanTwoPicker(config),
-            HumanPickAndDrag(config),
+            # PixelHumanTwoPicker(config),
+            # HumanPickAndDrag(config),
             HumanFold(config)
         ]
     

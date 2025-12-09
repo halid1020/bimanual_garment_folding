@@ -133,7 +133,7 @@ class DMC_Arena(Arena):
             obs["is_terminal"] = True
         self.info = {
             'observation': obs,
-            'reward': reward,
+            'reward': {'default': reward},
             'done': done,
             'discount': np.array(time_step.discount, np.float32),
             'arena_id': self.aid

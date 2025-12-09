@@ -34,7 +34,9 @@ from controllers.rl.image2state_multi_primitive_sac \
     import Image2StateMultiPrimitiveSAC
 from controllers.gpt_fabric.adapter import GPTFabricAdapter
 from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
-
+from controllers.human.human_fold import HumanFold
+from controllers.human.human_multi_primitive import HumanMultiPrimitive
+from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 import agent_arena as ag_ar
 from dotmap import DotMap
 
@@ -64,6 +66,9 @@ def register_agent_arena():
     ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
     ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)
     ag_ar.register_agent('dreamerV3', DreamerV3Adapter)
+    ag_ar.register_agent('human-fold', HumanFold)
+    ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
+    ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
 
 
 def build_task(task_cfg):

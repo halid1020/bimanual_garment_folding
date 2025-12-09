@@ -9,6 +9,7 @@ use_camera_obs: true    # Disable RGB camera observations
 control_freq: 10         # Control frequency (Hz)
 controller_name: OSC_POSE
 reward_scale: 5.0
+image_resolution: [64, 64]
 
 # === Environment kwargs ===
 robots: Panda          # Robot model

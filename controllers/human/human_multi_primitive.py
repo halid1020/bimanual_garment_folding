@@ -71,7 +71,9 @@ class HumanMultiPrimitive(Agent):
         img = np.concatenate([img, goal_rgb], axis=1)
 
         # Show window
-        cv2.imwrite("tmp/human_rgb.png", img)
+        obs_dir = "tmp/human_rgb.png"
+        cv2.imwrite(obs_dir, img)
+        print(f'[human-multi-primitive] Check {obs_dir} for current and goal observation.')
 
         chosen_primitive = None
         while True:

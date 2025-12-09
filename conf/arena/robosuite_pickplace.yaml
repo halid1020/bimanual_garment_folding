@@ -6,4 +6,4 @@ use_camera_obs: true
 control_freq: 20
 controller_name: OSC_POSE
 robots: Panda
-image_resolution: [128, 128]
+image_resolution: [64, 64]

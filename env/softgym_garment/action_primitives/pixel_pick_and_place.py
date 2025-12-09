@@ -98,7 +98,7 @@ class PixelPickAndPlace():
 
         if self.readjust_pick:
             pick_0 = adj_pick_0
-            print('Place readjust pick 0')
+            #print('Place readjust pick 0')
             
         dist_1 = 0
 
@@ -113,7 +113,7 @@ class PixelPickAndPlace():
 
             if self.readjust_pick:
                 pick_1 = adj_pick_1
-                print('Place readjust pick 1')
+                #print('Place readjust pick 1')
                 
 
             pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height

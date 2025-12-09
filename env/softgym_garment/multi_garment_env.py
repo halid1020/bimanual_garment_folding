@@ -19,9 +19,9 @@ class MultiGarmentEnv(GarmentEnv):
     def __init__(self, config):
         #config.name = f'multi-garment-{config.object}-env'
         
-        self.num_eval_trials = 30
-        self.num_train_trials = 100
-        self.num_val_trials = 10
+        self.num_eval_trials = config.get('num_eval_trials', 30)
+        self.num_train_trials = config.get('num_train_trials', 100)
+        self.num_val_trials = config.get('num_val_trials', 10)
 
 
         config.name = f'multi-garment-{config.garment_type}-env'
@@ -268,7 +268,9 @@ class MultiGarmentEnv(GarmentEnv):
             keys = self.val_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
         #print('len(keys)', len(keys))
+        print('mode', self.mode)
         while True:
+            #print('[multi-garment env] eid', eid)
             key = keys[eid]
             #print('key', key)
             with h5py.File(hdf5_path, 'r') as init_states:

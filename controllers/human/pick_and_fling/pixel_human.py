@@ -67,10 +67,7 @@ class PixelHumanFling(Agent):
                 (place_y / height) * 2 - 1
             ]
             
-            return {
-                'pick_0': normalized_action[:2],
-                'pick_1': normalized_action[2:]
-            }
+            return np.asarray(normalized_action)
             
             
         def get_phase(self):

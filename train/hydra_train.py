@@ -7,7 +7,7 @@ from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter im
 from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
 from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
 from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
-
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
 from train.utils import register_agent_arena, registered_arena, build_task
 from env.parallel import Parallel
 
@@ -19,7 +19,7 @@ def main(cfg: DictConfig):
 
 
     agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
-    print('agent', cfg.agent.name, agent)
+    #print('agent', cfg.agent.name, agent)
     
     # data_augmenter
     if cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter':
@@ -30,6 +30,8 @@ def main(cfg: DictConfig):
         augmenter = PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
     elif cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter-for-dreamer':
         augmenter = PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg.data_augmenter)
+    elif cfg.data_augmenter.name == 'pixel-based-multi-primitive-data-augmenter-for-diffusion':
+        augmenter = PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg.data_augmenter)
     elif cfg.data_augmenter.name == 'identity':
         augmenter = lambda x: x
     else:

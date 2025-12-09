@@ -7,16 +7,17 @@ offline_evaldir: ''
 seed: 0
 deterministic_run: False
 steps: 1e5
+parallel: False
 # eval_every: 1e4
 # eval_episode_num: 10
 log_every: 1e3
 reset_every: 0
-device: 'cuda:1'
+device: 'cuda:0'
 compile: True
 precision: 32
 debug: False
 train_video_pred_log: True
-parallel: False
+
 
 # time_limit: 1000
 grayscale: False
@@ -56,20 +57,21 @@ unimix_ratio: 0.01
 initial: 'learned'
 
 # Training
-batch_size: 16
-batch_length: 64
+batch_size: 64 #16
+batch_length: 16 #64
 train_ratio: 512
-pretrain: 100
+pretrain: 1000 #100
 model_lr: 1e-4
 opt_eps: 1e-8
 grad_clip: 1000
+updates_per_step: 10 #1
 
 opt: 'adam'
 
 # Behavior.
 discount: 0.997
 discount_lambda: 0.95
-imag_horizon: 15
+imag_horizon: 4 #15
 imag_gradient: 'dynamics'
 imag_gradient_mix: 0.0
 eval_state_mean: False
@@ -92,27 +94,21 @@ restart: true
 # eval_video_pred_log: true
 
 
-dataset_size: 1000000
-total_update_steps: 5e6 #This is action steps actually in dreamer
+dataset_size: 100000
+total_update_steps: 1e5 #This is action steps actually in dreamer
 eval_checkpoint: -1
 size: [64, 64]
 action_repeat: 1
-prefill: 2500
-validation_interval: 10000
+prefill: 250
+validation_interval: 1000
 obs_keys: ['image', 'is_first', 'is_terminal']
-reward_key: last_reward_with_affordance_penalty
+reward_key: coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus
 primitive_integration: 'predict_bin_as_output'
 primitives:
-  - name: reach
-    dim: 4 #x, y, z, gripper_yaw
-  - name: atomic
-    dim: 5 #dx, dy, dz, gripper_yaw, gripper_open_close
-  - name: push
-    dim: 7 #x, y, z, grippre_yaw, dx, dy, dz
-  - name: grasp
-    dim: 4 #x, y, z, gripper_yaw
-  - name: open
-    dim: 0 # no parameter 
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]name: image2state-sac
+  - name: norm-pixel-fold
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
 save_success: True
 num_actions: 'to_be_defined'
 

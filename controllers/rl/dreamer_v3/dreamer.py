@@ -28,6 +28,7 @@ class Dreamer(nn.Module):
         self._should_pretrain = Once()
         self._should_reset = Every(config.reset_every)
         self._should_expl = Until(int(config.expl_until / config.action_repeat))
+        self._updates_per_step = self._config.get('updates_per_step', 1)
         self._metrics = {}
         # this is update step
         self._step = logger.step // config.action_repeat
@@ -55,7 +56,7 @@ class Dreamer(nn.Module):
             steps = (
                 self._config.pretrain
                 if self._should_pretrain()
-                else self._should_train(step)
+                else self._should_train(step) * self._updates_per_step
             )
             for _ in range(steps):
                 self._train(next(self._dataset))
@@ -111,10 +112,10 @@ class Dreamer(nn.Module):
 
     def _train(self, data):
         metrics = {}
-        print('train data keys', data.keys())
-        print('train data image states min and max', data['image'].min(),  data['image'].max())
+        # print('train data keys', data.keys())
+        # print('train data image states min and max', data['image'].min(),  data['image'].max())
         data = self.data_augmenter(data)
-        print('augment data keys', data.keys())
+        # print('augment data keys', data.keys())
         post, context, mets = self._wm._train(data)
         metrics.update(mets)
         start = post

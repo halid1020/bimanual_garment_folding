@@ -180,7 +180,7 @@ class GarmentFoldingTask(GarmentTask):
             "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
-            'normalised_coverage': self._get_normalised_coverage(arena)
+            'normalised_coverage': self._get_normalised_coverage(arena),
         }
 
     def _align_points(self, arena, cur, goal):

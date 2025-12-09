@@ -84,7 +84,9 @@ class PixelHumanTwoPicker(Agent):
             (place2_y / width) * 2 - 1
         ]
         
-        return {
+        return np.concatenate([normalized_action1, normalized_action2])
+        
+        {
             'pick_0': normalized_action1[:2],
             'place_0': normalized_action1[2:],
             'pick_1': normalized_action2[:2],

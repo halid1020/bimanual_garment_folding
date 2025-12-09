@@ -79,7 +79,7 @@ class GarmentEnv(Arena):
         self.set_id(0)
         self.name = config.name
         self.frame_resolution = config.get("frame_resolution", [256, 256])
-        self.obs_resolution =  config.get("frame_resolution", [128, 128])
+        self.obs_resolution =  config.get("image_resolution", [128, 128])
         
         # Softgym Setup
         self._get_sim_config()

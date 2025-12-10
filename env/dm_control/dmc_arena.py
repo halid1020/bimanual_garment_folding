@@ -1,8 +1,10 @@
 import os
+os.environ["MUJOCO_GL"] = "osmesa"
 import datetime
 from ..video_logger import VideoLogger
 from agent_arena import Arena
 from dm_control import suite
+
 import numpy as np
 import gym
 import uuid
@@ -11,10 +13,12 @@ import uuid
 class DMC_Arena(Arena):
     def __init__(self, config):
         super().__init__(config)
+        
+        
         #os.environ["MUJOCO_GL"] = "osmesa"
         self.num_eval_trials = 30
         self.num_train_trials = 1000
-        self.num_val_trials = 10
+        self.num_val_trials = 5
         self.action_horizon = config.action_horizon
 
         self.action_repeat = config.action_repeat
@@ -136,7 +140,8 @@ class DMC_Arena(Arena):
             'reward': {'default': reward},
             'done': done,
             'discount': np.array(time_step.discount, np.float32),
-            'arena_id': self.aid
+            'arena_id': self.aid,
+            'success': self.success()
         }
         return self.info
 

@@ -6,9 +6,7 @@ import requests
 import time
 from .manipulation import RGB_manipulation, encode_image
 from agent_arena.utilities.save_utils import save_mask, save_colour, save_depth
-from huggingface_hub import login
-HF_TOKEN = os.environ["HF_TOKEN"]
-login(token=HF_TOKEN)
+
 from transformers import AutoProcessor, Gemma3ForConditionalGeneration
 import torch
 from collections import deque
@@ -87,6 +85,10 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
     def __init__(self, re_consider=True,in_context_learning=False,demo_dir="./tmp/Manual_test14"):
         
         super().__init__()
+        from huggingface_hub import login
+        HF_TOKEN = os.environ["HF_TOKEN"]
+        login(token=HF_TOKEN)
+
         self.re_consider=re_consider
         self.in_context_learning=in_context_learning
         self.demo_dir=demo_dir

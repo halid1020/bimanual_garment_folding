@@ -1,0 +1,4 @@
+name: 'centre_sleeve_folding_stochastic_policy'
+
+exp_name: ${exp_name}
+project_name: ${project_name}

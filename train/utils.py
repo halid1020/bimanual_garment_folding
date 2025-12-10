@@ -1,3 +1,7 @@
+import agent_arena as ag_ar
+from dotmap import DotMap
+
+
 from env.softgym_garment.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.softgym_garment.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
 from env.softgym_garment.multi_garment_env import MultiGarmentEnv
@@ -37,8 +41,14 @@ from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 from controllers.human.human_fold import HumanFold
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
-import agent_arena as ag_ar
-from dotmap import DotMap
+
+# Add this import block at the top of the second file
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
+from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
+from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
+
 
 
 registered_arena = {
@@ -97,3 +107,27 @@ def build_task(task_cfg):
     else:
         raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
     return task
+
+def build_data_augmenter(cfg):
+    name = cfg.data_augmenter.name
+
+    if name == 'pixel-based-multi-primitive-data-augmenter':
+        return PixelBasedMultiPrimitiveDataAugmenter(cfg.data_augmenter)
+
+    elif name == 'pixel-based-fold-data-augmenter':
+        return PixelBasedFoldDataAugmenter(cfg.data_augmenter)
+
+    elif name == 'pixel-based-single-primitive-augmenter':
+        return PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
+
+    elif name == 'pixel-based-multi-primitive-data-augmenter-for-dreamer':
+        return PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg.data_augmenter)
+
+    elif name == 'pixel-based-multi-primitive-data-augmenter-for-diffusion':
+        return PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg.data_augmenter)
+
+    elif name == 'identity':
+        return lambda x: x
+
+    else:
+        raise NotImplementedError(f"Data augmenter {name} not supported")

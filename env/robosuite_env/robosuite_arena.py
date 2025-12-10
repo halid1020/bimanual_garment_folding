@@ -1,7 +1,6 @@
 import numpy as np
 import gym
-import robosuite as suite
-from robosuite.wrappers.gym_wrapper import GymWrapper
+
 from agent_arena import Arena  # your abstract base
 from omegaconf import OmegaConf
 from ..video_logger import VideoLogger
@@ -54,6 +53,9 @@ class RoboSuiteArena(Arena):
         self.num_val_trials = 5
 
         super().__init__(config)
+        import robosuite as suite
+        from robosuite.wrappers.gym_wrapper import GymWrapper
+
         self.config = config
         self.name = config.get("name", "robosuite_arena")
         self.sim_horizon = config.get("sim_horizon", 500)

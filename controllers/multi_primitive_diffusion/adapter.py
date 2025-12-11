@@ -128,6 +128,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.buffer_actions = {}
         self.last_actions = {}
         self.obs_deque = {}
+        self.collect_on_success = self.config.get('collect_on_success', True)
 
         if self.config.primitive_integration != 'none':
             self.primitives = config.primitives
@@ -222,6 +223,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             policy.init(info)
             info['reward'] = 0
             done = info['done']
+            #print('done', done)
             while not done:
                 action = policy.single_act(info)
                 #print('demo action', action)
@@ -266,7 +268,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 policy.update(info, add_action)
                 info['reward'] = 0
                 done = info['done']
-                if info['success'] or policy.terminate()[arena.id]:
+                if (self.collect_on_success and info['success']) or policy.terminate()[arena.id]:
                     break
                 
             for k, v in info['observation'].items():

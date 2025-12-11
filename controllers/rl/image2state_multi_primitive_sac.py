@@ -595,7 +595,6 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
             'sim_steps': self.sim_steps,
-            "wandb_run_id": self.logger.get_run_id(),
         }
         if self.obs_type == 'image':
             state.update({
@@ -671,24 +670,24 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
-        run_id = state.get("wandb_run_id", None)
+       
         #print(f"[INFO] Resuming W&B run ID: {run_id}")
 
-        if resume and (run_id is not None):
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                run_id=run_id,
-                resume=True
-            )
-        else:
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
+        # if resume and (run_id is not None):
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         run_id=run_id,
+        #         resume=True
+        #     )
+        # else:
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
         
     
     def _load_replay_buffer(self, replay_file):

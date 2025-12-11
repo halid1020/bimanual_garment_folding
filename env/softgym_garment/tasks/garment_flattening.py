@@ -37,7 +37,7 @@ class GarmentFlatteningTask(GarmentTask):
         return self.goals[0]
 
     def reward(self, last_info, action, info):#
-        reward = coverage_alignment_reward(last_info, action, info)
+        reward = coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
         if info['success'] and self.config.get('big_success_bonus', True):
             reward = info['arena'].action_horizon - info['observation']['action_step']
         
@@ -45,6 +45,12 @@ class GarmentFlatteningTask(GarmentTask):
         
         if info['evaluation']['normalised_coverage'] > 0.7:
             reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
+        
+        if info['evaluation']['max_IoU_to_flattened'] > 0.6:
+            reward_ += (info['evaluation']['max_IoU_to_flattened'] - 0.5)
+        
+        if info['success']:
+            reward_ = 2
 
         threshold =  self.config.get('overstretch_penalty_threshold', 0)
         if info['overstretch'] > threshold:
@@ -58,8 +64,8 @@ class GarmentFlatteningTask(GarmentTask):
         #print('rev aff score', aff_score_rev)
         return {
             'coverage_alignment': reward,
-            'coverage_alignment_with_stretch_penalty_high_coverage_bonus': reward_,
-            'coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus': reward_2
+            'augmented_coverage_alignment_with_stretch_penalty': reward_,
+            'coverage_alignment_with_stretch_and_affordance_penalty': reward_2
         }
     
     def evaluate(self, arena):

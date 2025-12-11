@@ -80,6 +80,7 @@ class GarmentEnv(Arena):
         self.name = config.name
         self.frame_resolution = config.get("frame_resolution", [256, 256])
         self.obs_resolution =  config.get("image_resolution", [128, 128])
+        self.stop_on_success = config.get('stop_on_success', True)
         
         # Softgym Setup
         self._get_sim_config()
@@ -274,8 +275,8 @@ class GarmentEnv(Arena):
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
             info['success'] =  self.success()
-            # if info['success']:
-            #     info['done'] = True
+            if info['success'] and self.stop_on_success:
+                info['done'] = True
             
             #print('ev', info['evaluation'])
             if info['evaluation'] != {}:

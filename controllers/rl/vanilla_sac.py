@@ -17,8 +17,6 @@ import zarr
 from .replay_buffer import ReplayBuffer
 from .replay_buffer_zarr import ReplayBufferZarr
 
-from .wandb_logger import WandbLogger
-
 
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim=256):
@@ -517,7 +515,7 @@ class VanillaSAC(TrainableAgent):
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
             'sim_steps': self.sim_steps,
-            "wandb_run_id": self.logger.get_run_id(),
+           
         }
 
         if self.auto_alpha_learning:
@@ -603,28 +601,28 @@ class VanillaSAC(TrainableAgent):
         self.sim_steps = state.get('sim_steps', 0)
         self.last_sim_steps = self.sim_steps
 
-        # ---- W&B resume handling ----
-        run_id = state.get("wandb_run_id", None)
-        try:
-            if resume and run_id is not None:
-                print(f"[INFO] Attempting to resume W&B run ID: {run_id}")
-                self.logger = WandbLogger(
-                    project=self.config.project_name,
-                    name=self.config.exp_name,
-                    config=dict(self.config),
-                    run_id=run_id,
-                    resume=True
-                )
-            else:
-                raise ValueError("No valid run_id for resuming.")
-        except Exception as e:
-            print(f"[WARN] W&B resume failed ({e}). Starting a new run instead.")
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
+        # # ---- W&B resume handling ----
+        # run_id = state.get("wandb_run_id", None)
+        # try:
+        #     if resume and run_id is not None:
+        #         print(f"[INFO] Attempting to resume W&B run ID: {run_id}")
+        #         self.logger = WandbLogger(
+        #             project=self.config.project_name,
+        #             name=self.config.exp_name,
+        #             config=dict(self.config),
+        #             run_id=run_id,
+        #             resume=True
+        #         )
+        #     else:
+        #         raise ValueError("No valid run_id for resuming.")
+        # except Exception as e:
+        #     print(f"[WARN] W&B resume failed ({e}). Starting a new run instead.")
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
 
 
     def load(self, path: Optional[str] = None) -> int:
@@ -634,16 +632,17 @@ class VanillaSAC(TrainableAgent):
         replay_file = os.path.join(path, 'last_replay_buffer.pt')
 
         if not os.path.exists(model_file):
-            print(f"[WARN] Model file not found: {model_file}")
-
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
-            
             return 0
+        #     print(f"[WARN] Model file not found: {model_file}")
+
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
+            
+        #     return 0
 
         self._load_model(model_file, resume=True)
         
@@ -697,8 +696,6 @@ class VanillaSAC(TrainableAgent):
             raise ValueError(f"Unknown replay device type: {self.replay_device}")
 
 
-
-    
     def load_best(self, path: Optional[str] = None) -> int:
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
@@ -720,7 +717,3 @@ class VanillaSAC(TrainableAgent):
         for aid in arena_ids:
             self.internal_states[aid] = {}
             self.internal_states[aid]['obs_que'] = deque()
-
-    def set_log_dir(self, log_dir):
-        self.save_dir = log_dir
-        self.logger.set_log_dir(log_dir)

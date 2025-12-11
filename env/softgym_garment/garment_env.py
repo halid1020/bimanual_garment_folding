@@ -14,7 +14,8 @@ import gym
 
 from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-from ..video_logger import VideoLogger
+# from ..video_logger import VideoLogger
+from .pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
 
@@ -74,7 +75,7 @@ class GarmentEnv(Arena):
         self.info = {}
         self.sim_step = 0
         self.save_video = False
-        self.logger = VideoLogger()
+        
         self.random_reset = False
         self.set_id(0)
         self.name = config.name
@@ -107,10 +108,13 @@ class GarmentEnv(Arena):
             grasp_mode=(self.config.grasp_mode if 'grasp_mode' in self.config.keys() else {'closest': 1.0}),
         )
         self.particle_radius = self.scene_config['radius']
+        
         self.action_tool = HybridActionPrimitive(
-            # action_horizon=self.config.horizon,
             readjust_pick=self.config.get('readjust_pick', False),
             drag_vel=0.01)
+        self.save_each_action_picker_poses = True
+        self.logger = PixelBasedPrimitiveEnvLogger()
+
         self._observation_image_shape = config.observation_image_shape \
             if 'observation_image_shape' in config else (480, 480, 3)
 
@@ -153,6 +157,7 @@ class GarmentEnv(Arena):
         self.camera_angle = camera_angle
         
         self.camera_size = self.camera_config['cam_size']
+        self.picker_poses = []
 
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
@@ -225,6 +230,7 @@ class GarmentEnv(Arena):
         self.info = self._process_info()
         self.clear_frames()
 
+        self.picker_poses = []
         
         return self.info
     
@@ -253,8 +259,21 @@ class GarmentEnv(Arena):
             'arena_id': self.aid,
             'action_space': self.get_action_space(),
             'overstretch': self.overstretch,
-            'sim_steps': self.sim_step
+            'sim_steps': self.sim_step,
         })
+        
+        if self.save_each_action_picker_poses and self.mode != 'train':
+            print('save pixel poses!!!', len(self.picker_poses))
+            if len(self.picker_poses) > 0:
+                picker_poses = np.stack(self.picker_poses) #T, 2, 3
+                picker_poses = picker_poses[:, :, [0, 2, 1]].reshape(-1, 3)
+                picker_pixel_poses, _ = self.get_visibility(picker_poses)
+                H, W = self.camera_size
+                norm_pixels = picker_pixel_poses/np.array([H, W]) * 2 - 1
+                
+                info['observation']['picker_norm_pixel_pos'] = norm_pixels.reshape(-1, 2, 2)
+            else: 
+                info['observation']['picker_norm_pixel_pos'] = None
 
         if flatten_obs:
             info['flattened_obs'] = self.get_flattened_obs()
@@ -297,6 +316,7 @@ class GarmentEnv(Arena):
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
+        self.picker_poses = []
         #print('action step', self.action_step)
         self.overstretch = 0
         self.sim_step = 0
@@ -395,8 +415,9 @@ class GarmentEnv(Arena):
     def control_picker(self, signal, process_info=True):
         
         signal = signal[:, [0, 2, 1, 3]]
-        self.pickers.step(signal, self)
+        new_picker_pos = self.pickers.step(signal, self)
         self._step_sim()
+        self.picker_poses.append(new_picker_pos)
         
         info = {}
         if process_info:

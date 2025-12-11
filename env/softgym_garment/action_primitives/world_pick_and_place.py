@@ -98,45 +98,6 @@ class WorldPickAndPlace():
             action['single_operator'] = False
         
         return action
-    
-    # def step(self, env, action):
-    #     action = self.process(action)
-    #     self.camera_height = env.camera_height
-    #     pick_positions = np.stack(
-    #         [action['pick_0_position'], action['pick_1_position']]
-    #     )
-
-    #     place_positions = np.stack(
-    #         [action['place_0_position'], action['place_1_position']]
-    #     )
-
-    #     pre_pick_positions = pick_positions.copy()
-    #     pre_pick_positions[:, 2] = action['pregrasp_height']
-
-    #     place_raise = place_positions.copy()
-    #     place_raise[:, 2] = 0.1
-
-    #     if action['single_operator']:
-    #         pick_positions[1] = self.ready_pos[0, :3]
-    #         pre_pick_positions[1] = self.ready_pos[0, :3]
-
-    #     self.action_tool.movep(env, pre_pick_positions, self.no_cloth_vel)
-    #     self.action_tool.movep(env, pick_positions, action['tograsp_vel'])
-    #     self.action_tool.both_grasp(env)
-    #     self.action_tool.movep(env, pre_pick_positions, action['lift_vel'])
-    #     self.action_tool.movep(env, place_positions, action['drag_vel'])
-    #     self.action_tool.open_both_gripper(env)
-    #     self.action_tool.movep(env, place_raise, action['lift_vel'])
-    #     self.action_tool.open_both_gripper(env)
-
-    #     self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
-
-    #     info = env.wait_until_stable()
-        
-    #     self.action_step += 1
-    #     info['done'] = self.action_step >= self.action_horizon
-    #     #print(f"World Step: {self.action_step}, Done: {info['done']}")
-    #     return self._process_info(info)
 
     def step(self, env, action):
         action = self.process(action)

@@ -128,12 +128,14 @@ class MultiGarmentEnv(GarmentEnv):
         self.last_info = None
         self.sim_step = 0
         self.overstretch = 0
+        self.picker_poses = []
         self.info = self._process_info({})
         self.clear_frames()
 
         self.info['observation']['is_first'] = True
         self.info['observation']['is_terminal'] = False
 
+        self.picker_poses = []
         
         return self.info
     

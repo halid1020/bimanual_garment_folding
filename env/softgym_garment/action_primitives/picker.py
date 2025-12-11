@@ -234,11 +234,12 @@ class Picker():
         
         
         self._set_pos(new_picker_pos, new_particle_pos)
+        #print('new_picker_pos', new_picker_pos)
 
         self._detect_over_stretching(arena, new_particle_pos)
        
                             
-        return 1
+        return new_picker_pos
 
     def _detect_over_stretching(self, arena, new_particle_pos):
         #pairwise_dists = []

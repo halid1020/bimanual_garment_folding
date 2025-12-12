@@ -8,7 +8,7 @@ from statistics import mean
 from agent_arena import save_video
 from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
 
-from .utils import get_max_IoU, NC_FLATTENING_TRESHOLD, IOU_FLATTENING_TRESHOLD
+from .utils import get_max_IoU
 from .folding_rewards import *
 from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
@@ -305,9 +305,7 @@ class GarmentFoldingTask(GarmentTask):
         cur_particles = info['observation']['particle_positions']
         
         
-        multi_stage_reward = coverage_alignment_reward(last_info, action, info)
-        if info['evaluation']['normalised_coverage'] > NC_FLATTENING_TRESHOLD and info['evaluation']['max_IoU_to_flattened'] > IOU_FLATTENING_TRESHOLD:
-            multi_stage_reward = 1
+        multi_stage_reward = stable_nc_iou_reward(last_info, action, info)
         arena = info['arena']
         for i in range(self.config.goal_steps)[1:]:
             cur_mdps = []

@@ -109,22 +109,22 @@ def build_task(task_cfg):
     return task
 
 def build_data_augmenter(cfg):
-    name = cfg.data_augmenter.name
+    name = cfg.name
 
     if name == 'pixel-based-multi-primitive-data-augmenter':
-        return PixelBasedMultiPrimitiveDataAugmenter(cfg.data_augmenter)
+        return PixelBasedMultiPrimitiveDataAugmenter(cfg)
 
     elif name == 'pixel-based-fold-data-augmenter':
-        return PixelBasedFoldDataAugmenter(cfg.data_augmenter)
+        return PixelBasedFoldDataAugmenter(cfg)
 
     elif name == 'pixel-based-single-primitive-augmenter':
-        return PixelBasedSinglePrimitiveDataAugmenter(cfg.data_augmenter)
+        return PixelBasedSinglePrimitiveDataAugmenter(cfg)
 
     elif name == 'pixel-based-multi-primitive-data-augmenter-for-dreamer':
-        return PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg.data_augmenter)
+        return PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg)
 
     elif name == 'pixel-based-multi-primitive-data-augmenter-for-diffusion':
-        return PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg.data_augmenter)
+        return PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg)
 
     elif name == 'identity':
         return lambda x: x

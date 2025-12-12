@@ -16,7 +16,7 @@ def main(cfg: DictConfig):
     agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
     #print('agent', cfg.agent.name, agent)
     
-    augmenter = build_data_augmenter(cfg)
+    augmenter = build_data_augmenter(cfg.data_augmenter)
 
     agent.set_data_augmenter(augmenter)
     # logging

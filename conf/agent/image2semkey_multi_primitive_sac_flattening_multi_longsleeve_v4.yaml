@@ -4,7 +4,7 @@ name: image2state-multi-primitive-sac
 exp_name: ${exp_name}
 project_name: ${project_name}
 replay_device: Disk
-device: "cuda:1"   # fallback to cuda:0
+device: "cuda:0"   # fallback to cuda:0
 
 # === Inputs ===
 obs_keys: ['rgb']

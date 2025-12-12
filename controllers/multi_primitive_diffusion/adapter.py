@@ -151,6 +151,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.eval_action_sampler = ActionSampler[self.config.eval_action_sampler]()
         
         self.update_step = 0 #-1
+        self.total_update_steps = self.config.total_update_steps
         self.dataset_inited = False
 
         
@@ -573,7 +574,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         if len(ckpt_files) == 0:
             print('No checkpoint found')
-            return -1
+            return 0
         ckpt_file = ckpt_files[-1]
         ckpt_path = os.path.join(ckpt_path, ckpt_file)
         self.nets.load_state_dict(torch.load(ckpt_path))
@@ -597,7 +598,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.update_step = int(ckpt_file.split('_')[1].split('.')[0])
         return self.update_step
 
-    def single_act(self, info, update):
+    def single_act(self, info, update=False):
 
         if update == True:
             last_action = self.last_actions[info['arena_id']]
@@ -753,7 +754,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 .reshape(1, 1, *info['observation']['vector_state'].shape)
         
         # print('input data keys', input_data.keys())
-        # print('image shape', input_data['rgb'].shape)
+        #print('image shape', input_data['rgb'].shape)
         input_data = self.data_augmenter(input_data, train=False, device=self.device) 
                                     #sim2real=info['sim2real'] if 'sim2real' in info else False)
         

@@ -237,7 +237,7 @@ def simulate(
             action_for_env = [{agent.primitives[prim_id[i]]['name']: action[i][1:]} for i in range(len(action))]
             logger.log({
                 f"train/prim_id": prim_id[0],
-            }, step=step)
+            }, step=step) # TODO: change this to update steps
 
         
         else:
@@ -300,7 +300,7 @@ def simulate(
                 logger.scalar(f"train_return", score)
                 logger.scalar(f"train_length", length)
                 logger.scalar(f"train_episodes", len(cache))
-                logger.write(step=logger.step)
+                logger.write(step=logger.step) # change this to update steps
                 
     return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
 

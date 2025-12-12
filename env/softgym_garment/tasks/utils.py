@@ -10,7 +10,7 @@ from scipy.signal import fftconvolve
 import cv2
 import os
 
-IOU_FLATTENING_TRESHOLD = 0.82
+IOU_FLATTENING_TRESHOLD = 0.8
 NC_FLATTENING_TRESHOLD = 0.95
 
 def calculate_iou(mask1, mask2):

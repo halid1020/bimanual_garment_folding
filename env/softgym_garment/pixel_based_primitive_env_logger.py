@@ -14,7 +14,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         picker_traj = [info["observation"]["picker_norm_pixel_pos"]
                        for info in result["information"]]  # [T][2,2]
 
-        H, W, _ = frames[0].shape
+        H, W = 512, 512
 
         if filename is None:
             filename = 'manupilation'
@@ -38,6 +38,9 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             val = act[key]
 
             img = frames[i].copy()
+            # --- Resize to 512×512 BEFORE drawing text ---
+            img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
+            
 
             step_text = f"Step {i+1}: "
             if key == "norm-pixel-fold":
@@ -96,52 +99,65 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
                 # Retrieve trajectory of NEXT environment step
                 traj = picker_traj[i + 1]
-                traj = traj[10:-10]
+                if traj is None or len(traj) == 0:
+                    cv2.putText(
+                        img,
+                        'Rejected',
+                        (20, 30),                 # top-left corner
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.0,
+                        (255, 255, 255),          # white text
+                        2,
+                        cv2.LINE_AA
+                    )
+                    
+                else:
+                    traj = traj[10:-10]
 
-                traj_px_0 = [norm_to_px(step[0]) for step in traj]
-                traj_px_1 = [norm_to_px(step[1]) for step in traj]
+                    traj_px_0 = [norm_to_px(step[0]) for step in traj]
+                    traj_px_1 = [norm_to_px(step[1]) for step in traj]
 
-                T = len(traj)
-                num_samples = 20
-                idx = np.linspace(0, T - 1, min(T, num_samples)).astype(int)
+                    T = len(traj)
+                    num_samples = 20
+                    idx = np.linspace(0, T - 1, min(T, num_samples)).astype(int)
 
-                sampled_0 = [traj_px_0[j] for j in idx]
-                sampled_1 = [traj_px_1[j] for j in idx]
+                    sampled_0 = [traj_px_0[j] for j in idx]
+                    sampled_1 = [traj_px_1[j] for j in idx]
 
-                # Colormaps
-                cmap0 = cv2.COLORMAP_AUTUMN
-                cmap1 = cv2.COLORMAP_WINTER
+                    # Colormaps
+                    cmap0 = cv2.COLORMAP_AUTUMN
+                    cmap1 = cv2.COLORMAP_WINTER
 
-                for s in range(1, len(idx)):
-                    alpha = s / (len(idx) - 1)
+                    for s in range(1, len(idx)):
+                        alpha = s / (len(idx) - 1)
 
-                    value = np.uint8([[[int((1.0 - alpha) * 255)]]])
-                    color0 = cv2.applyColorMap(value, cmap0)[0, 0].tolist()
-                    color1 = cv2.applyColorMap(value, cmap1)[0, 0].tolist()
+                        value = np.uint8([[[int((1.0 - alpha) * 255)]]])
+                        color0 = cv2.applyColorMap(value, cmap0)[0, 0].tolist()
+                        color1 = cv2.applyColorMap(value, cmap1)[0, 0].tolist()
 
-                    cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 5)
-                    cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 5)
+                        cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 5)
+                        cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 5)
 
-                # -------- TODO FIX: replace X markers with hollow circles ----------
-                def draw_hollow_circle(img, p, color, radius=8, thickness=3):
-                    cv2.circle(img, swap(p), radius, color, thickness)
+                    # -------- TODO FIX: replace X markers with hollow circles ----------
+                    def draw_hollow_circle(img, p, color, radius=8, thickness=3):
+                        cv2.circle(img, swap(p), radius, color, thickness)
 
-                draw_hollow_circle(img, sampled_0[0], RED)
-                draw_hollow_circle(img, sampled_1[0], BLUE)
-                # ------------------------------------------------------------------
+                    draw_hollow_circle(img, sampled_0[0], RED)
+                    draw_hollow_circle(img, sampled_1[0], BLUE)
+                    # ------------------------------------------------------------------
 
-                # Final triangle marker
-                def draw_triangle(img, center, color, size=12):
-                    cx, cy = center
-                    pts = np.array([
-                        (cy, cx - size),
-                        (cy - size, cx + size),
-                        (cy + size, cx + size)
-                    ], np.int32)
-                    cv2.fillPoly(img, [pts], color)
+                    # Final triangle marker
+                    def draw_triangle(img, center, color, size=12):
+                        cx, cy = center
+                        pts = np.array([
+                            (cy, cx - size),
+                            (cy - size, cx + size),
+                            (cy + size, cx + size)
+                        ], np.int32)
+                        cv2.fillPoly(img, [pts], color)
 
-                draw_triangle(img, traj_px_0[-1], RED)
-                draw_triangle(img, traj_px_1[-1], BLUE)
+                    draw_triangle(img, traj_px_0[-1], RED)
+                    draw_triangle(img, traj_px_1[-1], BLUE)
 
 
             images.append(img)

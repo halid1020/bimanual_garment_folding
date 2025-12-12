@@ -18,15 +18,15 @@ to_np = lambda x: x.detach().cpu().numpy()
 
 
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, rnd_act_space, config, logger, dataset, data_augmenter):
+    def __init__(self, obs_space, rnd_act_space, config, logger, dataset):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
         self._should_log = Every(config.log_every)
         batch_steps = config.batch_size * config.batch_length
-        train_every = batch_steps / config.train_ratio
+        self.train_every = batch_steps / config.train_ratio
         #print('train every', train_every)
-        self._should_train = Every(train_every)
+        self._should_train = Every(self.train_every)
         self._should_pretrain = Once()
         self._should_reset = Every(config.reset_every)
         self._should_expl = Until(int(config.expl_until / config.action_repeat))
@@ -52,6 +52,8 @@ class Dreamer(nn.Module):
             random=lambda: Random(config, rnd_act_space),
             plan2explore=lambda: Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
+    
+    def set_data_augmenter(self, data_augmenter):
         self.data_augmenter = data_augmenter
 
     def __call__(self, obs, reset, state=None, training=True):

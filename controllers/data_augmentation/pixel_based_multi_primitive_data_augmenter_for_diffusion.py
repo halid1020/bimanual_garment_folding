@@ -171,6 +171,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         # We'll do geometric ops using channels-first tensors
         # Convert (N,H,W,3) -> (N,3,H,W)
+        print('obs shape', obs.shape)
         obs = obs.permute(0, 3, 1, 2).contiguous()  # (N,C,H,W)
         obs = F.interpolate(obs,
             size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)

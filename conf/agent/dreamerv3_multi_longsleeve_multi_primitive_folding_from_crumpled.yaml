@@ -6,11 +6,11 @@ offline_traindir: ''
 offline_evaldir: ''
 seed: 0
 deterministic_run: False
-
+action_steps: 1e5
 parallel: False
 # eval_every: 1e4
 # eval_episode_num: 10
-
+log_every: 1e2
 reset_every: 0
 device: 'cuda:0'
 compile: True
@@ -64,7 +64,7 @@ train_ratio: 512
 model_lr: 1e-4
 opt_eps: 1e-8
 grad_clip: 1000
-updates_per_step: 2 #10
+updates_per_step: 10 #1
 
 opt: 'adam'
 
@@ -94,17 +94,14 @@ restart: true
 # eval_video_pred_log: true
 
 
-action_steps: 1e5
-
+dataset_size: 100000
+total_update_steps: 1e5 #This is action steps actually in dreamer
 eval_checkpoint: -1
 size: [128, 128]
 action_repeat: 1
 
-validation_interval: 10 #1000
-dataset_size: 100 #100000
-total_update_steps: 60 # 20 bc + 20 dreamer pretrain + 20 dreamer online #1e5
-log_every: 5 #1e2
-obs_keys: ['image', 'rgb', 'is_first', 'is_terminal']
+validation_interval: 1000
+obs_keys: ['image', 'is_first', 'is_terminal']
 reward_key: multi_stage_reward
 primitive_integration: 'predict_bin_as_output'
 primitives:
@@ -115,12 +112,12 @@ primitives:
 save_success: True
 num_actions: 'to_be_defined'
 
-use_bc_policy_to_seed: True 
-bc_policy_config_name: 'multi_primitive_diffusion_multi_longsleeve_folding_from_crumpled_demo_test' # use agent_arena to bulid, update steps is decided in the config
-bc_prefill: 10 #1000
-bc_data_augmenter_config_name: pixel_based_multi_primitive_augmenter_for_diffusion
-random_prefill: 10 #1000
-pretrain: 20 #1000
+use_bc_policy_to_seed: False 
+# bc_policy_config: 'bc_policy_config_name' # use agent_arena to bulid, update steps is decided in the config
+# bc_prefill: 1000
+# bc_data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion
+random_prefill: 200
+pretrain: 100
 
 
 exp_name: ${exp_name}

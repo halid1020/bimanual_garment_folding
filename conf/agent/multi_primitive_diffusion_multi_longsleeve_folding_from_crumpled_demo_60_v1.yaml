@@ -10,7 +10,7 @@ input_obs: 'rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 20 #100
+num_demos: 60 #100
 batch_size: 64
 disable_updown: False
 action_shape: [8]
@@ -58,6 +58,7 @@ primitives:
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
   - name: no-operation
     dim: 0
+mask_out_irrelavent_action_dim: true
 
 exp_name: ${exp_name}
 project_name: ${project_name}

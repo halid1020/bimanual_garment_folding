@@ -3,7 +3,7 @@ random_rotation: true
 rotation_degree: 1
 vertical_flip: true
 debug: false
-color_jitter: true
+color_jitter: false
 img_dim: [96, 96]
 randomise_prim_acts: true
 K: 2

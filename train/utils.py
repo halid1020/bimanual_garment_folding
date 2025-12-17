@@ -84,7 +84,7 @@ def register_agent_arena():
 def build_task(task_cfg):
     # task
     if task_cfg.task_name == 'centre-sleeve-folding':
-        demonstrator = CentreSleeveFoldingStochasticPolicy({"debug": False})
+        demonstrator = HumanMultiPrimitive({"debug": False})
         task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
        
     elif task_cfg.task_name == 'waist-leg-alignment-folding':

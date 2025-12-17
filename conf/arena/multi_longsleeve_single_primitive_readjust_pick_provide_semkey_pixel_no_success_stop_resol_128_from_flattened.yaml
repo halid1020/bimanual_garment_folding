@@ -1,5 +1,5 @@
 garment_type: longsleeve
-name: multi-garment-env
+name: multi-garment-vectorised-fold-prim-env
 picker_radius: 0.03
 picker_threshold: 0.007
 picker_low: [-5, 0, -5]
@@ -9,7 +9,7 @@ picker_initial_pos: [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]]
 init_state_path: assets/init_states
 disp: false
 ray_id: 0
-action_horizon: 5
+action_horizon: 2
 image_resolution: [128, 128]
 track_semkey_on_frames: false
 num_val_trials: 10
@@ -19,3 +19,4 @@ provide_flattened_semkey_pos: false
 provide_semkey_norm_pixel: true
 provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
+init_mode: flattened

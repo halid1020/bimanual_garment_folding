@@ -6,88 +6,92 @@ import os
 import matplotlib.pyplot as plt
 
 from agent_arena.agent.utilities.torch_utils import np_to_ts, ts_to_np
+from .utils import randomize_primitive_encoding
+import kornia.augmentation as K
 
-# --------------------
-# Helper functions (torch)
-# --------------------
-def jitter_brightness_torch(imgs, delta):
-    # imgs: (N,C,H,W)
-    return torch.clamp(imgs + delta, 0.0, 1.0)
 
-def jitter_contrast_torch(imgs, factor):
-    # imgs: (N,C,H,W)
-    mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
-    return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
+# # --------------------
+# # Helper functions (torch)
+# # --------------------
+# def jitter_brightness_torch(imgs, delta):
+#     # imgs: (N,C,H,W)
+#     return torch.clamp(imgs + delta, 0.0, 1.0)
 
-def rgb_to_hsv_torch(rgb):
-    # rgb: (N,H,W,3) in [0,1] channels-last
-    # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    maxc, _ = rgb.max(dim=-1)
-    minc, _ = rgb.min(dim=-1)
-    v = maxc
-    diff = maxc - minc
+# def jitter_contrast_torch(imgs, factor):
+#     # imgs: (N,C,H,W)
+#     mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
+#     return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
 
-    s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
+# def rgb_to_hsv_torch(rgb):
+#     # rgb: (N,H,W,3) in [0,1] channels-last
+#     # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
+#     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+#     maxc, _ = rgb.max(dim=-1)
+#     minc, _ = rgb.min(dim=-1)
+#     v = maxc
+#     diff = maxc - minc
 
-    h = torch.zeros_like(maxc)
+#     s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
 
-    mask = diff > 1e-8
+#     h = torch.zeros_like(maxc)
 
-    rc = (maxc - r) / (diff + 1e-8)
-    gc = (maxc - g) / (diff + 1e-8)
-    bc = (maxc - b) / (diff + 1e-8)
+#     mask = diff > 1e-8
 
-    # for r == max
-    pick = (r == maxc) & mask
-    h = torch.where(pick, (bc - gc), h)
+#     rc = (maxc - r) / (diff + 1e-8)
+#     gc = (maxc - g) / (diff + 1e-8)
+#     bc = (maxc - b) / (diff + 1e-8)
 
-    # for g == max
-    pick = (g == maxc) & mask
-    h = torch.where(pick, 2.0 + (rc - bc), h)
+#     # for r == max
+#     pick = (r == maxc) & mask
+#     h = torch.where(pick, (bc - gc), h)
 
-    # for b == max
-    pick = (b == maxc) & mask
-    h = torch.where(pick, 4.0 + (gc - rc), h)
+#     # for g == max
+#     pick = (g == maxc) & mask
+#     h = torch.where(pick, 2.0 + (rc - bc), h)
 
-    h = (h / 6.0) % 1.0
-    hsv = torch.stack([h, s, v], dim=-1)
-    return hsv
+#     # for b == max
+#     pick = (b == maxc) & mask
+#     h = torch.where(pick, 4.0 + (gc - rc), h)
 
-def hsv_to_rgb_torch(hsv):
-    # hsv: (N,H,W,3) channels-last, h in [0,1]
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    i = torch.floor(h * 6.0).to(torch.int64)
-    f = (h * 6.0) - i.type(h.dtype)
-    i = i % 6
+#     h = (h / 6.0) % 1.0
+#     hsv = torch.stack([h, s, v], dim=-1)
+#     return hsv
 
-    p = v * (1.0 - s)
-    q = v * (1.0 - f * s)
-    t = v * (1.0 - (1.0 - f) * s)
+# def hsv_to_rgb_torch(hsv):
+#     # hsv: (N,H,W,3) channels-last, h in [0,1]
+#     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+#     i = torch.floor(h * 6.0).to(torch.int64)
+#     f = (h * 6.0) - i.type(h.dtype)
+#     i = i % 6
 
-    shape = h.shape
-    r = torch.zeros(shape, dtype=h.dtype, device=h.device)
-    g = torch.zeros(shape, dtype=h.dtype, device=h.device)
-    b = torch.zeros(shape, dtype=h.dtype, device=h.device)
+#     p = v * (1.0 - s)
+#     q = v * (1.0 - f * s)
+#     t = v * (1.0 - (1.0 - f) * s)
 
-    idx = (i == 0)
-    r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
-    idx = (i == 1)
-    r[idx], g[idx], b[idx] = q[idx], v[idx], p[idx]
-    idx = (i == 2)
-    r[idx], g[idx], b[idx] = p[idx], v[idx], t[idx]
-    idx = (i == 3)
-    r[idx], g[idx], b[idx] = p[idx], q[idx], v[idx]
-    idx = (i == 4)
-    r[idx], g[idx], b[idx] = t[idx], p[idx], v[idx]
-    idx = (i == 5)
-    r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
+#     shape = h.shape
+#     r = torch.zeros(shape, dtype=h.dtype, device=h.device)
+#     g = torch.zeros(shape, dtype=h.dtype, device=h.device)
+#     b = torch.zeros(shape, dtype=h.dtype, device=h.device)
 
-    return torch.stack([r, g, b], dim=-1)
+#     idx = (i == 0)
+#     r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
+#     idx = (i == 1)
+#     r[idx], g[idx], b[idx] = q[idx], v[idx], p[idx]
+#     idx = (i == 2)
+#     r[idx], g[idx], b[idx] = p[idx], v[idx], t[idx]
+#     idx = (i == 3)
+#     r[idx], g[idx], b[idx] = p[idx], q[idx], v[idx]
+#     idx = (i == 4)
+#     r[idx], g[idx], b[idx] = t[idx], p[idx], v[idx]
+#     idx = (i == 5)
+#     r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
+
+#     return torch.stack([r, g, b], dim=-1)
 
 def rotate_points_torch(points, R):
     # points: (..., 2), R: (2,2)
     return points @ R.T
+
 
 # --------------------
 # Augmenter class (torch)
@@ -99,6 +103,18 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.random_rotation = config.get("random_rotation", False)
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
+        self.color_jitter = self.config.get("color_jitter", False)
+
+        if self.color_jitter:
+            self.color_aug = K.ColorJitter(
+                brightness=self.config.get("brightness", 0.2),
+                contrast=self.config.get("contrast", 0.2),
+                saturation=self.config.get("saturation", 0.2),
+                hue=self.config.get("hue", 0.05),
+                p=1.0,
+                keepdim=True,
+                same_on_batch=True, 
+            )
 
     def _flatten_bt(self, x):
         B, T = x.shape[:2]
@@ -167,11 +183,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                     pa_cpu = pixel_actions[b].cpu().numpy()
                 else:
                     pa_cpu = np.zeros((1,2))
-                self._save_debug_image(cpu_img, pa_cpu, prefix="before_action", step=b)
+                self._save_debug_image(cpu_img, pa_cpu, prefix="diffusion_augment_before_action", step=b)
 
         # We'll do geometric ops using channels-first tensors
         # Convert (N,H,W,3) -> (N,3,H,W)
-        print('obs shape', obs.shape)
+        #print('obs shape', obs.shape)
         obs = obs.permute(0, 3, 1, 2).contiguous()  # (N,C,H,W)
         obs = F.interpolate(obs,
             size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)
@@ -180,39 +196,36 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #       RANDOM ROTATION
         # =========================
         if self.random_rotation and train:
-            while True:
-                degree = self.config.rotation_degree * torch.randint(
-                    int(360 / self.config.rotation_degree), size=(1,)
-                )
-                thetas = torch.deg2rad(degree)
-                cos_theta = torch.cos(thetas)
-                sin_theta = torch.sin(thetas)
+            
+            degree = self.config.rotation_degree * torch.randint(
+                int(360 / self.config.rotation_degree), size=(1,)
+            )
+            thetas = torch.deg2rad(degree)
+            cos_theta = torch.cos(thetas)
+            sin_theta = torch.sin(thetas)
 
-                rot = torch.stack([
-                    torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
-                ], dim=0).to(device)
-                rot_inv = rot.transpose(-1, -2)
+            rot = torch.stack([
+                torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
+            ], dim=0).to(device)
+            rot_inv = rot.transpose(-1, -2)
 
-                # Rotate actions
-                B, A = pixel_actions.shape
-                pixel_actions_ = pixel_actions.reshape(-1, 1, 2)
-                N = pixel_actions_.shape[0]
-                rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
-                rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B, A)
-
-                if torch.abs(rotated_action).max() > 1:
-                    continue
-
-               
-                B, C, H, W = obs.shape
-                affine_matrix = torch.zeros(B, 2, 3, device=device)
-                affine_matrix[:, :2, :2] = rot.expand(B, 2, 2)
-                grid = F.affine_grid(affine_matrix[:, :2], (B, C, H, W), align_corners=True)
-                obs = F.grid_sample(obs, grid, align_corners=True)
-              
-                pixel_actions = rotated_action.reshape(BB*(TT-1), -1)
-                break
-
+            # Rotate actions
+            B, A = pixel_actions.shape
+            pixel_actions_ = pixel_actions.reshape(-1, 1, 2)
+            N = pixel_actions_.shape[0]
+            rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
+            rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B, A)
+            rotated_action = rotated_action.clip(-1, 1)
+            
+            B, C, H, W = obs.shape
+            affine_matrix = torch.zeros(B, 2, 3, device=device)
+            affine_matrix[:, :2, :2] = rot.expand(B, 2, 2)
+            grid = F.affine_grid(affine_matrix[:, :2], (B, C, H, W), align_corners=True)
+            obs = F.grid_sample(obs, grid, align_corners=True)
+            
+            pixel_actions = rotated_action.reshape(BB*(TT-1), -1)
+        
+       
         # Vertical Flip
         if self.vertical_flip and (random.random() < 0.5) and train:
             B, C, H, W = obs.shape
@@ -226,44 +239,23 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         #     COLOR JITTER (GLOBAL)
         # =========================
-        if self.config.get("color_jitter", False) and train:
-            brightness = float(np.random.uniform(-self.config.get("brightness", 0.2),
-                                                 self.config.get("brightness", 0.2)))
-            contrast = float(1.0 + np.random.uniform(-self.config.get("contrast", 0.2),
-                                                     self.config.get("contrast", 0.2)))
-            saturation = float(1.0 + np.random.uniform(-self.config.get("saturation", 0.2),
-                                                       self.config.get("saturation", 0.2)))
-            hue = float(np.random.uniform(-self.config.get("hue", 0.05),
-                                          self.config.get("hue", 0.05)))
-
-            # Convert back to channels-last for HSV ops (N,H,W,3)
-            imgs_cl = obs.permute(0, 2, 3, 1).contiguous()  # (N,H,W,3)
-
-            # Brightness & Contrast (operate on channels-first equivalent)
-            imgs_cf = imgs_cl.permute(0, 3, 1, 2).contiguous()
-            imgs_cf = jitter_brightness_torch(imgs_cf, brightness)
-            imgs_cf = jitter_contrast_torch(imgs_cf, contrast)
-            imgs_cl = imgs_cf.permute(0, 2, 3, 1).contiguous()
-
-            # Convert to HSV and apply hue/saturation
-            hsv = rgb_to_hsv_torch(imgs_cl)  # (N,H,W,3)
-            hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
-            hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0.0, 1.0)
-
-            imgs_cl = hsv_to_rgb_torch(hsv)
-
-            # back to channels-first
-            obs = imgs_cl.permute(0, 3, 1, 2).contiguous()
+        
+        if self.color_jitter and train:
+            obs = self.color_aug(obs)
+        
 
         # =========================
         # debug save after
         # =========================
-        if self.debug and train:
+        if self.debug:
             n_show = min(4, obs.shape[0])
             for b in range(n_show):
                 cpu_img = obs[b].permute(1, 2, 0).cpu().numpy()  # H,W,3
-                pa_cpu = pixel_actions[b].cpu().numpy()
-                self._save_debug_image(cpu_img, pa_cpu, prefix="after_action", step=b)
+                if train:
+                    pa_cpu = pixel_actions[b].cpu().numpy()
+                else:
+                    pa_cpu = np.zeros((1,2))
+                self._save_debug_image(cpu_img, pa_cpu, prefix="diffusion_augment_after_action", step=b)
 
         # =========================
         #      RESHAPE BACK
@@ -275,13 +267,23 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         
 
         sample["rgb"] = obs
+        #print('[augmenter] rgb stats', sample['rgb'].max(), sample['rgb'].min())
         if train:
             #print('pixel_actions', pixel_actions.shape)
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)
             # restore action = (1 discrete action + continuous pixel coords)
             # action is a tensor (B,T,A); keep first column as-is
-            full_action = torch.cat([action[..., :1], pixel_actions], dim=-1)
+            prim_acts = action[..., :1]
+            #print('before prim_acts', prim_acts)
+            if self.config.get('randomise_prim_acts', False):
+                prim_acts = randomize_primitive_encoding(prim_acts, self.config.K)
+            
+            #print('after prim_acts', prim_acts)
+
+            full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
             sample["action"] = full_action.to(device)
+
+        #print('[augmenter] after action', sample["action"])
 
         return sample
     

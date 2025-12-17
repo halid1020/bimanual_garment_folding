@@ -27,9 +27,9 @@ class RewardEMA:
 
 
 class WorldModel(nn.Module):
-    def __init__(self, obs_space, step, config):
+    def __init__(self, obs_space, config):
         super(WorldModel, self).__init__()
-        self._step = step
+        #self._step = step
         self._use_amp = True if config.precision == 16 else False
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
@@ -105,12 +105,12 @@ class WorldModel(nn.Module):
             cont=config.cont_head["loss_scale"],
         )
 
-    def _train(self, data):
+    def _train(self, data_in):
         # action (batch_size, batch_length, act_dim)
         # image (batch_size, batch_length, h, w, ch)
         # reward (batch_size, batch_length)
         # discount (batch_size, batch_length)
-        data = self.preprocess(data)
+        data = self.preprocess(data_in, True)
 
         with RequiresGrad(self):
             with torch.cuda.amp.autocast(self._use_amp):
@@ -171,13 +171,19 @@ class WorldModel(nn.Module):
         return post, context, metrics
 
     # this function is called during both rollout and training
-    def preprocess(self, obs):
+    def preprocess(self, obs_in, train=False):
         #print('obs keys', obs.keys())
+        #print('World model training', train)
         obs = {
             k: torch.tensor(v, device=self._config.device, dtype=torch.float32)
-            for k, v in obs.items()
+            for k, v in obs_in.items()
         }
+        
+        if train:
+            obs = self.data_augmenter(obs)
+
         obs["image"] = obs["image"] / 255.0
+
         if "discount" in obs:
             obs["discount"] *= self._config.discount
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
@@ -189,9 +195,9 @@ class WorldModel(nn.Module):
         obs["cont"] = (1.0 - obs["is_terminal"]).unsqueeze(-1)
         return obs
 
-    def video_pred(self, data):
-        data = self.preprocess(data)
-        print('data image shape', data['image'].shape)
+    def video_pred(self, data_in):
+        data = self.preprocess(data_in)
+        #print('data image shape', data['image'].shape)
         embed = self.encoder(data)
 
         states, _ = self.dynamics.observe(
@@ -201,12 +207,12 @@ class WorldModel(nn.Module):
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode()[
             :6
         ]
-        print('recon shape', recon.shape)
+        #print('recon shape', recon.shape)
         reward_post = self.heads["reward"](self.dynamics.get_feat(states)).mode()[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
         openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode()
-        print('openl shape', openl.shape)
+        #print('openl shape', openl.shape)
         reward_prior = self.heads["reward"](self.dynamics.get_feat(prior)).mode()
         # observed image is given until 5 steps
         model = torch.cat([recon[:, :5], openl], 1)

@@ -129,7 +129,9 @@ class MultiGarmentEnv(GarmentEnv):
         self.sim_step = 0
         self.overstretch = 0
         self.picker_poses = []
-        self.info = self._process_info({})
+        self.info = {}
+        self.all_infos = [self.info]
+        self.info = self._process_info(self.info)
         self.clear_frames()
 
         self.info['observation']['is_first'] = True

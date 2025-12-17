@@ -2,8 +2,8 @@ name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
 action_dim: 8
-obs_horizon: 1
-pred_horizon: 1
+obs_horizon: 2
+pred_horizon: 4
 num_diffusion_iters: 100
 action_horizon: 1
 input_obs: 'rgb'
@@ -12,15 +12,16 @@ eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
 batch_size: 64
-disable_updown: True
+disable_updown: False
 action_shape: [8]
+collect_on_success: False # This is important!
 data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
 demo_policy: "human-multi-primitive"
 validation_interval: 1000
-total_update_steps: 100000
+total_update_steps: 50000
 eval_checkpoint: -1
 debug: False
 add_all_demos: True
@@ -29,7 +30,7 @@ dataset_mode: "general"
 dataset_config:
   data_path: "multi_longsleeve_folding_from_crumpled_human_multi_primitive_100"
   data_dir: "./data/datasets"
-  seq_length: 1
+  seq_length: 4
   io_mode: "w"
   obs_config:
     mask: 
@@ -55,6 +56,9 @@ primitives:
     dim: 4 # [pick_0, pick_1]
   - name: norm-pixel-fold
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+  - name: no-operation
+    dim: 0
+mask_out_irrelavent_action_dim: true
 
 exp_name: ${exp_name}
 project_name: ${project_name}

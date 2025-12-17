@@ -1,7 +1,8 @@
 name: pixel-based-multi-primitive-data-augmenter-for-dreamer
-rgb_noise_factor: 1
 random_rotation: true
 rotation_degree: 1
 vertical_flip: true
-debug: false
+debug: true
 color_jitter: true
+randomise_prim_acts: true
+K: 2

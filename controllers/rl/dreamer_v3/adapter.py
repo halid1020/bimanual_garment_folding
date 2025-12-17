@@ -7,6 +7,7 @@ from agent_arena import TrainableAgent
 from gym.spaces import Dict, Box
 import gym
 import numpy as np
+from tqdm import tqdm
 
 class DreamerV3Adapter(TrainableAgent):
   
@@ -16,7 +17,7 @@ class DreamerV3Adapter(TrainableAgent):
         if config.deterministic_run:
             enable_deterministic_run()
         self.config = config
-        self.config.action_steps //= config.action_repeat
+        #self.config.action_steps //= config.action_repeat
         self.loaded_model = False
         self.loaded_dataset = False
         self.initialised_agent = False
@@ -86,7 +87,7 @@ class DreamerV3Adapter(TrainableAgent):
         #self.config.evaldir.mkdir(parents=True, exist_ok=True)
 
         self.action_step = count_steps(self.config.traindir)
-        self.logger.step = self.config.action_repeat * self.action_step
+        #self.logger.step = self.config.action_repeat * self.action_step
         if self.config.offline_traindir:
             directory = self.config.offline_traindir.format(**vars(self.config))
         else:
@@ -138,12 +139,13 @@ class DreamerV3Adapter(TrainableAgent):
                 reward_key = self.config.reward_key,
                 save_success = self.config.get('save_success', False)
             )
-            self.logger.step += prefill * self.config.action_repeat
+            # self.logger.step += prefill * self.config.action_repeat
             self.action_step = count_steps(self.config.traindir)
-            print(f"Logger: ({self.logger.step} steps).")
+            self.dreamer._action_step = self.action_step
+            #print(f"Logger: ({self.logger.step} steps).")
     
     def _use_bc(self):
-        flg = self.use_bc_policy_to_seed and self.bc_policy.update_step <= self.bc_policy.total_update_steps
+        flg = self.use_bc_policy_to_seed and self.update_step <= self.bc_policy.total_update_steps
         #print('use bc?', flg)
         return flg    
 
@@ -200,9 +202,10 @@ class DreamerV3Adapter(TrainableAgent):
                 reward_key = self.config.reward_key,
                 save_success = self.config.get('save_success', False)
             )
-            self.logger.step += prefill * self.config.action_repeat
+            # self.logger.step += prefill * self.config.action_repeat
             self.action_step = count_steps(self.config.traindir)
-            print(f"Logger: ({self.logger.step} steps).")
+            self.dreamer._action_step = self.action_step
+            # print(f"Logger: ({self.logger.step} steps).")
 
     def _load_dataset(self):
         if self.loaded_dataset:
@@ -312,26 +315,49 @@ class DreamerV3Adapter(TrainableAgent):
             
             
             bc_update_steps = min(update_steps, self.bc_policy.total_update_steps-self.bc_policy.update_step)
-            print('[dreamer] train bc', bc_update_steps)
+            #print('[dreamer] train bc', bc_update_steps)
             
             self.bc_policy.train(bc_update_steps, arenas)
             self.update_step += bc_update_steps
             
             update_steps -= bc_update_steps
+            self.dreamer._logger.update_step = self.update_step
             if update_steps == 0:
                 return True
+            
+            total_bc_update_steps = self.bc_policy.total_update_steps
+        else:
+            total_bc_update_steps = 0
 
-        
+
+        ## Seeding, no update steps
         self._random_prefill_dataset(arenas)
-
         if self.use_bc_policy_to_seed:
             self._bc_prefill_dataset(arenas)
 
+        ## Pretraining
+        #print('deamer update count', self.dreamer._update_count)
+        if self.update_step < self.config.pretrain + total_bc_update_steps:
+            to_update_steps = min(update_steps, self.config.pretrain + total_bc_update_steps - self.update_step)
+            for _ in tqdm(range(to_update_steps), desc="[dreamer] Pretraining ..."):
+                self.dreamer._train(next(self.train_dataset))
+                #print('train!!!')
+                #self.dreamer._update_count += 1 ## only belongs to dreamer
+                self.dreamer._logger.update_step += 1 ## combination of bc and dreamer
+                
+                self.dreamer._metrics["action_step"] = self.action_step
+                self.dreamer.log()
+                self.update_step += 1
+            update_steps -= to_update_steps
+            if update_steps == 0:
+                return True
+        
+        ## Online Learning
         action_steps = int(self.dreamer.train_every*update_steps/self.config.updates_per_step)
         target_action_steps = min(self.action_step + action_steps, self.config.total_update_steps)
         action_steps_to_do = target_action_steps - self.action_step
-        print('draemer update steps', update_steps)
-        print('dreamer action steps to do', action_steps_to_do)
+        print('[dreamer] Online update steps to do', update_steps)
+        print('[dreamer] Online action steps to do', action_steps_to_do)
         self.logger.write()
         self.train_state = simulate(
             self,
@@ -348,13 +374,16 @@ class DreamerV3Adapter(TrainableAgent):
             obs_keys = self.config.obs_keys,
             reward_key = self.config.reward_key
         )
-        self.action_step = self.dreamer._step
+        self.action_step = count_steps(self.config.traindir)
+        print(f'[dreamer] action step {self.action_step} end of current epoch training')
         self.update_step += update_steps
     
     def save(self):
-        if self._use_bc:
+        if self._use_bc():
+            print(f'[dreamer] Save bc policy only at update step {self.update_step}')
             self.bc_policy.save()
             return
+        print(f'[dreamer] Save dreamer policy also at update step {self.update_step}')
         items_to_save = {
             "agent_state_dict": self.dreamer.state_dict(),
             "optims_state_dict": recursively_collect_optim_state_dict(self.dreamer),
@@ -365,7 +394,7 @@ class DreamerV3Adapter(TrainableAgent):
 
     def save_best(self):
 
-        if self._use_bc:
+        if self._use_bc():
             self.bc_policy.save_best()
             return
         
@@ -380,18 +409,24 @@ class DreamerV3Adapter(TrainableAgent):
         if self.loaded_model:
             return self.update_step
         
+        self.update_step= 0
+        self.dreamer._logger.update_step = self.update_step
         if (self.logdir / "latest.pt").exists():
             checkpoint = torch.load(self.logdir / "latest.pt")
             self.dreamer.load_state_dict(checkpoint["agent_state_dict"])
             self.update_step = checkpoint['update_step']
+            print(f'[dreamer] Loaded dreamer on checkpoint {self.update_step}')
+            self.logger.step = self.update_step
+            self.dreamer._logger.update_step = self.update_step
             recursively_load_optim_state_dict(self.dreamer, checkpoint["optims_state_dict"])
             self.dreamer._should_pretrain._once = False
-            if self.use_bc_policy_to_seed:
-                self.bc_policy.load()
+        
+        if self.use_bc_policy_to_seed:
+            self.update_step = max(self.bc_policy.load(), self.update_step)
 
         self.loaded_model = True
-
-        return count_steps(self.config.traindir)
+        #print('[dreamer] loaded check', self.update_step)
+        return self.update_step #count_steps(self.config.traindir)
 
     def set_eval(self):
         self.training=False

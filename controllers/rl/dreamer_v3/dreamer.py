@@ -33,13 +33,13 @@ class Dreamer(nn.Module):
         self._updates_per_step = self._config.get('updates_per_step', 1)
         self._metrics = {}
         # this is update step
-        self._step = logger.step // config.action_repeat
-        if self._step > 0:
-            self._should_pretrain()
-        #print('init step', self._step)
+        #self._action_step = logger.step // config.action_repeat
+        # if self._action_step > 0:
+        #     self._should_pretrain()
+        #print('init step', self._action_step)
         self._update_count = 0
         self._dataset = dataset
-        self._wm = WorldModel(obs_space, self._step, config)
+        self._wm = WorldModel(obs_space, config)
         self._task_behavior = ImagBehavior(config, self._wm)
         if (
             config.compile and os.name != "nt"
@@ -54,65 +54,65 @@ class Dreamer(nn.Module):
         )[config.expl_behavior]().to(self._config.device)
     
     def set_data_augmenter(self, data_augmenter):
-        self.data_augmenter = data_augmenter
+        self._wm.data_augmenter = data_augmenter
+
+    def log(self):
+        if self._should_log(self._logger.update_step):
+            print(f'[dreamerV3] Log training at update step {self._logger.update_step}')
+            for name, values in self._metrics.items():
+                self._logger.scalar(name, float(np.mean(values)))
+                self._metrics[name] = []
+            if self._config.train_video_pred_log:
+                openl = self._wm.video_pred(next(self._dataset))  # B, T, H, W, C
+
+                # Convert openl to T, H, B*W, C
+                B, T, H, W, C = openl.shape
+
+                # permute to (T, H, B, W, C)
+                x = openl.permute(1, 2, 0, 3, 4)
+
+                # reshape to (T, H, B*W, C)
+                convert_openl = x.reshape(T, H, B * W, C)
+                self._logger.video("train_openl", to_np(convert_openl))
+
+                # First sample
+                single_openl = openl[0]  # (T, H, W, C)
+
+                # Convert to (H, T*W, C)
+                convert_single_openl = single_openl.permute(1, 0, 2, 3).reshape(H, T * W, C)
+
+                self._logger.image("train_recon", to_np(convert_single_openl))
+                    
+                
+            self._logger.write(fps=True)
 
     def __call__(self, obs, reset, state=None, training=True):
-        step = self._step
+        # step = self._action_step
         #print('training', training, 'step', step)
         if training:
-            steps = (
-                self._config.pretrain
-                if self._should_pretrain()
-                else self._should_train(step) * self._updates_per_step
-            )
+            steps_to_update = self._should_train(self._action_step) * self._updates_per_step
             #print('update steps', steps)
-            for _ in range(steps):
+            for _ in range(steps_to_update):
                 self._train(next(self._dataset))
                 #print('train!!!')
-                self._update_count += 1
-                self._metrics["update_count"] = self._update_count
-            if self._should_log(step):
-                print(f'[dreamerV3] Log training at step {step}')
-                for name, values in self._metrics.items():
-                    self._logger.scalar(name, float(np.mean(values)))
-                    self._metrics[name] = []
-                if self._config.train_video_pred_log:
-                    openl = self._wm.video_pred(next(self._dataset))  # B, T, H, W, C
-
-                    # Convert openl to T, H, B*W, C
-                    B, T, H, W, C = openl.shape
-
-                    # permute to (T, H, B, W, C)
-                    x = openl.permute(1, 2, 0, 3, 4)
-
-                    # reshape to (T, H, B*W, C)
-                    convert_openl = x.reshape(T, H, B * W, C)
-                    self._logger.video("train_openl", to_np(convert_openl))
-
-                    # First sample
-                    single_openl = openl[0]  # (T, H, W, C)
-
-                    # Convert to (H, T*W, C)
-                    convert_single_openl = single_openl.permute(1, 0, 2, 3).reshape(H, T * W, C)
-
-                    self._logger.image("train_recon", to_np(convert_single_openl))
-                        
-                    
-                self._logger.write(fps=True)
+                #self._update_count += 1
+                self._logger.update_step += 1
+                self._metrics["action_step"] = self._action_step
+                self.log()
+            
 
         policy_output, state = self._policy(obs, state, training)
 
         if training:
-            self._step += len(reset)
-            self._logger.step = self._config.action_repeat * self._step
+            self._action_step += len(reset)
         return policy_output, state
 
-    def _policy(self, obs, state, training):
+    def _policy(self, obs_in, state, training):
         if state is None:
             latent = action = None
         else:
             latent, action = state
-        obs = self._wm.preprocess(obs)
+        obs = self._wm.preprocess(obs_in)
         embed = self._wm.encoder(obs)
         latent, _ = self._wm.dynamics.obs_step(latent, action, embed, obs["is_first"])
         if self._config.eval_state_mean:
@@ -121,7 +121,7 @@ class Dreamer(nn.Module):
         if not training:
             actor = self._task_behavior.actor(feat)
             action = actor.mode()
-        elif self._should_expl(self._step):
+        elif self._should_expl(self._action_step):
             actor = self._expl_behavior.actor(feat)
             action = actor.sample()
         else:
@@ -142,7 +142,7 @@ class Dreamer(nn.Module):
         metrics = {}
         # print('train data keys', data.keys())
         # print('train data image states min and max', data['image'].min(),  data['image'].max())
-        data = self.data_augmenter(data)
+        #data = self.data_augmenter(data)
         # print('augment data keys', data.keys())
         post, context, mets = self._wm._train(data)
         metrics.update(mets)
@@ -169,162 +169,3 @@ def make_dataset(episodes, config):
     generator = sample_episodes(episodes, config.batch_length)
     dataset = from_generator(generator, config.batch_size)
     return dataset
-
-
-
-def main(config):
-    set_seed_everywhere(config.seed)
-    if config.deterministic_run:
-        enable_deterministic_run()
-    logdir = pathlib.Path(config.logdir).expanduser()
-    config.traindir = config.traindir or logdir / "train_eps"
-    config.evaldir = config.evaldir or logdir / "eval_eps"
-    config.steps //= config.action_repeat
-    config.eval_every //= config.action_repeat
-    config.log_every //= config.action_repeat
-    config.time_limit //= config.action_repeat
-
-    print("Logdir", logdir)
-    logdir.mkdir(parents=True, exist_ok=True)
-    config.traindir.mkdir(parents=True, exist_ok=True)
-    config.evaldir.mkdir(parents=True, exist_ok=True)
-    step = count_steps(config.traindir)
-    # step in logger is environmental step
-    logger = Logger(logdir, config.action_repeat * step)
-
-    print("Create envs.")
-    if config.offline_traindir:
-        directory = config.offline_traindir.format(**vars(config))
-    else:
-        directory = config.traindir
-    train_eps = load_episodes(directory, limit=config.dataset_size)
-    if config.offline_evaldir:
-        directory = config.offline_evaldir.format(**vars(config))
-    else:
-        directory = config.evaldir
-    eval_eps = load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
-    acts = train_envs[0].action_space
-    print("Action Space", acts)
-    config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
-
-    state = None
-    if not config.offline_traindir:
-        prefill = max(0, config.prefill - count_steps(config.traindir))
-        print(f"Prefill dataset ({prefill} steps).")
-        if hasattr(acts, "discrete"):
-            random_actor = OneHotDist(
-                torch.zeros(config.num_actions).repeat(config.envs, 1)
-            )
-        else:
-            random_actor = torchd.independent.Independent(
-                torchd.uniform.Uniform(
-                    torch.tensor(acts.low).repeat(config.envs, 1),
-                    torch.tensor(acts.high).repeat(config.envs, 1),
-                ),
-                1,
-            )
-
-        def random_agent(o, d, s):
-            action = random_actor.sample()
-            logprob = random_actor.log_prob(action)
-            return {"action": action, "logprob": logprob}, None
-
-        state = simulate(
-            random_agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=prefill,
-        )
-        logger.step += prefill * config.action_repeat
-        print(f"Logger: ({logger.step} steps).")
-
-    print("Simulate agent.")
-    train_dataset = make_dataset(train_eps, config)
-    eval_dataset = make_dataset(eval_eps, config)
-    agent = Dreamer(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
-        config,
-        logger,
-        train_dataset,
-    ).to(config.device)
-    agent.requires_grad_(requires_grad=False)
-    
-
-    # make sure eval will be executed once after config.steps
-    while agent._step < config.steps + config.eval_every:
-        logger.write()
-        if config.eval_episode_num > 0:
-            print("Start evaluation.")
-            eval_policy = funcpartial(agent, training=False)
-            simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
-                logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
-            )
-            if config.video_pred_log:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
-        print("Start training.")
-        state = simulate(
-            agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=config.eval_every,
-            state=state,
-        )
-        items_to_save = {
-            "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": recursively_collect_optim_state_dict(agent),
-        }
-        torch.save(items_to_save, logdir / "latest.pt")
-    for env in train_envs + eval_envs:
-        try:
-            env.close()
-        except Exception:
-            pass
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+")
-    args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
-        (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
-    )
-
-    def recursive_update(base, update):
-        for key, value in update.items():
-            if isinstance(value, dict) and key in base:
-                recursive_update(base[key], value)
-            else:
-                base[key] = value
-
-    name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
-    defaults = {}
-    for name in name_list:
-        recursive_update(defaults, configs[name])
-    parser = argparse.ArgumentParser()
-    for key, value in sorted(defaults.items(), key=lambda x: x[0]):
-        arg_type = args_type(value)
-        parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    main(parser.parse_args(remaining))

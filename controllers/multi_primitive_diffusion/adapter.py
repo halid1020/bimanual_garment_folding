@@ -130,12 +130,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.obs_deque = {}
         self.collect_on_success = self.config.get('collect_on_success', True)
 
-        if self.config.primitive_integration != 'none':
+        self.primitive_integration = self.config.primitive_integration
+        if self.primitive_integration != 'none':
+            
             self.primitives = config.primitives
             self.K = len(self.primitives)
             self.action_dims = [prim['dim'] if isinstance(prim, dict) else prim.dim for prim in self.primitives]
             self.network_action_dim = max(self.action_dims) + 1
             self.prim_name2id = {item['name']: i for i, item in enumerate(self.primitives)}
+            self.primitive_action_masks = self._build_primitive_action_masks()
+            self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
 
         else:
             self.network_action_dim = config.action_dim
@@ -266,10 +270,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actions['default'].append(add_action)  
               
                 info = arena.step(action)
+                print('[diffusion] demo reward', info['reward'])
                 policy.update(info, add_action)
                 info['reward'] = 0
                 done = info['done']
-                if (self.collect_on_success and info['success']) or policy.terminate()[arena.id]:
+                if (self.collect_on_success and info['success']):
                     break
                 
             for k, v in info['observation'].items():
@@ -431,25 +436,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         for i in pbar:
 
-            # print('i', i)
-            # get a batch from dataloader
             nbatch = next(iter(self.dataloader))
-            # print('nbatch action max', nbatch['action']['default'].max())
-            # print('nbatch action min', nbatch['action']['default'].min())
-            # print('nbatch keys', nbatch.keys())
-
-            # if True:
-            #     rgb = ts_to_np(nbatch['observation']['rgb'][0][0])
-            #     H, W = rgb.shape[:2]
-            #     #print('rgb shape', rgb.shape)
-            #     act = ts_to_np(nbatch['action']['default'][0][0]).reshape(2, 2)
-            #     px_act = ((act + 1)/2 * np.array([H, W])).astype(np.int32)
-            #     start = px_act[0]
-            #     end = px_act[1]
-            #     pnp_rgb = draw_pick_and_place(
-            #         rgb, start, end, get_ready=True, swap=True
-            #     )
-            #     plt.imsave('tmp/pre_pnp_rgb.png', pnp_rgb)
+          
 
             if self.config.dataset_mode == 'diffusion':
                 nbatch = self.data_augmenter(nbatch, train=True, device=self.device)
@@ -472,12 +460,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon]\
                 .flatten(end_dim=1)
 
-            ## check if the input_obs is in the correct shape
-
-            # if input_obs.shape[-1] > 4:
-            #     print('input obs shape', input_obs.shape)
-            #     input_obs = input_obs.permute(0, 3, 1, 2)
-
+          
             # encoder vision features
             image_features = self.nets['vision_encoder'](
                 input_obs)
@@ -514,8 +497,35 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             noise_pred = self.noise_pred_net(
                 noisy_actions, timesteps, global_cond=obs_cond)
 
-            # L2 loss
-            loss = nn.functional.mse_loss(noise_pred, noise)
+            if self.primitive_integration == 'predict_bin_as_output' and self.mask_out_irrelavent_action_dim:
+                # nbatch['action']: (B, T, action_dim)
+                actions = nbatch['action']
+
+                # primitive bin is in action[..., 0] ∈ [-1, 1]
+                prim_bin = actions[:, 0, 0]  # (B,)
+
+                # same decoding logic you use in inference
+                prim_ids = (((prim_bin + 1) / 2) * self.K).long()
+                prim_ids = torch.clamp(prim_ids, 0, self.K - 1).cpu().detach().numpy()
+                B, T, D = actions.shape
+                device = actions.device
+
+                mask = torch.zeros((B, T, D), device=device)
+
+                for b in range(B):
+                    mask[b] = self.primitive_action_masks[prim_ids[b]].to(device)
+
+                # apply mask
+                diff = (noise_pred - noise) * mask
+
+                # normalize by number of valid elements
+                valid_count = mask.sum().clamp(min=1.0)
+
+                loss = (diff ** 2).sum() / valid_count
+                    
+            else:
+                # L2 loss
+                loss = nn.functional.mse_loss(noise_pred, noise)
 
             # optimize
             loss.backward()
@@ -532,6 +542,33 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             pbar.set_description(f"Training (loss: {loss.item():.4f})")
             self.logger.log({'train/loss': loss.item()}, step=self.update_step)
             self.update_step += 1
+
+    def _build_primitive_action_masks(self):
+        """
+        Returns a dict:
+        prim_id -> mask (action_dim,)
+        """
+        masks = {}
+
+        for pid, prim in enumerate(self.primitives):
+            mask = np.zeros(self.network_action_dim, dtype=np.float32)
+
+            # dimension 0 is the primitive selector → always valid
+            mask[0] = 1.0
+
+            if isinstance(prim, dict):
+                dim = prim['dim']
+            else:
+                dim = prim.dim
+
+            # parameters start from index 1
+            mask[1:1 + dim] = 1.0
+
+            masks[pid] = torch.tensor(mask)
+        
+        #print('masks', masks)
+
+        return masks
 
     def set_log_dir(self, logdir):
         super().set_log_dir(logdir)

@@ -73,6 +73,7 @@ class GarmentEnv(Arena):
         super().__init__(config)
         self.config = config
         self.info = {}
+        self.all_infos = []
         self.sim_step = 0
         self.save_video = False
         
@@ -231,6 +232,8 @@ class GarmentEnv(Arena):
         self.clear_frames()
 
         self.picker_poses = []
+
+        self.all_infos = [self.info]
         
         return self.info
     
@@ -250,6 +253,9 @@ class GarmentEnv(Arena):
     def get_info(self):
         return self.info
     
+    def get_trajectory_infos(self):
+        return self.all_infos
+    
     def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
            
@@ -263,7 +269,7 @@ class GarmentEnv(Arena):
         })
         
         if self.save_each_action_picker_poses and self.mode != 'train':
-            print('save pixel poses!!!', len(self.picker_poses))
+            #print('save pixel poses!!!', len(self.picker_poses))
             if len(self.picker_poses) > 0:
                 picker_poses = np.stack(self.picker_poses) #T, 2, 3
                 picker_poses = picker_poses[:, :, [0, 2, 1]].reshape(-1, 3)
@@ -310,6 +316,7 @@ class GarmentEnv(Arena):
                 info['goal'] = {}
                 for k, v in goal[-1]['observation'].items():
                     info['goal'][k] = v
+                info['goals'] = goals[0]
 
         return info
     
@@ -320,13 +327,17 @@ class GarmentEnv(Arena):
         #print('action step', self.action_step)
         self.overstretch = 0
         self.sim_step = 0
-        info = self.action_tool.step(self, action)
+        self.info = self.action_tool.step(self, action)
+        #print('applied aciton', info['applied_action'])
         
         self.action_step += 1
-        self.info = self._process_info(info)
+        self.all_infos.append(self.info)
+        self.info = self._process_info(self.info)
 
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
+
+        
         
         #print('reward', info['reward'])
         return self.info

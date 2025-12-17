@@ -17,6 +17,7 @@ from torch.nn import functional as F
 from torch import distributions as torchd
 
 import wandb
+import cv2
 
 def count_steps(folder):
     return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
@@ -116,7 +117,7 @@ class WandbLogger(Logger):
             scalars.append(("fps", self._compute_fps(step)))
 
         # Print summary
-        print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
+        print(f"[update step: {step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
 
         # Write json metrics file
         with (self._logdir / "metrics.jsonl").open("a") as f:
@@ -235,9 +236,9 @@ def simulate(
             #print('action', action)
             prim_id = [int(((action[i][0] + 1)/2)*agent.K - 1e-6) for i in range(len(action))]
             action_for_env = [{agent.primitives[prim_id[i]]['name']: action[i][1:]} for i in range(len(action))]
-            logger.log({
-                f"train/prim_id": prim_id[0],
-            }, step=step) # TODO: change this to update steps
+            # logger.log({
+            #     f"train/prim_id": prim_id[0],
+            # }, step=step) # TODO: change this to update steps
 
         
         else:
@@ -265,6 +266,8 @@ def simulate(
                logger.log_frames(env.get_frames(), key='success episodes', step=steps)
 
             o = {k: convert(v) for k, v in o.items() if k in obs_keys}
+            
+
             transition = o.copy()
             if isinstance(a, dict):
                 transition.update(a)
@@ -295,12 +298,13 @@ def simulate(
 
                 
                 step_in_dataset = erase_over_episodes(cache, limit)
-                logger.scalar(f"dataset_size", step_in_dataset)
+                print(f'[update step: {logger.update_step}], dataset_size: {step_in_dataset}, train_return: {score}, train_length: {length}, train_episodes: {len(cache)}')
                 
+                logger.scalar(f"dataset_size", step_in_dataset)
                 logger.scalar(f"train_return", score)
                 logger.scalar(f"train_length", length)
                 logger.scalar(f"train_episodes", len(cache))
-                logger.write(step=logger.step) # change this to update steps
+                # logger.write(step=logger.step) # change this to update steps
                 
     return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
 

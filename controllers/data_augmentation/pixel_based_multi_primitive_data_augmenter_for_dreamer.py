@@ -1,67 +1,73 @@
-import numpy as np
-from scipy.ndimage import affine_transform
-import random
-import os
-import matplotlib.pyplot as plt
-import numpy as np
-import colorsys
-from scipy.ndimage import affine_transform
+import torch
+import torch.nn.functional as F
 import random
 import os
 import matplotlib.pyplot as plt
 
+from .utils import randomize_primitive_encoding  # or torch version if you have it
 
-def jitter_brightness(imgs, delta):
-    return np.clip(imgs + delta, 0.0, 1.0)
+# --------------------
+# Helper functions (torch)
+# --------------------
+def jitter_brightness_torch(imgs, delta):
+    # imgs: (N,C,H,W)
+    return torch.clamp(imgs + delta, 0.0, 1.0)
 
+def jitter_contrast_torch(imgs, factor):
+    # imgs: (N,C,H,W)
+    mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
+    return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
 
-def jitter_contrast(imgs, factor):
-    mean = imgs.mean(axis=(1,2), keepdims=True)
-    return np.clip((imgs - mean) * factor + mean, 0.0, 1.0)
-
-
-def rgb_to_hsv_vectorized(rgb):
-    # rgb: (N,H,W,3)
+def rgb_to_hsv_torch(rgb):
+    # rgb: (N,H,W,3) in [0,1] channels-last
+    # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    maxc = np.max(rgb, axis=-1)
-    minc = np.min(rgb, axis=-1)
+    maxc, _ = rgb.max(dim=-1)
+    minc, _ = rgb.min(dim=-1)
     v = maxc
     diff = maxc - minc
 
-    # Saturation
-    s = np.where(maxc == 0, 0, diff / maxc)
+    s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
 
-    # Hue
-    h = np.zeros_like(maxc)
-    mask = diff != 0
+    h = torch.zeros_like(maxc)
 
-    rc = (maxc - r) / (diff + 1e-6)
-    gc = (maxc - g) / (diff + 1e-6)
-    bc = (maxc - b) / (diff + 1e-6)
+    mask = diff > 1e-8
 
-    h[..., :] = np.where((r == maxc) & mask, (bc - gc), h)
-    h[..., :] = np.where((g == maxc) & mask, 2.0 + (rc - bc), h)
-    h[..., :] = np.where((b == maxc) & mask, 4.0 + (gc - rc), h)
+    rc = (maxc - r) / (diff + 1e-8)
+    gc = (maxc - g) / (diff + 1e-8)
+    bc = (maxc - b) / (diff + 1e-8)
+
+    # for r == max
+    pick = (r == maxc) & mask
+    h = torch.where(pick, (bc - gc), h)
+
+    # for g == max
+    pick = (g == maxc) & mask
+    h = torch.where(pick, 2.0 + (rc - bc), h)
+
+    # for b == max
+    pick = (b == maxc) & mask
+    h = torch.where(pick, 4.0 + (gc - rc), h)
 
     h = (h / 6.0) % 1.0
+    hsv = torch.stack([h, s, v], dim=-1)
+    return hsv
 
-    return np.stack([h, s, v], axis=-1)
-
-
-def hsv_to_rgb_vectorized(hsv):
+def hsv_to_rgb_torch(hsv):
+    # hsv: (N,H,W,3) channels-last, h in [0,1]
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-
-    i = np.floor(h * 6).astype(np.int32)
-    f = (h * 6) - i
+    i = torch.floor(h * 6.0).to(torch.int64)
+    f = (h * 6.0) - i.type(h.dtype)
     i = i % 6
 
-    p = v * (1 - s)
-    q = v * (1 - f * s)
-    t = v * (1 - (1 - f) * s)
+    p = v * (1.0 - s)
+    q = v * (1.0 - f * s)
+    t = v * (1.0 - (1.0 - f) * s)
 
-    r = np.zeros_like(v)
-    g = np.zeros_like(v)
-    b = np.zeros_like(v)
+    shape = h.shape
+    r = torch.zeros(shape, dtype=h.dtype, device=h.device)
+    g = torch.zeros(shape, dtype=h.dtype, device=h.device)
+    b = torch.zeros(shape, dtype=h.dtype, device=h.device)
 
     idx = (i == 0)
     r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
@@ -76,14 +82,10 @@ def hsv_to_rgb_vectorized(hsv):
     idx = (i == 5)
     r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
 
-    return np.stack([r, g, b], axis=-1)
-
-
-
-def rotate_points(points, R):
-    """points: (..., 2), R: (2,2)"""
-    return points @ R.T
-
+    return torch.stack([r, g, b], dim=-1)
+# =========================
+#        AUGMENTER
+# =========================
 
 class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
     def __init__(self, config=None):
@@ -92,8 +94,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
 
-        
-
     def _flatten_bt(self, x):
         B, T = x.shape[:2]
         return x.reshape(B * T, *x.shape[2:]), B, T
@@ -101,155 +101,172 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
     def _unflatten_bt(self, x, B, T):
         return x.reshape(B, T, *x.shape[1:])
 
-    def _save_debug_image(self, rgb, pts, prefix, step):
-        """rgb: (H,W,3) float, pts: (N,2) in [-1,1]"""
-        save_dir = "./tmp/augment_debug"
-        os.makedirs(save_dir, exist_ok=True)
-
-        H, W, _ = rgb.shape
-        pts = pts.reshape(-1, 2)
-
-        xs = (pts[:, 1] + 1) * W / 2
-        ys = (pts[:, 0] + 1) * H / 2
-
-        plt.figure(figsize=(4, 4))
-        plt.imshow(rgb)
-        plt.scatter(xs, ys, c='red', s=12)
-        plt.axis('off')
-        plt.savefig(f"{save_dir}/{prefix}_step{step}.png", bbox_inches='tight', pad_inches=0)
-        plt.close()
-
     def __call__(self, sample):
         """
-        Input sample:
-            observation:       (B, T, H, W, 3) numpy      
-            action:            (B, T, 9)
-
+        Input:
+            image:  (B, T, H, W, 3) uint8
+            action: (B, T, A)
         """
-        observation = sample["image"].astype(np.float32) / 255.0
-        action = sample["action"].astype(np.float32)
 
-        # flatten (B,T) → (B*T)
-        obs, B, T = self._flatten_bt(observation)  
+        obs = sample["image"] / 255.0
+        action = sample["action"]
+        self.device = obs.device
+
+        obs, B, T = self._flatten_bt(obs)
         act, _, _ = self._flatten_bt(action)
 
+        pixel_actions = act[:, 1:]
 
-        pixel_actions = act[:, 1:]      # keep continuous part
-
-        # Save original (before augmentation)
+        # =========================
+        #   DEBUG (BEFORE AUG)
+        # =========================
         if self.debug:
-            for b in range(min(4, obs.shape[0])):  # only first few samples
-                self._save_debug_image(obs[b], pixel_actions[b], prefix="before_action", step=b)
+            n_show = min(4, B)
+            for b in range(n_show):
+                for t in range(min(4, T)):
+                    self._save_debug_image(
+                        obs[b * T + t],
+                        pixel_actions[b * T + t],
+                        prefix=f"dreamer_before_batch_{b}",
+                        step=t
+                    )
 
+        
+        obs = obs.permute(0, 3, 1, 2).contiguous()
+        #print('obs before rotate shape', obs.shape)
         # =========================
         #       RANDOM ROTATION
         # =========================
         if self.random_rotation:
             while True:
-                deg = self.config.rotation_degree * np.random.randint(
-                    0, int(360 / self.config.rotation_degree)
+                degree = self.config.rotation_degree * torch.randint(
+                    int(360 / self.config.rotation_degree), size=(1,)
                 )
-                rad = np.deg2rad(deg)
+                thetas = torch.deg2rad(degree)
+                cos_theta = torch.cos(thetas)
+                sin_theta = torch.sin(thetas)
 
-                cos = np.cos(rad)
-                sin = np.sin(rad)
+                rot = torch.stack([
+                    torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
+                ], dim=0).to(self.device)
+                rot_inv = rot.transpose(-1, -2)
 
-                R = np.array([[cos, -sin],
-                              [sin,  cos]], dtype=np.float32)
-                Rinv = R.T
+                # Rotate actions
+                NP, A = pixel_actions.shape
+                pixel_actions_ = pixel_actions.reshape(-1, 1, 2)
+                N_ = pixel_actions_.shape[0]
+                rotation_matrices_tensor = rot_inv.expand(N_, 2, 2).reshape(-1, 2, 2)
+                rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(NP, A)
 
-                # rotate pixel actions
-                pa = pixel_actions.reshape(-1, 2)
-                pa_rot = rotate_points(pa, Rinv)
-                if np.abs(pa_rot).max() > 1:
+                if torch.abs(rotated_action).max() > 1:
                     continue
 
-                pixel_actions = pa_rot.reshape(pixel_actions.shape)
-
-
-                # rotate images
-                for i in range(obs.shape[0]):
-                    oy = obs[i]
-
-                    H, W = oy.shape[:2]
-                    center = np.array([H/2, W/2])
-                    offset = center - R @ center
-
-                    rotated = np.zeros_like(oy)
-
-                    # apply transform per channel (SciPy requires channel-wise)
-                    for c in range(3):
-                        rotated[..., c] = affine_transform(
-                            oy[..., c],
-                            R,
-                            offset=offset,
-                            order=1,
-                            mode='nearest'
-                        )
-
-                    obs[i] = rotated
-                   
+            
+                N, C, H, W = obs.shape
+                affine_matrix = torch.zeros(N, 2, 3, device=self.device)
+                affine_matrix[:, :2, :2] = rot.expand(N, 2, 2)
+                grid = F.affine_grid(affine_matrix[:, :2], (N, C, H, W), align_corners=True)
+                obs = F.grid_sample(obs, grid, align_corners=True)
+            
+                pixel_actions = rotated_action.reshape(NP, -1)
                 break
-
+        
+        #print('obs before flip shape', obs.shape)
         # =========================
         #       VERTICAL FLIP
         # =========================
         if self.vertical_flip and random.random() < 0.5:
-            obs = obs[:, ::-1]    # flip Y
+            N, C, H, W = obs.shape
+            obs = torch.flip(obs, [2])
+            NP, A = pixel_actions.shape
+            pixel_actions = pixel_actions.reshape(-1, 2)
+            pixel_actions[:, 0] = -pixel_actions[:, 0]
+            pixel_actions = pixel_actions.reshape(NP, A)
 
-            pa = pixel_actions.reshape(-1, 2)
-            pa[:, 0] = -pa[:, 0]
-            pixel_actions = pa.reshape(pixel_actions.shape)
+        # =========================
+        #       COLOR JITTER
+        # =========================
+        obs = obs.permute(0, 2, 3, 1).contiguous()
+        if self.config.get("color_jitter", False):
+            brightness = random.uniform(-self.config.get("brightness", 0.2),
+                                         self.config.get("brightness", 0.2))
+            contrast = 1.0 + random.uniform(-self.config.get("contrast", 0.2),
+                                            self.config.get("contrast", 0.2))
+            saturation = 1.0 + random.uniform(-self.config.get("saturation", 0.2),
+                                              self.config.get("saturation", 0.2))
+            hue = random.uniform(-self.config.get("hue", 0.05),
+                                 self.config.get("hue", 0.05))
+
+            obs = jitter_brightness_torch(obs, brightness)
+            obs = jitter_contrast_torch(obs, contrast)
+
+            hsv = rgb_to_hsv_torch(obs)
+            hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
+            hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0, 1)
+            obs = hsv_to_rgb_torch(hsv)
 
         
+        #print('obs shape before debug after', obs.shape)
         # =========================
-        #     COLOR JITTER (GLOBAL)
+        #   DEBUG (AFTER AUG)
         # =========================
-        if self.config.get("color_jitter", False):
-            brightness = np.random.uniform(-self.config.get("brightness", 0.2),
-                                            self.config.get("brightness", 0.2))
-            contrast = 1.0 + np.random.uniform(-self.config.get("contrast", 0.2),
-                                                self.config.get("contrast", 0.2))
-            saturation = 1.0 + np.random.uniform(-self.config.get("saturation", 0.2),
-                                                self.config.get("saturation", 0.2))
-            hue = np.random.uniform(-self.config.get("hue", 0.05),
-                                    self.config.get("hue", 0.05))
-
-            # (N,H,W,3)
-            imgs = obs
-
-            # Brightness & Contrast
-            imgs = jitter_brightness(imgs, brightness)
-            imgs = jitter_contrast(imgs, contrast)
-
-            # Convert to HSV (vectorized)
-            hsv = rgb_to_hsv_vectorized(imgs)
-
-            # Apply hue/saturation jitter
-            hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
-            hsv[..., 1] = np.clip(hsv[..., 1] * saturation, 0, 1)
-
-            # Convert back
-            obs = hsv_to_rgb_vectorized(hsv)
-
-
+        if self.debug:
+            n_show = min(4, B)
+            for b in range(n_show):
+                for t in range(min(4, T)):
+                    self._save_debug_image(
+                        obs[b * T + t],
+                        pixel_actions[b * T + t],
+                        prefix=f"dreamer_after_batch_{b}",
+                        step=t
+                    )
+        
         # =========================
         #      RESHAPE BACK
         # =========================
-        if self.debug:
-            for b in range(min(4, obs.shape[0])):
-                self._save_debug_image(obs[b], pixel_actions[b], prefix="after_action", step=b)
-
-        observation = self._unflatten_bt(obs, B, T)
+        obs = self._unflatten_bt(obs, B, T)
         pixel_actions = self._unflatten_bt(pixel_actions, B, T)
 
-        # restore action = (1 discrete action + 2*k pixel coords)
-        full_action = np.concatenate([action[..., :1], pixel_actions], axis=-1)
+        
 
-        # =========================
-        #      PACK OUTPUT
-        # =========================
-        sample["image"] = (observation * 255).astype(np.uint8)
-        sample["action"] = full_action.astype(np.float32)
+        prim_acts = action[..., :1]
+        if self.config.get("randomise_prim_acts", False):            
+            prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(B, T, 1)
+
+
+        full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
+
+        sample["image"] = (obs.clamp(0, 1) * 255)
+        sample["action"] = full_action.float()
 
         return sample
+    
+    def _save_debug_image(self, rgb, pts, prefix, step):
+        """
+        rgb: (H, W, 3) torch or numpy, float in [0,1]
+        pts: (N, 2) torch or numpy in [-1,1]
+        """
+        save_dir = "./tmp/augment_debug"
+        os.makedirs(save_dir, exist_ok=True)
+
+        if torch.is_tensor(rgb):
+            rgb = rgb.detach().cpu().numpy()
+        if torch.is_tensor(pts):
+            pts = pts.detach().cpu().numpy()
+
+        H, W, _ = rgb.shape
+        pts = pts.reshape(-1, 2)
+
+        xs = (pts[:, 1] + 1) * [W-1] / 2
+        ys = (pts[:, 0] + 1) * [H-1] / 2
+
+        plt.figure(figsize=(4, 4))
+        plt.imshow(rgb)
+        plt.scatter(xs, ys, c='red', s=12)
+        plt.axis('off')
+        plt.savefig(
+            f"{save_dir}/{prefix}_step{step}.png",
+            bbox_inches='tight',
+            pad_inches=0
+        )
+        plt.close()

@@ -112,7 +112,7 @@ class HybridActionPrimitive():
             info['applied_action'] = {
                 'norm-pixel-fold': info['applied_action']
             }
-        elif 'no-op' in action and action['no-op']:
+        elif 'no-operation' in action:
             info = env.get_info()
         else:
             raise ValueError('Action not recognized')

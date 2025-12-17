@@ -2,17 +2,17 @@ name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
 action_dim: 8
-obs_horizon: 2
-pred_horizon: 4
+obs_horizon: 1
+pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
 input_obs: 'rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 20 #100
+num_demos: 10 #100
 batch_size: 64
-disable_updown: False
+disable_updown: True
 action_shape: [8]
 collect_on_success: False # This is important!
 data_obs: 'image'
@@ -30,7 +30,7 @@ dataset_mode: "general"
 dataset_config:
   data_path: "multi_longsleeve_folding_from_crumpled_human_multi_primitive_100"
   data_dir: "./data/datasets"
-  seq_length: 4
+  seq_length: 1
   io_mode: "w"
   obs_config:
     mask: 

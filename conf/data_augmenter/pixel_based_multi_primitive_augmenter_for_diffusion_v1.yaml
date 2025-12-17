@@ -5,5 +5,5 @@ vertical_flip: true
 debug: false
 color_jitter: true
 img_dim: [96, 96]
-randomise_prim_acts: true
+randomise_prim_acts: false
 K: 2

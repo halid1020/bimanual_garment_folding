@@ -25,21 +25,50 @@ class HumanFold(Agent):
         produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
         """
         rgb = state['observation']['rgb']
-        goal_rgb = state['goal']['rgb']
-
+        
         ## make it bgr to rgb using cv2
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
-        goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
+        
 
         ## resize
         rgb = cv2.resize(rgb, (512, 512))
-        goal_rgb = cv2.resize(goal_rgb, (512, 512))
+        
         
         # Create a copy of the image to draw on
         img = rgb.copy()
 
         # put img and goal_img side by side
-        img = np.concatenate([img, goal_rgb], axis=1)
+        # if 'goal' in state.keys():
+        #     goal_rgb = state['goal']['rgb']
+        #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
+        #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
+        #     img = np.concatenate([img, goal_rgb], axis=1)
+
+        if 'goals' in state.keys():
+            goals = state['goals']  # list of goal infos
+
+            # Extract goal RGBs
+            rgbs = []
+            for goal in goals[:4]:  # max 4 for 2x2 grid
+                g = goal['observation']['rgb']
+
+                # Ensure RGB
+                if g.shape[-1] == 3:
+                    g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
+
+                # Resize to half-size (for 2x2 grid)
+                g = cv2.resize(g, (256, 256))
+                rgbs.append(g)
+
+            # Pad with black images if fewer than 4
+            while len(rgbs) < 4:
+                rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
+
+            # Arrange into 2x2 grid
+            top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
+            bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
+            goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
+            img = np.concatenate([img, goal_rgb], axis=1)
 
         # Draw vertical white line between the two images
         line_x = rgb.shape[1]   # x-position = width of left image (512)

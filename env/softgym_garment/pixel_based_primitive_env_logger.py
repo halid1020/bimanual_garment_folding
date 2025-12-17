@@ -4,6 +4,40 @@ import numpy as np
 from ..video_logger import VideoLogger
 import matplotlib.pyplot as plt
 
+PRIMITIVE_COLORS = {
+    "norm-pixel-fold": (255, 180, 80),          # orange
+    "norm-pixel-pick-and-fling": (80, 200, 255),# cyan
+    "no-operation": (255, 255, 255),             # gray
+    "default": (255, 255, 255),                  # white
+}
+
+TEXT_Y_STEP = 30
+TEXT_Y_STATUS = 65
+TEXT_BG_ALPHA = 0.6
+
+def draw_text_with_bg(img, text, org, color, scale=1.0, thickness=2):
+    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    x, y = org
+    overlay = img.copy()
+    cv2.rectangle(
+        overlay,
+        (x - 5, y - h - 5),
+        (x + w + 5, y + 5),
+        (0, 0, 0),
+        -1
+    )
+    cv2.addWeighted(overlay, TEXT_BG_ALPHA, img, 1 - TEXT_BG_ALPHA, 0, img)
+    cv2.putText(
+        img,
+        text,
+        org,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        color,
+        thickness,
+        cv2.LINE_AA
+    )
+
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
     def __call__(self, episode_config, result, filename=None):
@@ -13,6 +47,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         actions = result["actions"]
         picker_traj = [info["observation"]["picker_norm_pixel_pos"]
                        for info in result["information"]]  # [T][2,2]
+
+        print('result["information"] keys', result["information"][0].keys())
 
         H, W = 512, 512
 
@@ -42,24 +78,26 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
             
 
+            primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
+
             step_text = f"Step {i+1}: "
             if key == "norm-pixel-fold":
-                step_text += "Pick-and-Place"
+                step_text += "Pick and Place"
             elif key == "norm-pixel-pick-and-fling":
-                step_text += "Pick-and-Fling"
+                step_text += "Pick and Fling"
+            elif key == "no-operation":
+                step_text += "No Operation"
             else:
                 step_text += key
 
-            cv2.putText(
+            draw_text_with_bg(
                 img,
                 step_text,
-                (10, 30),                 # top-left corner
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (255, 255, 255),          # white text
-                2,
-                cv2.LINE_AA
+                (10, TEXT_Y_STEP),
+                primitive_color
             )
+
+
 
             RED   = (50, 50, 200)     # softer red
             BLUE  = (200, 50, 50)     # softer blue
@@ -68,14 +106,15 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             #          FOLD / PICK-PLACE
             # ================================
             if key == "norm-pixel-fold":
-                pick_0  = norm_to_px(val[:2])
-                pick_1  = norm_to_px(val[2:4])
-                place_0 = norm_to_px(val[4:6])
-                place_1 = norm_to_px(val[6:8])
+                applied_action = result["information"][i+1]['applied_action']["norm-pixel-fold"]
+                pick_0  = norm_to_px(applied_action['pick_0'])
+                pick_1  = norm_to_px(applied_action['pick_1'])
+                place_0 = norm_to_px(applied_action['place_0'])
+                place_1 = norm_to_px(applied_action['place_1'])
 
                 # ----- Ensure BLUE pick is always the LEFT one -----
                 picks = [(pick_0, place_0), (pick_1, place_1)]
-                picks_sorted = sorted(picks, key=lambda p: p[0][0])  # sort by x
+                picks_sorted = sorted(picks, key=lambda p: p[0][1])  # sort by x
 
                 (left_pick, left_place), (right_pick, right_place) = picks_sorted
                 # BLUE = left, RED = right
@@ -99,16 +138,15 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
                 # Retrieve trajectory of NEXT environment step
                 traj = picker_traj[i + 1]
+
+                ## TODO: do not overlap with the step-wise primitive information text
                 if traj is None or len(traj) == 0:
-                    cv2.putText(
+                    draw_text_with_bg(
                         img,
-                        'Rejected',
-                        (20, 30),                 # top-left corner
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1.0,
-                        (255, 255, 255),          # white text
-                        2,
-                        cv2.LINE_AA
+                        "Rejected",
+                        (10, TEXT_Y_STATUS),
+                        (255, 80, 80),   # red
+                        scale=0.9
                     )
                     
                 else:
@@ -138,7 +176,6 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                         cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 5)
                         cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 5)
 
-                    # -------- TODO FIX: replace X markers with hollow circles ----------
                     def draw_hollow_circle(img, p, color, radius=8, thickness=3):
                         cv2.circle(img, swap(p), radius, color, thickness)
 

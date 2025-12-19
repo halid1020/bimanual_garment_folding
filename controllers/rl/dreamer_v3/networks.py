@@ -660,6 +660,7 @@ class MLP(nn.Module):
             x = symlog(x)
         out = self.layers(x)
         # Used for encoder output
+        #print('out shape', out.shape)
         if self._shape is None:
             return out
         if isinstance(self._shape, dict):
@@ -681,6 +682,7 @@ class MLP(nn.Module):
             return self.dist(self._dist, mean, std, self._shape)
 
     def dist(self, dist, mean, std, shape):
+        #print('mean shape', mean.shape)
         if dist == "tanh_normal":
             mean = torch.tanh(mean)
             std = F.softplus(std) + self._min_std

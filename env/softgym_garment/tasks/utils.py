@@ -52,12 +52,12 @@ def get_max_IoU(mask1, mask2, debug=False):
         pad = (mask2.shape[1] - mask2.shape[0]) // 2
         mask2 = np.pad(mask2, ((pad, pad), (0, 0)), mode='constant')
 
-    if mask1.shape[0] > 128:
+    if mask1.shape[0] != 128:
         mask1 = cv2.resize(mask1.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
         mask1 = (mask1 > 0.5).astype(np.uint8)
         
 
-    if mask2.shape[0] > 128:
+    if mask2.shape[0] != 128:
         mask2 = cv2.resize(mask2.astype(np.float32), (128, 128), interpolation=cv2.INTER_AREA)
         mask2 = (mask2 > 0.5).astype(np.uint8)
     

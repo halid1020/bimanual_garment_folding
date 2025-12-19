@@ -5,7 +5,7 @@ from ..video_logger import VideoLogger
 import matplotlib.pyplot as plt
 
 PRIMITIVE_COLORS = {
-    "norm-pixel-fold": (255, 180, 80),          # orange
+    "norm-pixel-pick-and-place": (255, 180, 80),          # orange
     "norm-pixel-pick-and-fling": (80, 200, 255),# cyan
     "no-operation": (255, 255, 255),             # gray
     "default": (255, 255, 255),                  # white
@@ -83,7 +83,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
 
             step_text = f"Step {i+1}: "
-            if key == "norm-pixel-fold":
+            if key == "norm-pixel-pick-and-place":
                 step_text += "Pick and Place"
             elif key == "norm-pixel-pick-and-fling":
                 step_text += "Pick and Fling"
@@ -107,8 +107,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             # ================================
             #          FOLD / PICK-PLACE
             # ================================
-            if key == "norm-pixel-fold":
-                applied_action = result["information"][i+1]['applied_action']["norm-pixel-fold"]
+            if key == "norm-pixel-pick-and-place":
+                applied_action = result["information"][i+1]['applied_action']["norm-pixel-pick-and-place"]
                 pick_0  = norm_to_px(applied_action['pick_0'])
                 pick_1  = norm_to_px(applied_action['pick_1'])
                 place_0 = norm_to_px(applied_action['place_0'])

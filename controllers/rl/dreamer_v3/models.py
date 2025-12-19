@@ -84,6 +84,21 @@ class WorldModel(nn.Module):
             device=config.device,
             name="Cont",
         )
+
+        if 'state_head' in config: 
+            self.heads["state"] = MLP(
+                feat_size,
+                (config.state_dim, ),
+                config.state_head["layers"],
+                config.units,
+                config.act,
+                config.norm,
+                dist=config.state_head["dist"],
+                outscale=config.state_head["outscale"],
+                device=config.device,
+                name="State",
+            )
+
         for name in config.grad_heads:
             assert name in self.heads, name
         self._model_opt = Optimizer(
@@ -103,7 +118,10 @@ class WorldModel(nn.Module):
         self._scales = dict(
             reward=config.reward_head["loss_scale"],
             cont=config.cont_head["loss_scale"],
+            state=config.get('state_head', {'loss_scale': 1})["loss_scale"]
         )
+        # if 'state_head' in config: 
+        #     self._scales['state'] = config.state_head["loss_scale"],
 
     def _train(self, data_in):
         # action (batch_size, batch_length, act_dim)
@@ -137,9 +155,11 @@ class WorldModel(nn.Module):
                         preds[name] = pred
                 losses = {}
                 for name, pred in preds.items():
+                    #print('data name', name, data[name].shape)
                     loss = -pred.log_prob(data[name])
                     assert loss.shape == embed.shape[:2], (name, loss.shape)
                     losses[name] = loss
+                    #print('loss shape', loss.shape)
                 scaled = {
                     key: value * self._scales.get(key, 1.0)
                     for key, value in losses.items()
@@ -179,10 +199,17 @@ class WorldModel(nn.Module):
             for k, v in obs_in.items()
         }
         
+        if 'state_head' in self._config:
+            obs["state"] = obs[self._config.state_key]
+            #print('[world modle] state shape', obs['state'].shape)
+            # print('[world modle] image shape', obs['image'].shape)
+
         if train:
             obs = self.data_augmenter(obs)
+            #print('[world modle] state shape after aug', obs['state'].shape)
 
         obs["image"] = obs["image"] / 255.0
+        
 
         if "discount" in obs:
             obs["discount"] *= self._config.discount

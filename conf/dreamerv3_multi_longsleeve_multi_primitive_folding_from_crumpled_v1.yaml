@@ -1,0 +1,10 @@
+defaults:
+  - agent: dreamerv3_multi_longsleeve_multi_primitive_folding_from_crumpled_v1
+  - arena: multi_longsleeve_readjust_pick_provide_semkey_pixel_no_success_stop_resol_64
+  - task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
+  - data_augmenter: pixel_based_multi_primitive_augmenter_for_dreamer_include_state
+
+train_and_eval: train_and_evaluate_single
+exp_name: dreamerv3_multi_longsleeve_multi_primitive_folding_from_crumpled_v1
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

@@ -3,86 +3,10 @@ import torch.nn.functional as F
 import random
 import os
 import matplotlib.pyplot as plt
+import kornia.augmentation as K
 
 from .utils import randomize_primitive_encoding  # or torch version if you have it
 
-# --------------------
-# Helper functions (torch)
-# --------------------
-def jitter_brightness_torch(imgs, delta):
-    # imgs: (N,C,H,W)
-    return torch.clamp(imgs + delta, 0.0, 1.0)
-
-def jitter_contrast_torch(imgs, factor):
-    # imgs: (N,C,H,W)
-    mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
-    return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
-
-def rgb_to_hsv_torch(rgb):
-    # rgb: (N,H,W,3) in [0,1] channels-last
-    # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    maxc, _ = rgb.max(dim=-1)
-    minc, _ = rgb.min(dim=-1)
-    v = maxc
-    diff = maxc - minc
-
-    s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
-
-    h = torch.zeros_like(maxc)
-
-    mask = diff > 1e-8
-
-    rc = (maxc - r) / (diff + 1e-8)
-    gc = (maxc - g) / (diff + 1e-8)
-    bc = (maxc - b) / (diff + 1e-8)
-
-    # for r == max
-    pick = (r == maxc) & mask
-    h = torch.where(pick, (bc - gc), h)
-
-    # for g == max
-    pick = (g == maxc) & mask
-    h = torch.where(pick, 2.0 + (rc - bc), h)
-
-    # for b == max
-    pick = (b == maxc) & mask
-    h = torch.where(pick, 4.0 + (gc - rc), h)
-
-    h = (h / 6.0) % 1.0
-    hsv = torch.stack([h, s, v], dim=-1)
-    return hsv
-
-def hsv_to_rgb_torch(hsv):
-    # hsv: (N,H,W,3) channels-last, h in [0,1]
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    i = torch.floor(h * 6.0).to(torch.int64)
-    f = (h * 6.0) - i.type(h.dtype)
-    i = i % 6
-
-    p = v * (1.0 - s)
-    q = v * (1.0 - f * s)
-    t = v * (1.0 - (1.0 - f) * s)
-
-    shape = h.shape
-    r = torch.zeros(shape, dtype=h.dtype, device=h.device)
-    g = torch.zeros(shape, dtype=h.dtype, device=h.device)
-    b = torch.zeros(shape, dtype=h.dtype, device=h.device)
-
-    idx = (i == 0)
-    r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
-    idx = (i == 1)
-    r[idx], g[idx], b[idx] = q[idx], v[idx], p[idx]
-    idx = (i == 2)
-    r[idx], g[idx], b[idx] = p[idx], v[idx], t[idx]
-    idx = (i == 3)
-    r[idx], g[idx], b[idx] = p[idx], q[idx], v[idx]
-    idx = (i == 4)
-    r[idx], g[idx], b[idx] = t[idx], p[idx], v[idx]
-    idx = (i == 5)
-    r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
-
-    return torch.stack([r, g, b], dim=-1)
 # =========================
 #        AUGMENTER
 # =========================
@@ -93,6 +17,20 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         self.random_rotation = config.get("random_rotation", False)
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
+        self.color_jitter = self.config.get("color_jitter", False)
+
+        self.include_state = self.config.get("include_state", False)
+
+        if self.color_jitter:
+            self.color_aug = K.ColorJitter(
+                brightness=self.config.get("brightness", 0.2),
+                contrast=self.config.get("contrast", 0.2),
+                saturation=self.config.get("saturation", 0.2),
+                hue=self.config.get("hue", 0.05),
+                p=1.0,
+                keepdim=True,
+                same_on_batch=True, 
+            )
 
     def _flatten_bt(self, x):
         B, T = x.shape[:2]
@@ -110,10 +48,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
 
         obs = sample["image"] / 255.0
         action = sample["action"]
+        
+
         self.device = obs.device
 
         obs, B, T = self._flatten_bt(obs)
         act, _, _ = self._flatten_bt(action)
+        if self.include_state:
+            state = sample['state']
+            state, _, _ = self._flatten_bt(state)
+        
 
         pixel_actions = act[:, 1:]
 
@@ -160,8 +104,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
 
                 if torch.abs(rotated_action).max() > 1:
                     continue
+                
+                if self.include_state:
+                    pixel_state_ = state.reshape(-1, 1, 2)
+                    N = pixel_state_.shape[0]
+                    rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
+                    new_state = torch.bmm(pixel_state_, rotation_matrices_tensor).reshape(NP, -1)
 
-            
+
+                
                 N, C, H, W = obs.shape
                 affine_matrix = torch.zeros(N, 2, 3, device=self.device)
                 affine_matrix[:, :2, :2] = rot.expand(N, 2, 2)
@@ -183,27 +134,35 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(NP, A)
 
+            if self.include_state:
+                new_state = new_state.reshape(-1, 2)
+                new_state[:, 0] = -new_state[:, 0]
+                new_state = new_state.reshape(NP, -1)
+
         # =========================
         #       COLOR JITTER
         # =========================
+        
+        if self.color_jitter:
+            obs = self.color_aug(obs)
         obs = obs.permute(0, 2, 3, 1).contiguous()
-        if self.config.get("color_jitter", False):
-            brightness = random.uniform(-self.config.get("brightness", 0.2),
-                                         self.config.get("brightness", 0.2))
-            contrast = 1.0 + random.uniform(-self.config.get("contrast", 0.2),
-                                            self.config.get("contrast", 0.2))
-            saturation = 1.0 + random.uniform(-self.config.get("saturation", 0.2),
-                                              self.config.get("saturation", 0.2))
-            hue = random.uniform(-self.config.get("hue", 0.05),
-                                 self.config.get("hue", 0.05))
+        # if self.config.get("color_jitter", False):
+        #     brightness = random.uniform(-self.config.get("brightness", 0.2),
+        #                                  self.config.get("brightness", 0.2))
+        #     contrast = 1.0 + random.uniform(-self.config.get("contrast", 0.2),
+        #                                     self.config.get("contrast", 0.2))
+        #     saturation = 1.0 + random.uniform(-self.config.get("saturation", 0.2),
+        #                                       self.config.get("saturation", 0.2))
+        #     hue = random.uniform(-self.config.get("hue", 0.05),
+        #                          self.config.get("hue", 0.05))
 
-            obs = jitter_brightness_torch(obs, brightness)
-            obs = jitter_contrast_torch(obs, contrast)
+        #     obs = jitter_brightness_torch(obs, brightness)
+        #     obs = jitter_contrast_torch(obs, contrast)
 
-            hsv = rgb_to_hsv_torch(obs)
-            hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
-            hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0, 1)
-            obs = hsv_to_rgb_torch(hsv)
+        #     hsv = rgb_to_hsv_torch(obs)
+        #     hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
+        #     hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0, 1)
+        #     obs = hsv_to_rgb_torch(hsv)
 
         
         #print('obs shape before debug after', obs.shape)
@@ -226,6 +185,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         # =========================
         obs = self._unflatten_bt(obs, B, T)
         pixel_actions = self._unflatten_bt(pixel_actions, B, T)
+        
 
         
 
@@ -238,6 +198,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
 
         sample["image"] = (obs.clamp(0, 1) * 255)
         sample["action"] = full_action.float()
+        if self.include_state:
+            new_state = self._unflatten_bt(new_state, B, T)
+            sample['state'] = new_state
 
         return sample
     

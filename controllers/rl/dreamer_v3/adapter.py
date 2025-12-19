@@ -211,6 +211,7 @@ class DreamerV3Adapter(TrainableAgent):
         if self.loaded_dataset:
             return
         self.train_dataset = make_dataset(self.train_eps, self.config)
+        self.vis_dataset = make_dataset_none_cross_trj(self.train_eps, self.config)
         self.loaded_dataset = True
 
     def _init_agent(self): # We want to call this in the init function instead
@@ -235,6 +236,7 @@ class DreamerV3Adapter(TrainableAgent):
             self.config,
             self.logger,
             self.train_dataset,
+            self.vis_dataset
         ).to(self.config.device)
         self.dreamer.set_data_augmenter(self.data_augmenter)
         self.dreamer.requires_grad_(requires_grad=False)

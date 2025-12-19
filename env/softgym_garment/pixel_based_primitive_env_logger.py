@@ -11,11 +11,13 @@ PRIMITIVE_COLORS = {
     "default": (255, 255, 255),                  # white
 }
 
-TEXT_Y_STEP = 30
-TEXT_Y_STATUS = 65
+MILD_RED = (120, 120, 220)  # soft red (B, G, R)
+
+TEXT_Y_STEP = 35
+TEXT_Y_STATUS = 80
 TEXT_BG_ALPHA = 0.6
 
-def draw_text_with_bg(img, text, org, color, scale=1.0, thickness=2):
+def draw_text_with_bg(img, text, org, color, scale=1.3, thickness=4):
     (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
     x, y = org
     overlay = img.copy()
@@ -122,12 +124,12 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 # ----- Draw arrows with SMALLER arrowheads -----
                 small_tip = 0.08    # << smaller arrowhead tip size
 
-                cv2.arrowedLine(img, swap(left_pick),  swap(left_place),  BLUE, 5, tipLength=small_tip)
-                cv2.arrowedLine(img, swap(right_pick), swap(right_place), RED,  5, tipLength=small_tip)
+                cv2.arrowedLine(img, swap(left_pick),  swap(left_place),  BLUE, 8, tipLength=small_tip)
+                cv2.arrowedLine(img, swap(right_pick), swap(right_place), RED,  8, tipLength=small_tip)
 
                 # ----- Hollow circles -----
-                cv2.circle(img, swap(left_pick),  8, BLUE, 2)
-                cv2.circle(img, swap(right_pick), 8, RED,  2)
+                cv2.circle(img, swap(left_pick),  10, BLUE, 3)
+                cv2.circle(img, swap(right_pick), 10, RED,  3)
 
             # ================================
             #        PICK & FLING
@@ -145,8 +147,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                         img,
                         "Rejected",
                         (10, TEXT_Y_STATUS),
-                        (255, 80, 80),   # red
-                        scale=0.9
+                        MILD_RED,
+                        scale=1.3
                     )
                     
                 else:
@@ -173,10 +175,10 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                         color0 = cv2.applyColorMap(value, cmap0)[0, 0].tolist()
                         color1 = cv2.applyColorMap(value, cmap1)[0, 0].tolist()
 
-                        cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 5)
-                        cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 5)
+                        cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 8)
+                        cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 8)
 
-                    def draw_hollow_circle(img, p, color, radius=8, thickness=3):
+                    def draw_hollow_circle(img, p, color, radius=10, thickness=3):
                         cv2.circle(img, swap(p), radius, color, thickness)
 
                     draw_hollow_circle(img, sampled_0[0], RED)
@@ -184,18 +186,30 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                     # ------------------------------------------------------------------
 
                     # Final triangle marker
-                    def draw_triangle(img, center, color, size=12):
-                        cx, cy = center
+                    def draw_triangle_down(img, center, color, size=15):
+                        cx, cy = center  # (x, y)
+
                         pts = np.array([
-                            (cy, cx - size),
-                            (cy - size, cx + size),
-                            (cy + size, cx + size)
+                            (cy - size, cx - size),  # top-left
+                            (cy + size, cx - size),  # top-right
+                            (cy,        cx + size),  # bottom (apex)
                         ], np.int32)
+
                         cv2.fillPoly(img, [pts], color)
 
-                    draw_triangle(img, traj_px_0[-1], RED)
-                    draw_triangle(img, traj_px_1[-1], BLUE)
+                    draw_triangle_down(img, traj_px_0[-1], RED)
+                    draw_triangle_down(img, traj_px_1[-1], BLUE)
 
+                    # def draw_triangle(img, center, color, size=15): 
+                    #     cx, cy = center 
+                    #     pts = np.array([ 
+                    #         (cx, cy - size), 
+                    #         (cx - size, cy + size), 
+                    #         (cx + size, cy + size) ], np.int32) 
+                    #     cv2.fillPoly(img, [pts], color) 
+                    
+                    # draw_triangle(img, traj_px_0[-1], RED) 
+                    # draw_triangle(img, traj_px_1[-1], BLUE)
 
             images.append(img)
 

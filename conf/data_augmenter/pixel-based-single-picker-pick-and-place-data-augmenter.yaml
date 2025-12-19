@@ -28,4 +28,4 @@ depth_eval_process: True
 maskout: True
 bg_value: 0
 debug: False
-primitive: 'dual-picker-norm-pixel-pick-and-place'
+primitive: 'single-picker-norm-pixel-pick-and-place'

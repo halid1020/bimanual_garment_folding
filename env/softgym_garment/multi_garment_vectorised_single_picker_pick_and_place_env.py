@@ -8,11 +8,11 @@ global ENV_NUM
 ENV_NUM = 0
 
 # @ray.remote
-class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
+class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
     
     def __init__(self, config):
         super().__init__(config)
-        self.action_space = gym.spaces.Box(-1, 1, (8, ), dtype=np.float32)
+        self.action_space = gym.spaces.Box(-1, 1, (4, ), dtype=np.float32)
         self.logger = PixelBasedPickAndPlaceEnvLogger()
         
 
@@ -23,9 +23,7 @@ class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
         dict_action = {
             'norm-pixel-pick-and-place': {
                 'pick_0': action[:2],
-                'pick_1': action[2:4],
-                'place_0': action[4:6],
-                'place_1': action[6:8]
+                'place_0': action[2:4]
             }
         }
 
@@ -35,7 +33,7 @@ class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
         self.info = self._process_info(self.info)
         dict_applied_action = self.info['applied_action']
         vector_action = []
-        for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
+        for param_name in ['pick_0', 'place_0']:
             vector_action.append(dict_action['norm-pixel-pick-and-place'][param_name])
         #print('vector_action', vector_action)
         vector_action = np.stack(vector_action).flatten()

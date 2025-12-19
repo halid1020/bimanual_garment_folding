@@ -1,0 +1,11 @@
+defaults:
+  - agent: diffusion_single_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_v1
+  - arena: multi_longsleeve_single_primitive_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_from_random_flattened
+  - task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
+  - data_augmenter: pixel-based-fold-data-augmenter
+
+
+exp_name: diffusion_single_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_v1
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

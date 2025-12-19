@@ -372,14 +372,52 @@ def from_generator(generator, batch_size):
         batch = []
         for _ in range(batch_size):
             batch.append(next(generator))
+
         data = {}
+        problem=False
         for key in batch[0].keys():
-            data[key] = []
-            for i in range(batch_size):
-                data[key].append(batch[i][key])
-            data[key] = np.stack(data[key], 0)
+            values = [batch[i][key] for i in range(batch_size)]
+
+            # Collect shapes
+            shapes = [len(v) for v in values]
+
+            # Check if all shapes are the same
+            if not all(s == shapes[0] for s in shapes):
+                print(f"[dreamer, from_generator], Shape mismatch key: {key}")
+                for i, s in enumerate(shapes):
+                    print(f"  sample {i}: shape = {s}")
+                # Optional: raise to fail fast
+                # raise ValueError(f"Shape mismatch for key '{key}'")
+                print(f"[dreamer, from_generator], Drop and continue")
+                problem=True
+                break
+
+
+            data[key] = np.stack(values, axis=0)
+        if problem:
+            continue
+
         yield data
 
+def sample_episodes_single_trajectory(episodes, length, seed=0):
+    np_random = np.random.RandomState(seed)
+
+    while True:
+
+        p = np.array(
+            [len(next(iter(episode.values()))) for episode in episodes.values()]
+        )
+        p = p / np.sum(p)
+
+        episode = np_random.choice(list(episodes.values()), p=p)
+       
+        ret = {
+            k: v[: length].copy()
+            for k, v in episode.items()
+            if "log_" not in k
+        }
+
+        yield ret
 
 def sample_episodes(episodes, length, seed=0):
     np_random = np.random.RandomState(seed)
@@ -1062,5 +1100,16 @@ def recursively_load_optim_state_dict(obj, optimizers_state_dicts):
 
 def make_dataset(episodes, config):
     generator = sample_episodes(episodes, config.batch_length)
+    dataset = from_generator(generator, config.batch_size)
+    return dataset
+
+
+
+def make_dataset_none_cross_trj(episodes, config):
+    generator = sample_episodes_single_trajectory(
+        episodes,
+        config.vis_length,
+        seed=config.seed if hasattr(config, "seed") else 0,
+    )
     dataset = from_generator(generator, config.batch_size)
     return dataset

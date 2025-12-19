@@ -444,11 +444,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             else:
                 obs = nbatch['observation']
                 action = nbatch['action']['default']
-                #print('action', action.shape)
+                #print('[diffusion] action', action.shape)
                 nbatch = {v: k for v, k in obs.items()}
                 nbatch['action'] = action.reshape(*action.shape[:2], -1)
                 #print('action after shape', nbatch['action'] .shape)
                 nbatch = self.data_augmenter(nbatch, train=True, device=self.device)
+                #print('[diffusion] action after augment', nbatch['action'].shape)
             
             if self.config.input_obs == 'rgbd':
                 # concatenate rgb and depth

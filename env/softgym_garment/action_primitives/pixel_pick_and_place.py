@@ -118,13 +118,13 @@ class PixelPickAndPlace():
 
             pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height
             place_1_depth = action['place_1_d'] if 'place_1_d' in action else self.camera_height - self.place_height
-            action['single_operator'] = False
+            #action['single_operator'] = False
         else:
             pick_1 = np.asarray(np.ones(2)) * 1.5
             place_1 = np.asarray(np.ones(2)) * 1.5
             pick_1_depth = self.camera_height
             place_1_depth = self.camera_height
-            action['single_operator'] = True
+            #action['single_operator'] = True
 
         self.affordance_score = self._calculate_affordance(dist_0, dist_1)
         
@@ -134,6 +134,8 @@ class PixelPickAndPlace():
         if np.linalg.norm(pick_1[:2] - ref_a) > np.linalg.norm(pick_0[:2] - ref_a):
             pick_0, pick_1 = pick_1, pick_0
             place_0, place_1 = place_1, place_0
+            pick_0_depth, pick_1_depth = pick_1_depth, pick_0_depth
+            place_0_depth, place_1_depth = place_1_depth, place_0_depth
 
         action_ = np.concatenate([pick_0, place_0, pick_1, place_1]).reshape(-1, 2)
 
@@ -168,7 +170,7 @@ class PixelPickAndPlace():
             'pregrasp_height': self.pregrasp_height,
             'pre_place_height': self.pre_place_height,
             'post_pick_height': self.post_pick_height,
-            'single_operator': action['single_operator']
+            # 'single_operator': action['single_operator']
         }
 
         pixel_action = {
@@ -199,7 +201,8 @@ class PixelPickAndPlace():
         self.camera_size = env.camera_size
 
         world_action_ , pixel_action = self.process(env, action)
-        #print('action_:', action_)
+        # print('[pixel-pick-and-place] world_action_:', world_action_)
+        # print('pixel action', pixel_action)
         info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
         info['action_affordance_score'] = self.affordance_score

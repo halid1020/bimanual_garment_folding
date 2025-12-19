@@ -183,7 +183,7 @@ class PixelBasedFoldDataAugmenter:
 
                 # Rotate actions
                 num_points = 2
-                if self.config.primitive == 'norm-pixel-fold':
+                if self.config.primitive == 'dual-picker-norm-pixel-pick-and-place':
                     num_points = 4
                 rotation_matrices_tensor = rot_inv.expand(B*(T-1)*num_points, 2, 2).reshape(-1, 2, 2)
                 rotation_action = sample['action'].reshape(-1, 1, 2)

@@ -107,7 +107,7 @@ primitive_integration: 'predict_bin_as_output'
 primitives:
   - name: norm-pixel-pick-and-fling
     dim: 4 # [pick_0, pick_1]name: image2state-sac
-  - name: norm-pixel-fold
+  - name: norm-pixel-pick-and-place
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
 save_success: True
 num_actions: 'to_be_defined'
@@ -119,6 +119,9 @@ use_bc_policy_to_seed: False
 random_prefill: 200
 pretrain: 100
 
+vis_length: 8
+vis_post_steps: 3
+vis_prior_steps: 5
 
 exp_name: ${exp_name}
 project_name: ${project_name}

@@ -16,9 +16,47 @@ from torch import distributions as torchd
 
 to_np = lambda x: x.detach().cpu().numpy()
 
+def draw_text_with_bg(
+    img,
+    text,
+    org,
+    font,
+    font_scale,
+    text_color,
+    bg_color=(0, 0, 0),
+    thickness=1,
+    padding=4
+):
+    (tw, th), baseline = cv2.getTextSize(
+        text, font, font_scale, thickness
+    )
+
+    x, y = org
+
+    # Background rectangle
+    cv2.rectangle(
+        img,
+        (x - padding, y - th - padding),
+        (x + tw + padding, y + baseline + padding),
+        bg_color,
+        thickness=-1
+    )
+
+    # Text
+    cv2.putText(
+        img,
+        text,
+        (x, y),
+        font,
+        font_scale,
+        text_color,
+        thickness,
+        cv2.LINE_AA
+    )
+
 
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, rnd_act_space, config, logger, dataset):
+    def __init__(self, obs_space, rnd_act_space, config, logger, dataset, vis_dataset):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
@@ -39,6 +77,7 @@ class Dreamer(nn.Module):
         #print('init step', self._action_step)
         self._update_count = 0
         self._dataset = dataset
+        self._vis_dataset = vis_dataset
         self._wm = WorldModel(obs_space, config)
         self._task_behavior = ImagBehavior(config, self._wm)
         if (
@@ -63,7 +102,11 @@ class Dreamer(nn.Module):
                 self._logger.scalar(name, float(np.mean(values)))
                 self._metrics[name] = []
             if self._config.train_video_pred_log:
-                openl = self._wm.video_pred(next(self._dataset))  # B, T, H, W, C
+                openl = self._wm.video_pred(
+                    next(self._vis_dataset),
+                    episodes=6,
+                    post_steps=self._config.vis_post_steps,
+                    prior_steps=self._config.vis_prior_steps)  # B, T, H, W, C
 
                 # Convert openl to T, H, B*W, C
                 B, T, H, W, C = openl.shape
@@ -81,7 +124,92 @@ class Dreamer(nn.Module):
                 # Convert to (H, T*W, C)
                 convert_single_openl = single_openl.permute(1, 0, 2, 3).reshape(H, T * W, C)
 
-                self._logger.image("train_recon", to_np(convert_single_openl))
+                img = to_np(convert_single_openl)  # (H, T*W, C)
+                img = (img * 255).astype(np.uint8)
+
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.4
+                thickness = 1
+
+                # Mild colors (BGR)
+                posterior_color = (120, 200, 120)  # soft green
+                prior_color = (100, 160, 200)      # soft blue
+                row_text_color = (255, 255, 255)   # white
+
+
+                H, TW, C = img.shape
+                W = TW // T
+
+                post_steps = self._config.vis_post_steps
+                prior_steps = self._config.vis_prior_steps
+
+                # -------------------------------
+                # Draw red vertical separator
+                # -------------------------------
+                sep_x = post_steps * W
+                cv2.line(
+                    img,
+                    (sep_x, 0),
+                    (sep_x, H),
+                    color=(255, 0, 0),
+                    thickness=3
+                )
+
+                # -------------------------------
+                # Top-right captions (Posterior / Prior)
+                # -------------------------------
+
+                y_text = 18
+                margin = W - W//2
+                for i in range(post_steps):
+                    x = i * W + margin
+                    draw_text_with_bg(
+                        img,
+                        f"Post {i+1}",
+                        (x, y_text),
+                        font,
+                        font_scale,
+                        posterior_color,
+                        thickness=thickness
+                    )
+
+                # Prior captions
+                for i in range(prior_steps):
+                    x = (post_steps + i) * W + margin
+                    draw_text_with_bg(
+                        img,
+                        f"Prior {i+1}",
+                        (x, y_text),
+                        font,
+                        font_scale,
+                        prior_color,
+                        thickness=thickness
+                    )
+
+                # -------------------------------
+                # Left-side row labels
+                # -------------------------------
+                row_names = ["Truth", "Model", "Error"]
+                row_height = H // len(row_names)
+                margin = row_height - 20
+                for i, name in enumerate(row_names):
+                    y = i * row_height + margin
+                    draw_text_with_bg(
+                        img,
+                        name,
+                        (6, y),
+                        font,
+                        font_scale,
+                        row_text_color,
+                        thickness=thickness
+                    )
+
+                # Convert back to float for logger
+                img = img.astype(np.float32) / 255.0
+
+                self._logger.image("train_recon", img)
+
+                #self._logger.image("train_recon", to_np(convert_single_openl))
                     
                 
             self._logger.write(fps=True)

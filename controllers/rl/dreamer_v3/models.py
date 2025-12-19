@@ -195,28 +195,31 @@ class WorldModel(nn.Module):
         obs["cont"] = (1.0 - obs["is_terminal"]).unsqueeze(-1)
         return obs
 
-    def video_pred(self, data_in):
+    def video_pred(self, data_in, episodes=6, post_steps=5, prior_steps=5):
         data = self.preprocess(data_in)
         #print('data image shape', data['image'].shape)
         embed = self.encoder(data)
 
         states, _ = self.dynamics.observe(
-            embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5]
+            embed[:episodes, :post_steps], data["action"][:episodes, :post_steps], data["is_first"][:episodes, :post_steps]
         )
         
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode()[
-            :6
+            :episodes
         ]
         #print('recon shape', recon.shape)
         reward_post = self.heads["reward"](self.dynamics.get_feat(states)).mode()[:6]
         init = {k: v[:, -1] for k, v in states.items()}
-        prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
+        prior = self.dynamics.imagine_with_action(data["action"][:episodes, post_steps:post_steps+prior_steps], init)
         openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode()
         #print('openl shape', openl.shape)
         reward_prior = self.heads["reward"](self.dynamics.get_feat(prior)).mode()
         # observed image is given until 5 steps
-        model = torch.cat([recon[:, :5], openl], 1)
-        truth = data["image"][:6]
+        model = torch.cat([recon[:, :post_steps], openl], 1)
+        truth = data["image"][:episodes, :post_steps+prior_steps]
+        # print('image shape', data["image"].shape)
+        # print('truth shapes', truth.shape)
+        # print('model shape', model.shape)
         model = model
         error = (model - truth + 1.0) / 2.0
 

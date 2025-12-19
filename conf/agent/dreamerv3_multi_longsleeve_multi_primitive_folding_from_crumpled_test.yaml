@@ -120,7 +120,9 @@ use_bc_policy_to_seed: False
 # bc_data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion
 random_prefill: 10 #200
 pretrain: 10 #100
-
+vis_length: 10
+vis_post_steps: 3
+vis_prior_steps: 2
 
 exp_name: ${exp_name}
 project_name: ${project_name}

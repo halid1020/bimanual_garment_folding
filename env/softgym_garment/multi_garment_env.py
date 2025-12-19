@@ -120,10 +120,12 @@ class MultiGarmentEnv(GarmentEnv):
         self.pickers.reset(self.picker_initial_pos)
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
+
+        self._initialise_trajecotry()
         
-        if self.init_mode == 'flattened':
-            #print('init_mode')
-            self.set_to_flatten()
+        # if self.init_mode == 'flattened':
+        #     #print('init_mode')
+        #     self.set_to_flatten()
         
         self.last_info = None
         self.sim_step = 0

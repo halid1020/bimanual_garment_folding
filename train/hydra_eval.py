@@ -19,7 +19,7 @@ def main(cfg: DictConfig):
     # data_augmenter
     
     if isinstance(agent, TrainableAgent):
-        augmenter = build_data_augmenter(cfg)
+        augmenter = build_data_augmenter(cfg.data_augmenter)
         agent.set_data_augmenter(augmenter)
 
     # logging

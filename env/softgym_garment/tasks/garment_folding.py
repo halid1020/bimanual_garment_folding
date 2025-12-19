@@ -299,49 +299,48 @@ class GarmentFoldingTask(GarmentTask):
             N = len(trj_infos)
             K = self.config.goal_steps
 
-            multi_stage_reward = 0.0
-
             # Always give some shaping based on current IoU to goal[0]
             multi_stage_reward = self._max_iou_for_goal_step(arena, trj_infos[-1], 0)
 
+            K = min(K, N)
             # Need at least K trajectory steps to attempt full alignment
-            if N >= K:
-                traj_window = trj_infos[N - K : N]
+            
+            traj_window = trj_infos[N - K : N]
 
-                best_reward = multi_stage_reward
+            best_reward = multi_stage_reward
 
-                # Try all possible start positions for goal[0]
-                for start in range(K):
-                    matched_steps = 0
-                    last_iou = 0.0
+            # Try all possible start positions for goal[0]
+            for start in range(K):
+                matched_steps = 0
+                last_iou = 0.0
 
-                    for g in range(K):
-                        t = start + g
-                        if t >= K:
-                            break
+                for g in range(K):
+                    t = start + g
+                    if t >= K:
+                        break
 
-                        iou = self._max_iou_for_goal_step(
-                            arena,
-                            traj_window[t],
-                            g
-                        )
+                    iou = self._max_iou_for_goal_step(
+                        arena,
+                        traj_window[t],
+                        g
+                    )
 
-                        #print(f"[reward] start={start}, goal={g}, iou={iou:.3f}")
+                    #print(f"[reward] K={K} start={start}, step={t}, goal={g}, iou={iou:.3f}")
 
-                        if iou >= IOU_TRESHOLD:
-                            matched_steps += 1
-                            last_iou = 0.0
-                        else:
-                            last_iou = iou
-                            break
+                    if iou >= IOU_TRESHOLD:
+                        matched_steps += 1
+                        last_iou = 0.0
+                    else:
+                        last_iou = iou
+                        break
 
-                        if t == K - 1:
-                            reward = matched_steps + last_iou
-                            best_reward = max(best_reward, reward)
-                    
-                    
+                    if t == K - 1:
+                        reward = matched_steps + last_iou
+                        best_reward = max(best_reward, reward)
+                
+                
 
-                multi_stage_reward = best_reward
+            multi_stage_reward = best_reward
 
         #print('!!! multi_stage_reward', multi_stage_reward)
 

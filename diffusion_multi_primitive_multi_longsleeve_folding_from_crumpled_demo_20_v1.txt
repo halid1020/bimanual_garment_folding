@@ -1,0 +1,177 @@
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+pybullet build time: Nov 28 2023 23:45:17
+WARNING:py.warnings:/home/hcv530/anaconda3/envs/mp-fold/lib/python3.10/site-packages/kornia/feature/lightglue.py:44: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+
+WARNING:py.warnings:/home/hcv530/anaconda3/envs/mp-fold/lib/python3.10/site-packages/hydra/_internal/defaults_list.py:251: UserWarning: In 'diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1': Defaults list is missing `_self_`. See https://hydra.cc/docs/1.2/upgrades/1.0_to_1.1/default_composition_order for more information
+  warnings.warn(msg, UserWarning)
+
+wandb: Currently logged in as: halid1020. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.17.8
+wandb: Run data is saved locally in /mnt/ssd/garment_folding_data/diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1/wandb/run-20251219_163452-z9f0nng4
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Resuming run diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1
+wandb: ⭐️ View project at https://wandb.ai/halid1020/bimanual_garment_folding
+wandb: 🚀 View run at https://wandb.ai/halid1020/bimanual_garment_folding/runs/z9f0nng4
+agent:
+  name: multi-primitive-diffusion
+  oracle: false
+  obs_dim: 512
+  action_dim: 8
+  obs_horizon: 1
+  pred_horizon: 1
+  num_diffusion_iters: 100
+  action_horizon: 1
+  input_obs: rgb
+  use_mask: true
+  eval_action_sampler: normal
+  include_state: false
+  num_demos: 20
+  batch_size: 64
+  disable_updown: true
+  action_shape:
+  - 8
+  collect_on_success: false
+  data_obs: image
+  data_state: agent_pos
+  data_action: action
+  train_mode: from_policy
+  demo_policy: human-multi-primitive
+  validation_interval: 1000
+  total_update_steps: 50000
+  eval_checkpoint: -1
+  debug: false
+  add_all_demos: true
+  dataset_mode: general
+  dataset_config:
+    data_path: multi_longsleeve_multi_primitive_folding_from_crumpled_human_demo_100
+    data_dir: ./data/datasets
+    seq_length: 1
+    io_mode: w
+    obs_config:
+      mask:
+        shape:
+        - 128
+        - 128
+        - 1
+        output_key: mask
+      depth:
+        shape:
+        - 128
+        - 128
+        - 1
+        output_key: depth
+      rgb:
+        shape:
+        - 128
+        - 128
+        - 3
+        output_key: rgb
+    act_config:
+      default:
+        shape:
+        - 9
+        output_key: default
+  primitive_integration: predict_bin_as_output
+  primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4
+  - name: norm-pixel-pick-and-place
+    dim: 8
+  - name: no-operation
+    dim: 0
+  mask_out_irrelavent_action_dim: false
+  exp_name: ${exp_name}
+  project_name: ${project_name}
+arena:
+  garment_type: longsleeve
+  name: multi-garment-env
+  picker_radius: 0.03
+  picker_threshold: 0.007
+  picker_low:
+  - -5
+  - 0
+  - -5
+  picker_high:
+  - 5
+  - 5
+  - 5
+  grasp_mode:
+    around: 1.0
+  picker_initial_pos:
+  - - 0.7
+    - 0.2
+    - 0.7
+  - - -0.7
+    - 0.2
+    - 0.7
+  init_state_path: assets/init_states
+  disp: false
+  ray_id: 0
+  action_horizon: 20
+  image_resolution:
+  - 128
+  - 128
+  track_semkey_on_frames: false
+  num_val_trials: 10
+  readjust_pick: true
+  provide_semkey_pos: false
+  provide_flattened_semkey_pos: false
+  provide_semkey_norm_pixel: true
+  provide_flattened_semkey_norm_pixel: true
+  stop_on_success: false
+task:
+  num_goals: 3
+  garment_type: longsleeve
+  asset_dir: assets
+  task_name: centre-sleeve-folding
+  debug: false
+  alignment: simple_rigid
+  goal_steps: 3
+  overstretch_penalty_scale: 1
+  overstretch_penalty_threshold: 0.1
+  affordance_penalty_scale: 0
+  big_success_bonus: false
+data_augmenter:
+  name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+  random_rotation: true
+  rotation_degree: 1
+  vertical_flip: true
+  debug: false
+  color_jitter: true
+  img_dim:
+  - 96
+  - 96
+  randomise_prim_acts: false
+  K: 2
+exp_name: diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single
+
+disabel_updown True
+number of parameters: 7.256244e+07
+wandb_dir: /mnt/ssd/garment_folding_data/diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1/wandb
+Auto-resume run ID: z9f0nng4
+[WandbLogger] run_id=z9f0nng4, resume=allow
+!!!!!!!!!cam_size: [480, 480]
+[2025-12-19 16:34:53,498][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/mp-fold/lib/python3.10/site-packages/gym/spaces/box.py:78: UserWarning: [33mWARN: Box bound precision lowered by casting to float64[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+
+[2025-12-19 16:34:53,500][py.warnings][WARNING] - /home/hcv530/anaconda3/envs/mp-fold/lib/python3.10/site-packages/gym/spaces/box.py:78: UserWarning: [33mWARN: Box bound precision lowered by casting to float32[0m
+  logger.warn(f"Box bound precision lowered by casting to {self.dtype}")
+
+Log directory for the arena is set to /mnt/ssd/garment_folding_data/diffusion_multi_primitive_multi_longsleeve_folding_from_crumpled_demo_20_v1
+
+[agent-arena, train_and_evaluate_single] Training "diffusion" agent ...
+No checkpoint found
+data_path ./data/datasets/multi_longsleeve_multi_primitive_folding_from_crumpled_human_demo_100
+total trj 20
+num_samples 400
+Collecting data from policy ...:   0%|          | 0/20 [00:00<?, ?it/s]Collecting data from policy ...: 100%|██████████| 20/20 [00:00<00:00, 1497965.71it/s]
+Training:   0%|          | 0/1000 [00:00<?, ?it/s][ACollecting data from policy ...: 100%|██████████| 20/20 [00:00<00:00, 1998.76it/s]   
+
+Training (loss: 1.1144):   0%|          | 0/1000 [00:34<?, ?it/s][A
+Training (loss: 1.1144):   0%|          | 1/1000 [00:34<9:27:38, 34.09s/it][A

@@ -1,44 +1,13 @@
 from agent_arena import Agent
 import numpy as np
 import cv2
-
-from .pick_and_place.pixel_human_two_picker import PixelHumanTwoPicker
-from .pick_and_fling.pixel_human import PixelHumanFling
-from .human_pick_and_drag import HumanPickAndDrag
-from .human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
-from .no_operation import NoOperation
-
 from .utils import draw_text_top_right
 
-
-class HumanMultiPrimitive(Agent):
+class HumanDualPickersPickAndPlace(Agent):
     
     def __init__(self, config):
-        
         super().__init__(config)
-        self.primitive_names = [
-            "norm-pixel-pick-and-fling",
-            # "norm-pixel-pick-and-place",
-            # "norm-pixel-pick-and-drag",
-            "norm-pixel-pick-and-place",
-            "no-operation"
-        ]
-        self.primitive_instances = [
-            PixelHumanFling(config),
-            # PixelHumanTwoPicker(config),
-            # HumanPickAndDrag(config),
-            HumanDualPickersPickAndPlace(config),
-            NoOperation(config)
-        ]
-    
-    def reset(self, arena_ids):
-        self.internal_states = {arena_id: {} for arena_id in arena_ids}
-        self.last_primitive = None
-    def init(self, infos):
-        pass
-
-    def update(self, infos, actions):
-        pass
+        self.name = "human-pixel-pick-and-place-two"
 
     def act(self, info_list, update=False):
         """
@@ -51,17 +20,18 @@ class HumanMultiPrimitive(Agent):
         
         return actions
     
-
     def single_act(self, state, update=False):
         """
-        Allow user to choose a primitive, then delegate to the chosen primitive's act method.
-        Shows rgb and goal_rgb images while prompting for input.
+        Pop up a window shows the RGB image, and user can click on the image to
+        produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
         """
-
-        # Extract the RGB and goal images
-                    ## make it bgr to rgb using cv2
         rgb = state['observation']['rgb']
+        
+        ## make it bgr to rgb using cv2
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+        
+
+        ## resize
         rgb = cv2.resize(rgb, (512, 512))
 
         # Overlay success + IoU info BEFORE concatenation
@@ -79,11 +49,18 @@ class HumanMultiPrimitive(Agent):
                 text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
 
             draw_text_top_right(rgb, text_lines)
-
+        
+        
         # Create a copy of the image to draw on
         img = rgb.copy()
 
-                
+        # put img and goal_img side by side
+        # if 'goal' in state.keys():
+        #     goal_rgb = state['goal']['rgb']
+        #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
+        #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
+        #     img = np.concatenate([img, goal_rgb], axis=1)
+
         if 'goals' in state.keys():
             goals = state['goals']  # list of goal infos
 
@@ -113,40 +90,56 @@ class HumanMultiPrimitive(Agent):
         # Draw vertical white line between the two images
         line_x = rgb.shape[1]   # x-position = width of left image (512)
         cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
-
-        # Show window
-        obs_dir = "tmp/human_rgb.png"
-        cv2.imwrite(obs_dir, img)
-        print(f'[human-multi-primitive] Check {obs_dir} for current and goal observation.')
-
-        chosen_primitive = None
-        while True:
-            print("\nChoose a primitive:")
-            for i, primitive in enumerate(self.primitive_names):
-                print(f"{i + 1}. {primitive}")
         
-            try:
-                choice = int(input("Enter the number of your choice: ")) - 1
-                if 0 <= choice < len(self.primitive_names):
-                    chosen_primitive = self.primitive_names[choice]
-                    self.current_primitive = self.primitive_instances[choice]
-                    break
-                else:
-                    print("Invalid choice. Please try again.")
-            except ValueError:
-                print("Invalid input. Please enter a number.")
-
-        # Close OpenCV window once a valid choice is made
-        # cv2.destroyAllWindows()
-
-        # Delegate action
-        action = self.current_primitive.single_act(state)
-        self.last_primitive = chosen_primitive
-
-        return {
-            chosen_primitive: action
-        }
+        # Store click coordinates
+        clicks = []
+        
+        def mouse_callback(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                clicks.append((x, y))
+                if len(clicks) % 2 == 1:  # Pick action (odd clicks)
+                    color = (0, 255, 0) if len(clicks) <= 2 else (0, 0, 255)  # Green for first, Red for second
+                    cv2.circle(img, (x, y), 5, color, -1)
+                else:  # Place action (even clicks)
+                    color = (0, 255, 0) if len(clicks) <= 2 else (0, 0, 255)  # Green for first, Red for second
+                    cv2.drawMarker(img, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
+                cv2.imshow('Click Pick and Place Points (4 clicks needed)', img)
+        
+        cv2.imshow('Click Pick and Place Points (4 clicks needed)', img)
+        cv2.setMouseCallback('Click Pick and Place Points (4 clicks needed)', mouse_callback)
+        
+        while len(clicks) < 4:
+            cv2.waitKey(1)
+        
+        cv2.destroyAllWindows()
+        
+        # Normalize the coordinates to [-1, 1]
+        height, width = rgb.shape[:2]
+        pick1_y, pick1_x = clicks[0]
+        place1_y, place1_x = clicks[1]
+        pick2_y, pick2_x = clicks[2]
+        place2_y, place2_x = clicks[3]
+        
+        normalized_action1 = [
+            (pick1_x / width) * 2 - 1,
+            (pick1_y / height) * 2 - 1,
+            (place1_x / width) * 2 - 1,
+            (place1_y / height) * 2 - 1
+        ]
+        
+        normalized_action2 = [
+            (pick2_x / height) * 2 - 1,
+            (pick2_y / width) * 2 - 1,
+            (place2_x / height) * 2 - 1,
+            (place2_y / width) * 2 - 1
+        ]
+        
+        return np.concatenate([
+            normalized_action1[:2], normalized_action2[:2], 
+            normalized_action1[2:], normalized_action2[2:] ])
+        
+    def init(self, state):
+        pass
     
-    def terminate(self):
-        return {arena_id: (self.last_primitive == 'no-operation')
-                for arena_id in self.internal_states.keys()}
+    def update(self, state, action):
+        pass

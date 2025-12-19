@@ -6,6 +6,7 @@ from env.softgym_garment.single_garment_fixed_initial_env import SingleGarmentFi
 from env.softgym_garment.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
 from env.softgym_garment.multi_garment_env import MultiGarmentEnv
 from env.softgym_garment.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
+from env.softgym_garment.multi_garment_vectorised_single_picker_pick_and_place_env import MultiGarmentVectorisedSinglePickerPickAndPlaceEnv
 from env.softgym_garment.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
 from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
@@ -38,7 +39,8 @@ from controllers.rl.image2state_multi_primitive_sac \
     import Image2StateMultiPrimitiveSAC
 from controllers.gpt_fabric.adapter import GPTFabricAdapter
 from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
-from controllers.human.human_fold import HumanFold
+from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
+from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 
@@ -57,6 +59,7 @@ registered_arena = {
     'single-garment-subgoal-init-vectorised-fold-prim-env': SingleGarmentSubgoalInitVectorisedFoldPrimEnv,
     'multi-garment-env': MultiGarmentEnv,
     'multi-garment-vectorised-fold-prim-env': MultiGarmentVectorisedFoldPrimEnv,
+    'multi-garment-vectorised-single-picker-pick-and-place-env': MultiGarmentVectorisedSinglePickerPickAndPlaceEnv,
     'robosuite-env': RoboSuiteArena,
     'robosuite-skill-env': RoboSuiteSkillArena,
     'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv,
@@ -76,7 +79,8 @@ def register_agent_arena():
     ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
     ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)
     ag_ar.register_agent('dreamerV3', DreamerV3Adapter)
-    ag_ar.register_agent('human-fold', HumanFold)
+    ag_ar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
+    ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
     ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
     ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
 

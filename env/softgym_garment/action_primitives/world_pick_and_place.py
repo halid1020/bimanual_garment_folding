@@ -117,12 +117,15 @@ class WorldPickAndPlace():
         place_raise = place_positions.copy()
         place_raise[:, 2] = 0.1
 
-        if action['single_operator']:
-            pick_positions[1] = self.ready_pos[0, :3]
-            pre_pick_positions[1] = self.ready_pos[0, :3]
+        # if action['single_operator']:
+        #     pick_positions[1] = self.ready_pos[0, :3]
+        #     pre_pick_positions[1] = self.ready_pos[0, :3]
 
         # ---- INTERSECTION CHECK ----
-        conflict, min_dist = check_trajectories_close(pre_pick_positions, pick_positions, place_positions)
+        conflict, min_dist = check_trajectories_close(
+            pre_pick_positions.copy(), 
+            pick_positions.copy(), 
+            place_positions.copy())
 
         if conflict:
             # Run sequentially: each picker moves while the other stays frozen

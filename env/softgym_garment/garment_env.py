@@ -163,10 +163,6 @@ class GarmentEnv(Arena):
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
         self.default_config = get_default_config()
-            # particle_radius = 0.015,
-            # cloth_stiffness = (0.15, .01, .02),
-            # scale=0.8,
-        #)
 
 
 
@@ -222,12 +218,8 @@ class GarmentEnv(Arena):
 
         self.evaluate_result = None
         
-        
-        if self.init_mode == 'flattened':
-            self.set_to_flatten()
-            self.last_flattened_step = 0
-        
-        
+        self._initialise_trajectory()
+
         self.info = self._process_info()
         self.clear_frames()
 
@@ -236,6 +228,36 @@ class GarmentEnv(Arena):
         self.all_infos = [self.info]
         
         return self.info
+    
+    def _initialise_trajecotry(self):
+        if self.init_mode == 'flattened':
+            self.set_to_flatten()
+            self.last_flattened_step = 0
+        elif self.init_mode == 'random_flattened':
+            rng = np.random.RandomState(self.eid)
+            theta = rng.uniform(0, 2 * np.pi)  # random angle in radians
+            rotation_matrix = np.array([
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta),  np.cos(theta), 0],
+                [0,              0,             1]
+            ])
+            goal_particles = self.flattened_obs['observation']['particle_positions']
+
+            center = goal_particles.mean(axis=0)
+            goal_particles -= center
+            
+            goal_particles = goal_particles @ rotation_matrix.T  # rotate
+
+            # Random displacement within ±0.5 range per axis
+            displacement = rng.uniform(-0.5, 0.5, size=3)
+            displacement[2] = 0
+            goal_particles += displacement
+
+            self.set_mesh_particles_positions(goal_particles)
+            self.wait_until_stable()
+            self.last_flattened_step = 0
+        elif self.init_mode == 'crumpled':
+            pass
     
     def get_episode_config(self):
         return self.episode_config
@@ -308,6 +330,9 @@ class GarmentEnv(Arena):
                 #print('self.last_info', self.last_info)
                 #print(info['evaluation'])
                 info['reward'] = self.task.reward(self.last_info, None, info)
+
+                for k, v in info['reward'].items():
+                    info['evaluation'][f'reward/{k}'] = v
             
 
             goals = self.task.get_goals()

@@ -1,12 +1,13 @@
 from agent_arena import Agent
 import numpy as np
 import cv2
+from .utils import draw_text_top_right
 
-class HumanFold(Agent):
+class HumanSinglePickerPickAndPlace(Agent):
     
     def __init__(self, config):
         super().__init__(config)
-        self.name = "human-pixel-pick-and-place-two"
+        self.name = "human-single-picker-pixel-pick-and-place"
 
     def act(self, info_list, update=False):
         """
@@ -32,6 +33,22 @@ class HumanFold(Agent):
 
         ## resize
         rgb = cv2.resize(rgb, (512, 512))
+
+        # Overlay success + IoU info BEFORE concatenation
+        if 'evaluation' in state.keys() and state['evaluation'] != {}:
+            success = state['success']
+            max_iou_flat = state['evaluation']['max_IoU_to_flattened']
+            
+            text_lines = [
+                (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
+                (f"IoU(flat): {max_iou_flat:.3f}", (255, 255, 255))
+            ]
+
+            if 'max_IoU' in state['evaluation'].keys():
+                max_iou_goal = state['evaluation']['max_IoU']
+                text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
+
+            draw_text_top_right(rgb, text_lines)
         
         
         # Create a copy of the image to draw on
@@ -86,12 +103,12 @@ class HumanFold(Agent):
                 else:  # Place action (even clicks)
                     color = (0, 255, 0) if len(clicks) <= 2 else (0, 0, 255)  # Green for first, Red for second
                     cv2.drawMarker(img, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
-                cv2.imshow('Click Pick and Place Points (4 clicks needed)', img)
+                cv2.imshow('Click Pick and Place Points (2 clicks needed)', img)
         
-        cv2.imshow('Click Pick and Place Points (4 clicks needed)', img)
-        cv2.setMouseCallback('Click Pick and Place Points (4 clicks needed)', mouse_callback)
+        cv2.imshow('Click Pick and Place Points (2 clicks needed)', img)
+        cv2.setMouseCallback('Click Pick and Place Points (2 clicks needed)', mouse_callback)
         
-        while len(clicks) < 4:
+        while len(clicks) < 2:
             cv2.waitKey(1)
         
         cv2.destroyAllWindows()
@@ -100,8 +117,6 @@ class HumanFold(Agent):
         height, width = rgb.shape[:2]
         pick1_y, pick1_x = clicks[0]
         place1_y, place1_x = clicks[1]
-        pick2_y, pick2_x = clicks[2]
-        place2_y, place2_x = clicks[3]
         
         normalized_action1 = [
             (pick1_x / width) * 2 - 1,
@@ -110,16 +125,9 @@ class HumanFold(Agent):
             (place1_y / height) * 2 - 1
         ]
         
-        normalized_action2 = [
-            (pick2_x / height) * 2 - 1,
-            (pick2_y / width) * 2 - 1,
-            (place2_x / height) * 2 - 1,
-            (place2_y / width) * 2 - 1
-        ]
+      
         
-        return np.concatenate([
-            normalized_action1[:2], normalized_action2[:2], 
-            normalized_action1[2:], normalized_action2[2:] ])
+        return np.asarray(normalized_action1)
         
     def init(self, state):
         pass

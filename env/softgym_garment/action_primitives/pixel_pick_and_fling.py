@@ -5,6 +5,7 @@ from .world_pick_and_fling \
     import WorldPickAndFling
 from ..utils.camera_utils import norm_pixel2world
 from .utils import pixel_to_world, readjust_norm_pixel_pick
+import random
 
 class PixelPickAndFling():
 
@@ -28,7 +29,7 @@ class PixelPickAndFling():
         release_vel=0.01,
         drag_vel=0.005,
         lower_height=0.06,
-        readjust_pick=False,
+        readjust_pick_poss=0.0,
 
         pick_lower_bound=[-1, -1],
         pick_upper_bound=[1, 1],
@@ -62,7 +63,7 @@ class PixelPickAndFling():
         self.lower_height = lower_height
 
         self.num_pickers = 2
-        self.readjust_pick = readjust_pick
+        self.readjust_pick_poss = readjust_pick_poss
 
         
 
@@ -107,9 +108,9 @@ class PixelPickAndFling():
         adj_p1, dist_1 = readjust_norm_pixel_pick(p1, mask)
        
 
-        if self.readjust_pick:
-           p0 = adj_p0
-           p1 = adj_p1
+        if random.random() < self.readjust_pick_poss:
+            p0 = adj_p0
+            p1 = adj_p1
 
            #print('Fling readjust picks')
         

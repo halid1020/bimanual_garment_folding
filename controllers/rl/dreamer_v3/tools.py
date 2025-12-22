@@ -249,7 +249,7 @@ def simulate(
         results = [e.step(a) for e, a in zip(envs, action_for_env)]
         if parallel:
             results = [r() for r in results]
-        obs, reward, done = zip(*[(p["observation"], p["reward"], p["done"]) for p in results])
+        obs, reward, done, applied_action = zip(*[(p["observation"], p["reward"], p["done"], p["applied_action"]) for p in results])
         
         obs = list(obs)
         reward = list(reward)
@@ -260,7 +260,7 @@ def simulate(
         #print('simulation step', step)
         length *= 1 - done
         # add to cache
-        for a, result, env in zip(action, results, envs):
+        for a, result, env in zip(applied_action, results, envs):
             o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
             if result['success'] and save_success:
                logger.log_frames(env.get_frames(), key='success episodes', step=steps)

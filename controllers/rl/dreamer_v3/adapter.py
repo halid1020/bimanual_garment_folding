@@ -63,6 +63,13 @@ class DreamerV3Adapter(TrainableAgent):
             # Build the data augmenter
             augmenter = build_data_augmenter(self.bc_augmenter_config)
             self.bc_policy.set_data_augmenter(augmenter)
+        
+        self.human_prefill = self.config.get('human_prefill', 0)
+        if self.human_prefill:
+            import agent_arena as ag_ar
+            self.human_policy = ag_ar.build_agent(self.config.human_demo_policy)
+           
+            
 
     def set_data_augmenter(self, data_augmenter):
         self.data_augmenter = data_augmenter
@@ -102,7 +109,7 @@ class DreamerV3Adapter(TrainableAgent):
         self.train_state = None
         num_env = len(arenas)
         if not self.config.offline_traindir:
-            prefill = max(0, self.random_prefill - count_steps(self.config.traindir))
+            prefill = max(0, self.random_prefill + self.human_prefill - count_steps(self.config.traindir))
             print(f"[dreamer] Random prefill dataset ({prefill} steps).")
             #acts = arenas[0].action_space # Future object, that is why
             rnd_act_space = gym.spaces.Box(-1, 1, (self.config.num_actions, ), dtype=np.float32)
@@ -153,12 +160,74 @@ class DreamerV3Adapter(TrainableAgent):
         if self._use_bc():
             return self.bc_policy.reset(arena_ids)
         super().reset(arena_ids)
+
+    def _human_prefill_dataset(self, arenas):
+
         
+        self.train_state = None
+        num_env = len(arenas)
+        if not self.config.offline_traindir:
+            prefill = max(0, self.human_prefill - count_steps(self.config.traindir))
+            print(f"[dreamer] Human demo policy prefill dataset ({prefill} steps).")
+            #acts = arenas[0].action_space # Future object, that is why
+
+            def human(o, d, s): ## assume single arena
+                
+                info = {'observation': o, "arena_id": 0}
+                info['observation']['rgb'] = info['observation']['image'][-1]
+                if d[0]: #reset agent
+                    self.human_policy.reset([0])
+                    self.human_policy.init([info])
+                else: # diffsuion does not need the last step action
+                    self.human_policy.update([info], [None])
+                action = self.human_policy.single_act(
+                    info
+                ) # TODO: this may return the multi primitive action in dictionary
+                #print('human action', action)
+                if self.config.primitive_integration == 'predict_bin_as_output':
+                    action_name = list(action.keys())[0]
+                    action_param = action[action_name]
+                    prim_id = self.prim_name2id[action_name]
+                    prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
+                    action = np.zeros((1, self.config.num_actions))
+                    action[0, 0] = prim_act
+                    action[0, 1:action_param.shape[0]+1] = action_param
+                else:
+                    action_ = np.zeros((1, self.config.num_actions))
+                    action_[0] = action
+                    action = action_
+                
+                action = torch.tensor(action)
+                #print('[dreamer] human action', action)
+
+                #print('bc feed action', action)
+                return {"action": action}, None
+
+            self.train_state = simulate(
+                self,
+                human,
+                arenas,
+                self.train_eps,
+                self.config.traindir,
+                self.logger,
+                limit=self.config.dataset_size,
+                steps=prefill,
+                parallel=self.config.parallel,
+                obs_keys = self.config.obs_keys,
+                reward_key = self.config.reward_key,
+                save_success = self.config.get('save_success', False)
+            )
+            # self.logger.step += prefill * self.config.action_repeat
+            self.action_step = count_steps(self.config.traindir)
+            self.dreamer._action_step = self.action_step
+
+
+
     def _bc_prefill_dataset(self, arenas):
         self.train_state = None
         num_env = len(arenas)
         if not self.config.offline_traindir:
-            prefill = max(0, self.random_prefill + self.bc_prefill - count_steps(self.config.traindir))
+            prefill = max(0, self.random_prefill + self.bc_prefill + self.human_prefill - count_steps(self.config.traindir))
             print(f"[dreamer] Bahaviour cloning policy prefill dataset ({prefill} steps).")
             #acts = arenas[0].action_space # Future object, that is why
 
@@ -312,6 +381,8 @@ class DreamerV3Adapter(TrainableAgent):
 
     def train(self, update_steps, arenas) -> bool:
         
+        
+
         ## If demo learning is required first do the demo
         if self._use_bc():
             
@@ -331,7 +402,10 @@ class DreamerV3Adapter(TrainableAgent):
         else:
             total_bc_update_steps = 0
 
-
+        self.action_step = count_steps(self.config.traindir)
+        
+        self._human_prefill_dataset(arenas)
+        
         ## Seeding, no update steps
         self._random_prefill_dataset(arenas)
         if self.use_bc_policy_to_seed:

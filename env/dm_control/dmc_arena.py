@@ -105,7 +105,8 @@ class DMC_Arena(Arena):
         self.clear_frames()
         return {
             'observation': obs,
-            'arena_id': self.aid
+            'arena_id': self.aid,
+            'evaluation': self.evaluate()
         }
 
     def step(self, action):
@@ -141,7 +142,9 @@ class DMC_Arena(Arena):
             'done': done,
             'discount': np.array(time_step.discount, np.float32),
             'arena_id': self.aid,
-            'success': self.success()
+            'success': self.success(),
+            'applied_action': action,
+            'evaluation': self.evaluate()
         }
         return self.info
 

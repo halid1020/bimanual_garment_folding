@@ -10,84 +10,6 @@ from .utils import randomize_primitive_encoding
 import kornia.augmentation as K
 
 
-# # --------------------
-# # Helper functions (torch)
-# # --------------------
-# def jitter_brightness_torch(imgs, delta):
-#     # imgs: (N,C,H,W)
-#     return torch.clamp(imgs + delta, 0.0, 1.0)
-
-# def jitter_contrast_torch(imgs, factor):
-#     # imgs: (N,C,H,W)
-#     mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
-#     return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
-
-# def rgb_to_hsv_torch(rgb):
-#     # rgb: (N,H,W,3) in [0,1] channels-last
-#     # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
-#     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-#     maxc, _ = rgb.max(dim=-1)
-#     minc, _ = rgb.min(dim=-1)
-#     v = maxc
-#     diff = maxc - minc
-
-#     s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
-
-#     h = torch.zeros_like(maxc)
-
-#     mask = diff > 1e-8
-
-#     rc = (maxc - r) / (diff + 1e-8)
-#     gc = (maxc - g) / (diff + 1e-8)
-#     bc = (maxc - b) / (diff + 1e-8)
-
-#     # for r == max
-#     pick = (r == maxc) & mask
-#     h = torch.where(pick, (bc - gc), h)
-
-#     # for g == max
-#     pick = (g == maxc) & mask
-#     h = torch.where(pick, 2.0 + (rc - bc), h)
-
-#     # for b == max
-#     pick = (b == maxc) & mask
-#     h = torch.where(pick, 4.0 + (gc - rc), h)
-
-#     h = (h / 6.0) % 1.0
-#     hsv = torch.stack([h, s, v], dim=-1)
-#     return hsv
-
-# def hsv_to_rgb_torch(hsv):
-#     # hsv: (N,H,W,3) channels-last, h in [0,1]
-#     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-#     i = torch.floor(h * 6.0).to(torch.int64)
-#     f = (h * 6.0) - i.type(h.dtype)
-#     i = i % 6
-
-#     p = v * (1.0 - s)
-#     q = v * (1.0 - f * s)
-#     t = v * (1.0 - (1.0 - f) * s)
-
-#     shape = h.shape
-#     r = torch.zeros(shape, dtype=h.dtype, device=h.device)
-#     g = torch.zeros(shape, dtype=h.dtype, device=h.device)
-#     b = torch.zeros(shape, dtype=h.dtype, device=h.device)
-
-#     idx = (i == 0)
-#     r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
-#     idx = (i == 1)
-#     r[idx], g[idx], b[idx] = q[idx], v[idx], p[idx]
-#     idx = (i == 2)
-#     r[idx], g[idx], b[idx] = p[idx], v[idx], t[idx]
-#     idx = (i == 3)
-#     r[idx], g[idx], b[idx] = p[idx], q[idx], v[idx]
-#     idx = (i == 4)
-#     r[idx], g[idx], b[idx] = t[idx], p[idx], v[idx]
-#     idx = (i == 5)
-#     r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
-
-#     return torch.stack([r, g, b], dim=-1)
-
 def rotate_points_torch(points, R):
     # points: (..., 2), R: (2,2)
     return points @ R.T
@@ -104,6 +26,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
         self.color_jitter = self.config.get("color_jitter", False)
+        self.K = self.config.get("K", 0)
+        self.random_channel_permutation = self.config.get("random_channel_permutation", False)
+
+
 
         if self.color_jitter:
             self.color_aug = K.ColorJitter(
@@ -172,7 +98,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             action = sample["action"]  # (B, T, A)
             #print('input act shape', action.shape)
             act, _, _ = self._flatten_bt(action)  # (B*T, A)
-            pixel_actions = act[:, 1:]  # keep continuous part
+            #pixel_actions = act[:, 1:]  # keep continuous part
+
+            if self.K != 0:
+                pixel_actions = act[:, 1:]
+            else:
+                pixel_actions = act
+
 
         # Debug save before any augmentation
         if self.debug:
@@ -243,6 +175,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if self.color_jitter and train:
             obs = self.color_aug(obs)
         
+        # =========================
+        #   RANDOM CHANNEL PERMUTATION
+        # =========================
+        if self.random_channel_permutation:
+            # Generate ONE permutation for the whole batch
+            perm = torch.randperm(3, device=obs.device)
+            obs = obs[:, perm, :, :]
+
+        
 
         # =========================
         # debug save after
@@ -261,9 +202,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #      RESHAPE BACK
         # =========================
         # # obs -> (N,H,W,3)
-        # obs = obs.permute(0, 2, 3, 1).contiguous()
-    
+        # 
+        #obs = obs.permute(0, 2, 3, 1).contiguous()
         obs = self._unflatten_bt(obs, BB, TT)  # (B, T, 3, H, W)
+        #print('[diffusion augmenter] obs.shape', obs.shape)
+        
         
 
         sample["rgb"] = obs
@@ -271,19 +214,20 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if train:
             #print('pixel_actions', pixel_actions.shape)
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)
-            # restore action = (1 discrete action + continuous pixel coords)
-            # action is a tensor (B,T,A); keep first column as-is
-            prim_acts = action[..., :1]
-            #print('before prim_acts', prim_acts)
-            if self.config.get('randomise_prim_acts', False):
-                prim_acts = randomize_primitive_encoding(prim_acts, self.config.K)
-            
-            #print('after prim_acts', prim_acts)
 
-            full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
+            if self.K != 0:
+                prim_acts = action[..., :1]
+                if self.config.get("randomise_prim_acts", False):            
+                    prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(B, T, 1)
+
+
+                full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
+            else:
+                full_action =  pixel_actions
+
             sample["action"] = full_action.to(device)
 
-        #print('[augmenter] after action', sample["action"])
+        #print('[diffusion augmenter] after action', sample["action"].shape)
 
         return sample
     

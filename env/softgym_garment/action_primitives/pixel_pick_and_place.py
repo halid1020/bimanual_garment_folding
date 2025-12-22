@@ -1,5 +1,6 @@
 import numpy as np
 from gym.spaces import Dict, Discrete, Box
+import random
 
 from .world_pick_and_place \
     import WorldPickAndPlace
@@ -22,7 +23,7 @@ class PixelPickAndPlace():
                  pre_grasp_vel=0.05,
                  drag_vel=0.05,
                  lift_vel=0.05,
-                 readjust_pick=False,
+                 readjust_pick_poss=0.0,
                  single_operator=False,
                  **kwargs):
         
@@ -68,7 +69,7 @@ class PixelPickAndPlace():
         self.post_pick_height = post_pick_height
         self.drag_vel = drag_vel
         self.lift_vel = lift_vel
-        self.readjust_pick = readjust_pick
+        self.readjust_pick_poss = readjust_pick_poss
 
 
     def get_no_op(self):
@@ -96,8 +97,13 @@ class PixelPickAndPlace():
         mask = env._get_cloth_mask()
         adj_pick_0, dist_0 = readjust_norm_pixel_pick(pick_0, mask)
 
-        if self.readjust_pick:
+        #print('[pick-and-place]  readjust pick poss', self.readjust_pick_poss)
+        if random.random() < self.readjust_pick_poss:
             pick_0 = adj_pick_0
+            #print('[pick-and-place] Readjust pick 1')
+        else:
+            pass
+            #print('[pick-and-place] No readjust')
             #print('Place readjust pick 0')
             
         dist_1 = 0
@@ -111,9 +117,9 @@ class PixelPickAndPlace():
 
             adj_pick_1, dist_1 = readjust_norm_pixel_pick(pick_1, mask)
 
-            if self.readjust_pick:
+            if random.random() < self.readjust_pick_poss:
                 pick_1 = adj_pick_1
-                #print('Place readjust pick 1')
+                #print('[pick-and-place] Readjust pick 1')
                 
 
             pick_1_depth = action['pick_1_d'] if 'pick_1_d' in action else self.camera_height  - self.pick_height
@@ -138,7 +144,7 @@ class PixelPickAndPlace():
             place_0_depth, place_1_depth = place_1_depth, place_0_depth
 
         action_ = np.concatenate([pick_0, place_0, pick_1, place_1]).reshape(-1, 2)
-
+        #print('[pixel pick-and-place] action', action)
         depths = np.array([
             pick_0_depth, place_0_depth, 
             pick_1_depth, place_1_depth])

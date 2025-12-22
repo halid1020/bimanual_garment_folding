@@ -84,35 +84,52 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
             #print('results keys', result.keys())
             applied_action = result["information"][i+1]['applied_action']
 
-            pick_0  = norm_to_px(applied_action[:2])
-            pick_1  = norm_to_px(applied_action[2:4])
-            place_0 = norm_to_px(applied_action[4:6])
-            place_1 = norm_to_px(applied_action[6:8])
-
-            # -------------------------------
-            # Ensure LEFT pick is BLUE
-            # -------------------------------
-            picks = [(pick_0, place_0), (pick_1, place_1)]
-            picks_sorted = sorted(picks, key=lambda p: p[0][1])  # sort by x
-
-            (left_pick, left_place), (right_pick, right_place) = picks_sorted
-
-            # -------------------------------
-            # Draw arrows + hollow circles
-            # -------------------------------
+            
             small_tip = 0.08
+            if len(applied_action) > 4:
+                pick_0  = norm_to_px(applied_action[:2])
+                pick_1  = norm_to_px(applied_action[2:4])
+                place_0 = norm_to_px(applied_action[4:6])
+                place_1 = norm_to_px(applied_action[6:8])
+                # -------------------------------
+                # Ensure LEFT pick is BLUE
+                # -------------------------------
+                picks = [(pick_0, place_0), (pick_1, place_1)]
+                picks_sorted = sorted(picks, key=lambda p: p[0][1])  # sort by x
 
-            cv2.arrowedLine(
-                img, swap(left_pick), swap(left_place),
-                BLUE, 5, tipLength=small_tip
-            )
-            cv2.arrowedLine(
-                img, swap(right_pick), swap(right_place),
-                RED, 5, tipLength=small_tip
-            )
+                (left_pick, left_place), (right_pick, right_place) = picks_sorted
+                # -------------------------------
+                # Draw arrows + hollow circles
+                # -------------------------------
+               
 
-            cv2.circle(img, swap(left_pick),  8, BLUE, 2)
-            cv2.circle(img, swap(right_pick), 8, RED,  2)
+                cv2.arrowedLine(
+                    img, swap(left_pick), swap(left_place),
+                    BLUE, 5, tipLength=small_tip
+                )
+                cv2.arrowedLine(
+                    img, swap(right_pick), swap(right_place),
+                    RED, 5, tipLength=small_tip
+                )
+
+                cv2.circle(img, swap(left_pick),  8, BLUE, 2)
+                cv2.circle(img, swap(right_pick), 8, RED,  2)
+                
+            else:
+                
+                left_pick  = norm_to_px(applied_action[:2])
+                left_place  = norm_to_px(applied_action[2:4])
+                
+                cv2.arrowedLine(
+                    img, swap(left_pick), swap(left_place),
+                    BLUE, 5, tipLength=small_tip
+                )
+                
+
+                cv2.circle(img, swap(left_pick),  8, BLUE, 2)
+              
+
+            
 
             images.append(img)
 

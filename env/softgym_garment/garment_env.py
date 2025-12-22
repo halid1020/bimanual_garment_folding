@@ -111,7 +111,7 @@ class GarmentEnv(Arena):
         self.particle_radius = self.scene_config['radius']
         
         self.action_tool = HybridActionPrimitive(
-            readjust_pick=self.config.get('readjust_pick', False),
+            readjust_pick_poss=self.config.get('readjust_pick_poss', 0),
             drag_vel=0.01)
         self.save_each_action_picker_poses = True
         self.logger = PixelBasedPrimitiveEnvLogger()

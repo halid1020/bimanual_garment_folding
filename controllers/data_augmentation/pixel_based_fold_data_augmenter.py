@@ -192,9 +192,9 @@ class PixelBasedFoldDataAugmenter:
                     .reshape(*sample['action'].shape)
                 #print('rotated_action', rotated_action.shape)
                 
-                if torch.abs(sample['action']).max() > 1:
-                    #print('max action', torch.abs(sample['action']).max())
-                    continue
+                # if torch.abs(sample['action']).max() > 1:
+                #     #print('max action', torch.abs(sample['action']).max())
+                #     continue
                 #sample['action'] = rotated_action
 
                 # Rotate observations

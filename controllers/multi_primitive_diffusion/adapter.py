@@ -199,7 +199,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         #self.dataloader = None
     
     def _init_demo_policy_dataset(self, arenas):
+        
+        
         arena = arenas[0] # assume only one arena
+        org_horizon = arena.action_horizon
+        arena.action_horizon = self.config.get('demo_horizon', org_horizon)
         from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
         config = self.config.dataset_config #.toDict()
@@ -312,6 +316,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             episode_id += 1
             episode_id %= arena.get_num_episodes()
 
+        arena.action_horizon = org_horizon
         torch.backends.cudnn.benchmark = True
         self.dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -463,6 +468,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
           
             # encoder vision features
+            #print('[diffusion] input obs shape', input_obs.shape)
             image_features = self.nets['vision_encoder'](
                 input_obs)
             obs_features = image_features.reshape(

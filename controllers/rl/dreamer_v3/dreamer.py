@@ -125,7 +125,7 @@ class Dreamer(nn.Module):
                 convert_single_openl = single_openl.permute(1, 0, 2, 3).reshape(H, T * W, C)
 
                 img = to_np(convert_single_openl)  # (H, T*W, C)
-                img = (img * 255).astype(np.uint8)
+                img = (img.clip(0, 1) * 255).astype(np.uint8)
 
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 font_scale = 0.4
@@ -136,6 +136,9 @@ class Dreamer(nn.Module):
                 prior_color = (100, 160, 200)      # soft blue
                 row_text_color = (255, 255, 255)   # white
 
+                
+
+                img = cv2.resize(img, (128*T, 128*3))
 
                 H, TW, C = img.shape
                 W = TW // T

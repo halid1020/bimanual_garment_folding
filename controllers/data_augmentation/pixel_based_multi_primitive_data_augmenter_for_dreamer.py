@@ -18,8 +18,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
         self.color_jitter = self.config.get("color_jitter", False)
+        self.random_channel_permutation = self.config.get("random_channel_permutation", False)
 
         self.include_state = self.config.get("include_state", False)
+        self.K = self.config.get("K", 0)
 
         if self.color_jitter:
             self.color_aug = K.ColorJitter(
@@ -58,8 +60,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
             state = sample['state']
             state, _, _ = self._flatten_bt(state)
         
-
-        pixel_actions = act[:, 1:]
+        if self.K != 0:
+            pixel_actions = act[:, 1:]
+        else:
+            pixel_actions = act
 
         # =========================
         #   DEBUG (BEFORE AUG)
@@ -102,8 +106,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
                 rotation_matrices_tensor = rot_inv.expand(N_, 2, 2).reshape(-1, 2, 2)
                 rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(NP, A)
 
-                if torch.abs(rotated_action).max() > 1:
-                    continue
+                # if torch.abs(rotated_action).max() > 1:
+                #     continue
                 
                 if self.include_state:
                     pixel_state_ = state.reshape(-1, 1, 2)
@@ -145,24 +149,19 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         
         if self.color_jitter:
             obs = self.color_aug(obs)
+
+        # =========================
+        #   RANDOM CHANNEL PERMUTATION
+        # =========================
+        if self.random_channel_permutation:
+            # Generate ONE permutation for the whole batch
+            perm = torch.randperm(3, device=obs.device)
+            obs = obs[:, perm, :, :]
+
+
         obs = obs.permute(0, 2, 3, 1).contiguous()
-        # if self.config.get("color_jitter", False):
-        #     brightness = random.uniform(-self.config.get("brightness", 0.2),
-        #                                  self.config.get("brightness", 0.2))
-        #     contrast = 1.0 + random.uniform(-self.config.get("contrast", 0.2),
-        #                                     self.config.get("contrast", 0.2))
-        #     saturation = 1.0 + random.uniform(-self.config.get("saturation", 0.2),
-        #                                       self.config.get("saturation", 0.2))
-        #     hue = random.uniform(-self.config.get("hue", 0.05),
-        #                          self.config.get("hue", 0.05))
+        
 
-        #     obs = jitter_brightness_torch(obs, brightness)
-        #     obs = jitter_contrast_torch(obs, contrast)
-
-        #     hsv = rgb_to_hsv_torch(obs)
-        #     hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
-        #     hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0, 1)
-        #     obs = hsv_to_rgb_torch(hsv)
 
         
         #print('obs shape before debug after', obs.shape)
@@ -188,14 +187,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
         
 
         
+        if self.K != 0:
+            prim_acts = action[..., :1]
+            if self.config.get("randomise_prim_acts", False):            
+                prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(B, T, 1)
 
-        prim_acts = action[..., :1]
-        if self.config.get("randomise_prim_acts", False):            
-            prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(B, T, 1)
 
-
-        full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
-
+            full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
+        else:
+            full_action =  pixel_actions
+            
         sample["image"] = (obs.clamp(0, 1) * 255)
         sample["action"] = full_action.float()
         if self.include_state:

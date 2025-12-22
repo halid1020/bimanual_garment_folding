@@ -14,7 +14,7 @@ from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
 
 SUCCESS_TRESHOLD = 0.05
-IOU_TRESHOLD = 0.85
+IOU_TRESHOLDS = [0.8, 0.8, 0.85]
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
@@ -327,7 +327,7 @@ class GarmentFoldingTask(GarmentTask):
 
                     #print(f"[reward] K={K} start={start}, step={t}, goal={g}, iou={iou:.3f}")
 
-                    if iou >= IOU_TRESHOLD:
+                    if iou >= IOU_TRESHOLDS[g]:
                         matched_steps += 1
                         last_iou = 0.0
                     else:
@@ -425,7 +425,7 @@ class GarmentFoldingTask(GarmentTask):
                 goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0
                 IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
                 max_IoU = max(IoU, max_IoU)
-            if max_IoU < IOU_TRESHOLD:
+            if max_IoU < IOU_TRESHOLDS[-1]:
                 self.has_succeeded = False
                 print('[folding task] Success is messed up!')
                 return False
@@ -442,7 +442,7 @@ class GarmentFoldingTask(GarmentTask):
                 IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
                 max_IoU = max(IoU, max_IoU)
             #print(f'goal step {k}, current step {N - K + k}: max_IoU: {max_IoU}')
-            if max_IoU < IOU_TRESHOLD:
+            if max_IoU < IOU_TRESHOLDS[k]:
                 return False
         print('[folding task] Successful Step!')
         self.has_succeeded = True

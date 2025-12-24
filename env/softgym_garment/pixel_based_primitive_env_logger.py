@@ -17,7 +17,69 @@ TEXT_Y_STEP = 35
 TEXT_Y_STATUS = 80
 TEXT_BG_ALPHA = 0.6
 
-def draw_text_with_bg(img, text, org, color, scale=1.3, thickness=4):
+def draw_big_arrowhead(img, p_from, p_to, color, size=28):
+    """
+    p_from, p_to are (x, y)
+    """
+    dx = p_to[0] - p_from[0]
+    dy = p_to[1] - p_from[1]
+    norm = np.sqrt(dx * dx + dy * dy) + 1e-6
+
+    ux, uy = dx / norm, dy / norm      # direction
+    px, py = -uy, ux                   # perpendicular
+
+    tip = np.array([p_to[0], p_to[1]])
+
+    left = np.array([
+        p_to[0] - size * ux + size * 0.6 * px,
+        p_to[1] - size * uy + size * 0.6 * py
+    ])
+
+    right = np.array([
+        p_to[0] - size * ux - size * 0.6 * px,
+        p_to[1] - size * uy - size * 0.6 * py
+    ])
+
+    # Convert to OpenCV (col, row) only here
+    pts = np.array([
+        (int(tip[0]),   int(tip[1])),
+        (int(left[0]),  int(left[1])),
+        (int(right[0]), int(right[1]))
+    ], dtype=np.int32)
+
+    cv2.fillPoly(img, [pts], color)
+
+def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20):
+    """
+    Draw a straight line from p_start → p_end with color gradient.
+    p_start, p_end: (x, y) in pixel coords
+    """
+    xs = np.linspace(p_start[0], p_end[0], num_samples).astype(int)
+    ys = np.linspace(p_start[1], p_end[1], num_samples).astype(int)
+
+    for i in range(1, num_samples):
+        alpha = i / (num_samples - 1)
+
+        value = np.uint8([[[int((1.0 - alpha) * 255)]]])
+        color = cv2.applyColorMap(value, cmap)[0, 0].tolist()
+
+        cv2.line(
+            img,
+            (xs[i - 1], ys[i - 1]),
+            (xs[i], ys[i]),
+            color,
+            thickness
+        )
+
+    draw_big_arrowhead(
+        img,
+        (xs[-2], ys[-2]),
+        (xs[-1], ys[-1]),
+        color,
+        size=30
+    )
+
+def draw_text_with_bg(img, text, org, color, scale=1.2, thickness=4):
     (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
     x, y = org
     overlay = img.copy()
@@ -103,16 +165,20 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
             RED   = (50, 50, 200)     # softer red
             BLUE  = (200, 50, 50)     # softer blue
-
+            # print('result length', len(result["information"]))
+            # print('action lenght', len(actions))
             # ================================
             #          FOLD / PICK-PLACE
             # ================================
             if key == "norm-pixel-pick-and-place":
-                applied_action = result["information"][i+1]['applied_action']["norm-pixel-pick-and-place"]
-                pick_0  = norm_to_px(applied_action['pick_0'])
-                pick_1  = norm_to_px(applied_action['pick_1'])
-                place_0 = norm_to_px(applied_action['place_0'])
-                place_1 = norm_to_px(applied_action['place_1'])
+                applied_action = result["information"][i+1]['applied_action']
+                # print('applied action before', applied_action)
+                applied_action = applied_action['norm-pixel-pick-and-place']
+                # print('applied action', applied_action)
+                pick_0  = norm_to_px(applied_action[:2])
+                pick_1  = norm_to_px(applied_action[2:4])
+                place_0 = norm_to_px(applied_action[4:6])
+                place_1 = norm_to_px(applied_action[6:8])
 
                 # ----- Ensure BLUE pick is always the LEFT one -----
                 picks = [(pick_0, place_0), (pick_1, place_1)]
@@ -124,8 +190,28 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 # ----- Draw arrows with SMALLER arrowheads -----
                 small_tip = 0.08    # << smaller arrowhead tip size
 
-                cv2.arrowedLine(img, swap(left_pick),  swap(left_place),  BLUE, 8, tipLength=small_tip)
-                cv2.arrowedLine(img, swap(right_pick), swap(right_place), RED,  8, tipLength=small_tip)
+                # Colormaps (same convention as fling)
+                cmap_left  = cv2.COLORMAP_WINTER   # BLUE-ish
+                cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
+
+                draw_colored_line(
+                    img,
+                    swap(left_pick),
+                    swap(left_place),
+                    cmap_left,
+                    thickness=8,
+                    num_samples=20
+                )
+
+                draw_colored_line(
+                    img,
+                    swap(right_pick),
+                    swap(right_place),
+                    cmap_right,
+                    thickness=8,
+                    num_samples=20
+                )
+
 
                 # ----- Hollow circles -----
                 cv2.circle(img, swap(left_pick),  10, BLUE, 3)
@@ -148,7 +234,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                         "Rejected",
                         (10, TEXT_Y_STATUS),
                         MILD_RED,
-                        scale=1.3
+                        scale=1.2
                     )
                     
                 else:
@@ -200,17 +286,6 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                     draw_triangle_down(img, traj_px_0[-1], RED)
                     draw_triangle_down(img, traj_px_1[-1], BLUE)
 
-                    # def draw_triangle(img, center, color, size=15): 
-                    #     cx, cy = center 
-                    #     pts = np.array([ 
-                    #         (cx, cy - size), 
-                    #         (cx - size, cy + size), 
-                    #         (cx + size, cy + size) ], np.int32) 
-                    #     cv2.fillPoly(img, [pts], color) 
-                    
-                    # draw_triangle(img, traj_px_0[-1], RED) 
-                    # draw_triangle(img, traj_px_1[-1], BLUE)
-
             images.append(img)
 
         # Add final frame
@@ -261,4 +336,3 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         save_path = os.path.join(out_dir, f"episode_{eid}_trajectory.png")
         plt.savefig(save_path, dpi=200)
         plt.close(fig)
-

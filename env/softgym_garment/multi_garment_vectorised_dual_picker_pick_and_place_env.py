@@ -36,18 +36,16 @@ class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
         self.action_step += 1
         self.all_infos.append(self.info)
         self.info = self._process_info(self.info)
-        dict_applied_action = self.info['applied_action']
-        vector_action = []
+        applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
+        #vector_action = []
         if random.random() < 0.5:
-            for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
-                vector_action.append(dict_applied_action['norm-pixel-pick-and-place'][param_name])
-        else:
-            for param_name in ['pick_1', 'pick_0', 'place_1', 'place_0']:
-                vector_action.append(dict_applied_action['norm-pixel-pick-and-place'][param_name])
-        #print('vector_action', vector_action)
-        vector_action = np.stack(vector_action).flatten()
+            applied_action = applied_action.reshape(-1, 2)
+            applied_action[[0, 1, 2, 3]] = applied_action[[1, 0, 3, 2]]
+            applied_action = applied_action.flatten()
 
-        self.info['applied_action'] = vector_action
+        #vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = applied_action
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
         return self.info

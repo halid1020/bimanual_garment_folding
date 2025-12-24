@@ -164,10 +164,13 @@ class PixelPickAndFling():
             'lower_height': self.lower_height, # for lower the picker before release
         }
 
-        pixel_action = {
-            'pick_0': p0,
-            'pick_1': p1
-        }
+        # pixel_action = {
+        #     'pick_0': p0,
+        #     'pick_1': p1
+        # }
+
+        pixel_action = np.stack([p0, p1]).flatten()
+        
 
         return world_action, pixel_action
     

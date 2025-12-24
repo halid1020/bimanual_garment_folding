@@ -65,6 +65,8 @@ def main(cfg: DictConfig):
             cfg.agent.validation_interval,
             cfg.agent.total_update_steps,
             cfg.agent.eval_checkpoint,
+            policy_terminate=False,
+            env_success_stop=False
         )
 
 

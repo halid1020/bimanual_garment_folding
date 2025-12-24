@@ -230,6 +230,7 @@ def simulate(
             action = np.array(action)
         assert len(action) == len(envs)
 
+        #print('[simualtion] in action', action)
         if agent.primitive_integration == 'none':
             action_for_env = action
         elif agent.primitive_integration == 'predict_bin_as_output':
@@ -239,8 +240,6 @@ def simulate(
             # logger.log({
             #     f"train/prim_id": prim_id[0],
             # }, step=step) # TODO: change this to update steps
-
-        
         else:
             raise NotImplementedError
         
@@ -251,6 +250,7 @@ def simulate(
             results = [r() for r in results]
         obs, reward, done, applied_action = zip(*[(p["observation"], p["reward"], p["done"], p["applied_action"]) for p in results])
         
+        #print('[simulation] applied action', applied_action)
         obs = list(obs)
         reward = list(reward)
         done = np.stack(done)
@@ -260,7 +260,7 @@ def simulate(
         #print('simulation step', step)
         length *= 1 - done
         # add to cache
-        for a, result, env in zip(applied_action, results, envs):
+        for aa, oa, result, env in zip(applied_action, action, results, envs):
             o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
             if result['success'] and save_success:
                logger.log_frames(env.get_frames(), key='success episodes', step=steps)
@@ -268,13 +268,32 @@ def simulate(
             o = {k: convert(v) for k, v in o.items() if k in obs_keys}
             
 
-            transition = o.copy()
-            if isinstance(a, dict):
-                transition.update(a)
+            if agent.primitive_integration == 'none':
+                action_to_add = aa
+            elif agent.primitive_integration == 'predict_bin_as_output':
+                action_name = list(aa.keys())[0]
+                action_param = aa[action_name]
+                prim_id = agent.prim_name2id[action_name]
+                prim_act = oa[0] #(1.0*(prim_id+0.5)/agent.K *2 - 1)
+                action_to_add = np.zeros((agent.config.num_actions))
+                action_to_add[0] = prim_act
+                action_to_add[1:action_param.shape[0]+1] = action_param
+                
             else:
-                transition["action"] = a
+                raise NotImplementedError
+            
+            #print('[simulation] action_to_add', action_to_add)
+            
+            transition = o.copy()
+            if isinstance(action_to_add, dict):
+                transition.update(action_to_add)
+            else:
+                transition["action"] = action_to_add
             transition["reward"] = r[reward_key]
             transition["discount"] = discount
+
+            
+
             add_to_cache(cache, env.uid, transition)
 
         if done.any():

@@ -43,6 +43,7 @@ from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
+from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 
 # Add this import block at the top of the second file
@@ -83,6 +84,7 @@ def register_agent_arena():
     ag_ar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
     ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
     ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
+    ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
     ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
 
 

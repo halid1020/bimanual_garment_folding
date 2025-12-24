@@ -254,7 +254,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                             observations[k].append(v_)
                 
                 add_action = action
-                if self.config.primitive_integration == 'predict_bin_as_output':
+                if self.config.primitive_integration == 'predict_bin_as_output': # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.prim_name2id[action_name]

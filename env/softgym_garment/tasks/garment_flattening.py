@@ -37,35 +37,34 @@ class GarmentFlatteningTask(GarmentTask):
         return self.goals[0]
 
     def reward(self, last_info, action, info):#
-        reward = coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
+        ca_reward = coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
         if info['success'] and self.config.get('big_success_bonus', True):
-            reward = info['arena'].action_horizon - info['observation']['action_step']
+            ca_reward = info['arena'].action_horizon - info['observation']['action_step']
         
-        reward_ = reward
-        
-        if info['evaluation']['normalised_coverage'] > 0.7:
-            reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
-        
-        if info['evaluation']['max_IoU_to_flattened'] > 0.6:
-            reward_ += (info['evaluation']['max_IoU_to_flattened'] - 0.5)
-        
-        if info['success']:
-            reward_ = 2
+        aug_ca_reward = ca_reward
+        if info['evaluation']['normalised_coverage'] > NC_FLATTENING_TRESHOLD and info['evaluation']['max_IoU_to_flattened'] > IOU_FLATTENING_TRESHOLD:
+            aug_ca_reward = 1
 
         threshold =  self.config.get('overstretch_penalty_threshold', 0)
         if info['overstretch'] > threshold:
-           
-            reward_ -= self.config.get("overstretch_penalty_scale", 0) * (info['overstretch'] - threshold)
+            stretch_penalty = self.config.get("overstretch_penalty_scale", 0) * (info['overstretch'] - threshold)
+            aug_ca_reward_pen = aug_ca_reward - stretch_penalty
+
+            ca_reward_pen = ca_reward - stretch_penalty
+        else:
+            aug_ca_reward_pen = aug_ca_reward
+            ca_reward_pen = ca_reward
         
-        reward_2 = reward_
+        reward_2 = aug_ca_reward
         aff_score_pen = (1 - info.get('action_affordance_score', 1))
         reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_pen
     
         #print('rev aff score', aff_score_rev)
         return {
-            'coverage_alignment': reward,
-            'augmented_coverage_alignment_with_stretch_penalty': reward_,
-            'coverage_alignment_with_stretch_and_affordance_penalty': reward_2
+            'coverage_alignment': ca_reward,
+            'augmented_coverage_alignment_with_stretch_penalty': aug_ca_reward_pen,
+            'coverage_alignment_with_stretch_and_affordance_penalty': reward_2,
+            'coverage_alignment_with_stretch_penalty': ca_reward_pen
         }
     
     def evaluate(self, arena):

@@ -272,8 +272,12 @@ class GarmentEnv(Arena):
         else:
             raise NotImplementedError
 
-    def get_info(self):
+    def get_info(self, new=False):
+        if new:
+            self.info = self._process_info({})
+            return self.info
         return self.info
+    
     
     def get_trajectory_infos(self):
         return self.all_infos

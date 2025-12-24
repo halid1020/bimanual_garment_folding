@@ -179,12 +179,15 @@ class PixelPickAndPlace():
             # 'single_operator': action['single_operator']
         }
 
-        pixel_action = {
-            'pick_0': pick_0,
-            'place_0': place_0,
-            'pick_1': pick_1,
-            'place_1': place_1
-        }
+        pixel_action = np.stack([pick_0, pick_1, place_0, place_1]).flatten()
+        
+        # TODO: actually it has to be the following.
+        # {
+        #     'pick_0': pick_0,
+        #     'place_0': place_0,
+        #     'pick_1': pick_1,
+        #     'place_1': place_1
+        # }
 
         return world_action, pixel_action
     

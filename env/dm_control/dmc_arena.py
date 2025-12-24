@@ -1,9 +1,8 @@
 import os
-os.environ["MUJOCO_GL"] = "osmesa"
+
 import datetime
 from ..video_logger import VideoLogger
 from agent_arena import Arena
-from dm_control import suite
 
 import numpy as np
 import gym
@@ -14,7 +13,9 @@ class DMC_Arena(Arena):
     def __init__(self, config):
         super().__init__(config)
         
-        
+        os.environ["MUJOCO_GL"] = "osmesa"
+        from dm_control import suite
+
         #os.environ["MUJOCO_GL"] = "osmesa"
         self.num_eval_trials = 30
         self.num_train_trials = 1000

@@ -31,14 +31,10 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         self.action_step += 1
         self.all_infos.append(self.info)
         self.info = self._process_info(self.info)
-        dict_applied_action = self.info['applied_action']
-        vector_action = []
-        for param_name in ['pick_0', 'place_0']:
-            vector_action.append(dict_applied_action['norm-pixel-pick-and-place'][param_name])
-        #print('vector_action', vector_action)
-        vector_action = np.stack(vector_action).flatten()
+        
+        applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
 
-        self.info['applied_action'] = vector_action
+        self.info['applied_action'] = applied_action
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
         return self.info

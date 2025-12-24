@@ -107,7 +107,8 @@ class HybridActionPrimitive():
                 'norm-pixel-pick-and-place': info['applied_action']
             }
         elif 'no-operation' in action:
-            info = env.get_info()
+            info = env.get_info(new=True)
+            info['applied_action'] = action
         else:
             raise ValueError('Action not recognized')
 

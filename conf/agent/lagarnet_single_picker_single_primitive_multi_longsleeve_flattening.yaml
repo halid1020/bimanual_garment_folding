@@ -1,3 +1,4 @@
+name: lagarnet
 device: 'cuda:0'
 debug: False
 train_mode: 'offline'
@@ -54,10 +55,10 @@ validation_interval: 5000
 
 refresh_init_state: False
 
-action_output:
-  norm-pixel-pick-and-place:
-    pick_0: [0, 1]
-    place_0: [2, 3]
+# action_output:
+#   norm-pixel-pick-and-place:
+#     pick_0: [0, 1]
+#     place_0: [2, 3]
 
 apply_transform_in_dataset: True
 

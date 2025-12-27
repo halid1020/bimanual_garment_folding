@@ -2,12 +2,12 @@
 import os
 from omegaconf import OmegaConf
 
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
-from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
-from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
-
+from .pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
+from .pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
+from .pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
+from .pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
+from .pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
+from .pick_and_place_transformer_v1 import PickAndPlaceTransformerV1
 
 def build_data_augmenter(cfg_str):
 
@@ -31,6 +31,9 @@ def build_data_augmenter(cfg_str):
 
     elif name == 'pixel-based-multi-primitive-data-augmenter-for-diffusion':
         return PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg)
+
+    elif name == 'pick_and_place_transformer_v1':
+        return PickAndPlaceTransformerV1(cfg)
 
     elif name == 'identity':
         return lambda x: x

@@ -160,7 +160,7 @@ class GC_RSSM(RSSM):
             'mask': np.expand_dims(mask, axis=(0)),
             'goal-mask': np.expand_dims(goal_mask, axis=(0)),
         }
-        res = self.transform(
+        res = self.data_augmenter(
             to_trans_dict, 
             train=False)
         image = res[self.config.input_obs].to(self.config.device)
@@ -517,7 +517,7 @@ class GC_RSSM(RSSM):
             if single and not self.apply_transform_in_dataset:
                 for k, v in data.items():
                     data[k] = np.expand_dims(v, 0)
-            data = self.transform(data, train=train)
+            data = self.data_augmenter(data, train=train)
             if self.apply_transform_in_dataset:
                 for k, v in data.items():
                     data[k] = v.unsqueeze(0)

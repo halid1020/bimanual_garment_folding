@@ -52,7 +52,7 @@ class PickAndPlaceTransformerV1:
                  single=False):
         #print('before preprocess goal-rgb', sample['goal-rgb'].shape)
         # batch is assumed to have the shape B*T*C*H*W
-        print('transform!!!!')
+        #print('transform!!!!')
         allowed_keys = ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                         'goal-depth', 'goal-mask', 'action', 'reward', 'terminal']
         if 'observation' in sample_in:
@@ -188,8 +188,8 @@ class PickAndPlaceTransformerV1:
 
      
             
-        if self.config.reward_scale and train:
-            sample['reward'] *= self.config.reward_scale
+        # if self.config.reward_scale and train:
+        #     sample['reward'] *= self.config.reward_scale
         
         # we assume the action is in the correct form
         if 'action' in sample.keys() and (not self.swap_action):

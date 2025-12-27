@@ -76,6 +76,7 @@ class GarmentEnv(Arena):
         self.all_infos = []
         self.sim_step = 0
         self.save_video = False
+        self.add_final_goal_to_obs = config.get('add_final_goal_to_obs', False)
         
         self.random_reset = False
         self.set_id(0)
@@ -346,6 +347,10 @@ class GarmentEnv(Arena):
                 for k, v in goal[-1]['observation'].items():
                     info['goal'][k] = v
                 info['goals'] = goals[0]
+            
+            if self.add_final_goal_to_obs:
+                for k, v in goal[-1]['observation'].items():
+                    info['observation'][f'goal-{k}'] = v
 
         return info
     

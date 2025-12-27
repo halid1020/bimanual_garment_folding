@@ -12,13 +12,15 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
+from omegaconf import OmegaConf
 
 from agent_arena.torch_utils import *
 from agent_arena.registration.dataset import *
 from agent_arena.agent.oracle.builder import OracleBuilder
 from agent_arena.utilities.utils import TrainWriter
-from agent_arena.utilities.transform.register import DATA_TRANSFORMER
+# from agent_arena.utilities.transform.register import DATA_TRANSFORMER
 from agent_arena import RLAgent
+from dotmap import DotMap
 # from agent_arena.utilities.logger.logger_interface import Logger
 
 from .networks import ImageEncoder, ImageDecoder
@@ -26,10 +28,12 @@ from .memory import ExperienceReplay
 # from .logger import *
 from .cost_functions import *
 from .model import *
+from ...data_augmentation.register_augmeters import build_data_augmenter
 
 class RSSM(RLAgent):
 
     def __init__(self, config):
+        super().__init__(config)
         self.config = config
         self.input_obs = self.config.input_obs
         
@@ -83,23 +87,36 @@ class RSSM(RLAgent):
         print(f"Number of all parameters in the model: {num_parameters}")
 
 
-        optimiser_params = self.config.optimiser_params.copy()
-        optimiser_params['params'] = self.param_list
+        optimiser_params = OmegaConf.to_container(
+            self.config.optimiser_params,
+            resolve=True
+        )
+
+        optimiser_params["params"] = self.param_list
+
         self.optimiser = OPTIMISER_CLASSES[self.config.optimiser_class](**optimiser_params)
         self.loaded = False
         self.symlog = self.config.symlog
 
         #Dot map to dict
-        transform_config = self.config.transform
-        self.transform = DATA_TRANSFORMER[transform_config.name](transform_config.params)
+        #transform_config = self.config.data_agumenter
+        #self.transform = DATA_TRANSFORMER[transform_config.name](transform_config.params)
+        self.data_augmenter = build_data_augmenter(config.data_augmenter)
+
+        
         self.apply_transform_in_dataset = self.config.get('apply_transform_in_dataset', False)
 
+        planning_config = OmegaConf.to_container(
+            self.config.policy.params,
+            resolve=True
+        )
 
-        planning_config = self.config.policy.params
-        planning_config.model = self
-        planning_config.action_space = self.config.action_space
-        planning_config.no_op = self.no_op
-        
+        #planning_config = self.config.policy.params
+        planning_config["model"] = self
+        #planning_config["action_space"] = self.config.action_space
+        planning_config["no_op"] = self.no_op
+        planning_config = DotMap(planning_config)
+                
         import agent_arena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
@@ -107,7 +124,7 @@ class RSSM(RLAgent):
         
         self.data_sampler = self.config.get('data_sampler', 'uniform')
         self.internal_states = {}
-        self.logger = Logger()
+        #self.logger = Logger()
         self.cur_state = {}
         self.apply_reward_processor = self.config.get('apply_reward_processor', False)
         self.datasets = None
@@ -124,10 +141,10 @@ class RSSM(RLAgent):
             embedding_layers=self.config.trans_layers
         ).to(self.config.device)
 
-    def set_log_dir(self, logdir):
-        super().set_log_dir(logdir)
+    def set_log_dir(self, logdir, project_name, exp_name):
+        super().set_log_dir(logdir, project_name, exp_name)
         self.save_dir = logdir
-        self.writer = TrainWriter(self.save_dir)
+        # self.logger = TrainWriter(self.save_dir)
     
         
     def reset(self, areana_ids):
@@ -137,33 +154,39 @@ class RSSM(RLAgent):
 
     def get_state(self):
         return self.internal_states
+    
+    def single_act(self, info, update=False):
+
+        action =  self.planning_algo.act([info])[0].flatten()
+        plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
         
+        for k, v in plan_internal_state.items():
+            self.internal_states[info['arena_id']][k] = v
+        
+        # ## covert self.config.action_output to dict and copy it
+        # ret_action = self.config.action_output.copy().toDict()
+        # action = action.flatten()
+
+        # ## recursively goes down the dictionary tree, when encounter list of integer number
+        # ## replace list with corresponding indexed values in `action`
+
+        # def replace_action(action, ret_action):
+        #     for k, v in ret_action.items():
+        #         if isinstance(v, dict):
+        #             replace_action(action, v)
+        #         elif isinstance(v, list):
+        #             #print('v', v)
+        #             ret_action[k] = action[v]
+
+        # replace_action(action, ret_action)
+
+        return action
+
     def act(self, infos, update=False):
         actions = []
         for info in infos:
-            action =  self.planning_algo.act([info])[0].flatten()
-            plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
             
-            for k, v in plan_internal_state.items():
-                self.internal_states[info['arena_id']][k] = v
-            
-            ## covert self.config.action_output to dict and copy it
-            ret_action = self.config.action_output.copy().toDict()
-            action = action.flatten()
-
-            ## recursively goes down the dictionary tree, when encounter list of integer number
-            ## replace list with corresponding indexed values in `action`
-
-            def replace_action(action, ret_action):
-                for k, v in ret_action.items():
-                    if isinstance(v, dict):
-                        replace_action(action, v)
-                    elif isinstance(v, list):
-                        #print('v', v)
-                        ret_action[k] = action[v]
-
-            replace_action(action, ret_action)
-
+            ret_action = self.single_act(info)
             actions.append(ret_action)
        
         return actions
@@ -327,12 +350,13 @@ class RSSM(RLAgent):
             self.init(infos)
             return
         for info, action in zip(infos, actions):
-            self._update_helper(info, self.flatten_action(action))
+            #print('action', action)
+            self._update_helper(info, action)
              
-    def flatten_action(self, action):
-        if 'norm-pixel-pick-and-place' in self.config.action_output:
-            action = action['norm-pixel-pick-and-place']
-        return np.stack([action['pick_0'], action['place_0']]).flatten()
+    # def flatten_action(self, action):
+    #     if 'norm-pixel-pick-and-place' in self.config.action_output:
+    #         action = action['norm-pixel-pick-and-place']
+    #     return np.stack([action['pick_0'], action['place_0']]).flatten()
         
     
            
@@ -845,7 +869,7 @@ class RSSM(RLAgent):
                 else:
                     losses_dict[kk] = [vv.detach().cpu().item()]
                 
-                self.writer.add_scalar(kk, vv.detach().cpu().item(), u)
+                self.logger.add_scalar(kk, vv.detach().cpu().item(), u)
 
             updates.append(u)
 
@@ -868,7 +892,7 @@ class RSSM(RLAgent):
                 results.update({'train_{}'.format(k): v for k, v in train_results.items()})
 
                 for k, v in results.items():
-                    self.writer.add_scalar(k, v, u)
+                    self.logger.add_scalar(k, v, u)
 
                 results['update_step'] = [u]
 
@@ -1248,7 +1272,7 @@ class RSSM(RLAgent):
         return blfs, posteriors_, priors_, obs_emb
     
     def get_writer(self):
-        return self.writer
+        return self.logger
 
     def unroll_state_action(self, state, action):
 

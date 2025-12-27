@@ -45,13 +45,8 @@ from controllers.human.human_single_picker_pick_and_place import HumanSinglePick
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
-
-# Add this import block at the top of the second file
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter import PixelBasedMultiPrimitiveDataAugmenter
-from controllers.data_augmentation.pixel_based_single_primitive_data_augmenter import PixelBasedSinglePrimitiveDataAugmenter
-from controllers.data_augmentation.pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
-from controllers.data_augmentation.pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
+from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
+from controllers.rl.lagarnet.gc_rssm import GC_RSSM
 
 
 
@@ -86,7 +81,8 @@ def register_agent_arena():
     ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
     ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
     ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
-
+    ag_ar.register_agent('oracle-based-stitching-policy', IoUBasedStitchingPolicy)
+    ag_ar.register_agent('lagarnet', GC_RSSM)
 
 def build_task(task_cfg):
     # task
@@ -115,26 +111,3 @@ def build_task(task_cfg):
         raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
     return task
 
-def build_data_augmenter(cfg):
-    name = cfg.name
-
-    if name == 'pixel-based-multi-primitive-data-augmenter':
-        return PixelBasedMultiPrimitiveDataAugmenter(cfg)
-
-    elif name == 'pixel-based-fold-data-augmenter':
-        return PixelBasedFoldDataAugmenter(cfg)
-
-    elif name == 'pixel-based-single-primitive-augmenter':
-        return PixelBasedSinglePrimitiveDataAugmenter(cfg)
-
-    elif name == 'pixel-based-multi-primitive-data-augmenter-for-dreamer':
-        return PixelBasedMultiPrimitiveDataAugmenterForDreamer(cfg)
-
-    elif name == 'pixel-based-multi-primitive-data-augmenter-for-diffusion':
-        return PixelBasedMultiPrimitiveDataAugmenterForDiffusion(cfg)
-
-    elif name == 'identity':
-        return lambda x: x
-
-    else:
-        raise NotImplementedError(f"Data augmenter {name} not supported")

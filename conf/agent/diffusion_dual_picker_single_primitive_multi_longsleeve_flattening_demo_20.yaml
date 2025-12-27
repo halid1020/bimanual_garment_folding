@@ -56,5 +56,7 @@ primitive_integration: 'none'
 #     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
 # mask_out_irrelavent_action_dim: true
 
-exp_name: ${exp_name}
-project_name: ${project_name}
+# exp_name: ${exp_name}
+# project_name: ${project_name}
+
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0

@@ -2,10 +2,8 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 
-from train.utils import register_agent_arena, registered_arena, build_task, build_data_augmenter
+from train.utils import register_agent_arena, registered_arena, build_task
 import agent_arena.api as ag_ar
-from agent_arena import TrainableAgent
-from train.utils import register_agent_arena,  build_data_augmenter
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
@@ -13,23 +11,27 @@ def main(cfg: DictConfig):
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
-    agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
+    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+    agent = ag_ar.build_agent(
+        cfg.agent.name, 
+        cfg.agent,
+        save_dir=save_dir) # this needs to do the set_logger_part
     print('[hydra eval] agent', cfg.agent.name, agent)
     
     # data_augmenter
     
-    if isinstance(agent, TrainableAgent):
-        augmenter = build_data_augmenter(cfg.data_augmenter)
-        agent.set_data_augmenter(augmenter)
+    # Data Augmenter should be part of agent.
+    # augmenter = build_data_augmenter(cfg.data_augmenter)
+    # agent.set_data_augmenter(augmenter)
 
     # logging
-    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+    
     arena = registered_arena[cfg.arena.name](cfg.arena) #We want to bulid this with agent arena.
     task = build_task(cfg.task)
     arena.set_task(task)
-    arena.set_log_dir(save_dir)
+    arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
     
-    agent.set_log_dir(save_dir)
+    
 
     # training
     ag_ar.evaluate(

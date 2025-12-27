@@ -3,36 +3,7 @@ import cv2
 import numpy as np
 from ..video_logger import VideoLogger
 import matplotlib.pyplot as plt
-
-TEXT_Y_STEP = 30
-TEXT_BG_ALPHA = 0.6
-
-BLUE = (200, 50, 50)   # left picker
-RED  = (50, 50, 200)   # right picker
-MILD_RED = (120, 120, 220)  # soft red (B, G, R)
-
-def draw_text_with_bg(img, text, org, color=(255, 255, 255), scale=1.0, thickness=2):
-    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
-    x, y = org
-    overlay = img.copy()
-    cv2.rectangle(
-        overlay,
-        (x - 5, y - h - 5),
-        (x + w + 5, y + 5),
-        (0, 0, 0),
-        -1
-    )
-    cv2.addWeighted(overlay, TEXT_BG_ALPHA, img, 1 - TEXT_BG_ALPHA, 0, img)
-    cv2.putText(
-        img,
-        text,
-        org,
-        cv2.FONT_HERSHEY_SIMPLEX,
-        scale,
-        color,
-        thickness,
-        cv2.LINE_AA
-    )
+from .draw_utils import *
 
 
 class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
@@ -52,17 +23,7 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
         out_dir = os.path.join(self.log_dir, filename, "performance_visualisation")
         os.makedirs(out_dir, exist_ok=True)
 
-        # -------------------------------
-        # Normalized → pixel coordinates
-        # -------------------------------
-        def norm_to_px(v):
-            x = int((v[0] + 1) * 0.5 * W)
-            y = int((v[1] + 1) * 0.5 * H)
-            return x, y
-
-        # OpenCV uses (row, col)
-        def swap(p):
-            return (p[1], p[0])
+        
 
         images = []
 
@@ -74,8 +35,13 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
             # Step text
             # -------------------------------
             step_text = f"Step {i + 1}: Pick and Place"
-            draw_text_with_bg(img, step_text, (10, TEXT_Y_STEP))
-
+            primitive_color = PRIMITIVE_COLORS.get("norm-pixel-pick-and-place", PRIMITIVE_COLORS["default"])
+            draw_text_with_bg(
+                img,
+                step_text,
+                (10, TEXT_Y_STEP),
+                primitive_color
+            )
             # -------------------------------
             # Extract action
             # -------------------------------
@@ -84,51 +50,7 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
             #print('results keys', result.keys())
             applied_action = result["information"][i+1]['applied_action']
 
-            
-            small_tip = 0.08
-            if len(applied_action) > 4:
-                pick_0  = norm_to_px(applied_action[:2])
-                pick_1  = norm_to_px(applied_action[2:4])
-                place_0 = norm_to_px(applied_action[4:6])
-                place_1 = norm_to_px(applied_action[6:8])
-                # -------------------------------
-                # Ensure LEFT pick is BLUE
-                # -------------------------------
-                picks = [(pick_0, place_0), (pick_1, place_1)]
-                picks_sorted = sorted(picks, key=lambda p: p[0][1])  # sort by x
-
-                (left_pick, left_place), (right_pick, right_place) = picks_sorted
-                # -------------------------------
-                # Draw arrows + hollow circles
-                # -------------------------------
-               
-
-                cv2.arrowedLine(
-                    img, swap(left_pick), swap(left_place),
-                    BLUE, 5, tipLength=small_tip
-                )
-                cv2.arrowedLine(
-                    img, swap(right_pick), swap(right_place),
-                    RED, 5, tipLength=small_tip
-                )
-
-                cv2.circle(img, swap(left_pick),  8, BLUE, 2)
-                cv2.circle(img, swap(right_pick), 8, RED,  2)
-                
-            else:
-                
-                left_pick  = norm_to_px(applied_action[:2])
-                left_place  = norm_to_px(applied_action[2:4])
-                
-                cv2.arrowedLine(
-                    img, swap(left_pick), swap(left_place),
-                    BLUE, 5, tipLength=small_tip
-                )
-                
-
-                cv2.circle(img, swap(left_pick),  8, BLUE, 2)
-              
-
+            img = draw_pick_and_place(img, applied_action)
             
 
             images.append(img)

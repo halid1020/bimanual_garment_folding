@@ -13,7 +13,7 @@ action_horizon: 20
 image_resolution: [128, 128]
 track_semkey_on_frames: false
 num_val_trials: 10
-readjust_pick: true
+readjust_pick_poss: 1.0
 provide_semkey_pos: false
 provide_flattened_semkey_pos: false
 provide_semkey_norm_pixel: true

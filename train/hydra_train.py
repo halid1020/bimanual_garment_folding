@@ -12,17 +12,19 @@ def main(cfg: DictConfig):
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
-
-    agent = ag_ar.build_agent(cfg.agent.name, cfg.agent)
-    #print('agent', cfg.agent.name, agent)
-    
-    augmenter = build_data_augmenter(cfg.data_augmenter)
-
-    agent.set_data_augmenter(augmenter)
-    # logging
     save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+
+    agent = ag_ar.build_agent(
+        cfg.agent.name, 
+        cfg.agent,
+        save_dir=save_dir)
     
-    agent.set_log_dir(save_dir)
+    # augmenter = build_data_augmenter(cfg.data_augmenter)
+    # agent.set_data_augmenter(augmenter)
+    # logging
+    # save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+    
+    # agent.set_log_dir(save_dir)
 
     if cfg.train_and_eval == 'train_and_evaluate_single':
         # training

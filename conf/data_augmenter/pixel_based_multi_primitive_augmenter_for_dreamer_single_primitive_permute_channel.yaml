@@ -6,5 +6,5 @@ debug: true
 color_jitter: true
 randomise_prim_acts: false
 K: 0
-include_state: true
+include_state: false
 random_channel_permutation: true

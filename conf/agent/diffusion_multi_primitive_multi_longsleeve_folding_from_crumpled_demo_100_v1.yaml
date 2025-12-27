@@ -11,6 +11,7 @@ use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
+demo_horizon: 10
 batch_size: 64
 disable_updown: True
 action_shape: [8]
@@ -19,7 +20,7 @@ data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
-demo_policy:  "human-dual-pickers-pick-and-place"
+demo_policy: "human-multi-primitive"
 validation_interval: 1000
 total_update_steps: 50000
 eval_checkpoint: -1
@@ -28,7 +29,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_single_primitive_folding_from_random_flattened_human_demo_100"
+  data_path: "multi_longsleeve_multi_primitive_folding_from_crumpled_horizon_10_human_demo_100"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
@@ -47,16 +48,18 @@ dataset_config:
 
   act_config:
     default: 
-      shape: [8]
+      shape: [9]
       output_key: 'default'
 
-primitive_integration: 'none'
-# primitives:
-#   - name: norm-pixel-fold
-#     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
-# mask_out_irrelavent_action_dim: true
+primitive_integration: 'predict_bin_as_output'
+primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]
+  - name: norm-pixel-pick-and-place
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+  - name: no-operation
+    dim: 0
+mask_out_irrelavent_action_dim: false
 
-# exp_name: ${exp_name}
-# project_name: ${project_name}
-
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0
+exp_name: ${exp_name}
+project_name: ${project_name}

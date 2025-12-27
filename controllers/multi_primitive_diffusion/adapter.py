@@ -23,6 +23,7 @@ from .utils \
     import get_resnet, replace_bn_with_gn
 from .networks import ConditionalUnet1D
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
+from ..data_augmentation.register_augmeters import build_data_augmenter
 
 def omegaconf_to_plain_dict(cfg):
     if isinstance(cfg, (DictConfig, ListConfig)):
@@ -157,6 +158,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.update_step = 0 #-1
         self.total_update_steps = self.config.total_update_steps
         self.dataset_inited = False
+
+
+        self.data_augmenter = build_data_augmenter(config.data_augmenter)
 
         
         
@@ -577,8 +581,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         return masks
 
-    def set_log_dir(self, logdir):
-        super().set_log_dir(logdir)
+    def set_log_dir(self, logdir, project_name, exp_name):
+        super().set_log_dir(logdir, project_name, exp_name)
         self.save_dir = logdir
 
         
@@ -637,10 +641,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         ckpt_path = os.path.join(ckpt_path, 'net_best.pt')
         self.nets.load_state_dict(torch.load(ckpt_path))
 
-        print(f'Loaded checkpoint: {ckpt_file}')
         self.loaded = True
-        self.update_step = int(ckpt_file.split('_')[1].split('.')[0])
-        return self.update_step
+        return self.loaded
 
     def single_act(self, info, update=False):
 

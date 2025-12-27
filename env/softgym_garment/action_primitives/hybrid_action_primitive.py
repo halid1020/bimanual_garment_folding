@@ -20,7 +20,6 @@ class HybridActionPrimitive():
         ### Environment has to be WorldPickAndFlingWrapper
         self.np_pnp = PixelPickAndPlace(**kwargs)
         self.np_pnf = PixelPickAndFling(**kwargs)
-        self.np_pnd = PixelPickAndDrag(**kwargs)
         kwargs['pregrasp_height'] = 0.2 # only difference from Pick and Place so far
         kwargs['post_pick_height'] = 0.2
         kwargs['pre_place_height'] = 0.15
@@ -82,13 +81,6 @@ class HybridActionPrimitive():
             info = self.np_pnf.step(env, action)
             info['applied_action'] = {
                 'norm-pixel-pick-and-fling': info['applied_action']
-            }
-        elif 'norm-pixel-pick-and-drag' in action:
-            action = action['norm-pixel-pick-and-drag']
-            #action['swap'] = swap
-            info = self.np_pnd.step(env, action)
-            info['applied_action'] = {
-                'norm-pixel-pick-and-drag': info['applied_action']
             }
         elif 'norm-pixel-pick-and-place' in action:
             action = action['norm-pixel-pick-and-place']

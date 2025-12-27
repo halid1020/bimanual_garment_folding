@@ -1,12 +1,10 @@
 import numpy as np
 import torch
-import torch.nn as nn
-from torchvision import datasets, models, transforms
-import torchvision.transforms.functional as TF
+from torchvision import transforms
 import torch.nn.functional as F
 
 
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
+from agent_arena.torch_utils import np_to_ts, ts_to_np
 
 
 def randomize_primitive_encoding_np(action_prim, K):

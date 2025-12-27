@@ -14,7 +14,7 @@ from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
 
 SUCCESS_TRESHOLD = 0.05
-IOU_TRESHOLDS = [0.8, 0.8, 0.85]
+IOU_TRESHOLDS = [0.8, 0.8, 0.82]
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]

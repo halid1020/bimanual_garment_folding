@@ -5,7 +5,7 @@ import random
 import os
 import matplotlib.pyplot as plt
 
-from agent_arena.agent.utilities.torch_utils import np_to_ts, ts_to_np
+from agent_arena.torch_utils import np_to_ts, ts_to_np
 from .utils import randomize_primitive_encoding
 import kornia.augmentation as K
 

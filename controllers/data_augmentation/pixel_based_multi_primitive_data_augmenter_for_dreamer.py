@@ -105,7 +105,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
                 N_ = pixel_actions_.shape[0]
                 rotation_matrices_tensor = rot_inv.expand(N_, 2, 2).reshape(-1, 2, 2)
                 rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(NP, A)
-
+                rotated_action = rotated_action.clip(-1, 1)
                 # if torch.abs(rotated_action).max() > 1:
                 #     continue
                 

@@ -262,7 +262,3 @@ class Picker():
         arena.overstretch = max(overstretch, arena.overstretch)
        
         #return pairwise_dists
-        
-
-
-        

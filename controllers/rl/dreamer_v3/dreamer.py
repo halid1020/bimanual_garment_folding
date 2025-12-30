@@ -1,17 +1,14 @@
-import argparse
-import functools
 import os
-import pathlib
 import numpy as np
-import ruamel.yaml as yaml
+import torch
+from torch import nn
 
 from .exploration import *
 from .models import *
 from .tools import *
+from ...data_augmentation.register_augmeters import build_data_augmenter
 
-import torch
-from torch import nn
-from torch import distributions as torchd
+
 
 
 to_np = lambda x: x.detach().cpu().numpy()
@@ -91,9 +88,11 @@ class Dreamer(nn.Module):
             random=lambda: Random(config, rnd_act_space),
             plan2explore=lambda: Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
-    
-    def set_data_augmenter(self, data_augmenter):
-        self._wm.data_augmenter = data_augmenter
+
+        self._wm.data_augmenter = build_data_augmenter(config.data_augmenter)
+
+
+        
 
     def log(self):
         if self._should_log(self._logger.update_step):

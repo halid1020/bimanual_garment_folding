@@ -141,7 +141,7 @@ def draw_pick_and_place(img, action):
     small_tip = 0.08    # << smaller arrowhead tip size
 
     # Colormaps (same convention as fling)
-    cmap_left  = cv2.COLORMAP_WINTER   # BLUE-ish
+    cmap_left  = cv2.COLORMAP_COOL   # BLUE-ish
     cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
 
     draw_colored_line(

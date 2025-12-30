@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import random
 import os
 import matplotlib.pyplot as plt
+import kornia.augmentation as K
 
 def gaussian_2d(shape, sigma=1):
     m, n = [(ss - 1.) / 2. for ss in shape]
@@ -42,6 +43,20 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             self.kernel = gaussian_2d((kernel_size, kernel_size), sigma).to(self.device)
             self.kernel = self.kernel.expand(1, 1, kernel_size, kernel_size)
             self.padding = (kernel_size - 1) // 2 if kernel_size % 2 == 1 else kernel_size // 2
+
+        self.random_channel_permutation = self.config.get("random_channel_permutation", False)
+        
+        self.color_jitter = self.config.get("color_jitter", False)
+        if self.color_jitter:
+            self.color_aug = K.ColorJitter(
+                brightness=self.config.get("brightness", 0.2),
+                contrast=self.config.get("contrast", 0.2),
+                saturation=self.config.get("saturation", 0.2),
+                hue=self.config.get("hue", 0.05),
+                p=1.0,
+                keepdim=True,
+                same_on_batch=True, 
+            )
 
     def _save_debug_image(self, rgb_tensor, state_tensor, prefix, step):
         """Save an RGB tensor with state points drawn on it."""
@@ -105,9 +120,9 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 N = pixel_actions_.shape[0]
                 rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
                 rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B, A)
-
-                if torch.abs(rotated_action).max() > 1:
-                    continue
+                rotated_action = rotated_action.clip(-1, 1)
+                # if torch.abs(rotated_action).max() > 1:
+                #     continue
 
                 pixel_state_ = state.reshape(-1, 1, 2)
                 N = pixel_state_.shape[0]
@@ -136,6 +151,21 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             new_state = new_state.reshape(-1, 2)
             new_state[:, 0] = -new_state[:, 0]
             new_state = new_state.reshape(B, -1)
+
+        # =========================
+        #     COLOR JITTER (GLOBAL)
+        # =========================
+        
+        if self.color_jitter:
+            obs = self.color_aug(obs)
+        
+        # =========================
+        #   RANDOM CHANNEL PERMUTATION
+        # =========================
+        if self.random_channel_permutation:
+            # Generate ONE permutation for the whole batch
+            perm = torch.randperm(3, device=obs.device)
+            obs = obs[:, perm, :, :]
 
         # Save after augmentation
         if self.debug:

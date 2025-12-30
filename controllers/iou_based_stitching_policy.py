@@ -43,8 +43,8 @@ class IoUBasedStitchingPolicy(Agent):
             folding_policy_config.agent.name, 
             folding_policy_config.agent,
             project_name=folding_policy_config.project_name,
-            exp_name=config.flattening_policy,
-            save_dir= os.path.join(folding_policy_config.save_root, config.flattening_policy))
+            exp_name=config.folding_policy,
+            save_dir= os.path.join(folding_policy_config.save_root, config.folding_policy))
         
         # self.flattening_policy.set_log_dir(
         #     os.path.join(config.flattening_policy_log_dir, config.flattening_policy)

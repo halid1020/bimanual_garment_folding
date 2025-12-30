@@ -4,10 +4,11 @@ import numpy as np
 import random
 import os
 import matplotlib.pyplot as plt
+import kornia.augmentation as K
 
 from agent_arena.torch_utils import np_to_ts, ts_to_np
 from .utils import randomize_primitive_encoding
-import kornia.augmentation as K
+
 
 
 def rotate_points_torch(points, R):
@@ -28,7 +29,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.color_jitter = self.config.get("color_jitter", False)
         self.K = self.config.get("K", 0)
         self.random_channel_permutation = self.config.get("random_channel_permutation", False)
-
+        self.randomise_prim_acts = self.config.get("randomise_prim_acts", False)
 
 
         if self.color_jitter:
@@ -217,8 +218,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
             if self.K != 0:
                 prim_acts = action[..., :1]
-                if self.config.get("randomise_prim_acts", False):            
-                    prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(B, T, 1)
+                if self.randomise_prim_acts:            
+                    prim_acts = randomize_primitive_encoding(prim_acts.reshape(-1, 1), self.config.K).reshape(BB, TT-1, 1)
 
 
                 full_action = torch.cat([prim_acts, pixel_actions], dim=-1)

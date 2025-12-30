@@ -107,7 +107,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
                     # Colormaps
                     cmap0 = cv2.COLORMAP_AUTUMN
-                    cmap1 = cv2.COLORMAP_WINTER
+                    cmap1 = cv2.COLORMAP_COOL
 
                     for s in range(1, len(idx)):
                         alpha = s / (len(idx) - 1)

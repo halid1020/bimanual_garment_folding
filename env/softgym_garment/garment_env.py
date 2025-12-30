@@ -341,6 +341,7 @@ class GarmentEnv(Arena):
             
 
             goals = self.task.get_goals()
+            #print('len goals', len(goals))
             if len(goals) > 0:
                 goal = goals[0]
                 info['goal'] = {}

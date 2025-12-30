@@ -69,7 +69,7 @@ class PixelHumanFling(Agent):
                 goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
                 img = np.concatenate([img, goal_rgb], axis=1)
 
-            os.environ["DISPLAY"] = "localhost:10.0"
+            #os.environ["DISPLAY"] = "localhost:10.0"
             # Draw vertical white line between the two images
             line_x = rgb.shape[1]   # x-position = width of left image (512)
             cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
@@ -79,7 +79,7 @@ class PixelHumanFling(Agent):
             def mouse_callback(event, x, y, flags, param):
                 if event == cv2.EVENT_LBUTTONDOWN:
                     clicks.append((x, y))
-                    cv2.circle(img, (x, y), 2, (0, 255, 0), -1)
+                    cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
                     cv2.imshow('Click Two Pick Points for Fling', img)
             
             cv2.imshow('Click Two Pick Points for Fling', img)
@@ -89,7 +89,7 @@ class PixelHumanFling(Agent):
                 cv2.waitKey(1)
             
             cv2.destroyAllWindows()
-            os.environ["DISPLAY"] = ""
+            #os.environ["DISPLAY"] = ""
             
             # Normalize the coordinates to [-1, 1]
             height, width = rgb.shape[:2]

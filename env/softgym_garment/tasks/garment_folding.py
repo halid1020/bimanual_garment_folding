@@ -294,6 +294,9 @@ class GarmentFoldingTask(GarmentTask):
             # Sequential goal matching
             # -------------------------------
 
+            
+
+
             arena = info['arena']
             trj_infos = arena.get_trajectory_infos()
             N = len(trj_infos)
@@ -338,7 +341,10 @@ class GarmentFoldingTask(GarmentTask):
                         reward = matched_steps + last_iou
                         best_reward = max(best_reward, reward)
                 
-                
+            if self.config.get('base_reward', None) == 'aug-converage-alignment' and multi_stage_reward <= 1.0:
+                multi_stage_reward = coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
+                if info['evaluation']['normalised_coverage'] > NC_FLATTENING_TRESHOLD and info['evaluation']['max_IoU_to_flattened'] > IOU_FLATTENING_TRESHOLD:
+                    multi_stage_reward = 1
 
             multi_stage_reward = best_reward
 

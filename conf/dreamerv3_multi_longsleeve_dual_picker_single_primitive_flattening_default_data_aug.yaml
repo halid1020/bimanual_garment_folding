@@ -1,6 +1,6 @@
 defaults:
   - agent: dreamerv3_multi_longsleeve_dual_picker_single_primitive_flattening_default
-  - arena: multi_longsleeve_dual_picker_readjust_pick_0.9_provide_semkey_pixel_no_success_stop_resol_64
+  - arena: multi_longsleeve_dual_picker_readjust_pick_0.5_provide_semkey_pixel_no_success_stop_resol_64
   - task: flattening_overstretch_penalty_1_no_big_bonus
   - data_augmenter: pixel_based_multi_primitive_augmenter_for_dreamer_single_primitive_permute_channel
 

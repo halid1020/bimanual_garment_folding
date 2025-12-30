@@ -137,11 +137,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.primitives = config.primitives
             self.K = len(self.primitives)
             self.action_dims = [prim['dim'] if isinstance(prim, dict) else prim.dim for prim in self.primitives]
-            self.network_action_dim = max(self.action_dims) + 1
+            
             self.prim_name2id = {item['name']: i for i, item in enumerate(self.primitives)}
+            self.network_action_dim = max(self.action_dims)
+            if self.primitive_integration == 'bin_as_output':
+                self.network_action_dim += 1
             self.primitive_action_masks = self._build_primitive_action_masks()
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
-
+            
+            
         else:
             self.network_action_dim = config.action_dim
 
@@ -258,7 +262,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                             observations[k].append(v_)
                 
                 add_action = action
-                if self.config.primitive_integration == 'predict_bin_as_output': # Unused dimenstions are zeros
+                if self.config.primitive_integration == 'bin_as_output': # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.prim_name2id[action_name]
@@ -359,10 +363,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
 
+        #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
+        if self.primitive_integration == 'one-hot-encoding':
+            self.prim_class_head = nn.Linear(self.obs_feature_dim, self.K) #TODO: make it more layers later.
+            # Increase global_cond_dim to accommodate the one-hot vector
+            global_cond_dim = (self.config.obs_dim + self.K) * self.config.obs_horizon
+        else:
+            global_cond_dim = self.config.obs_dim * self.config.obs_horizon
 
         self.noise_pred_net = ConditionalUnet1D(
             input_dim=self.network_action_dim,
-            global_cond_dim=self.config.obs_dim*self.config.obs_horizon,
+            global_cond_dim=global_cond_dim,
             diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
         )
 
@@ -381,6 +392,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             'vision_encoder': self.vision_encoder,
             'noise_pred_net': self.noise_pred_net
         })
+        if self.primitive_integration == 'one-hot-encoding':
+            self.nets['prim_class_head'] = self.prim_class_head
 
         self._test_network()
 
@@ -484,7 +497,37 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 vector_state = nbatch['vector_state'][:, :self.config.obs_horizon]
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
             obs_cond = obs_features.flatten(start_dim=1)
-            # (B, obs_horizon * obs_dim)
+
+            # TODO: optional add primtiive cond_as well, use one-hot encoding.
+            # when self.primitive_integration == 'one-hot-encoding'
+            # predict the primitve through a classification head attached to the obs_features
+            # prim_id = self.prim_class(obs_feature)
+            # calculate the prim_loss through cross_entropy
+            # obs_cond = torch.concat(obs_cond, prim_enc)
+
+            
+            if self.primitive_integration == 'one-hot-encoding':
+                prim_loss = 0
+                # 1. Predict primitive ID from observation features
+                prim_logits = self.nets['prim_class_head'](obs_cond)
+                
+                # 2. Extract ground truth primitive ID from the action encoding
+                # Based on your _init_demo_policy_dataset, prim_id is encoded in action[0]
+                # We decode it back to the class index (0 to K-1)
+                prim_bin = nbatch['action'][:, 0, 0] 
+                gt_prim_ids = (((prim_bin + 1) / 2) * self.K).long()
+                gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.K - 1)
+                
+                # 3. Calculate Cross Entropy Loss
+                prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
+                
+                # 4. Create one-hot encoding for conditioning the Diffusion net
+                # Use ground truth during training (Teacher Forcing)
+                prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
+                
+                # 5. Concatenate to obs_cond
+                obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+
 
             # sample noise to add to actions
             noise = torch.randn(nbatch['action'].shape, device=self.device)
@@ -508,9 +551,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             noise_pred = self.noise_pred_net(
                 noisy_actions, timesteps, global_cond=obs_cond)
 
-            if self.primitive_integration == 'predict_bin_as_output' and self.mask_out_irrelavent_action_dim:
+            prim_loss = 0
+            if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
                 # nbatch['action']: (B, T, action_dim)
-                actions = nbatch['action']
+                actions = nbatch['action'] # bin encoded prim acctions.
 
                 # primitive bin is in action[..., 0] ∈ [-1, 1]
                 prim_bin = actions[:, 0, 0]  # (B,)
@@ -524,7 +568,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 mask = torch.zeros((B, T, D), device=device)
 
                 for b in range(B):
-                    mask[b] = self.primitive_action_masks[prim_ids[b]].to(device)
+                    mask[b] = self.primitive_action_masks[prim_ids[b]].clone().to(device)
 
                 # apply mask
                 diff = (noise_pred - noise) * mask
@@ -532,14 +576,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 # normalize by number of valid elements
                 valid_count = mask.sum().clamp(min=1.0)
 
-                loss = (diff ** 2).sum() / valid_count
+                actor_noise_loss = (diff ** 2).sum() / valid_count
                     
             else:
                 # L2 loss
-                loss = nn.functional.mse_loss(noise_pred, noise)
+                actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
+            total_loss = actor_noise_loss + prim_loss #co-update the encoder
             # optimize
-            loss.backward()
+            total_loss.backward()
             self.optimizer.step()
             self.optimizer.zero_grad()
             # step lr scheduler every batch
@@ -550,8 +595,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.ema.step(self.nets.parameters())
 
             ## write loss value to tqdm progress bar
-            pbar.set_description(f"Training (loss: {loss.item():.4f})")
-            self.logger.log({'train/loss': loss.item()}, step=self.update_step)
+            pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
+            self.logger.log({'train/actor_noise_loss': actor_noise_loss.item()}, step=self.update_step)
+            self.logger.log({'train/total_loss': total_loss.item()}, step=self.update_step)
+            if self.primitive_integration == 'one-hot-encoding':
+                self.logger.log({'train/prim_loss': prim_loss.item()}, step=self.update_step)
+            
             self.update_step += 1
 
     def _build_primitive_action_masks(self):
@@ -560,12 +609,18 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         prim_id -> mask (action_dim,)
         """
         masks = {}
+        start = None
+        if self.primitive_integration == 'one-hot-encoding':
+            start = 0
+        elif self.primitive_integration == 'bin_as_output':
+            start = 1
 
         for pid, prim in enumerate(self.primitives):
             mask = np.zeros(self.network_action_dim, dtype=np.float32)
 
             # dimension 0 is the primitive selector → always valid
-            mask[0] = 1.0
+            if start == 1:
+                mask[0] = 1.0
 
             if isinstance(prim, dict):
                 dim = prim['dim']
@@ -573,7 +628,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 dim = prim.dim
 
             # parameters start from index 1
-            mask[1:1 + dim] = 1.0
+            mask[start:start + dim] = 1.0
 
             masks[pid] = torch.tensor(mask)
         
@@ -634,8 +689,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
     def load_best(self):
         
-        #print('loading checkpoint')
-        ## find the latest checkpoint
         ckpt_path = os.path.join(self.save_dir, 'checkpoints')
         
         ckpt_path = os.path.join(ckpt_path, 'net_best.pt')
@@ -664,6 +717,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 mask = torch.stack([x['mask'] for x in self.obs_deque[info['arena_id']]])
                 sample_state['mask'] = mask
 
+            
             obs_features = self.nets['vision_encoder'](image)
             # print('obs features shape', obs_features.shape)
 
@@ -673,6 +727,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 # print('vector state shape', vector_state.shape)
                 
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
+            
+            if self.primitive_integration == 'one-hot-encoding':
+                # Predict primitive ID from current observation features
+                prim_logits = self.nets['prim_class_head'](obs_features)
+                prim_id = torch.argmax(prim_logits, dim=-1) # (1,)
+                cur_prim_id = prim_id[-1]
+                # Convert to one-hot encoding
+                prim_enc = nn.functional.one_hot(prim_id, num_classes=self.K).float()
+                
+                # Condition is [Obs Features + One-Hot Primitive ID]
+                obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
             
             obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
             #print('obs cond', obs_cond.shape)
@@ -731,12 +796,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         if self.config.primitive_integration == 'none':
             out_action = action
-        elif self.config.primitive_integration == 'predict_bin_as_output':
+        elif self.config.primitive_integration == 'bin_as_output':
             prim_idx = int(((action[0] + 1)/2)*self.K - 1e-6)
             prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
             action = action[1:]
             out_action = {prim_name: action}
-            #print('out action', out_action)
+        elif self.primitive_integration == 'one-hot-encoding':
+            # Use the ID predicted during the observation encoding step
+            prim_name = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
+            out_action = {prim_name: action[:self.action_dims[cur_prim_id]]}
         else:
             raise NotImplementedError
 

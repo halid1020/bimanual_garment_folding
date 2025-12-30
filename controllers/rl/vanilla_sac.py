@@ -16,6 +16,7 @@ from agent_arena import TrainableAgent
 import zarr
 from .replay_buffer import ReplayBuffer
 from .replay_buffer_zarr import ReplayBufferZarr
+from ..data_augmentation.register_augmeters import build_data_augmenter
 
 
 class Critic(nn.Module):
@@ -124,6 +125,7 @@ class VanillaSAC(TrainableAgent):
         self.total_update_steps = config.total_update_steps
         self.info = None
         self.save_success = config.get('save_success', False)
+        self.data_augmenter = build_data_augmenter(self.config.data_augmenter)
 
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
@@ -214,12 +216,13 @@ class VanillaSAC(TrainableAgent):
             a, logp = self.actor.sample(self._process_context_for_input(obs_list))
             a = torch.clip(a, -self.config.action_range, self.config.action_range)
             a = a.detach().cpu().numpy().squeeze(0)
-            return a, logp.detach().cpu().numpy().squeeze(0)
+            return a, a #logp.detach().cpu().numpy().squeeze(0)
         else:
             mean, _ = self.actor(self._process_context_for_input(obs_list))
             action = torch.tanh(mean)
             action = torch.clip(action, -self.config.action_range, self.config.action_range)
-            return action.detach().cpu().numpy().squeeze(0), None
+            a = action.detach().cpu().numpy().squeeze(0)
+            return a, a
 
     def act(self, info_list, updates=None):
         self.set_eval()
@@ -375,6 +378,7 @@ class VanillaSAC(TrainableAgent):
 
         # sample stochastic action for exploration
         a, a_add = self._select_action(self.info, stochastic=True)
+        #print(f'[vanilla sac] a {a}, a_add {a_add}',)
         # clip to action range
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
@@ -422,7 +426,7 @@ class VanillaSAC(TrainableAgent):
         self.episode_length += 1
     
     def _add_transition_replay(self, obs_for_replay, a, reward, next_obs_for_replay, done):
-       
+        #print('[vanilla sac] action before add', a)
         self.replay.add(obs_for_replay, a, reward, next_obs_for_replay,  done)
 
     def _get_next_obs_for_process(self, next_info):

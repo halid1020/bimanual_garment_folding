@@ -1,13 +1,16 @@
 
 import pathlib
-
-from .tools import *
-from controllers.rl.dreamer_v3.dreamer import Dreamer
 from agent_arena import TrainableAgent
 from gym.spaces import Dict, Box
 import gym
 import numpy as np
 from tqdm import tqdm
+
+
+from .dreamer import Dreamer
+from .tools import *
+from ...data_augmentation.register_augmeters import build_data_augmenter
+
 
 class DreamerV3Adapter(TrainableAgent):
   
@@ -74,12 +77,12 @@ class DreamerV3Adapter(TrainableAgent):
     def set_data_augmenter(self, data_augmenter):
         self.data_augmenter = data_augmenter
     
-    def set_log_dir(self, log_dir):
+    def set_log_dir(self, log_dir, project_name, exp_name):
         logdir = pathlib.Path(log_dir).expanduser()
-        super().set_log_dir(log_dir)
+        super().set_log_dir(log_dir, project_name, exp_name)
         if self.use_bc_policy_to_seed:
             bc_logger_dir = os.path.join(log_dir, 'bc_policy')
-            self.bc_policy.set_log_dir(bc_logger_dir)
+            self.bc_policy.set_log_dir(bc_logger_dir, project_name, exp_name)
         
         self.config.traindir = self.config.traindir or logdir / "train_eps"
         #self.config.evaldir = self.config.evaldir or logdir / "eval_eps"
@@ -307,7 +310,9 @@ class DreamerV3Adapter(TrainableAgent):
             self.train_dataset,
             self.vis_dataset
         ).to(self.config.device)
-        self.dreamer.set_data_augmenter(self.data_augmenter)
+        self.dreamer._wm.data_augmenter = build_data_augmenter(self.config.data_augmenter)
+
+        #self.dreamer.set_data_augmenter(self.data_augmenter)
         self.dreamer.requires_grad_(requires_grad=False)
         self.load()
             

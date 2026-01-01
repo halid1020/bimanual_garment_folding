@@ -1,5 +1,20 @@
 import cv2
+import numpy as np
 
+def apply_workspace_shade(rgb, mask, color, alpha=0.35):
+    """
+    Shade pixels where mask == True with given BGR color.
+    """
+    shaded = rgb.copy()
+    overlay = np.zeros_like(rgb, dtype=np.uint8)
+    overlay[:] = color
+
+    shaded[mask] = cv2.addWeighted(
+        rgb[mask], 1 - alpha,
+        overlay[mask], alpha,
+        0
+    )
+    return shaded
 
 def draw_text_top_right(
     img,

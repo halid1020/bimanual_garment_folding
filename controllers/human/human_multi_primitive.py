@@ -8,7 +8,7 @@ from .human_pick_and_drag import HumanPickAndDrag
 from .human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 from .no_operation import NoOperation
 
-from .utils import draw_text_top_right
+from .utils import draw_text_top_right, apply_workspace_shade
 
 
 class HumanMultiPrimitive(Agent):
@@ -61,8 +61,46 @@ class HumanMultiPrimitive(Agent):
         # Extract the RGB and goal images
                     ## make it bgr to rgb using cv2
         rgb = state['observation']['rgb']
+        
+
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
         rgb = cv2.resize(rgb, (512, 512))
+        H, W = rgb.shape[:2]
+
+        if 'robot0_mask' in state['observation']:
+            mask0 = state['observation']['robot0_mask'].astype(bool)
+
+            if mask0.shape[:2] != (H, W):
+                mask0 = cv2.resize(
+                    mask0.astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+            rgb = apply_workspace_shade(
+                rgb,
+                mask0,
+                color=(255, 0, 0),  # Blue in BGR
+                alpha=0.2
+            )
+
+        if 'robot1_mask' in state['observation']:
+            mask1 = state['observation']['robot1_mask'].astype(bool)
+
+            if mask1.shape[:2] != (H, W):
+                mask1 = cv2.resize(
+                    mask1.astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+            rgb = apply_workspace_shade(
+                rgb,
+                mask1,
+                color=(0, 0, 255),  # Red in BGR
+                alpha=0.2
+            )
+
 
         # Overlay success + IoU info BEFORE concatenation
         if 'evaluation' in state.keys() and state['evaluation'] != {}:

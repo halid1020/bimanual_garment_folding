@@ -2,6 +2,7 @@ from agent_arena import Agent
 import numpy as np
 import cv2
 import os
+from ..utils import apply_workspace_shade
 
 class PixelHumanFling(Agent):
     
@@ -24,13 +25,48 @@ class PixelHumanFling(Agent):
             
             rgb = state['observation']['rgb']
         
-
+        
             ## make it bgr to rgb using cv2
             rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
             
 
             ## resize
             rgb = cv2.resize(rgb, (512, 512))
+            H, W = rgb.shape[:2]
+            if 'robot0_mask' in state['observation']:
+                mask0 = state['observation']['robot0_mask'].astype(bool)
+
+                if mask0.shape[:2] != (H, W):
+                    mask0 = cv2.resize(
+                        mask0.astype(np.uint8),
+                        (W, H),
+                        interpolation=cv2.INTER_NEAREST
+                    ).astype(bool)
+
+                rgb = apply_workspace_shade(
+                    rgb,
+                    mask0,
+                    color=(255, 0, 0),  # Blue in BGR
+                    alpha=0.2
+                )
+
+            if 'robot1_mask' in state['observation']:
+                mask1 = state['observation']['robot1_mask'].astype(bool)
+
+                if mask1.shape[:2] != (H, W):
+                    mask1 = cv2.resize(
+                        mask1.astype(np.uint8),
+                        (W, H),
+                        interpolation=cv2.INTER_NEAREST
+                    ).astype(bool)
+
+                rgb = apply_workspace_shade(
+                    rgb,
+                    mask1,
+                    color=(0, 0, 255),  # Red in BGR
+                    alpha=0.2
+                )
+
             
             
             # Create a copy of the image to draw on
@@ -69,7 +105,7 @@ class PixelHumanFling(Agent):
                 goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
                 img = np.concatenate([img, goal_rgb], axis=1)
 
-            #os.environ["DISPLAY"] = "localhost:10.0"
+            os.environ["DISPLAY"] = "localhost:10.0"
             # Draw vertical white line between the two images
             line_x = rgb.shape[1]   # x-position = width of left image (512)
             cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
@@ -89,7 +125,7 @@ class PixelHumanFling(Agent):
                 cv2.waitKey(1)
             
             cv2.destroyAllWindows()
-            #os.environ["DISPLAY"] = ""
+            os.environ["DISPLAY"] = ""
             
             # Normalize the coordinates to [-1, 1]
             height, width = rgb.shape[:2]

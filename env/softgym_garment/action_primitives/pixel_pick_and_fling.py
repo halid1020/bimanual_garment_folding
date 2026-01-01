@@ -4,7 +4,7 @@ from gym.spaces import Box
 from .world_pick_and_fling \
     import WorldPickAndFling
 from ..utils.camera_utils import norm_pixel2world
-from .utils import pixel_to_world, readjust_norm_pixel_pick
+from .utils import pixel_to_world, readjust_norm_pixel_pick, norm_pixel_to_index
 import random
 
 class PixelPickAndFling():
@@ -19,13 +19,13 @@ class PixelPickAndFling():
         tograsp_vel=0.05,
         prefling_height=0.3, #7,#
         prefling_vel=0.01,
-        fling_pos_y=0.3,
+        fling_pos_y=0, #0.3,
         lift_vel=0.02, #0.01,
         #adaptive_fling_momentum=1.0,
         action_horizon=20,
         hang_adjust_vel=0.01,
         stretch_adjust_vel=0.01,
-        fling_vel= 0.02, #0.008,
+        fling_vel= 0.03, #0.008,
         release_vel=0.01,
         drag_vel=0.005,
         lower_height=0.06,
@@ -120,7 +120,7 @@ class PixelPickAndFling():
         ref_a = np.array([-1, 1])
         ref_b = np.array([1, 1])
 
-        if np.linalg.norm(p1[:2] - ref_a) < np.linalg.norm(p0[:2] - ref_a):
+        if p0[1] > p1[1]:
             p0, p1 = p1, p0
       
         action_ = np.concatenate([p0, p1]).reshape(-1, 2)
@@ -182,7 +182,28 @@ class PixelPickAndFling():
         self.camera_pose = env.camera_extrinsic_matrix
         self.camera_size = env.camera_size
         world_action_, pixel_action = self.process(env, action)
-        info = self.action_tool.step(env, world_action_)
+        W, H = self.camera_size
+        reject=False
+        if env.apply_workspace:
+
+            # -------- robot 0 --------
+            r0p, c0p = norm_pixel_to_index(pixel_action[:2], (W, H))
+            r1p, c1p = norm_pixel_to_index(pixel_action[2:4], (W, H))
+
+            if not env.robot0_mask[r0p, c0p]:
+                print('[PixelPickAndPlace] Reject: pick_0 outside robot0 workspace')
+                reject=True
+                info = {}
+            
+
+            if not env.robot1_mask[r1p, c1p]:
+                print('[PixelPickAndPlace] Reject: pick_1 outside robot1 workspace')
+                reject=True
+                info = {}
+
+   
+        if not reject: 
+            info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
         info['action_affordance_score'] = self.affordance_score
         return info

@@ -18,7 +18,7 @@ class WorldPickAndPlace():
                  place_lower_bound=[-1, -1, 0],
                  place_upper_bound=[1, 1, 1],
 
-                 ready_pos = [[1, 1, 0.6], [-1, 1, 0.6]],
+                 ready_pos = [[-1, 0, 0.6], [1, 0, 0.6]],
                  
                  lift_vel=0.05,
                  drag_vel=0.05,
@@ -39,13 +39,6 @@ class WorldPickAndPlace():
         self.action_space = Box(space_low, space_high, dtype=np.float64)
 
         self.ready_pos = np.asarray(ready_pos)
-
-        # if self.no_op.shape[0] == 2:
-        #     self.no_op = self.no_op.reshape(2, 2, -1)
-        #     self.no_op[1, :, 0] *= -1
-        #     if self.no_op.shape[2] == 3:
-        #         self.no_op[:, :, 2] = 0.2
-        #     self.no_op = self.no_op.reshape(*self.action_space.shape)
         
 
         ### Each parameters has its class variable
@@ -117,9 +110,6 @@ class WorldPickAndPlace():
         place_raise = place_positions.copy()
         place_raise[:, 2] = 0.1
 
-        # if action['single_operator']:
-        #     pick_positions[1] = self.ready_pos[0, :3]
-        #     pre_pick_positions[1] = self.ready_pos[0, :3]
 
         # ---- INTERSECTION CHECK ----
         conflict, min_dist = check_trajectories_close(

@@ -13,3 +13,4 @@ action_horizon: 5
 track_semkey_on_frames: false
 readjust_pick: false
 init_mode: flattened
+debug: True

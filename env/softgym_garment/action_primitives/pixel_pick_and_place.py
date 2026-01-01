@@ -5,7 +5,7 @@ import random
 from .world_pick_and_place \
     import WorldPickAndPlace
 from ..utils.camera_utils import norm_pixel2world
-from .utils import readjust_norm_pixel_pick
+from .utils import readjust_norm_pixel_pick, norm_pixel_to_index
 
 class PixelPickAndPlace():
 
@@ -134,14 +134,19 @@ class PixelPickAndPlace():
 
         self.affordance_score = self._calculate_affordance(dist_0, dist_1)
         
-        ref_a = np.array([1, -1])
-        ref_b = np.array([1, 1])
+        # ref_a = np.array([1, 1]) #np.array([1, -1])
+        # # ref_b = 
 
-        if np.linalg.norm(pick_1[:2] - ref_a) > np.linalg.norm(pick_0[:2] - ref_a):
+        # if np.linalg.norm(pick_1[:2] - ref_a) > np.linalg.norm(pick_0[:2] - ref_a):
+
+        ## TODO: do the following if pick_0 is at the right of pick1
+        #print(f"[PixelPickAndPlace] before assining, pick0 {pick_0}, place0 {place_0}, pick1 {pick_1}, place1 {place_1}")
+        if place_0[1] > place_1[1]:
             pick_0, pick_1 = pick_1, pick_0
             place_0, place_1 = place_1, place_0
             pick_0_depth, pick_1_depth = pick_1_depth, pick_0_depth
             place_0_depth, place_1_depth = place_1_depth, place_0_depth
+        #print(f"[PixelPickAndPlace] after assining, pick0 {pick_0}, place0 {place_0}, pick1 {pick_1}, place1 {place_1}")
 
         action_ = np.concatenate([pick_0, place_0, pick_1, place_1]).reshape(-1, 2)
         #print('[pixel pick-and-place] action', action)
@@ -180,14 +185,6 @@ class PixelPickAndPlace():
         }
 
         pixel_action = np.stack([pick_0, pick_1, place_0, place_1]).flatten()
-        
-        # TODO: actually it has to be the following.
-        # {
-        #     'pick_0': pick_0,
-        #     'place_0': place_0,
-        #     'pick_1': pick_1,
-        #     'place_1': place_1
-        # }
 
         return world_action, pixel_action
     
@@ -210,9 +207,52 @@ class PixelPickAndPlace():
         self.camera_size = env.camera_size
 
         world_action_ , pixel_action = self.process(env, action)
+        W, H = env.robot0_mask.shape[:2]
+
+        reject = False
+        if env.apply_workspace:
+            #print(f'[PixelPickAndPlace] pixel_action {pixel_action}')
+            # -------- robot 0 --------
+            r0p, c0p = norm_pixel_to_index(pixel_action[:2], (W, H))
+            r0l, c0l = norm_pixel_to_index(pixel_action[4:6], (W, H))
+
+            # from agent_arena.utilities.save_utils import save_mask
+            # save_mask(env.robot0_mask, 'robot0-mask', 'tmp')
+            
+            if not env.robot0_mask[r0p, c0p]:
+                print('[PixelPickAndPlace] Reject: pick_0 outside robot0 workspace')
+                
+                reject = True
+                info = {}
+            
+            if not env.robot0_mask[r0l, c0l]:
+                print('[PixelPickAndPlace] Reject: place_0 outside robot0 workspace')
+                reject = True
+                info = {}
+    
+            # -------- robot 1 --------
+           
+            r1p, c1p = norm_pixel_to_index(pixel_action[2:4], (W, H))
+            r1l, c1l = norm_pixel_to_index(pixel_action[6:8], (W, H))
+            
+            # from agent_arena.utilities.save_utils import save_mask
+            # save_mask(env.robot1_mask, 'robot1-mask', 'tmp')
+            
+            if not env.robot1_mask[r1p, c1p]:
+                print('[PixelPickAndPlace] Reject: pick_1 outside robot1 workspace')
+                
+                reject = True
+                info = {}
+
+            if not env.robot1_mask[r1l, c1l]:
+                print('[PixelPickAndPlace] Reject: place_1 outside robot1 workspace')
+                reject = True
+                info = {}
+            
         # print('[pixel-pick-and-place] world_action_:', world_action_)
         # print('pixel action', pixel_action)
-        info = self.action_tool.step(env, world_action_)
+        if not reject: 
+            info = self.action_tool.step(env, world_action_)
         info['applied_action'] = pixel_action
         info['action_affordance_score'] = self.affordance_score
         # self.action_step += 1

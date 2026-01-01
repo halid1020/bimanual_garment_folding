@@ -85,7 +85,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         observation = sample['observation']/255.0  # B*C*H*W, [0, 255]
         #self.device = observation.device
         self.device = observation.device
-        state = sample['state']
+        if 'state' in sample.keys():
+            state = sample['state']
         next_observation = sample['next_observation']/255.0
         action = sample['action']
 
@@ -124,10 +125,11 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 # if torch.abs(rotated_action).max() > 1:
                 #     continue
 
-                pixel_state_ = state.reshape(-1, 1, 2)
-                N = pixel_state_.shape[0]
-                rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
-                new_state = torch.bmm(pixel_state_, rotation_matrices_tensor).reshape(B, -1)
+                if 'state' in sample.keys():
+                    pixel_state_ = state.reshape(-1, 1, 2)
+                    N = pixel_state_.shape[0]
+                    rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
+                    new_state = torch.bmm(pixel_state_, rotation_matrices_tensor).reshape(B, -1)
 
                 B, C, H, W = observation.shape
                 affine_matrix = torch.zeros(B, 2, 3, device=self.device)
@@ -148,9 +150,10 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(B, -1)
 
-            new_state = new_state.reshape(-1, 2)
-            new_state[:, 0] = -new_state[:, 0]
-            new_state = new_state.reshape(B, -1)
+            if 'state' in sample.keys():
+                new_state = new_state.reshape(-1, 2)
+                new_state[:, 0] = -new_state[:, 0]
+                new_state = new_state.reshape(B, -1)
 
         # =========================
         #     COLOR JITTER (GLOBAL)
@@ -176,5 +179,6 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         sample['observation'] = observation.clip(0, 1)*255
         sample['next_observation'] = next_observation.clip(0, 1)*255
         sample['action'] = pixel_actions
-        sample['state'] = new_state
+        if 'state' in sample.keys():
+            sample['state'] = new_state
         return sample

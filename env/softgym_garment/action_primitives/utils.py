@@ -1,6 +1,16 @@
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
+def norm_pixel_to_index(p, resolution):
+    """
+    p: normalized pixel in [-1, 1]
+    returns (row, col)
+    """
+    W, H = resolution
+    row = int((p[0] + 1) * 0.5 * (W - 1))
+    col = int((p[1] + 1) * 0.5 * (H - 1))
+    return row, col
+
 def segment_distance(p1, p2, q1, q2):
     """Compute min distance between two 3D line segments p1→p2 and q1→q2."""
     u = p2 - p1

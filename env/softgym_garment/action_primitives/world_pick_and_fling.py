@@ -19,12 +19,12 @@ class WorldPickAndFling():
         tograsp_vel=0.005,
         prefling_height=0.7,#
         prefling_vel=6e-3,
-        fling_pos_y=0.3,
+        fling_pos_y=0,
         lift_vel=0.009,
         hang_adjust_vel=0.005,
         stretch_adjust_vel=0.005,
         release_vel=1e-2,
-        ready_pos = [[1, 1, 0.6], [-1, 1, 0.6]],
+        ready_pos = [[-1, 0, 0.6], [1, 0, 0.6]],
         no_cloth_vel = 0.3,
         adaptive_fling_momentum=1.3,
         lower_height=0.015,
@@ -118,7 +118,7 @@ class WorldPickAndFling():
 
         # Fix: np.align → np.linalg
         if np.linalg.norm(pick_0_position - pick_1_position) < 0.1:
-            print('Reject Pick and Fling, Two picks are too close.')
+            print('[WorldPickAndFling] Reject Pick and Fling, Two picks are too close.')
             return {}
 
         
@@ -136,8 +136,8 @@ class WorldPickAndFling():
         grasp_dist = np.linalg.norm(pick_positions[0, :2] - pick_positions[1, :2])
         prefling_positions = lift_positions.copy()
         prefling_positions[:, 1] = action['fling_pos_y']
-        prefling_positions[0, 0] = grasp_dist/2
-        prefling_positions[1, 0] = -grasp_dist/2
+        prefling_positions[0, 0] = -grasp_dist/2
+        prefling_positions[1, 0] = grasp_dist/2
  
         ## go to pregrasp position
         info = self.action_tool.movep(env, pregrasp_positions, self.no_cloth_vel)
@@ -196,18 +196,19 @@ class WorldPickAndFling():
         cloth_height = np.max(cloth_positions[:, 2]) - np.min(cloth_positions[:, 2])
 
         # Fling the cloth
-        fling_y = 0.5
+        fling_y = 0.3
 
         front_fling_pos = np.array([
-            [grasp_dist/2, -fling_y, hang_height],
-            [-grasp_dist/2, -fling_y, hang_height]
+            [-grasp_dist/2, -fling_y, hang_height],
+            [grasp_dist/2, -fling_y, hang_height]
         ])
         back_fling_pos = np.array([
-            [grasp_dist/2, fling_y/2, hang_height],
-            [-grasp_dist/2, fling_y/2, hang_height]
+            [-grasp_dist/2, fling_y, hang_height],
+            [grasp_dist/2, fling_y, hang_height]
         ])
         
         #print('fling_vel', fling_vel)
+        #info = self.action_tool.movep(env, back_fling_pos, fling_vel/2)
         info = self.action_tool.movep(env, front_fling_pos, fling_vel)
         info = self.action_tool.movep(env, back_fling_pos, fling_vel/2)
         
@@ -217,17 +218,17 @@ class WorldPickAndFling():
         release_y = fling_y * self.adaptive_fling_momentum
         drag_y = fling_y * self.adaptive_fling_momentum
         #print('adaptive fling', self.adaptive_fling_momentum)
-        self.action_tool.movep(env, [[grasp_dist/2,  release_y, lower_height],
-                    [-grasp_dist/2, release_y, lower_height]], release_vel)
-        self.action_tool.movep(env,[[grasp_dist/2, drag_y, lower_height],
-                    [-grasp_dist/2, drag_y, lower_height]], drag_vel)
+        self.action_tool.movep(env, [[-grasp_dist/2,  release_y, lower_height],
+                    [grasp_dist/2, release_y, lower_height]], release_vel)
+        self.action_tool.movep(env,[[-grasp_dist/2, drag_y, lower_height],
+                    [grasp_dist/2, drag_y, lower_height]], drag_vel)
         
         # release the cloth, TODO: refactor
         info = self.action_tool.open_both_gripper(env)
 
         # move up the picker a bit
-        self.action_tool.movep(env,[[grasp_dist/2, drag_y, lower_height+0.1],
-                    [-grasp_dist/2, drag_y, lower_height+0.1]], drag_vel)
+        self.action_tool.movep(env,[[-grasp_dist/2, drag_y, lower_height+0.1],
+                    [grasp_dist/2, drag_y, lower_height+0.1]], drag_vel)
         
         return info
 
@@ -244,8 +245,8 @@ class WorldPickAndFling():
         direction = (picker_pos[0] - picker_pos[1])/np.linalg.norm(picker_pos[0] - picker_pos[1])
 
         hang_positios = np.array([
-            [grasp_dist/2, hang_pos_y, hang_height],
-            [-grasp_dist/2, hang_pos_y, hang_height]])
+            [-grasp_dist/2, hang_pos_y, hang_height],
+            [grasp_dist/2, hang_pos_y, hang_height]])
 
         info = self.action_tool.movep(env, hang_positios, adjust_vel)
         picker_mid_pos = (picker_pos[0] + picker_pos[1])/2
@@ -298,10 +299,10 @@ class WorldPickAndFling():
             grasp_dist += increment_dist
             #print('streching grasp dist', grasp_dist)
 
-            left_pos = mid_pos - direction*grasp_dist/2
-            right_pos = mid_pos + direction*grasp_dist/2
+            left_pos = mid_pos + direction*grasp_dist/2
+            right_pos = mid_pos - direction*grasp_dist/2
 
-            info = self.action_tool.movep(env, np.stack([right_pos, left_pos]), adjust_vel)
+            info = self.action_tool.movep(env, np.stack([left_pos, right_pos]), adjust_vel)
 
             if grasp_dist > max_grasp_dist:
                 #print('break because reaching max grasp step')
@@ -315,8 +316,8 @@ class WorldPickAndFling():
     def hang_cloth(self, env, hang_height, grasp_dist, hang_pos_y, adjust_vel=0.001):
         
         hang_positions = np.array([
-            [grasp_dist/2, hang_pos_y, hang_height],
-            [-grasp_dist/2, hang_pos_y, hang_height]])
+            [-grasp_dist/2, hang_pos_y, hang_height],
+            [grasp_dist/2, hang_pos_y, hang_height]])
 
         info = self.action_tool.movep(env, hang_positions, adjust_vel)
         max_steps = 100

@@ -76,6 +76,7 @@ class GarmentEnv(Arena):
         self.all_infos = []
         self.sim_step = 0
         self.save_video = False
+        self.debug = config.get("debug", False)
         self.add_final_goal_to_obs = config.get('add_final_goal_to_obs', False)
         
         self.random_reset = False
@@ -132,7 +133,76 @@ class GarmentEnv(Arena):
         self.action_horizon = self.config.action_horizon
 
         self.overstretch = 0
+
+        self.apply_workspace = config.get('apply_workspace', False)
+        if self.apply_workspace:
+            self.robot1_radius = config.robot1_radius
+            self.robot0_radius = config.robot0_radius
+            self.robot0_base = config.robot0_base
+            self.robot1_base = config.robot1_base
+            self._calculate_workspace_masks(self.camera_config['cam_size'])
     
+    def _calculate_workspace_masks(self, resolution):
+        """
+        Compute workspace masks for robot0 and robot1.
+        Pixels are projected to world coordinates (z=0 plane),
+        then distances to robot bases are computed in the XY plane.
+        """
+        H, W = resolution
+
+        # ---- 1. Generate pixel grid ----
+        u = np.arange(W)
+        v = np.arange(H)
+        uu, vv = np.meshgrid(u, v)
+        pixels = np.stack([uu.ravel(), vv.ravel(), np.ones(H * W)], axis=1)  # (N, 3)
+
+        # ---- 2. Pixel → Camera ray ----
+        K_inv = np.linalg.inv(self.camera_intrinsic_matrix)
+        rays_cam = (K_inv @ pixels.T).T
+        rays_cam /= np.linalg.norm(rays_cam, axis=1, keepdims=True)
+
+        # ---- 3. Camera → World ----
+        T_world_cam = self.camera_extrinsic_matrix
+        R = T_world_cam[:3, :3]
+        cam_origin = T_world_cam[:3, 3]
+
+        rays_world = (R @ rays_cam.T).T
+
+        # ---- 4. Ray–plane intersection (z = 0) ----
+        dz = rays_world[:, 2]
+        valid = np.abs(dz) > 1e-6
+
+        s = -cam_origin[2] / dz
+        s[~valid] = np.nan
+
+        world_points = cam_origin + rays_world * s[:, None]  # (N, 3)
+
+        # ---- 5. World → Robot frame (translation only) ----
+        robot0_base = np.asarray(self.robot0_base)
+        robot1_base = np.asarray(self.robot1_base)
+
+        robot0_pts = world_points - robot0_base
+        robot1_pts = world_points - robot1_base
+
+        # ---- 6. Planar distances ----
+        robot0_dist = np.linalg.norm(robot0_pts[:, :2], axis=1)
+        robot1_dist = np.linalg.norm(robot1_pts[:, :2], axis=1)
+
+        # ---- 7. Workspace masks ----
+        robot0_mask = (
+            (robot0_dist >= self.robot0_radius[0]) &
+            (robot0_dist <= self.robot0_radius[1])
+        )
+
+        robot1_mask = (
+            (robot1_dist >= self.robot1_radius[0]) &
+            (robot1_dist <= self.robot1_radius[1])
+        )
+
+        # ---- 8. Reshape ----
+        self.robot0_mask = robot0_mask.reshape(H, W)
+        self.robot1_mask = robot1_mask.reshape(H, W)
+
 
     def _setup_camera(self):
         
@@ -372,7 +442,11 @@ class GarmentEnv(Arena):
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
 
-        
+        if self.debug:
+            print('[GarmentEnv] debug!')
+            # save gif to a directory
+            from agent_arena.utilities.visual_utils import save_numpy_as_gif
+            save_numpy_as_gif(self.video_frames, './tmp', 'debug-frames')
         
         #print('reward', info['reward'])
         return self.info
@@ -661,6 +735,10 @@ class GarmentEnv(Arena):
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
+        if self.apply_workspace:
+            print('[GarmentEnv] add workspace')
+            obs['robot0_mask'] = self.robot0_mask
+            obs['robot1_mask'] = self.robot1_mask
         
         if flatten_obs and self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
             semkey_positions = []

@@ -141,7 +141,7 @@ class PixelPickAndPlace():
 
         ## TODO: do the following if pick_0 is at the right of pick1
         #print(f"[PixelPickAndPlace] before assining, pick0 {pick_0}, place0 {place_0}, pick1 {pick_1}, place1 {place_1}")
-        if place_0[1] > place_1[1]:
+        if pick_0[1] > pick_1[1]:
             pick_0, pick_1 = pick_1, pick_0
             place_0, place_1 = place_1, place_0
             pick_0_depth, pick_1_depth = pick_1_depth, pick_0_depth

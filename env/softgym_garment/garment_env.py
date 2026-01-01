@@ -442,7 +442,7 @@ class GarmentEnv(Arena):
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
 
-        if self.debug:
+        if self.debug and len(self.video_frames) > 0:
             print('[GarmentEnv] debug!')
             # save gif to a directory
             from agent_arena.utilities.visual_utils import save_numpy_as_gif

@@ -2,7 +2,7 @@ from agent_arena import Agent
 import numpy as np
 import cv2
 import os
-from ..utils import apply_workspace_shade
+from ..utils import apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
 
 class PixelHumanFling(Agent):
     
@@ -105,7 +105,7 @@ class PixelHumanFling(Agent):
                 goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
                 img = np.concatenate([img, goal_rgb], axis=1)
 
-            os.environ["DISPLAY"] = "localhost:10.0"
+            os.environ["DISPLAY"] = CV2_DISPLAY
             # Draw vertical white line between the two images
             line_x = rgb.shape[1]   # x-position = width of left image (512)
             cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
@@ -125,7 +125,7 @@ class PixelHumanFling(Agent):
                 cv2.waitKey(1)
             
             cv2.destroyAllWindows()
-            os.environ["DISPLAY"] = ""
+            os.environ["DISPLAY"] = SIM_DISPLAY
             
             # Normalize the coordinates to [-1, 1]
             height, width = rgb.shape[:2]

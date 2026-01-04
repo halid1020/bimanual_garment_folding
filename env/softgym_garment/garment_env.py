@@ -112,8 +112,17 @@ class GarmentEnv(Arena):
         )
         self.particle_radius = self.scene_config['radius']
         
+        self.apply_workspace = config.get('apply_workspace', False)
+        if self.apply_workspace:
+            self.robot1_radius = config.robot1_radius
+            self.robot0_radius = config.robot0_radius
+            self.robot0_base = config.robot0_base
+            self.robot1_base = config.robot1_base
+            self._calculate_workspace_masks(self.camera_config['cam_size'])
+
         self.action_tool = HybridActionPrimitive(
             readjust_pick_poss=self.config.get('readjust_pick_poss', 0),
+            apply_workspace=self.apply_workspace,
             drag_vel=0.01)
         self.save_each_action_picker_poses = True
         self.logger = PixelBasedPrimitiveEnvLogger()
@@ -134,13 +143,7 @@ class GarmentEnv(Arena):
 
         self.overstretch = 0
 
-        self.apply_workspace = config.get('apply_workspace', False)
-        if self.apply_workspace:
-            self.robot1_radius = config.robot1_radius
-            self.robot0_radius = config.robot0_radius
-            self.robot0_base = config.robot0_base
-            self.robot1_base = config.robot1_base
-            self._calculate_workspace_masks(self.camera_config['cam_size'])
+        
     
     def _calculate_workspace_masks(self, resolution):
         """

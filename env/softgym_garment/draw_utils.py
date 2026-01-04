@@ -26,6 +26,22 @@ def norm_to_px(v, W, H):
     y = int((v[1] + 1) * 0.5 * H)
     return x, y
 
+def apply_workspace_shade(rgb, mask, color, alpha=0.35):
+    """
+    Shade pixels where mask == True with given BGR color.
+    """
+    shaded = rgb.copy()
+    overlay = np.zeros_like(rgb, dtype=np.uint8)
+    overlay[:] = color
+
+    shaded[mask] = cv2.addWeighted(
+        rgb[mask], 1 - alpha,
+        overlay[mask], alpha,
+        0
+    )
+    return shaded
+
+
 # OpenCV uses (row, col)
 def swap(p):
     return (p[1], p[0])
@@ -164,6 +180,14 @@ def draw_pick_and_place(img, action):
         )
 
 
+    BLUE = cv2.applyColorMap(
+        np.uint8([[[0]]]), cmap_left
+    )[0, 0].tolist()
+                    
+    RED = cv2.applyColorMap(
+        np.uint8([[[0]]]), cmap_right
+    )[0, 0].tolist()
+    
     # ----- Hollow circles -----
     cv2.circle(img, swap(left_pick),  10, BLUE, 3)
 

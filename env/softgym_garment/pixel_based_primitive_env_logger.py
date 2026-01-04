@@ -15,6 +15,13 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         super().__call__(episode_config, result, filename=filename)
         eid = episode_config['eid']
         frames = [info["observation"]["rgb"] for info in result["information"]]
+        robot0_masks = None
+        robot1_masks = None
+        if 'robot0_mask' in result["information"][0]["observation"]:
+            robot0_masks = [info["observation"]["robot0_mask"] for info in result["information"]]
+        if 'robot1_mask' in result["information"][0]["observation"]:
+            robot1_masks = [info["observation"]["robot1_mask"] for info in result["information"]]
+        
         actions = result["actions"]
         picker_traj = [info["observation"]["picker_norm_pixel_pos"]
                        for info in result["information"]]  # [T][2,2]
@@ -35,6 +42,34 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             img = frames[i].copy()
             # --- Resize to 512×512 BEFORE drawing text ---
             img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
+
+            if robot0_masks is not None:
+                mask0 = cv2.resize(
+                    robot0_masks[i].astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+                img = apply_workspace_shade(
+                    img,
+                    mask0,
+                    color=(255, 0, 0),  # Blue in BGR
+                    alpha=0.2
+                )
+                
+            if robot1_masks is not None:
+                mask1 = cv2.resize(
+                    robot1_masks[i].astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+                img = apply_workspace_shade(
+                    img,
+                    mask1,
+                    color=(0, 0, 255),  # Red in BGR
+                    alpha=0.2
+                )
             
 
             primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
@@ -58,8 +93,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
 
 
-            RED   = (50, 50, 200)     # softer red
-            BLUE  = (200, 50, 50)     # softer blue
+            # RED   = (50, 50, 200)     # softer red
+            # BLUE  = (200, 50, 50)     # softer blue
             # print('result length', len(result["information"]))
             # print('action lenght', len(actions))
             # ================================
@@ -106,8 +141,16 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                     sampled_1 = [traj_px_1[j] for j in idx]
 
                     # Colormaps
-                    cmap0 = cv2.COLORMAP_AUTUMN
-                    cmap1 = cv2.COLORMAP_COOL
+                    cmap0 = cv2.COLORMAP_COOL
+                    cmap1 = cv2.COLORMAP_AUTUMN
+
+                    BLUE = cv2.applyColorMap(
+                        np.uint8([[[0]]]), cmap0
+                    )[0, 0].tolist()
+                    
+                    RED = cv2.applyColorMap(
+                        np.uint8([[[0]]]), cmap1
+                    )[0, 0].tolist()
 
                     for s in range(1, len(idx)):
                         alpha = s / (len(idx) - 1)
@@ -122,8 +165,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                     def draw_hollow_circle(img, p, color, radius=10, thickness=3):
                         cv2.circle(img, swap(p), radius, color, thickness)
 
-                    draw_hollow_circle(img, sampled_0[0], RED)
-                    draw_hollow_circle(img, sampled_1[0], BLUE)
+                    draw_hollow_circle(img, sampled_0[0], BLUE)
+                    draw_hollow_circle(img, sampled_1[0], RED)
                     # ------------------------------------------------------------------
 
                     # Final triangle marker
@@ -138,8 +181,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
                         cv2.fillPoly(img, [pts], color)
 
-                    draw_triangle_down(img, traj_px_0[-1], RED)
-                    draw_triangle_down(img, traj_px_1[-1], BLUE)
+                    draw_triangle_down(img, traj_px_0[-1], BLUE)
+                    draw_triangle_down(img, traj_px_1[-1], RED)
 
             images.append(img)
 

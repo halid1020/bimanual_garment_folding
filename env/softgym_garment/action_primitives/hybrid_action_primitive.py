@@ -10,15 +10,21 @@ class HybridActionPrimitive():
 
     def __init__(self, 
         #env,
-        pick_lower_bound=[-1, -1],
-        pick_upper_bound=[1, 1],
-        place_lower_bound=[-1, -1],
-        place_upper_bound=[1, 1],
+        # pick_lower_bound=[-1, -1],
+        # pick_upper_bound=[1, 1],
+        # place_lower_bound=[-1, -1],
+        # place_upper_bound=[1, 1],
         # action_horizon=20,
         **kwargs):
         
         ### Environment has to be WorldPickAndFlingWrapper
         self.np_pnp = PixelPickAndPlace(**kwargs)
+        if kwargs['apply_workspace']:
+            print('[HybridActionPrimitive] ajust parametners!')
+            kwargs['hang_pos_y'] = 0
+            kwargs['fling_vel'] = 0.02
+            kwargs['fling_y'] = 0.3
+
         self.np_pnf = PixelPickAndFling(**kwargs)
         kwargs['pregrasp_height'] = 0.2 # only difference from Pick and Place so far
         kwargs['post_pick_height'] = 0.2
@@ -30,10 +36,10 @@ class HybridActionPrimitive():
 
         
         self.num_pickers = 2
-        space_low = np.concatenate([pick_lower_bound, place_lower_bound]*self.num_pickers)\
-            .reshape(self.num_pickers, -1).astype(np.float32)
-        space_high = np.concatenate([pick_upper_bound, place_upper_bound]*self.num_pickers)\
-            .reshape(self.num_pickers, -1).astype(np.float32)
+        # space_low = np.concatenate([pick_lower_bound, place_lower_bound]*self.num_pickers)\
+        #     .reshape(self.num_pickers, -1).astype(np.float32)
+        # space_high = np.concatenate([pick_upper_bound, place_upper_bound]*self.num_pickers)\
+        #     .reshape(self.num_pickers, -1).astype(np.float32)
         #self.action_horizon = action_horizon
         #self.action_step = 0
     

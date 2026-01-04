@@ -1,7 +1,7 @@
 from agent_arena import Agent
 import numpy as np
 import cv2
-from .utils import draw_text_top_right, apply_workspace_shade
+from .utils import draw_text_top_right, apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
 import os
 
 class HumanDualPickersPickAndPlace(Agent):
@@ -128,7 +128,7 @@ class HumanDualPickersPickAndPlace(Agent):
         cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
         
         clicks = []
-        os.environ["DISPLAY"] = "localhost:10.0"
+        os.environ["DISPLAY"] = CV2_DISPLAY
 
         # Create a separate panel for buttons (e.g., 80 pixels wide)
         button_panel_width = 80
@@ -180,7 +180,7 @@ class HumanDualPickersPickAndPlace(Agent):
             cv2.waitKey(1)
 
         cv2.destroyAllWindows()
-        os.environ["DISPLAY"] = ""
+        os.environ["DISPLAY"] = SIM_DISPLAY
 
         # # Store click coordinates
         # clicks = []

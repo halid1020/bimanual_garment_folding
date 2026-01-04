@@ -19,13 +19,14 @@ class PixelPickAndFling():
         tograsp_vel=0.05,
         prefling_height=0.3, #7,#
         prefling_vel=0.01,
-        fling_pos_y=0, #0.3,
+        hang_pos_y=0.3, #0 when workspace
+        fling_y=0.5, # 0.3 when workspace
         lift_vel=0.02, #0.01,
         #adaptive_fling_momentum=1.0,
         action_horizon=20,
         hang_adjust_vel=0.01,
         stretch_adjust_vel=0.01,
-        fling_vel= 0.03, #0.008,
+        fling_vel= 0.02, #0.03 when workspace
         release_vel=0.01,
         drag_vel=0.005,
         lower_height=0.06,
@@ -52,7 +53,7 @@ class PixelPickAndFling():
         self.tograsp_vel = tograsp_vel
         self.prefling_height = prefling_height
         self.prefling_vel = prefling_vel
-        self.fling_pos_y = fling_pos_y
+        self.hang_pos_y = hang_pos_y
         self.lift_vel = lift_vel
         #self.adaptive_fling_momentum = adaptive_fling_momentum
         self.pick_height = pick_height
@@ -61,6 +62,7 @@ class PixelPickAndFling():
         self.release_vel = release_vel
         self.drag_vel = drag_vel
         self.lower_height = lower_height
+        self.fling_y = fling_y
 
         self.num_pickers = 2
         self.readjust_pick_poss = readjust_pick_poss
@@ -155,7 +157,8 @@ class PixelPickAndFling():
             'prefling_vel': self.prefling_vel,
             'lift_vel': self.lift_vel,
 
-            'fling_pos_y': self.fling_pos_y,
+            'hang_pos_y': self.hang_pos_y,
+            'fling_y': self.fling_y,
             'hang_adjust_vel': self.hang_adjust_vel, # for hang and stretch
             'stretch_adjust_vel': self.stretch_adjust_vel, # for hang and stretch
             'fling_vel': self.fling_vel, # for fling 

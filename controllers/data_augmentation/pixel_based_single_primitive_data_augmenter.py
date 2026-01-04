@@ -87,6 +87,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         self.device = observation.device
         if 'state' in sample.keys():
             state = sample['state']
+            new_state = state.clone()
+            
         next_observation = sample['next_observation']/255.0
         action = sample['action']
 
@@ -98,7 +100,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 self._save_debug_image(observation[b], state[b], prefix="before_state", step=b)
                 self._save_debug_image(observation[b], pixel_actions[b], prefix="before_action", step=b)
 
-        new_state = state.clone()
+
+        
 
         # Random Rotation
         if self.random_rotation:

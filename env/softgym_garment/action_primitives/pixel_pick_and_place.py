@@ -207,7 +207,9 @@ class PixelPickAndPlace():
         self.camera_size = env.camera_size
 
         world_action_ , pixel_action = self.process(env, action)
-        W, H = env.robot0_mask.shape[:2]
+
+        if env.apply_workspace:
+            W, H = env.robot0_mask.shape[:2]
 
         reject = False
         if env.apply_workspace:

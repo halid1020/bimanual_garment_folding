@@ -57,22 +57,45 @@ def capture_reference_view():
     rgb = np.reshape(img[2], (IMG_H, IMG_W, 4))[:, :, :3]
     return rgb
 
-def capture_wrist_camera(body_id):
-    pos, orn = p.getBasePositionAndOrientation(body_id)
+# def capture_wrist_camera(body_id):
+#     pos, orn = p.getBasePositionAndOrientation(body_id)
 
-    CAMERA_OFFSET = [0, 0, 0.0]
-    CAMERA_ROT = p.getQuaternionFromEuler([np.pi, 0, 0])  # looking down
+#     CAMERA_OFFSET = [0, 0, 0.0]
+#     CAMERA_ROT = p.getQuaternionFromEuler([np.pi, 0, 0])  # looking down
 
-    cam_pos, cam_orn = p.multiplyTransforms(
-        pos, orn,
-        CAMERA_OFFSET, CAMERA_ROT
+#     cam_pos, cam_orn = p.multiplyTransforms(
+#         pos, orn,
+#         CAMERA_OFFSET, CAMERA_ROT
+#     )
+
+#     rot = np.array(p.getMatrixFromQuaternion(cam_orn)).reshape(3, 3)
+#     forward = rot @ np.array([0, 0, 1])
+#     up = rot @ np.array([0, -1, 0])
+
+#     view = p.computeViewMatrix(cam_pos, cam_pos + forward, up)
+#     proj = p.computeProjectionMatrixFOV(FOV, IMG_W / IMG_H, NEAR, FAR)
+
+#     img = p.getCameraImage(
+#         IMG_W, IMG_H, view, proj,
+#         renderer=p.ER_TINY_RENDERER
+#     )
+
+#     rgb = np.reshape(img[2], (IMG_H, IMG_W, 4))[:, :, :3]
+#     return rgb, view
+
+def capture_wrist_camera(body_id, target=[0, 0, 0.65]):
+    # Get the current position of the wrist sphere
+    pos, _ = p.getBasePositionAndOrientation(body_id)
+
+    # Automatically compute the rotation to look at the target
+    # This handles all tilting angles and heights perfectly
+    view = p.computeViewMatrix(
+        cameraEyePosition=pos,
+        cameraTargetPosition=target,
+        cameraUpVector=[0, 0, 1]  # Standard Z-up world
     )
 
-    rot = np.array(p.getMatrixFromQuaternion(cam_orn)).reshape(3, 3)
-    forward = rot @ np.array([0, 0, 1])
-    up = rot @ np.array([0, -1, 0])
-
-    view = p.computeViewMatrix(cam_pos, cam_pos + forward, up)
+    # Use the standard FOV projection
     proj = p.computeProjectionMatrixFOV(FOV, IMG_W / IMG_H, NEAR, FAR)
 
     img = p.getCameraImage(

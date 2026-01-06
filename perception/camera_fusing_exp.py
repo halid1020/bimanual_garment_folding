@@ -7,7 +7,17 @@ from perception.utils import *
 
 
 """
-In this work, we simulate a tabletop environment in the PyBullet physics engine to generate both fused and ground-truth visual representations. A small sphere is used as a simplified proxy for the wrist-mounted camera, which is moved through multiple predefined viewpoints above the table to capture RGB images of randomly placed, colored objects. These images are subsequently projected onto a common top-down plane using ray–plane intersection, producing a fused perceptive map that approximates a bird’s-eye view of the scene. To provide a quantitative reference, a virtual camera is positioned directly above the table to capture a ground-truth top-down image. All intermediate and final outputs—including individual wrist-sphere views, the fused top-down map, and the ground-truth reference—are stored for subsequent analysis and validation of the fusion procedure. This simplified setup enables systematic evaluation of multi-view perception strategies in simulated robotic environments while reducing complexity associated with full manipulator models.
+In this work, we simulate a tabletop environment in the PyBullet physics engine to generate 
+both fused and ground-truth visual representations. A small sphere is used as a simplified 
+proxy for the wrist-mounted camera, which is moved through multiple predefined viewpoints above
+the table to capture RGB images of randomly placed, colored objects. These images are subsequently 
+projected onto a common top-down plane using ray–plane intersection, producing a fused perceptive 
+map that approximates a bird’s-eye view of the scene. To provide a quantitative reference, a 
+virtual camera is positioned directly above the table to capture a ground-truth top-down image. 
+All intermediate and final outputs—including individual wrist-sphere views, the fused top-down 
+map, and the ground-truth reference—are stored for subsequent analysis and validation of the fusion 
+procedure. This simplified setup enables systematic evaluation of multi-view perception strategies 
+in simulated robotic environments while reducing complexity associated with full manipulator models.
 
 """
 
@@ -63,20 +73,40 @@ for i in range(6):
 
 
 
-EE_LINK = 7
+# EE_LINK = 7
 
-CAMERA_OFFSET = [0, 0, 0.08]
-CAMERA_ROT = p.getQuaternionFromEuler([np.pi, 0, 0])
+# CAMERA_OFFSET = [0, 0, 0.08]
+# CAMERA_ROT = p.getQuaternionFromEuler([np.pi, 0, 0])
 
-perception_poses = [
-    [0.4, 0.0, 1.0],
-    [0.2, 0.3, 1.0],
-    [-0.2, 0.3, 1.0],
-    [-0.4, 0.0, 1.0],
-    [0.2, -0.3, 1.0],
-    [-0.2, -0.3, 1.0],
-]
+# perception_poses = [
+#     [0.4, 0.0, 1.0],
+#     [0.2, 0.3, 1.0],
+#     [-0.2, 0.3, 1.0],
+#     [-0.4, 0.0, 1.0],
+#     [0.2, -0.3, 1.0],
+#     [-0.2, -0.3, 1.0],
+# ]
 
+
+NUM_VIEWS = 6
+min_height, max_height = 0.9, 1.3  # Varying heights (Z)
+min_radius, max_radius = 0.3, 0.6  # Varying distance from center
+
+perception_poses = []
+
+for _ in range(NUM_VIEWS):
+    # Random angle around the table (0 to 360 degrees)
+    theta = np.random.uniform(0, 2 * np.pi)
+    
+    # Random distance and height
+    r = np.random.uniform(min_radius, max_radius)
+    z = np.random.uniform(min_height, max_height)
+    
+    # Convert polar to cartesian
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+    
+    perception_poses.append([x, y, z])
 
 
 

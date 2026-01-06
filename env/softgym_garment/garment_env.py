@@ -446,7 +446,7 @@ class GarmentEnv(Arena):
         self.info['observation']['is_terminal'] = self.info['done']
 
         if self.debug and len(self.video_frames) > 0:
-            print('[GarmentEnv] debug!')
+            #print('[GarmentEnv] debug!')
             # save gif to a directory
             from agent_arena.utilities.visual_utils import save_numpy_as_gif
             save_numpy_as_gif(self.video_frames, './tmp', 'debug-frames')
@@ -739,7 +739,7 @@ class GarmentEnv(Arena):
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
         if self.apply_workspace:
-            print('[GarmentEnv] add workspace')
+            #print('[GarmentEnv] add workspace')
             obs['robot0_mask'] = self.robot0_mask
             obs['robot1_mask'] = self.robot1_mask
         

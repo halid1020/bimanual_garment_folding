@@ -35,6 +35,7 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
         self.debug = self.config.get('debug', False)
+       
         #self.device = self.config.get('device', 'cpu')
 
         if self.depth_blur:
@@ -88,7 +89,7 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         if 'state' in sample.keys():
             state = sample['state']
             new_state = state.clone()
-            
+
         next_observation = sample['next_observation']/255.0
         action = sample['action']
 
@@ -163,15 +164,15 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         # =========================
         
         if self.color_jitter:
-            obs = self.color_aug(obs)
+            observation = self.color_aug(observation)
         
         # =========================
         #   RANDOM CHANNEL PERMUTATION
         # =========================
         if self.random_channel_permutation:
             # Generate ONE permutation for the whole batch
-            perm = torch.randperm(3, device=obs.device)
-            obs = obs[:, perm, :, :]
+            perm = torch.randperm(3, device=observation.device)
+            observation = observation[:, perm, :, :]
 
         # Save after augmentation
         if self.debug:

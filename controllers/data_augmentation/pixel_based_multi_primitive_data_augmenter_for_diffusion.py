@@ -30,7 +30,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.K = self.config.get("K", 0)
         self.random_channel_permutation = self.config.get("random_channel_permutation", False)
         self.randomise_prim_acts = self.config.get("randomise_prim_acts", False)
-
+        self.use_workspace = self.config.get('use_workspace', False)
 
         if self.color_jitter:
             self.color_aug = K.ColorJitter(
@@ -83,8 +83,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             else:
                 # assume already a torch tensor
                 sample[k] = v.to(device)
+
+        if self.use_workspace and 'rgb-workspace-mask' in sample:
+            sample['rgb'] = sample['rgb-workspace-mask'][:, :, :, :, :3]
+            sample['robot0_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 3:4]
+            sample['robot1_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 4:5]
+        
         if "rgb" not in sample:
             raise KeyError("sample must contain 'rgb'")
+        
         if train and "action" not in sample:
             raise KeyError("sample must contain 'action'")
 
@@ -93,6 +100,23 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         observation = sample["rgb"].float() / 255.0  # (B, T, H, W, 3)
         #print('input obs shape', observation.shape)
         obs, BB, TT = self._flatten_bt(observation)  # (B*T, H, W, 3)
+        if self.use_workspace:
+            robot0_mask = sample['robot0_mask'].float()
+            robot1_mask = sample['robot1_mask'].float()
+            #TODO: apply the same rotation and flipping as the "observation"
+
+            # # Ensure shape (B,T,H,W)
+            # if robot0_mask.dim() == 5:
+            #     robot0_mask = robot0_mask.squeeze(2)
+            #     robot1_mask = robot1_mask.squeeze(2)
+
+            robot0_mask, _, _ = self._flatten_bt(robot0_mask)  # (B*T,H,W,1)
+            robot1_mask, _, _ = self._flatten_bt(robot1_mask)
+
+            # # Add channel dim → (N,1,H,W)
+            # robot0_mask = robot0_mask.unsqueeze(1)
+            # robot1_mask = robot1_mask.unsqueeze(1)
+
        
 
         if train:
@@ -124,6 +148,21 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         obs = obs.permute(0, 3, 1, 2).contiguous()  # (N,C,H,W)
         obs = F.interpolate(obs,
             size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)
+        
+        if self.use_workspace:
+            #print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] robot0_mask shape', robot0_mask.shape)
+            robot0_mask = robot0_mask.permute(0, 3, 1, 2).contiguous() 
+            robot0_mask = F.interpolate(
+                robot0_mask,
+                size=tuple(self.config.img_dim),
+                mode='nearest'
+            )
+            robot1_mask = robot1_mask.permute(0, 3, 1, 2).contiguous() 
+            robot1_mask = F.interpolate(
+                robot1_mask,
+                size=tuple(self.config.img_dim),
+                mode='nearest'
+            )
 
         # =========================
         #       RANDOM ROTATION
@@ -157,13 +196,23 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             obs = F.grid_sample(obs, grid, align_corners=True)
             
             pixel_actions = rotated_action.reshape(BB*(TT-1), -1)
+
+            if self.use_workspace:
+                robot0_mask = F.grid_sample(
+                    robot0_mask, grid, mode='nearest', align_corners=True
+                )
+                robot1_mask = F.grid_sample(
+                    robot1_mask, grid, mode='nearest', align_corners=True
+                )
         
        
         # Vertical Flip
         if self.vertical_flip and (random.random() < 0.5) and train:
             B, C, H, W = obs.shape
             obs = torch.flip(obs, [2])
-           
+            if self.use_workspace:
+                robot0_mask = torch.flip(robot0_mask, [2])
+                robot1_mask = torch.flip(robot1_mask, [2])
 
             pixel_actions = pixel_actions.reshape(-1, 2)
             pixel_actions[:, 0] = -pixel_actions[:, 0]
@@ -208,9 +257,21 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         obs = self._unflatten_bt(obs, BB, TT)  # (B, T, 3, H, W)
         #print('[diffusion augmenter] obs.shape', obs.shape)
         
-        
-
+       
+    
         sample["rgb"] = obs
+
+        if self.use_workspace:
+            robot0_mask = self._unflatten_bt(robot0_mask, BB, TT)
+            robot1_mask = self._unflatten_bt(robot1_mask, BB, TT)
+
+            sample['robot0_mask'] = robot0_mask
+            sample['robot1_mask'] = robot1_mask
+
+            if 'rgb-workspace-mask' in sample:
+                sample['rgb-workspace-mask'] = torch.cat([obs, robot0_mask, robot1_mask], dim=2)
+
+
         #print('[augmenter] rgb stats', sample['rgb'].max(), sample['rgb'].min())
         if train:
             #print('pixel_actions', pixel_actions.shape)

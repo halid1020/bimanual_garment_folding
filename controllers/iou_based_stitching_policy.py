@@ -1,7 +1,6 @@
 from agent_arena import Agent
-import numpy as np
 import os
-from hydra import compose, initialize
+from hydra import compose
 
 
 class IoUBasedStitchingPolicy(Agent):
@@ -10,13 +9,7 @@ class IoUBasedStitchingPolicy(Agent):
         
         super().__init__(config)
         self.name = 'iou_based_stitching_policy'
-        #from omegaconf import OmegaConf
-        
-        
-        # flattening_policy_config_path = os.path.join("conf", "agent", f"{config.flattening_policy}.yaml")
-        # folding_policy_config_path = os.path.join("conf", "agent", f"{config.folding_policy}.yaml")
-
-        #with initialize(config_path="conf"):
+      
         flattening_policy_config = compose(
             config_name=config.flattening_policy
         )
@@ -24,11 +17,7 @@ class IoUBasedStitchingPolicy(Agent):
             config_name=config.folding_policy
         )
         
-        # flattening_policy_config = OmegaConf.load(flattening_policy_config_path)
-        # folding_policy_config = OmegaConf.load(folding_policy_config_path)
-        
-        # flattening_policy_config.project_name = config.project_name
-        # flattening_policy_config.exp_name = config.flattening_policy
+
         import agent_arena.api as ag_ar
         print(f'[iou_based_stitching_policy] Building flattening agent from {config.flattening_policy}')
         self.flattening_policy = ag_ar.build_agent(
@@ -46,26 +35,13 @@ class IoUBasedStitchingPolicy(Agent):
             exp_name=config.folding_policy,
             save_dir= os.path.join(folding_policy_config.save_root, config.folding_policy))
         
-        # self.flattening_policy.set_log_dir(
-        #     os.path.join(config.flattening_policy_log_dir, config.flattening_policy)
-        # )
-       
-        # TODO: we need to simplify the following structure.
-        # folding_policy_config.project_name = config.project_name
-        # folding_policy_config.exp_name = config.folding_policy
-        # self.folding_policy = ag_ar.build_agent(
-        #     folding_policy_config.name,
-        #     folding_policy_config)
-        # self.folding_policy.set_log_dir(
-        #     os.path.join(config.folding_policy_log_dir, config.folding_policy)
-        # )
         
         self.flattening_policy.load_best()
         self.folding_policy.load_best()
     
-    def set_data_augmenter(self, data_augmenter):
-        self.flattening_policy.set_data_augmenter(data_augmenter)
-        self.folding_policy.set_data_augmenter(data_augmenter)
+    # def set_data_augmenter(self, data_augmenter):
+    #     self.flattening_policy.set_data_augmenter(data_augmenter)
+    #     self.folding_policy.set_data_augmenter(data_augmenter)
         
     
     def reset(self, arena_ids):

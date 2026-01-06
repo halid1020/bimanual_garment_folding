@@ -3,7 +3,6 @@
 import os
 from tqdm import tqdm
 import torch
-import logging
 import numpy as np
 from collections import deque
 import torch
@@ -313,6 +312,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             if info['success'] or self.config.get('add_all_demos', False):
                 #print('add to trajectory')
                 for k, v in observations.items():
+                    #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
@@ -360,12 +360,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 4
         elif self.config.input_obs == 'depth':
             self.input_channel = 1
+        elif self.config.input_obs == 'rgb-workspace-mask':
+            self.input_channel = 5
+
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
 
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
-            self.prim_class_head = nn.Linear(self.obs_feature_dim, self.K) #TODO: make it more layers later.
+            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
             # Increase global_cond_dim to accommodate the one-hot vector
             global_cond_dim = (self.config.obs_dim + self.K) * self.config.obs_horizon
         else:
@@ -420,7 +423,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     self.config.state_dim))
                 obs = torch.cat([obs, vector_state],dim=-1)
             
-            # print('obs', obs.shape)
+            # print('[MultiPrimitiveDiffusion, _test_network] obs', obs.shape)
             
             noised_action = torch.randn(
                 (1, self.config.pred_horizon, self.network_action_dim))
@@ -430,10 +433,34 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             # the noise prediction network
             # takes noisy action, diffusion iteration and observation as input
             # predicts the noise added to action
+            
+            goal_cond = obs
+
+            # 5. Handle One-Hot Encoding Integration
+            if self.primitive_integration == 'one-hot-encoding':
+                # Predict primitive logits from the flattened observation
+                prim_logits = self.nets['prim_class_head'](goal_cond.squeeze(0))
+                
+                # For testing, we can just take the argmax or simulate a specific ID
+                prim_id = torch.argmax(prim_logits, dim=-1) # Shape (Batch,)
+                
+                # Convert to one-hot: (Batch, K)
+                prim_one_hot = nn.functional.one_hot(
+                    prim_id, num_classes=self.K
+                ).float().unsqueeze(0)
+
+                #print(f'[MultiPrimitiveDiffusion, _test_network] goal_cond {goal_cond.shape}, prim_one_hot {prim_one_hot.shape}')
+
+                # Concatenate one-hot vector to the global condition
+                goal_cond = torch.cat([goal_cond, prim_one_hot], dim=-1)
+
+
+            goal_cond = goal_cond.flatten(start_dim=1)
+
             noise = self.nets['noise_pred_net'](
                 sample=noised_action,
                 timestep=diffusion_iter,
-                global_cond=obs.flatten(start_dim=1))
+                global_cond=goal_cond)
 
             # illustration of removing noise
             # the actual noise removal is performed by NoiseScheduler
@@ -477,6 +504,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 # concatenate rgb and depth
                 nbatch['rgbd'] = torch.cat([
                     nbatch['rgb'], nbatch['depth']], dim=2)
+            
+            if self.config.input_obs == 'rgb-workspace-mask':
+                nbatch['rgb-workspace-mask'] = torch.cat([
+                    nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
 
             
             B = nbatch[self.config.input_obs].shape[0]
@@ -505,9 +536,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             # calculate the prim_loss through cross_entropy
             # obs_cond = torch.concat(obs_cond, prim_enc)
 
-            
+            prim_loss = torch.tensor(0)
             if self.primitive_integration == 'one-hot-encoding':
-                prim_loss = 0
+                
                 # 1. Predict primitive ID from observation features
                 prim_logits = self.nets['prim_class_head'](obs_cond)
                 
@@ -527,6 +558,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 
                 # 5. Concatenate to obs_cond
                 obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                nbatch['action'] = nbatch['action'][:, :, 1:]
+                # print(f'[MultiPrimitiveDiffusion, train] obs_cond shape {obs_cond.shape}')
 
 
             # sample noise to add to actions
@@ -551,7 +584,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             noise_pred = self.noise_pred_net(
                 noisy_actions, timesteps, global_cond=obs_cond)
 
-            prim_loss = 0
             if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
                 # nbatch['action']: (B, T, action_dim)
                 actions = nbatch['action'] # bin encoded prim acctions.
@@ -732,15 +764,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 # Predict primitive ID from current observation features
                 prim_logits = self.nets['prim_class_head'](obs_features)
                 prim_id = torch.argmax(prim_logits, dim=-1) # (1,)
-                cur_prim_id = prim_id[-1]
+                cur_prim_id = prim_id[-1].cpu().detach().item()
                 # Convert to one-hot encoding
                 prim_enc = nn.functional.one_hot(prim_id, num_classes=self.K).float()
                 
                 # Condition is [Obs Features + One-Hot Primitive ID]
                 obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
-            
-            obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
-            #print('obs cond', obs_cond.shape)
+            else:
+                obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
+            #print('[MultiPrimitiveDiffusion, single_act] obs cond', obs_cond.shape)
             naction = self.eval_action_sampler.sample(
                 state=sample_state, 
                 horizon=self.config.pred_horizon, 
@@ -803,7 +835,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             out_action = {prim_name: action}
         elif self.primitive_integration == 'one-hot-encoding':
             # Use the ID predicted during the observation encoding step
-            prim_name = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
+            prim_name = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[cur_prim_id], dict) else self.primitives[cur_prim_id].name
             out_action = {prim_name: action[:self.action_dims[cur_prim_id]]}
         else:
             raise NotImplementedError
@@ -852,6 +884,38 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         if self.config.input_obs == 'rgbd':
             info['observation']['rgbd'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), depth], axis=-1)
+        
+        if self.config.input_obs == 'rgb-workspace-mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
+
+            def resize_mask_to_rgb(mask):
+                H, W = rgb.shape[:2]
+
+                # Ensure numpy array (already true, but safe)
+                mask = np.asarray(mask)
+
+                # Remove channel if present
+                if mask.ndim == 3:
+                    mask = mask[..., 0]
+
+                # 🔴 CRITICAL: cast dtype
+                if mask.dtype != np.uint8 and mask.dtype != np.float32:
+                    mask = mask.astype(np.float32)
+
+                mask = cv2.resize(
+                    mask,
+                    (W, H),                      # (width, height)
+                    interpolation=cv2.INTER_NEAREST
+                )
+
+                return mask[..., None]           # (H, W, 1)
+
+            m0 = resize_mask_to_rgb(info['observation']['robot0_mask'])
+            m1 = resize_mask_to_rgb(info['observation']['robot1_mask'])
+
+            info['observation']['rgb-workspace-mask'] = np.concatenate(
+                [rgb, m0, m1], axis=-1
+            )
             #print('rgbd shape', info['observation']['rgbd'].shape)
 
         input_data = {

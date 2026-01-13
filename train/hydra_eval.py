@@ -15,7 +15,10 @@ def main(cfg: DictConfig):
     agent = ag_ar.build_agent(
         cfg.agent.name, 
         cfg.agent,
-        save_dir=save_dir) # this needs to do the set_logger_part
+        project_name=cfg.project_name,
+        exp_name=cfg.exp_name,
+        save_dir=save_dir)
+    
     print('[hydra eval] agent', cfg.agent.name, agent)
     
     # data_augmenter
@@ -38,6 +41,7 @@ def main(cfg: DictConfig):
         agent,
         arena,
         -1,
+        load_best=True,
         policy_terminate=False,
         env_success_stop=False
     )

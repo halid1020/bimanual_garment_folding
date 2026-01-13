@@ -42,28 +42,6 @@ class Upsample1d(nn.Module):
         return self.conv(x)
 
 
-# class Downsample1d(nn.Module):
-#     def __init__(self, dim):
-#         super().__init__()
-#         self.conv = nn.Conv1d(dim, dim, kernel_size=3, stride=2, padding=1)
-
-#     def forward(self, x):
-#         # Ensure the last dimension is at least 2 before downsampling
-#         if x.size(-1) == 1:
-#             return x  # Return input unchanged if downsampling would lead to invalid output
-#         return self.conv(x)
-
-# class Upsample1d(nn.Module):
-#     def __init__(self, dim):
-#         super().__init__()
-#         self.conv = nn.ConvTranspose1d(dim, dim, kernel_size=4, stride=2, padding=1)
-
-#     def forward(self, x):
-#         if x.size(-1) == 1:
-#             # Handle the edge case where input size is 1, upsampling would typically increase size
-#             return self.conv(x)[:, :, :1]  # Crop to avoid going beyond the intended size
-#         return self.conv(x)
-
 class Conv1dBlock(nn.Module):
     '''
         Conv1d --> GroupNorm --> Mish
@@ -277,3 +255,54 @@ class ConditionalUnet1D(nn.Module):
         x = x.moveaxis(-1,-2)
         # (B,T,C)
         return x
+
+def get_activation(name: str):
+    name = name.lower()
+    if name == "relu":
+        return nn.ReLU()
+    elif name == "gelu":
+        return nn.GELU()
+    elif name == "silu" or name == "swish":
+        return nn.SiLU()
+    elif name == "tanh":
+        return nn.Tanh()
+    elif name == "leaky_relu":
+        return nn.LeakyReLU(0.01)
+    else:
+        raise ValueError(f"Unsupported activation: {name}")
+
+
+class MLPClassifier(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims,
+        activation="relu",
+        dropout=0.0,
+        use_layernorm=False,
+    ):
+        super().__init__()
+
+        layers = []
+        dims = [input_dim] + list(hidden_dims)
+
+        act = get_activation(activation)
+
+        for i in range(len(hidden_dims)):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+
+            if use_layernorm:
+                layers.append(nn.LayerNorm(dims[i + 1]))
+
+            layers.append(act)
+
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+        layers.append(nn.Linear(dims[-1], output_dim))
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)

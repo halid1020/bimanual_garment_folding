@@ -10,9 +10,7 @@ from agent_arena.torch_utils import np_to_ts, ts_to_np
 from .utils import randomize_primitive_encoding
 
 
-
 def rotate_points_torch(points, R):
-    # points: (..., 2), R: (2,2)
     return points @ R.T
 
 
@@ -31,6 +29,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.random_channel_permutation = self.config.get("random_channel_permutation", False)
         self.randomise_prim_acts = self.config.get("randomise_prim_acts", False)
         self.use_workspace = self.config.get('use_workspace', False)
+        self.use_goal = self.config.get('use_goal', False)
 
         if self.color_jitter:
             self.color_aug = K.ColorJitter(
@@ -89,6 +88,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['robot0_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 3:4]
             sample['robot1_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 4:5]
         
+        if self.use_goal and 'rgb-goal' in sample:
+            sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
+            sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
+        
         if "rgb" not in sample:
             raise KeyError("sample must contain 'rgb'")
         
@@ -98,8 +101,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         # Normalize rgb to [0,1] float32
         observation = sample["rgb"].float() / 255.0  # (B, T, H, W, 3)
-        #print('input obs shape', observation.shape)
         obs, BB, TT = self._flatten_bt(observation)  # (B*T, H, W, 3)
+        if self.use_goal:
+            goal_obs = sample['goal_rgb'].float() / 255.0
+            goal_obs, BB, TT = self._flatten_bt(goal_obs)  # (B*T, H, W, 3)
+        
+        #print('input obs shape', observation.shape)
+        
         if self.use_workspace:
             robot0_mask = sample['robot0_mask'].float()
             robot1_mask = sample['robot1_mask'].float()
@@ -148,6 +156,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         obs = obs.permute(0, 3, 1, 2).contiguous()  # (N,C,H,W)
         obs = F.interpolate(obs,
             size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)
+        
+        if self.use_goal:
+            goal_obs = goal_obs.permute(0, 3, 1, 2).contiguous()
+            goal_obs = F.interpolate(goal_obs,
+                size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)
         
         if self.use_workspace:
             #print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] robot0_mask shape', robot0_mask.shape)
@@ -256,9 +269,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #obs = obs.permute(0, 2, 3, 1).contiguous()
         obs = self._unflatten_bt(obs, BB, TT)  # (B, T, 3, H, W)
         #print('[diffusion augmenter] obs.shape', obs.shape)
-        
-       
-    
         sample["rgb"] = obs
 
         if self.use_workspace:
@@ -270,6 +280,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
             if 'rgb-workspace-mask' in sample:
                 sample['rgb-workspace-mask'] = torch.cat([obs, robot0_mask, robot1_mask], dim=2)
+        
+        if self.use_goal:
+            goal_obs = self._unflatten_bt(goal_obs, BB, TT)
+            sample['goal_rgb'] = goal_obs
+            if 'rgb-goal' in sample:
+                sample['rgb-goal'] = torch.cat([obs, goal_obs], dim=2)
 
 
         #print('[augmenter] rgb stats', sample['rgb'].max(), sample['rgb'].min())

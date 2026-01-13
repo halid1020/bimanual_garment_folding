@@ -2,15 +2,15 @@ name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
 action_dim: 8
-obs_horizon: 1
-pred_horizon: 1
+obs_horizon: 2
+pred_horizon: 4
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'rgb'
+input_obs: 'rgb-workspace-mask'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 20
+num_demos: 100
 demo_horizon: 10
 batch_size: 64
 disable_updown: True
@@ -29,11 +29,20 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_flattening_horizon_10_human_demo_100"
+  data_path: "multi_longsleeve_multi_primitive_flattening_horizon_10_workspace_snap_human_demo_100"
   data_dir: "./data/datasets"
-  seq_length: 1
+  seq_length: 4
   io_mode: "w"
   obs_config:
+
+    robot0_mask: 
+      shape: [128, 128, 1]
+      output_key: 'robot0_mask'
+    
+    robot1_mask: 
+      shape: [128, 128, 1]
+      output_key: 'robot1_mask'
+
     mask: 
       shape: [128, 128, 1]
       output_key: 'mask'
@@ -45,6 +54,18 @@ dataset_config:
     rgb: 
       shape: [128, 128, 3]
       output_key: 'rgb'
+
+    goal_rgb: 
+      shape: [128, 128, 3]
+      output_key: 'goal_rgb'
+    
+    goal_depth: 
+      shape: [128, 128, 1]
+      output_key: 'goal_depth'
+    
+    goal_mask: 
+      shape: [128, 128, 1]
+      output_key: 'goal_mask'
 
   act_config:
     default: 
@@ -61,4 +82,4 @@ primitives:
     dim: 0
 mask_out_irrelavent_action_dim: false
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_workspace

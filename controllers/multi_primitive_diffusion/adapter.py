@@ -12,58 +12,16 @@ from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
-from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from agent_arena import TrainableAgent
 from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
 from agent_arena.utilities.visual_utils import save_numpy_as_gif, save_video
 
 from .utils \
-    import get_resnet, replace_bn_with_gn
-from .networks import ConditionalUnet1D
+    import get_resnet, replace_bn_with_gn, compute_classification_metrics
+from .networks import ConditionalUnet1D, MLPClassifier
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from ..data_augmentation.register_augmeters import build_data_augmenter
-
-def omegaconf_to_plain_dict(cfg):
-    if isinstance(cfg, (DictConfig, ListConfig)):
-        return OmegaConf.to_container(cfg, resolve=True)  # nested dict/list
-    return cfg
-
-def dict_to_action_vector(dict_action, action_output_template):
-    """
-    Convert dictionary form of action back into flat vector form.
-    """
-    #print('action_output_template', action_output_template)
-    indices = list(_max_index_in_dict(action_output_template))
-    if indices:
-        max_index = max(indices)
-    else:
-        raise ValueError(f"No indices found in action_output_template: {action_output_template}")
-
-    #print('max_index', max_index)
-    action = np.zeros(max_index + 1, dtype=float)
-
-    def fill_action(d_action, template):
-        for k, v in template.items():
-            if isinstance(v, dict):
-                fill_action(d_action[k], v)
-            elif isinstance(v, (list, ListConfig)) and len(v) > 0:
-                values = d_action[k]
-                action[np.array(v)] = values
-
-    fill_action(dict_action, action_output_template)
-    return action
-
-
-def _max_index_in_dict(d):
-    """Helper to find all indices used in the template dict."""
-    for v in d.values():
-        #print(type(v))
-        if isinstance(v, dict):
-            yield from _max_index_in_dict(v)
-        elif isinstance(v, (list, ListConfig)) and len(v) > 0:
-            yield max(v)
-
 
 class DiffusionTransform():
 
@@ -250,10 +208,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 for k, v in info['observation'].items():
                     #print('k', k)
                     if k in observations.keys():
-                        if k in ['rgb', 'depth']:
+                        if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
                             v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
-                        elif k == 'mask':
+                        elif k in ['mask', 'goal_mask']:
                             v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             v_ = v_ > 0.9
                             observations[k].append(v_)
@@ -290,10 +248,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 
             for k, v in info['observation'].items():
                 if k in observations.keys():
-                    if k in ['rgb', 'depth']:
+                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
                         v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         observations[k].append(v_)
-                    elif k == 'mask':
+                    elif k in ['mask', 'goal_mask']:
                         v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         v_ = v_ > 0.9
                         observations[k].append(v_)
@@ -362,6 +320,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 1
         elif self.config.input_obs == 'rgb-workspace-mask':
             self.input_channel = 5
+        elif self.config.input_obs == 'rgb-goal':
+            self.input_channel = 6
 
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
@@ -369,8 +329,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
             self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
+
+            cls_cfg = self.config.get("primitive_classifier", {}) # nn.Linear(self.config.obs_dim, self.K) by default
+
+            self.prim_class_head = MLPClassifier(
+                input_dim=self.config.obs_dim,
+                output_dim=self.K,
+                hidden_dims=cls_cfg.get("hidden_dims", []),
+                activation=cls_cfg.get("activation", "relu"),
+                dropout=cls_cfg.get("dropout", 0.0),
+                use_layernorm=cls_cfg.get("use_layernorm", False),
+            )
+
             # Increase global_cond_dim to accommodate the one-hot vector
             global_cond_dim = (self.config.obs_dim + self.K) * self.config.obs_horizon
+            self.log_prim_metrics_every = self.config.get('log_prim_metrics_every', 200)
         else:
             global_cond_dim = self.config.obs_dim * self.config.obs_horizon
 
@@ -508,6 +481,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             if self.config.input_obs == 'rgb-workspace-mask':
                 nbatch['rgb-workspace-mask'] = torch.cat([
                     nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+            
+            if self.config.input_obs == 'rgb-goal':
+                nbatch['rgb-goal'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
 
             
             B = nbatch[self.config.input_obs].shape[0]
@@ -551,7 +527,30 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 
                 # 3. Calculate Cross Entropy Loss
                 prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
-                
+
+                if self.update_step % self.log_prim_metrics_every == 0:
+
+                    metrics = compute_classification_metrics(
+                        prim_logits.detach(),
+                        gt_prim_ids.detach(),
+                        self.K
+                    )
+
+                    wandb_metrics = {
+                        f"train/prim_{k}": v for k, v in metrics.items()
+                    }
+
+                    self.logger.log(wandb_metrics, step=self.update_step)
+                    
+                    import wandb
+                    confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                        probs=None,
+                        y_true=gt_prim_ids.cpu().numpy(),
+                        preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
+                        class_names=[p['name'] for p in self.primitives]
+                    )}
+                    self.logger.log(confusion, step=self.update_step)
+                                
                 # 4. Create one-hot encoding for conditioning the Diffusion net
                 # Use ground truth during training (Teacher Forcing)
                 prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
@@ -727,7 +726,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.nets.load_state_dict(torch.load(ckpt_path))
 
         self.loaded = True
-        return self.loaded
+        return -2
 
     def single_act(self, info, update=False):
 
@@ -885,6 +884,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgbd'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), depth], axis=-1)
         
+        if self.config.input_obs == 'rgb-goal':
+            info['observation']['rgb-goal'] = np.concatenate(
+                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+
         if self.config.input_obs == 'rgb-workspace-mask':
             rgb = info['observation']['rgb'].astype(np.float32)
 

@@ -2,6 +2,87 @@ import torch
 import torch.nn as nn
 import torchvision
 from typing import Callable
+from omegaconf import DictConfig, ListConfig, OmegaConf
+import numpy as np
+
+def omegaconf_to_plain_dict(cfg):
+    if isinstance(cfg, (DictConfig, ListConfig)):
+        return OmegaConf.to_container(cfg, resolve=True)  # nested dict/list
+    return cfg
+
+def dict_to_action_vector(dict_action, action_output_template):
+    """
+    Convert dictionary form of action back into flat vector form.
+    """
+    #print('action_output_template', action_output_template)
+    indices = list(_max_index_in_dict(action_output_template))
+    if indices:
+        max_index = max(indices)
+    else:
+        raise ValueError(f"No indices found in action_output_template: {action_output_template}")
+
+    #print('max_index', max_index)
+    action = np.zeros(max_index + 1, dtype=float)
+
+    def fill_action(d_action, template):
+        for k, v in template.items():
+            if isinstance(v, dict):
+                fill_action(d_action[k], v)
+            elif isinstance(v, (list, ListConfig)) and len(v) > 0:
+                values = d_action[k]
+                action[np.array(v)] = values
+
+    fill_action(dict_action, action_output_template)
+    return action
+
+
+def _max_index_in_dict(d):
+    """Helper to find all indices used in the template dict."""
+    for v in d.values():
+        #print(type(v))
+        if isinstance(v, dict):
+            yield from _max_index_in_dict(v)
+        elif isinstance(v, (list, ListConfig)) and len(v) > 0:
+            yield max(v)
+
+def compute_classification_metrics(logits, targets, num_classes):
+    """
+    logits: (B, K)
+    targets: (B,)
+    """
+    with torch.no_grad():
+        preds = torch.argmax(logits, dim=-1)
+
+        accuracy = (preds == targets).float().mean()
+
+        metrics = {
+            "accuracy": accuracy.item()
+        }
+
+        # Per-class precision / recall / F1 (macro-averaged)
+        eps = 1e-8
+        precisions, recalls, f1s = [], [], []
+
+        for c in range(num_classes):
+            tp = ((preds == c) & (targets == c)).sum().float()
+            fp = ((preds == c) & (targets != c)).sum().float()
+            fn = ((preds != c) & (targets == c)).sum().float()
+
+            precision = tp / (tp + fp + eps)
+            recall = tp / (tp + fn + eps)
+            f1 = 2 * precision * recall / (precision + recall + eps)
+
+            precisions.append(precision)
+            recalls.append(recall)
+            f1s.append(f1)
+
+        metrics.update({
+            "precision_macro": torch.stack(precisions).mean().item(),
+            "recall_macro": torch.stack(recalls).mean().item(),
+            "f1_macro": torch.stack(f1s).mean().item(),
+        })
+
+    return metrics
 
 def get_resnet(name:str, input_channel=3, weights=None, **kwargs) -> nn.Module:
     """

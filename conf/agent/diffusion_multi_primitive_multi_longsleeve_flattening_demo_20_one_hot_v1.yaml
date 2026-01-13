@@ -27,6 +27,13 @@ eval_checkpoint: -1
 debug: False
 add_all_demos: True
 
+primitive_classifier:
+  hidden_dims: [256, 128]
+  activation: relu        # relu | gelu | silu | tanh | leaky_relu
+  dropout: 0.1            # 0.0 to disable
+  use_layernorm: true
+
+
 dataset_mode: "general"
 dataset_config:
   data_path: "multi_longsleeve_multi_primitive_flattening_horizon_10_human_demo_100"
@@ -51,7 +58,7 @@ dataset_config:
       shape: [9]
       output_key: 'default'
 
-primitive_integration: 'bin_as_output'
+primitive_integration: 'one-hot-encoding'
 primitives:
   - name: norm-pixel-pick-and-fling
     dim: 4 # [pick_0, pick_1]
@@ -59,6 +66,6 @@ primitives:
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
   - name: no-operation
     dim: 0
-mask_out_irrelavent_action_dim: false
+mask_out_irrelavent_action_dim: False
 
 data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3

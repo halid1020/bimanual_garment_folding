@@ -13,7 +13,7 @@ action_horizon: 10
 image_resolution: [128, 128]
 track_semkey_on_frames: false
 num_val_trials: 10
-readjust_pick_poss: 0
+readjust_pick_poss: 1.0
 provide_semkey_pos: false
 provide_flattened_semkey_pos: false
 provide_semkey_norm_pixel: true
@@ -26,3 +26,5 @@ robot0_radius: [0.1, 0.9] #left
 robot1_radius: [0.1, 0.85] #right
 robot0_base: [0, -0.85, 0]
 robot1_base: [0, 0.85, 0]
+readjust_to_workspace: true
+add_final_goal_to_obs: True

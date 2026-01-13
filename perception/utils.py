@@ -6,7 +6,7 @@ FOV = 60
 NEAR, FAR = 0.01, 3.0
 
 NEAR, FAR = 0.01, 3.0
-TABLE_Z = 0.65  # The height where objects sit
+
 
 fx = IMG_W / (2 * np.tan(np.deg2rad(FOV / 2)))
 fy = fx
@@ -83,6 +83,18 @@ def capture_reference_view():
 #     rgb = np.reshape(img[2], (IMG_H, IMG_W, 4))[:, :, :3]
 #     return rgb, view
 
+def visualize_camera(cam_pos, target_pos, color=[1, 0, 0], lifeTime=3.0):
+    """
+    Draws an arrow in the PyBullet GUI. 
+    The line starts at cam_pos and the 'point' is at target_pos.
+    """
+    # Draw the main shaft of the arrow
+    p.addUserDebugLine(cam_pos, target_pos, color, lineWidth=3, lifeTime=lifeTime)
+    
+    # Optional: Draw a small cross or "head" at the target to show focus
+    p.addUserDebugLine(target_pos + np.array([0.05, 0, 0]), target_pos - np.array([0.05, 0, 0]), [0, 1, 0], lifeTime=lifeTime)
+    p.addUserDebugLine(target_pos + np.array([0, 0.05, 0]), target_pos - np.array([0, 0.05, 0]), [0, 1, 0], lifeTime=lifeTime)
+    
 def capture_wrist_camera(body_id, target=[0, 0, 0.65]):
     # Get the current position of the wrist sphere
     pos, _ = p.getBasePositionAndOrientation(body_id)
@@ -109,9 +121,15 @@ def capture_wrist_camera(body_id, target=[0, 0, 0.65]):
 TOP_Z = 1.8          # height above table (safe margin)
 LOOKAT_Z = 0.65      # table height
 
+TARGET_LENGTH = 2.0
+DEFAULT_LEN = 1.5
+table_scale = TARGET_LENGTH / DEFAULT_LEN
+TABLE_Z = 0.65 * table_scale
+camera_height = 1.5
+
 def capture_topdown_groundtruth():
     # Position camera directly above center
-    cam_pos = [0, 0, 2.0]
+    cam_pos = [0, 0, camera_height + 0.65*table_scale]
     target = [0, 0, 0]
     up = [0, 1, 0] 
 

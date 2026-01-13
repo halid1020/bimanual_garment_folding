@@ -6,12 +6,12 @@ obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'rgb'
+input_obs: 'rgb-goal'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 20
-demo_horizon: 10
+num_demos: 2 #50
+demo_horizon: 3 #6
 batch_size: 64
 disable_updown: True
 action_shape: [8]
@@ -20,7 +20,7 @@ data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
-demo_policy: "human-multi-primitive"
+demo_policy:  "human-dual-pickers-pick-and-place"
 validation_interval: 1000
 total_update_steps: 50000
 eval_checkpoint: -1
@@ -29,7 +29,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_flattening_horizon_10_human_demo_100"
+  data_path: "multi_longsleeve_single_primitive_flattening_human_demo_100_goal"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
@@ -45,20 +45,31 @@ dataset_config:
     rgb: 
       shape: [128, 128, 3]
       output_key: 'rgb'
+    
+    goal_rgb: 
+      shape: [128, 128, 3]
+      output_key: 'goal_rgb'
+    
+    goal_depth: 
+      shape: [128, 128, 1]
+      output_key: 'goal_depth'
+    
+    goal_mask: 
+      shape: [128, 128, 1]
+      output_key: 'goal_mask'
 
   act_config:
     default: 
-      shape: [9]
+      shape: [8]
       output_key: 'default'
 
-primitive_integration: 'bin_as_output'
-primitives:
-  - name: norm-pixel-pick-and-fling
-    dim: 4 # [pick_0, pick_1]
-  - name: norm-pixel-pick-and-place
-    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
-  - name: no-operation
-    dim: 0
-mask_out_irrelavent_action_dim: false
+primitive_integration: 'none'
+# primitives:
+#   - name: norm-pixel-fold
+#     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+# mask_out_irrelavent_action_dim: true
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3
+# exp_name: ${exp_name}
+# project_name: ${project_name}
+
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0_goal

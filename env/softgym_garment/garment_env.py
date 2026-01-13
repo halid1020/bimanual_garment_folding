@@ -114,6 +114,7 @@ class GarmentEnv(Arena):
         
         self.apply_workspace = config.get('apply_workspace', False)
         if self.apply_workspace:
+            self.readjust_to_workspace =  config.get('readjust_to_workspace', False) # <--- Store flag
             self.robot1_radius = config.robot1_radius
             self.robot0_radius = config.robot0_radius
             self.robot0_base = config.robot0_base
@@ -424,7 +425,7 @@ class GarmentEnv(Arena):
             
             if self.add_final_goal_to_obs:
                 for k, v in goal[-1]['observation'].items():
-                    info['observation'][f'goal-{k}'] = v
+                    info['observation'][f'goal_{k}'] = v
 
         return info
     

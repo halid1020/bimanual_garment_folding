@@ -1,0 +1,12 @@
+defaults:
+  - agent: dreamerv3_dmc_walker_walk_sanity
+  - arena: dmc_walker_walk
+  - task: dummy
+  - data_augmenter: identity
+
+train_and_eval: train_plural_eval_single
+num_train_envs: 4
+
+exp_name: dreamerv3_dmc_walker_walk_sanity
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

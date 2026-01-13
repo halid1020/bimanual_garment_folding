@@ -1,0 +1,10 @@
+defaults:
+  - agent: image2semkey_multi_primitive_sac_flattening_multi_longsleeve_v4
+  - arena:  multi_longsleeve_readjust_pick_provide_semkey_pixel_v1 # no success stop
+  - task: flattening_overstretch_penalty_1_no_big_bonus
+  - data_augmenter: pixel_based_multi_primitive_augmenter
+
+exp_name: image2semkey_multi_primitive_sac_flattening_multi_longsleeve_v4
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

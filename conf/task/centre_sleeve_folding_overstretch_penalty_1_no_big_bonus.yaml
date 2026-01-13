@@ -1,0 +1,11 @@
+num_goals: 3
+garment_type: longsleeve
+asset_dir: assets
+task_name: centre-sleeve-folding
+debug: false
+alignment: simple_rigid
+goal_steps: 3
+overstretch_penalty_scale: 1
+overstretch_penalty_threshold: 0.1
+affordance_penalty_scale: 0
+big_success_bonus: False

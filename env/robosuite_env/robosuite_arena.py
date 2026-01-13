@@ -1,11 +1,12 @@
 import numpy as np
 import gym
-import robosuite as suite
-from robosuite.wrappers.gym_wrapper import GymWrapper
+
 from agent_arena import Arena  # your abstract base
 from omegaconf import OmegaConf
 from ..video_logger import VideoLogger
 from statistics import mean
+import uuid
+import datetime
 # from .osc_controller import OperationalSpaceController
 
 def to_dict(obj):
@@ -52,6 +53,9 @@ class RoboSuiteArena(Arena):
         self.num_val_trials = 5
 
         super().__init__(config)
+        import robosuite as suite
+        from robosuite.wrappers.gym_wrapper import GymWrapper
+
         self.config = config
         self.name = config.get("name", "robosuite_arena")
         self.sim_horizon = config.get("sim_horizon", 500)
@@ -59,7 +63,8 @@ class RoboSuiteArena(Arena):
         self.use_camera_obs = config.get("use_camera_obs", False)
         self.has_renderer = config.get("disp", False)
         self.control_freq = config.get("control_freq", 20)
-        self.resolution = config.get("resolution", (256, 256))
+        self.frame_resolution = config.get("frame_resolution", (256, 256))
+        self.image_resolution = config.get("image_resolution", (128, 128))
         self.obs_keys = config.get("obs_keys", None)
 
         # env_kwargs = to_dict(config.get("env_kwargs", {}))
@@ -87,10 +92,15 @@ class RoboSuiteArena(Arena):
 
         # Store observation filtering preferences from YAML (optional)
 
-        self.action_space = self.env.action_space
-        self.observation_space = self.env.observation_space
+        #self.action_space = self.env.action_space
+        #self.observation_space = self.env.observation_space
         self.logger = VideoLogger()
     
+    @property
+    def observation_space(self):
+        spaces = {}
+        spaces["image"] = gym.spaces.Box(0, 255, self.image_resolution + (3,), dtype=np.uint8)
+        return gym.spaces.Dict(spaces)
     
     def _filter_observation(self, obs_dict):
         """
@@ -132,6 +142,9 @@ class RoboSuiteArena(Arena):
         self.eid = episode_config['eid']
         self.save_frames = episode_config['save_video']
 
+        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
+
         obs_, _ = self.env.reset(seed=self.eid)
         obs_dict = self.env.env._get_observations(force_update=True)
         obs = self._filter_observation(obs_dict)
@@ -152,10 +165,12 @@ class RoboSuiteArena(Arena):
             "evaluation": {}
         }
         if self.use_camera_obs:
-            info['observation']['rgb'] = obs
+            info['observation']['image'] = self.render(resolution=self.image_resolution)
         else:
             info['observation']['state'] = obs.astype(np.float32)
         self.info = info
+        self.info['observation']['is_first'] = True
+        self.info['observation']['is_terminal'] = False
         return info
 
     def get_observation_space(self):
@@ -189,21 +204,29 @@ class RoboSuiteArena(Arena):
             "success": self.success(),
             "fail_step": not act_success,
             'sim_steps': 1,
+            "discount": 1.0 if not done else 0.0
         }
 
         if self.use_camera_obs:
-            info['observation']['rgb'] = obs
+            info['observation']['image'] = self.render(resolution=self.image_resolution)
         else:
             info['observation']['state'] = obs.astype(np.float32)
 
+        info['observation']['is_first'] = True
+        info['observation']['is_terminal'] = False
+
         if self.save_frames:
-            frame = self.env.sim.render(camera_name="frontview", width=self.resolution[0], height=self.resolution[1])
-            frame = np.flipud(frame)
+            frame = self.render(resolution=self.frame_resolution)
             self.video_frames.append(frame)
 
         self.sim_step += 1
         self.info = info
         return info
+    
+    def render(self, resolution):
+        frame = self.env.sim.render(camera_name="frontview", width=resolution[0], height=resolution[1])
+        frame = np.flipud(frame)
+        return frame
 
     def get_frames(self):
         return self.video_frames

@@ -1,0 +1,11 @@
+defaults:
+  - agent: diffusion_dual_picker_single_primitive_multi_longsleeve_flattening_demo_20
+  - arena: multi_longsleeve_single_primitive_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128
+  - task: flattening_overstretch_penalty_1_no_big_bonus
+  # - data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0
+
+
+exp_name: diffusion_dual_picker_single_primitive_multi_longsleeve_flattening_demo_20
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

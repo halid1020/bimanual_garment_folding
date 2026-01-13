@@ -1,6 +1,0 @@
-name: pixel-based-single-primitive-augmenter
-random_rotation: true
-rotation_degree: 1
-vertical_flip: true
-debug: false
-device: cuda:1

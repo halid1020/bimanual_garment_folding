@@ -1,0 +1,20 @@
+from xacrodoc import XacroDoc
+
+# Define paths
+xacro_path = "/home/hcv530/project/universal_robot/ur_description/urdf/ur5e.xacro"
+urdf_path = "/home/hcv530/project/universal_robot/ur_description/urdf/ur5e.urdf"
+
+# Convert if the URDF doesn't exist
+if not os.path.exists(urdf_path):
+    print("Converting Xacro to URDF...")
+    doc = XacroDoc.from_file(xacro_path)
+    doc.to_urdf_file(urdf_path)
+
+xacro_path = "/home/hcv530/project/universal_robot/ur_description/urdf/ur16e.xacro"
+urdf_path = "/home/hcv530/project/universal_robot/ur_description/urdf/ur16e.urdf"
+
+# Convert if the URDF doesn't exist
+if not os.path.exists(urdf_path):
+    print("Converting Xacro to URDF...")
+    doc = XacroDoc.from_file(xacro_path)
+    doc.to_urdf_file(urdf_path)

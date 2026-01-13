@@ -6,9 +6,7 @@ import requests
 import time
 from .manipulation import RGB_manipulation, encode_image
 from agent_arena.utilities.save_utils import save_mask, save_colour, save_depth
-from huggingface_hub import login
-HF_TOKEN = os.environ["HF_TOKEN"]
-login(token=HF_TOKEN)
+
 from transformers import AutoProcessor, Gemma3ForConditionalGeneration
 import torch
 from collections import deque
@@ -87,6 +85,10 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
     def __init__(self, re_consider=True,in_context_learning=False,demo_dir="./tmp/Manual_test14"):
         
         super().__init__()
+        from huggingface_hub import login
+        HF_TOKEN = os.environ["HF_TOKEN"]
+        login(token=HF_TOKEN)
+
         self.re_consider=re_consider
         self.in_context_learning=in_context_learning
         self.demo_dir=demo_dir
@@ -236,7 +238,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         # Get moving direction and distance from GPT response.
         moving_direction = direction_match.group(1) if direction_match else None
         if moving_direction is None:
-            return None,None,None,None
+            return None,None
 
         numerator, denominator = moving_direction.split('/')
         moving_direction=float(numerator)/float(denominator)
@@ -244,7 +246,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         
         moving_distance = float(distance_match.group(1)) if distance_match else None
         if moving_distance is None:
-            return None,None,None,None
+            return None,None
 
         # Calculate the placing point based on the picking point, moving direction and distance.
         #curr_config=self.env.get_current_config()
@@ -274,7 +276,7 @@ class RGBD_manipulation_part_obs(RGB_manipulation):
         save_colour(place_rgb, 'gpt_place_rgb', './tmp')
 
             
-        return pick_pixel,place_pixel
+        return pick_pixel, place_pixel
     
     
     

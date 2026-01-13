@@ -6,9 +6,8 @@ import numpy as np
 from dotmap import DotMap
 import os
 
-from env.multi_garment_env import MultiGarmentEnv
-from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
-from env.tasks.garment_flattening import GarmentFlatteningTask
+from env.softgym_garment.multi_garment_env import MultiGarmentEnv
+from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
@@ -29,7 +28,7 @@ def main():
         #'task': 'centre-sleeve-folding',
         'disp': True,
         'ray_id': 0,
-        'horizon': 8,
+        'action_horizon': 5,
         'track_semkey_on_frames': False
     }
     
@@ -49,6 +48,7 @@ def main():
     arena = MultiGarmentEnv(arena_config)
     
     arena.set_task(task)
+    arena.set_val()
     
 
     agent = HumanMultiPrimitive(DotMap())

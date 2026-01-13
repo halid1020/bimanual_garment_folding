@@ -1,21 +1,26 @@
-import datetime
 import collections
 import io
 import os
 import json
 import pathlib
-import re
+import datetime
 import time
 import random
 
 import numpy as np
+import uuid
+from agent_arena.utilities.logger.logger_interface import Logger
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch import distributions as torchd
-from torch.utils.tensorboard import SummaryWriter
 
+import wandb
+import cv2
+
+def count_steps(folder):
+    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -54,10 +59,12 @@ class TimeRecording:
         print(self._comment, self._st.elapsed_time(self._nd) / 1000)
 
 
-class Logger:
-    def __init__(self, logdir, step):
+class WandbLogger(Logger):
+    
+    def __init__(self, logdir, step, project, name, config, run_id=None, resume=False):
+        
+        
         self._logdir = logdir
-        self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
         self._last_step = None
         self._last_time = None
         self._scalars = {}
@@ -65,40 +72,83 @@ class Logger:
         self._videos = {}
         self.step = step
 
+        self.project = project
+        self.name = name
+        self.config = config
+
+        # initialize wandb run
+        self.wandb = wandb.init(
+            project=project,
+            name=name,
+            config=config,
+            id=run_id,
+            resume="must" if resume else "never",
+            dir=str(logdir)     # <-- IMPORTANT FIX
+        )
+
+    def _compute_fps(self, step):
+        now = time.time()
+        if self._last_time is None:
+            self._last_time = now
+            self._last_step = step
+            return 0.0
+        fps = (step - self._last_step) / (now - self._last_time)
+        self._last_time = now
+        self._last_step = step
+        return fps
+
     def scalar(self, name, value):
         self._scalars[name] = float(value)
 
     def image(self, name, value):
+        # Expect HWC or CHW image array
         self._images[name] = np.array(value)
 
     def video(self, name, value):
+        # Expect B T H W C or T H W C (adjust as needed)
         self._videos[name] = np.array(value)
 
     def write(self, fps=False, step=False):
         if not step:
             step = self.step
+
         scalars = list(self._scalars.items())
         if fps:
             scalars.append(("fps", self._compute_fps(step)))
-        print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
+
+        # Print summary
+        print(f"[update step: {step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
+
+        # Write json metrics file
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
-        for name, value in scalars:
-            if "/" not in name:
-                self._writer.add_scalar("scalars/" + name, value, step)
-            else:
-                self._writer.add_scalar(name, value, step)
-        for name, value in self._images.items():
-            self._writer.add_image(name, value, step)
-        for name, value in self._videos.items():
-            name = name if isinstance(name, str) else name.decode("utf-8")
+
+        # Log scalars
+        wandb_logs = {k: v for k, v in scalars}
+
+        # Log images
+        for name, img in self._images.items():
+            wandb_logs[name] = wandb.Image(img)
+
+        # Log videos
+        for name, vid in self._videos.items():
+            value = vid
+            # Convert floats to uint8 video
             if np.issubdtype(value.dtype, np.floating):
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
-            B, T, H, W, C = value.shape
-            value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-            self._writer.add_video(name, value, step, 16)
 
-        self._writer.flush()
+            # wandb accepts (T, H, W, C)
+            if value.ndim == 5:  # B T H W C — take first batch
+                value = value[0]
+
+            value = np.transpose(value, (0, 3, 1, 2))  # (T,H,W,C) → (T,C,H,W)
+
+            wandb_logs[name] = wandb.Video(value, fps=16, format="mp4")
+
+        # Commit step
+        wandb.log(wandb_logs, step=step)
+
+        # Clear buffers
         self._scalars = {}
         self._images = {}
         self._videos = {}
@@ -127,18 +177,23 @@ class Logger:
 
 def simulate(
     agent,
+    policy,
     envs,
     cache,
     directory,
     logger,
-    is_eval=False,
     limit=None,
     steps=0,
     episodes=0,
     state=None,
+    parallel=True,
+    restart=True,
+    obs_keys=['image', 'is_first', 'is_terminal'],
+    reward_key='default',
+    save_success=False
 ):
     # initialize or unpack simulation state
-    if state is None:
+    if (state is None) or restart:
         step, episode = 0, 0
         done = np.ones(len(envs), bool)
         length = np.zeros(len(envs), np.int32)
@@ -152,100 +207,124 @@ def simulate(
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             results = [envs[i].reset() for i in indices]
-            results = [r() for r in results]
+            if parallel:
+                results = [r() for r in results]
             for index, result in zip(indices, results):
-                t = result.copy()
-                t = {k: convert(v) for k, v in t.items()}
+                t = result['observation'].copy()
+                t = {k: convert(v) for k, v in t.items() if k in obs_keys}
                 # action will be added to transition in add_to_cache
                 t["reward"] = 0.0
                 t["discount"] = 1.0
                 # initial state should be added to cache
-                add_to_cache(cache, envs[index].id, t)
+                add_to_cache(cache, envs[index].uid, t)
                 # replace obs with done by initial state
-                obs[index] = result
+                obs[index] = t.copy()
         # step agents
-        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
-        action, agent_state = agent(obs, done, agent_state)
+        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if ("log_" not in k) and (k in obs_keys)}
+        action, agent_state = policy(obs, done, agent_state)
         if isinstance(action, dict):
             action = [
-                {k: np.array(action[k][i].detach().cpu()) for k in action}
-                for i in range(len(envs))
+                np.array(action['action'][i].detach().cpu()) for i in range(len(envs))
             ]
         else:
             action = np.array(action)
         assert len(action) == len(envs)
+
+        #print('[simualtion] in action', action)
+        if agent.primitive_integration == 'none':
+            action_for_env = action
+        elif agent.primitive_integration == 'predict_bin_as_output':
+            #print('action', action)
+            prim_id = [int(((action[i][0] + 1)/2)*agent.K - 1e-6) for i in range(len(action))]
+            action_for_env = [{agent.primitives[prim_id[i]]['name']: action[i][1:]} for i in range(len(action))]
+            # logger.log({
+            #     f"train/prim_id": prim_id[0],
+            # }, step=step) # TODO: change this to update steps
+        else:
+            raise NotImplementedError
+        
+
         # step envs
-        results = [e.step(a) for e, a in zip(envs, action)]
-        results = [r() for r in results]
-        obs, reward, done = zip(*[p[:3] for p in results])
+        results = [e.step(a) for e, a in zip(envs, action_for_env)]
+        if parallel:
+            results = [r() for r in results]
+        obs, reward, done, applied_action = zip(*[(p["observation"], p["reward"], p["done"], p["applied_action"]) for p in results])
+        
+        #print('[simulation] applied action', applied_action)
         obs = list(obs)
         reward = list(reward)
         done = np.stack(done)
         episode += int(done.sum())
         length += 1
         step += len(envs)
+        #print('simulation step', step)
         length *= 1 - done
         # add to cache
-        for a, result, env in zip(action, results, envs):
-            o, r, d, info = result
-            o = {k: convert(v) for k, v in o.items()}
-            transition = o.copy()
-            if isinstance(a, dict):
-                transition.update(a)
+        for aa, oa, result, env in zip(applied_action, action, results, envs):
+            o, r, d, discount = result['observation'], result['reward'], result['done'], result['discount']
+            if result['success'] and save_success:
+               logger.log_frames(env.get_frames(), key='success episodes', step=steps)
+
+            o = {k: convert(v) for k, v in o.items() if k in obs_keys}
+            
+
+            if agent.primitive_integration == 'none':
+                action_to_add = aa
+            elif agent.primitive_integration == 'predict_bin_as_output':
+                action_name = list(aa.keys())[0]
+                action_param = aa[action_name]
+                prim_id = agent.prim_name2id[action_name]
+                prim_act = oa[0] #(1.0*(prim_id+0.5)/agent.K *2 - 1)
+                action_to_add = np.zeros((agent.config.num_actions))
+                action_to_add[0] = prim_act
+                action_to_add[1:action_param.shape[0]+1] = action_param
+                
             else:
-                transition["action"] = a
-            transition["reward"] = r
-            transition["discount"] = info.get("discount", np.array(1 - float(d)))
-            add_to_cache(cache, env.id, transition)
+                raise NotImplementedError
+            
+            #print('[simulation] action_to_add', action_to_add)
+            
+            transition = o.copy()
+            if isinstance(action_to_add, dict):
+                transition.update(action_to_add)
+            else:
+                transition["action"] = action_to_add
+            transition["reward"] = r[reward_key]
+            transition["discount"] = discount
+
+            
+
+            add_to_cache(cache, env.uid, transition)
 
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                save_episodes(directory, {envs[i].id: cache[envs[i].id]})
-                length = len(cache[envs[i].id]["reward"]) - 1
-                score = float(np.array(cache[envs[i].id]["reward"]).sum())
-                video = cache[envs[i].id]["image"]
+                
+                #print('save episoeds')
+                save_episodes(directory, {envs[i].uid: cache[envs[i].uid]})
+                length = len(cache[envs[i].uid]["reward"]) - 1
+                score = float(np.array(cache[envs[i].uid]["reward"]).sum())
+                #video = cache[envs[i].uid]["image"]
                 # record logs given from environments
-                for key in list(cache[envs[i].id].keys()):
+                for key in list(cache[envs[i].uid].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].id][key]).sum())
+                            key, float(np.array(cache[envs[i].uid][key]).sum())
                         )
                         # log items won't be used later
-                        cache[envs[i].id].pop(key)
+                        cache[envs[i].uid].pop(key)
 
-                if not is_eval:
-                    step_in_dataset = erase_over_episodes(cache, limit)
-                    logger.scalar(f"dataset_size", step_in_dataset)
-                    logger.scalar(f"train_return", score)
-                    logger.scalar(f"train_length", length)
-                    logger.scalar(f"train_episodes", len(cache))
-                    logger.write(step=logger.step)
-                else:
-                    if not "eval_lengths" in locals():
-                        eval_lengths = []
-                        eval_scores = []
-                        eval_done = False
-                    # start counting scores for evaluation
-                    eval_scores.append(score)
-                    eval_lengths.append(length)
-
-                    score = sum(eval_scores) / len(eval_scores)
-                    length = sum(eval_lengths) / len(eval_lengths)
-                    logger.video(f"eval_policy", np.array(video)[None])
-
-                    if len(eval_scores) >= episodes and not eval_done:
-                        logger.scalar(f"eval_return", score)
-                        logger.scalar(f"eval_length", length)
-                        logger.scalar(f"eval_episodes", len(eval_scores))
-                        logger.write(step=logger.step)
-                        eval_done = True
-    if is_eval:
-        # keep only last item for saving memory. this cache is used for video_pred later
-        while len(cache) > 1:
-            # FIFO
-            cache.popitem(last=False)
+                
+                step_in_dataset = erase_over_episodes(cache, limit)
+                print(f'[update step: {logger.update_step}], dataset_size: {step_in_dataset}, train_return: {score}, train_length: {length}, train_episodes: {len(cache)}')
+                
+                logger.scalar(f"dataset_size", step_in_dataset)
+                logger.scalar(f"train_return", score)
+                logger.scalar(f"train_length", length)
+                logger.scalar(f"train_episodes", len(cache))
+                # logger.write(step=logger.step) # change this to update steps
+                
     return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
 
 
@@ -261,6 +340,7 @@ def add_to_cache(cache, id, transition):
                 cache[id][key] = [convert(0 * val)]
                 cache[id][key].append(convert(val))
             else:
+                #print('key', key)
                 cache[id][key].append(convert(val))
 
 
@@ -311,14 +391,52 @@ def from_generator(generator, batch_size):
         batch = []
         for _ in range(batch_size):
             batch.append(next(generator))
+
         data = {}
+        problem=False
         for key in batch[0].keys():
-            data[key] = []
-            for i in range(batch_size):
-                data[key].append(batch[i][key])
-            data[key] = np.stack(data[key], 0)
+            values = [batch[i][key] for i in range(batch_size)]
+
+            # Collect shapes
+            shapes = [len(v) for v in values]
+
+            # Check if all shapes are the same
+            if not all(s == shapes[0] for s in shapes):
+                print(f"[dreamer, from_generator], Shape mismatch key: {key}")
+                for i, s in enumerate(shapes):
+                    print(f"  sample {i}: shape = {s}")
+                # Optional: raise to fail fast
+                # raise ValueError(f"Shape mismatch for key '{key}'")
+                print(f"[dreamer, from_generator], Drop and continue")
+                problem=True
+                break
+
+
+            data[key] = np.stack(values, axis=0)
+        if problem:
+            continue
+
         yield data
 
+def sample_episodes_single_trajectory(episodes, length, seed=0):
+    np_random = np.random.RandomState(seed)
+
+    while True:
+
+        p = np.array(
+            [len(next(iter(episode.values()))) for episode in episodes.values()]
+        )
+        p = p / np.sum(p)
+
+        episode = np_random.choice(list(episodes.values()), p=p)
+       
+        ret = {
+            k: v[: length].copy()
+            for k, v in episode.items()
+            if "log_" not in k
+        }
+
+        yield ret
 
 def sample_episodes(episodes, length, seed=0):
     np_random = np.random.RandomState(seed)
@@ -998,3 +1116,19 @@ def recursively_load_optim_state_dict(obj, optimizers_state_dicts):
         for key in keys:
             obj_now = getattr(obj_now, key)
         obj_now.load_state_dict(state_dict)
+
+def make_dataset(episodes, config):
+    generator = sample_episodes(episodes, config.batch_length)
+    dataset = from_generator(generator, config.batch_size)
+    return dataset
+
+
+
+def make_dataset_none_cross_trj(episodes, config):
+    generator = sample_episodes_single_trajectory(
+        episodes,
+        config.vis_length,
+        seed=config.seed if hasattr(config, "seed") else 0,
+    )
+    dataset = from_generator(generator, config.batch_size)
+    return dataset

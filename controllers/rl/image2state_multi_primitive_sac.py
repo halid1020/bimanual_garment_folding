@@ -82,9 +82,9 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             ).to(self.device)
             self.encoder_target.load_state_dict(self.encoder.state_dict())
             self.encoder_optim = torch.optim.Adam(self.encoder.parameters(), lr=cfg.encoder_lr)
-            self.state_loss_coef = cfg.get('state_loss_coef', 0.1)
+            self.state_loss_coef = cfg.get('state_loss_coef', 1.0)
             self.recon_loss_coef = cfg.get('recon_loss_coef', 2.0)
-            self.encoder_max_grad_norm = cfg.get('encoder_max_grad_norm', 5)
+            self.encoder_max_grad_norm = cfg.get('encoder_max_grad_norm', float('inf'))
             self.state_dim = cfg.feature_dim
             if cfg.primitive_integration == 'expand_as_input':
                 self.state_dim = cfg.feature_dim + (0 if self.disable_one_hot else self.K)
@@ -419,7 +419,7 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             )
 
             # Optimize
-            self.encoder_optim.zero_grad(set_to_none=True)
+            self.encoder_optim.zero_grad()
             encoder_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.encoder_max_grad_norm)
             self.encoder_optim.step()
@@ -595,7 +595,6 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
             'sim_steps': self.sim_steps,
-            "wandb_run_id": self.logger.get_run_id(),
         }
         if self.obs_type == 'image':
             state.update({
@@ -671,24 +670,24 @@ class Image2StateMultiPrimitiveSAC(VanillaSAC):
         self.update_steps = state.get('update_steps', 0)
         self.act_steps = state.get('act_steps', 0)
 
-        run_id = state.get("wandb_run_id", None)
+       
         #print(f"[INFO] Resuming W&B run ID: {run_id}")
 
-        if resume and (run_id is not None):
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                run_id=run_id,
-                resume=True
-            )
-        else:
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
+        # if resume and (run_id is not None):
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         run_id=run_id,
+        #         resume=True
+        #     )
+        # else:
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
         
     
     def _load_replay_buffer(self, replay_file):

@@ -5,6 +5,84 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+# --------------------
+# Helper functions (torch)
+# --------------------
+def jitter_brightness_torch(imgs, delta):
+    # imgs: (N,C,H,W)
+    return torch.clamp(imgs + delta, 0.0, 1.0)
+
+def jitter_contrast_torch(imgs, factor):
+    # imgs: (N,C,H,W)
+    mean = imgs.mean(dim=(2, 3), keepdim=True)  # shape (N,C,1,1)
+    return torch.clamp((imgs - mean) * factor + mean, 0.0, 1.0)
+
+def rgb_to_hsv_torch(rgb):
+    # rgb: (N,H,W,3) in [0,1] channels-last
+    # returns (N,H,W,3) hsv with h in [0,1], s,v in [0,1]
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    maxc, _ = rgb.max(dim=-1)
+    minc, _ = rgb.min(dim=-1)
+    v = maxc
+    diff = maxc - minc
+
+    s = torch.where(maxc == 0, torch.zeros_like(maxc), diff / (maxc + 1e-8))
+
+    h = torch.zeros_like(maxc)
+
+    mask = diff > 1e-8
+
+    rc = (maxc - r) / (diff + 1e-8)
+    gc = (maxc - g) / (diff + 1e-8)
+    bc = (maxc - b) / (diff + 1e-8)
+
+    # for r == max
+    pick = (r == maxc) & mask
+    h = torch.where(pick, (bc - gc), h)
+
+    # for g == max
+    pick = (g == maxc) & mask
+    h = torch.where(pick, 2.0 + (rc - bc), h)
+
+    # for b == max
+    pick = (b == maxc) & mask
+    h = torch.where(pick, 4.0 + (gc - rc), h)
+
+    h = (h / 6.0) % 1.0
+    hsv = torch.stack([h, s, v], dim=-1)
+    return hsv
+
+def hsv_to_rgb_torch(hsv):
+    # hsv: (N,H,W,3) channels-last, h in [0,1]
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    i = torch.floor(h * 6.0).to(torch.int64)
+    f = (h * 6.0) - i.type(h.dtype)
+    i = i % 6
+
+    p = v * (1.0 - s)
+    q = v * (1.0 - f * s)
+    t = v * (1.0 - (1.0 - f) * s)
+
+    shape = h.shape
+    r = torch.zeros(shape, dtype=h.dtype, device=h.device)
+    g = torch.zeros(shape, dtype=h.dtype, device=h.device)
+    b = torch.zeros(shape, dtype=h.dtype, device=h.device)
+
+    idx = (i == 0)
+    r[idx], g[idx], b[idx] = v[idx], t[idx], p[idx]
+    idx = (i == 1)
+    r[idx], g[idx], b[idx] = q[idx], v[idx], p[idx]
+    idx = (i == 2)
+    r[idx], g[idx], b[idx] = p[idx], v[idx], t[idx]
+    idx = (i == 3)
+    r[idx], g[idx], b[idx] = p[idx], q[idx], v[idx]
+    idx = (i == 4)
+    r[idx], g[idx], b[idx] = t[idx], p[idx], v[idx]
+    idx = (i == 5)
+    r[idx], g[idx], b[idx] = v[idx], p[idx], q[idx]
+
+    return torch.stack([r, g, b], dim=-1)
+
 def gaussian_2d(shape, sigma=1):
     m, n = [(ss - 1.) / 2. for ss in shape]
     y, x = torch.meshgrid(torch.arange(-m, m+1), torch.arange(-n, n+1), indexing='ij')
@@ -136,6 +214,49 @@ class PixelBasedMultiPrimitiveDataAugmenter:
             new_state = new_state.reshape(-1, 2)
             new_state[:, 0] = -new_state[:, 0]
             new_state = new_state.reshape(B, -1)
+
+        # =========================
+        #     COLOR JITTER (GLOBAL)
+        # =========================
+        if self.config.get("color_jitter", False):
+
+            brightness = float(np.random.uniform(
+                -self.config.get("brightness", 0.2),
+                 self.config.get("brightness", 0.2)
+            ))
+            contrast = float(1.0 + np.random.uniform(
+                -self.config.get("contrast", 0.2),
+                 self.config.get("contrast", 0.2)
+            ))
+            saturation = float(1.0 + np.random.uniform(
+                -self.config.get("saturation", 0.2),
+                 self.config.get("saturation", 0.2)
+            ))
+            hue = float(np.random.uniform(
+                -self.config.get("hue", 0.05),
+                 self.config.get("hue", 0.05)
+            ))
+
+            # Apply jitter to both obs and next_obs
+            for img_name in ["observation", "next_observation"]:
+                imgs = locals()[img_name]  # (N,C,H,W)
+
+                # ----- brightness + contrast (CHW) -----
+                imgs = jitter_brightness_torch(imgs, brightness)
+                imgs = jitter_contrast_torch(imgs, contrast)
+
+                # ----- saturation + hue (convert to HSV) -----
+                imgs_cl = imgs.permute(0, 2, 3, 1).contiguous()
+                hsv = rgb_to_hsv_torch(imgs_cl)
+
+                hsv[..., 0] = (hsv[..., 0] + hue) % 1.0
+                hsv[..., 1] = torch.clamp(hsv[..., 1] * saturation, 0.0, 1.0)
+
+                imgs_cl = hsv_to_rgb_torch(hsv)
+                imgs = imgs_cl.permute(0, 3, 1, 2).contiguous()
+
+                # store back
+                locals()[img_name][:] = imgs
 
         # Save after augmentation
         if self.debug:

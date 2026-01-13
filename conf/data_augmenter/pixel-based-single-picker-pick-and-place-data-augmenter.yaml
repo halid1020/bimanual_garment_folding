@@ -1,0 +1,31 @@
+name: pixel-based-fold-data-augmenter
+
+img_dim: [96, 96]
+remap_image: [0, 1]
+rgb_norm_mode: ['remap']
+rgb_norm_param:
+  remap_range: [0, 1]
+rgb_noise_factor: 0.01
+random_rotation: True
+random_terminal: False
+rotation_degree: 1
+vertical_flip: False
+random_resize: False
+action_noise: 0.0
+depth_clip: True
+depth_clip_min: 1.8 #
+depth_clip_max: 2.0 #0.66
+min_max_norm: True
+depth_min: 1.8
+depth_max: 2.0
+depth_map: True
+depth_map_range: [0, 1]
+depth_blur: True
+depth_flip: True
+depth_blur_kernel_size: 2
+depth_noise_var: 0.01
+depth_eval_process: True
+maskout: True
+bg_value: 0
+debug: False
+primitive: 'single-picker-norm-pixel-pick-and-place'

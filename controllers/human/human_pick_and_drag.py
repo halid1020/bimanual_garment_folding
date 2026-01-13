@@ -81,11 +81,8 @@ class HumanPickAndDrag(Agent):
             (pick2_y / width) * 2 - 1,
         ]
         
-        return {
-            'pick_0': normalized_action1[:2],
-            'place_0': normalized_action1[2:],
-            'pick_1': normalized_action2[:2],
-        }
+        action = np.concatenate([normalized_action1, normalized_action2[:2]]) #pick 0, place 0, pick
+        return action
         
     def init(self, state):
         pass

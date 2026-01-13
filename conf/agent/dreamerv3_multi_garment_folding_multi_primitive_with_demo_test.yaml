@@ -1,0 +1,127 @@
+name: dreamerV3
+logdir: null
+traindir: null
+evaldir: null
+offline_traindir: ''
+offline_evaldir: ''
+seed: 0
+deterministic_run: False
+
+parallel: False
+# eval_every: 1e4
+# eval_episode_num: 10
+
+reset_every: 0
+device: 'cuda:0'
+compile: True
+precision: 32
+debug: False
+train_video_pred_log: True
+
+
+# time_limit: 1000
+grayscale: False
+
+reward_EMA: True
+
+# Model
+dyn_hidden: 512
+dyn_deter: 512
+dyn_stoch: 32
+dyn_discrete: 32
+dyn_rec_depth: 1
+dyn_mean_act: 'none'
+dyn_std_act: 'sigmoid2'
+dyn_min_std: 0.1
+grad_heads: ['decoder', 'reward', 'cont']
+units: 512
+act: 'SiLU'
+norm: True
+encoder:
+  {mlp_keys: '$^', cnn_keys: 'image', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, symlog_inputs: True}
+decoder:
+  {mlp_keys: '$^', cnn_keys: 'image', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, cnn_sigmoid: False, image_dist: mse, vector_dist: symlog_mse, outscale: 1.0}
+actor:
+  {layers: 2, dist: 'normal', entropy: 3e-4, unimix_ratio: 0.01, std: 'learned', min_std: 0.1, max_std: 1.0, temp: 0.1, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 1.0}
+critic:
+  {layers: 2, dist: 'symlog_disc', slow_target: True, slow_target_update: 1, slow_target_fraction: 0.02, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 0.0}
+reward_head:
+  {layers: 2, dist: 'symlog_disc', loss_scale: 1.0, outscale: 0.0}
+cont_head:
+  {layers: 2, loss_scale: 1.0, outscale: 1.0}
+dyn_scale: 0.5
+rep_scale: 0.1
+kl_free: 1.0
+weight_decay: 0.0
+unimix_ratio: 0.01
+initial: 'learned'
+
+# Training
+batch_size: 64 #16
+batch_length: 16 #64
+train_ratio: 512
+
+model_lr: 1e-4
+opt_eps: 1e-8
+grad_clip: 1000
+updates_per_step: 2 #10
+
+opt: 'adam'
+
+# Behavior.
+discount: 0.997
+discount_lambda: 0.95
+imag_horizon: 4 #15
+imag_gradient: 'dynamics'
+imag_gradient_mix: 0.0
+eval_state_mean: False
+
+# Exploration
+expl_behavior: 'greedy'
+expl_until: 0
+expl_extr_scale: 0.0
+expl_intr_scale: 1.0
+disag_target: 'stoch'
+disag_log: True
+disag_models: 10
+disag_offset: 1
+disag_layers: 4
+disag_units: 400
+disag_action_cond: False
+
+restart: true
+# evaluate_method: 'simulate'
+# eval_video_pred_log: true
+
+
+action_steps: 1e5
+
+eval_checkpoint: -1
+size: [128, 128]
+action_repeat: 1
+
+validation_interval: 10 #1000
+dataset_size: 100 #100000
+total_update_steps: 60 # 20 bc + 20 dreamer pretrain + 20 dreamer online #1e5
+log_every: 5 #1e2
+obs_keys: ['image', 'rgb', 'is_first', 'is_terminal']
+reward_key: multi_stage_reward
+primitive_integration: 'predict_bin_as_output'
+primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]name: image2state-sac
+  - name: norm-pixel-fold
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+save_success: True
+num_actions: 'to_be_defined'
+
+use_bc_policy_to_seed: True 
+bc_policy_config_name: 'multi_primitive_diffusion_multi_longsleeve_folding_from_crumpled_demo_test' # use agent_arena to bulid, update steps is decided in the config
+bc_prefill: 10 #1000
+bc_data_augmenter_config_name: pixel_based_multi_primitive_augmenter_for_diffusion
+random_prefill: 10 #1000
+pretrain: 20 #1000
+
+
+exp_name: ${exp_name}
+project_name: ${project_name}

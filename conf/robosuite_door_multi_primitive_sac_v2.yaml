@@ -1,0 +1,9 @@
+defaults:
+  - agent: robosuite_door_multi_primitive_sac_v2
+  - arena: robosuite_skill_door_afford_3_reward_5
+  - task: dummy
+  - data_augmenter: identity
+
+exp_name: robosuite_door_multi_primitive_sac_v2
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

@@ -1,0 +1,6 @@
+name: 'dm_control'
+action_repeat: 2
+image_resolution: [64, 64]
+domain: walker
+task: walk
+action_horizon: 500 #2*500 sim steps

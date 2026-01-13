@@ -10,11 +10,7 @@ from scipy.signal import fftconvolve
 import cv2
 import os
 
-<<<<<<< HEAD:env/softgym_garment/tasks/utils.py
 IOU_FLATTENING_TRESHOLD = 0.8
-=======
-IOU_FLATTENING_TRESHOLD = 0.82
->>>>>>> e8982bdda037099f737c014ffde53c5d35019faa:env/tasks/utils.py
 NC_FLATTENING_TRESHOLD = 0.95
 
 def calculate_iou(mask1, mask2):

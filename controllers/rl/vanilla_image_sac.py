@@ -115,7 +115,6 @@ class VanillaImageSAC(VanillaSAC):
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # optimizers
-<<<<<<< HEAD
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
 
@@ -131,11 +130,6 @@ class VanillaImageSAC(VanillaSAC):
             self.target_entropy = -float(self.network_action_dim)
 
         self.replay_action_dim = self.network_action_dim
-=======
-        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
-
->>>>>>> e8982bdda037099f737c014ffde53c5d35019faa
 
     def _init_reply_buffer(self, cfg):
         

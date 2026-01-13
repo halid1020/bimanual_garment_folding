@@ -132,10 +132,7 @@ class GraspSkill(BaseSkill):
         gripper_action = np.zeros(rg_dim)
         
         # When reaching or grasped, close the gripper (-1)
-<<<<<<< HEAD
         #print('state', self._state)
-=======
->>>>>>> e8982bdda037099f737c014ffde53c5d35019faa
         if self._state in ['GRASPED', 'REACHED']:
             gripper_action[:] = 1 # Close gripper
         else:
@@ -150,10 +147,7 @@ class GraspSkill(BaseSkill):
         return pos
 
     def is_success(self, info):
-<<<<<<< HEAD
         #print('max grasp steps', self._config['num_grasp_steps'], 'self._num_grasp_steps', self._num_grasp_steps)
-=======
->>>>>>> e8982bdda037099f737c014ffde53c5d35019faa
         return self._num_grasp_steps >= self._config['num_grasp_steps']
 
     def _reached_goal_ori(self, info):

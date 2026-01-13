@@ -1,0 +1,60 @@
+/home/hcv530/project/agent-arena-v0/agent_arena/arena/arena.py:65: DeprecationWarning: `np.int` is a deprecated alias for the builtin `int`. To silence this warning, use `int` by itself. Doing this will not modify any behavior and is safe. When replacing `np.int`, you may wish to use e.g. `np.int64` or `np.int32` to specify the precision. If you wish to review your current use, check the release note link for additional information.
+Deprecated in NumPy 1.20; for more details and guidance: https://numpy.org/devdocs/release/1.20.0-notes.html#deprecations
+  def get_num_episodes(self) -> np.int:
+[robosuite WARNING] No private macro file found! (macros.py:53)
+[robosuite WARNING] It is recommended to use a private macro file (macros.py:54)
+[robosuite WARNING] To setup, run: python /home/hcv530/anaconda3/envs/agent-arena-v0/lib/python3.7/site-packages/robosuite/scripts/setup_macros.py (macros.py:55)
+agent:
+  name: vanilla-sac
+  device: ${oc.env:DEVICE,cuda:1}
+  obs_keys:
+  - state
+  reward_key: default
+  init_alpha: 0.2
+  auto_alpha_learning: true
+  context_horizon: 1
+  hidden_dim: 256
+  state_dim: 42
+  action_dim: 7
+  action_range: 1.0
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  alpha_lr: 0.0003
+  tau: 0.005
+  gamma: 0.99
+  batch_size: 256
+  replay_capacity: 1000000
+  initial_act_steps: 10000
+  train_freq: 1
+  gradient_steps: 2
+  target_update_interval: 1
+  total_update_steps: 1000000
+  validation_interval: 10000
+  eval_checkpoint: -1
+arena:
+  name: robosuite-env
+  task_name: Lift
+  horizon: 500
+  disp: false
+  use_camera_obs: false
+  control_freq: 20
+  env_kwargs:
+    robots: Panda
+    controller_configs: OSC_POSE
+task:
+  task_name: dummy
+data_augmenter:
+  name: identity
+exp_name: vanilla_sac_robosuite_lift_v0
+save_root: /home/hcv530/garment_folding_data
+
+Error executing job with overrides: []
+Traceback (most recent call last):
+  File "train/hydra_train.py", line 33, in main
+    arena = registered_arena[cfg.arena.name](cfg.arena)
+  File "/home/hcv530/project/bimanual_garment_folding/env/robosuite_env/robosuite_arena.py", line 64, in __init__
+    self.config.env_kwargs.controller_configs.update(
+AttributeError: 'str' object has no attribute 'update'
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
+pybullet build time: Sep 22 2020 00:55:20

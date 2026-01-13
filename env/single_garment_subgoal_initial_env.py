@@ -1,20 +1,26 @@
 import os
 import h5py
 import numpy as np
+import cv2
+import json
 
-from itertools import zip_longest
+from softgym.action_space.action_space import Picker
+from softgym.utils.env_utils import get_coverage
+import pyflex
+from agent_arena import Arena
+from tqdm import tqdm
 
 
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
 from .utils.env_utils import set_scene
+from .utils.camera_utils import get_camera_matrix
 from .garment_env import GarmentEnv
 
 global ENV_NUM
 ENV_NUM = 0
-# self.all_garment_types = ['longsleeve', 'trousers', 'skirt', 'dress']
 
 # @ray.remote
-class SingleGarmentSecondLastGoaInitEnv(GarmentEnv):
+class SingleGarmentSubGoalEnv(GarmentEnv):
     
     def __init__(self, config):
         self.num_eval_trials = 30
@@ -84,15 +90,15 @@ class SingleGarmentSecondLastGoaInitEnv(GarmentEnv):
         ###### apply subgoal init
         goals = self.task.get_goals()
         #print('goals', goals)
-        all_sub_goals = len(goals)
+        all_sub_goals = len(goals) * len(goals[0])
 
         ## make a random seed using eid, then choose subgoal deterministically
         self.eid = episode_config['eid']
         rng = np.random.RandomState(self.eid)
         idx = rng.randint(0, all_sub_goals)
 
-        goal_id = idx     # integer division for goal index
-        subgoal_id = -2 # remainder for subgoal index
+        goal_id = idx // len(goals[0])   # integer division for goal index
+        subgoal_id = idx % len(goals[0]) # remainder for subgoal index
 
         goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
 
@@ -153,7 +159,7 @@ class SingleGarmentSecondLastGoaInitEnv(GarmentEnv):
             {'eid': eid, 'tier': 0, 'save_video': True}
             for eid in range(self.num_val_trials)
         ]
-        print('len config', len(val_configs), 'num tiral', self.num_val_trials)
+        
         return val_configs
 
 

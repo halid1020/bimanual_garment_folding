@@ -63,3 +63,6 @@ action_save:
     place_0: [2, 3]
     pick_1: [4, 5]
     place_1: [6, 7]
+
+exp_name: ${exp_name}
+project_name: ${project_name}

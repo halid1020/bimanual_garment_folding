@@ -18,7 +18,7 @@ from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy imp
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from agent_arena.utilities.perform_single import perform_single
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
-from controllers.human.human_fold import HumanFold
+from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 
 # --- dataset class: try plausible import; adjust if your project stores it elsewhere ---
 from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
@@ -90,7 +90,7 @@ def main():
     arena.set_task(task_obj)
 
     # Use the human multi-primitive controller as the human agent (HumanFold was not defined)
-    agent = HumanFold(DotMap())
+    agent = HumanDualPickersPickAndPlace(DotMap())
 
     trials_configs = arena.get_train_configs()
     arena.set_train()

@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import random
 import os
 import matplotlib.pyplot as plt
+import kornia.augmentation as K
 
 def gaussian_2d(shape, sigma=1):
     m, n = [(ss - 1.) / 2. for ss in shape]
@@ -34,7 +35,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
         self.debug = self.config.get('debug', False)
-        self.device = self.config.get('device', 'cpu')
+       
+        #self.device = self.config.get('device', 'cpu')
 
         if self.depth_blur:
             kernel_size = self.config.depth_blur_kernel_size
@@ -42,6 +44,20 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             self.kernel = gaussian_2d((kernel_size, kernel_size), sigma).to(self.device)
             self.kernel = self.kernel.expand(1, 1, kernel_size, kernel_size)
             self.padding = (kernel_size - 1) // 2 if kernel_size % 2 == 1 else kernel_size // 2
+
+        self.random_channel_permutation = self.config.get("random_channel_permutation", False)
+        
+        self.color_jitter = self.config.get("color_jitter", False)
+        if self.color_jitter:
+            self.color_aug = K.ColorJitter(
+                brightness=self.config.get("brightness", 0.2),
+                contrast=self.config.get("contrast", 0.2),
+                saturation=self.config.get("saturation", 0.2),
+                hue=self.config.get("hue", 0.05),
+                p=1.0,
+                keepdim=True,
+                same_on_batch=True, 
+            )
 
     def _save_debug_image(self, rgb_tensor, state_tensor, prefix, step):
         """Save an RGB tensor with state points drawn on it."""
@@ -69,7 +85,11 @@ class PixelBasedSinglePrimitiveDataAugmenter:
     def __call__(self, sample):
         observation = sample['observation']/255.0  # B*C*H*W, [0, 255]
         #self.device = observation.device
-        state = sample['state']
+        self.device = observation.device
+        if 'state' in sample.keys():
+            state = sample['state']
+            new_state = state.clone()
+
         next_observation = sample['next_observation']/255.0
         action = sample['action']
 
@@ -81,7 +101,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 self._save_debug_image(observation[b], state[b], prefix="before_state", step=b)
                 self._save_debug_image(observation[b], pixel_actions[b], prefix="before_action", step=b)
 
-        new_state = state.clone()
+
+        
 
         # Random Rotation
         if self.random_rotation:
@@ -104,14 +125,15 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 N = pixel_actions_.shape[0]
                 rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
                 rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B, A)
+                rotated_action = rotated_action.clip(-1, 1)
+                # if torch.abs(rotated_action).max() > 1:
+                #     continue
 
-                if torch.abs(rotated_action).max() > 1:
-                    continue
-
-                pixel_state_ = state.reshape(-1, 1, 2)
-                N = pixel_state_.shape[0]
-                rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
-                new_state = torch.bmm(pixel_state_, rotation_matrices_tensor).reshape(B, -1)
+                if 'state' in sample.keys():
+                    pixel_state_ = state.reshape(-1, 1, 2)
+                    N = pixel_state_.shape[0]
+                    rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
+                    new_state = torch.bmm(pixel_state_, rotation_matrices_tensor).reshape(B, -1)
 
                 B, C, H, W = observation.shape
                 affine_matrix = torch.zeros(B, 2, 3, device=self.device)
@@ -132,9 +154,25 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(B, -1)
 
-            new_state = new_state.reshape(-1, 2)
-            new_state[:, 0] = -new_state[:, 0]
-            new_state = new_state.reshape(B, -1)
+            if 'state' in sample.keys():
+                new_state = new_state.reshape(-1, 2)
+                new_state[:, 0] = -new_state[:, 0]
+                new_state = new_state.reshape(B, -1)
+
+        # =========================
+        #     COLOR JITTER (GLOBAL)
+        # =========================
+        
+        if self.color_jitter:
+            observation = self.color_aug(observation)
+        
+        # =========================
+        #   RANDOM CHANNEL PERMUTATION
+        # =========================
+        if self.random_channel_permutation:
+            # Generate ONE permutation for the whole batch
+            perm = torch.randperm(3, device=observation.device)
+            observation = observation[:, perm, :, :]
 
         # Save after augmentation
         if self.debug:
@@ -145,5 +183,6 @@ class PixelBasedSinglePrimitiveDataAugmenter:
         sample['observation'] = observation.clip(0, 1)*255
         sample['next_observation'] = next_observation.clip(0, 1)*255
         sample['action'] = pixel_actions
-        sample['state'] = new_state
+        if 'state' in sample.keys():
+            sample['state'] = new_state
         return sample

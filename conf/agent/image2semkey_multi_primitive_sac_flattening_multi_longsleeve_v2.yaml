@@ -1,0 +1,66 @@
+
+# Exp setup
+name: image2state-multi-primitive-sac
+exp_name: ${exp_name}
+project_name: ${project_name}
+replay_device: Disk
+device: "cuda:1"   # fallback to cuda:0
+
+# === Inputs ===
+obs_keys: ['rgb']
+state_keys: ['semkey_norm_pixel']
+reward_key: coverage_alignment_with_stretch_and_affordance_penalty_high_coverage_bonus
+
+context_horizon: 1
+each_image_shape: [3, 128, 128]   # Increased from 84x84
+
+# === Network Dimensions ===
+init_alpha: 1.0
+hidden_dim: 256
+state_dim: 30 # 15*2*2
+feature_dim: 15
+action_dim: 8
+action_range: 1.0
+
+# === Actor / Critic ===
+actor_hidden_dims: [256, 256, 128]
+critic_hidden_dims: [256, 256, 128]
+
+# === GAN-like Encoder (same structure, larger input) ===
+conv_layers:
+  - {out_channels: 64,  kernel_size: 4, stride: 2}
+  - {out_channels: 128, kernel_size: 4, stride: 2}
+  - {out_channels: 256, kernel_size: 4, stride: 2}
+  - {out_channels: 512, kernel_size: 3, stride: 1}
+  - {out_channels: 512, kernel_size: 3, stride: 1}
+
+# === Optimizers ===
+actor_lr: 3e-4
+critic_lr: 3e-4
+encoder_lr: 3e-4
+alpha_lr: 3e-4
+
+# === SAC Hyperparameters ===
+tau: 0.005
+gamma: 0.99
+batch_size: 256
+replay_capacity: 100000
+initial_act_steps: 200
+train_freq: 1
+gradient_steps: 4
+target_update_interval: 1
+
+# Multi-Primitive Part
+obs_type: "image"
+primitive_integration: 'predict_bin_as_output'
+primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]name: image2state-sac
+  - name: norm-pixel-fold
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+save_success: True
+
+# === Training Schedule ===
+total_update_steps: 100000
+validation_interval: 1000
+eval_checkpoint: -1

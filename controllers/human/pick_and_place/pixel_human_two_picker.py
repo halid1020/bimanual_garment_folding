@@ -40,6 +40,10 @@ class PixelHumanTwoPicker(Agent):
 
         # put img and goal_img side by side
         img = np.concatenate([img, goal_rgb], axis=1)
+
+        # Draw vertical white line between the two images
+        line_x = rgb.shape[1]   # x-position = width of left image (512)
+        cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
         
         # Store click coordinates
         clicks = []
@@ -84,7 +88,9 @@ class PixelHumanTwoPicker(Agent):
             (place2_y / width) * 2 - 1
         ]
         
-        return {
+        return np.concatenate([normalized_action1, normalized_action2])
+        
+        {
             'pick_0': normalized_action1[:2],
             'place_0': normalized_action1[2:],
             'pick_1': normalized_action2[:2],

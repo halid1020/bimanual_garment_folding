@@ -1,0 +1,9 @@
+name: pixel-based-multi-primitive-data-augmenter-for-dreamer
+random_rotation: true
+rotation_degree: 1
+vertical_flip: true
+debug: true
+color_jitter: true
+randomise_prim_acts: true
+K: 3
+include_state: true

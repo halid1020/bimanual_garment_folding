@@ -1,5 +1,4 @@
 name: pixel-based-multi-primitive-data-augmenter
-device: cuda:1
 rgb_noise_factor: 1
 random_rotation: true
 rotation_degree: 1

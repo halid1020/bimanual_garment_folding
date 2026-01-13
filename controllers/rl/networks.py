@@ -36,35 +36,158 @@ class NatureCNNEncoder(nn.Module):
         return F.relu(x)
 
 class NatureCNNEncoderRegressor(nn.Module):
-    def __init__(self, obs_shape=(3, 84, 84), state_dim=45, feature_dim=512):
+    def __init__(
+        self,
+        obs_shape=(3, 84, 84),
+        state_dim=45,
+        feature_dim=512,
+        conv_layers=None,
+        use_decoder=False,
+        decoder_layers=None,
+    ):
+        """
+        Args:
+            obs_shape: (C, H, W)
+            state_dim: output state dimension
+            feature_dim: intermediate feature dimension before regression
+            conv_layers: list of dicts for encoder Conv2d blocks
+            use_decoder: whether to build a decoder
+            decoder_layers: list of dicts for transpose conv blocks, e.g.
+                [
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1},
+                    {"out_channels": 32, "kernel_size": 4, "stride": 2},
+                    {"out_channels": 3,  "kernel_size": 8, "stride": 4}
+                ]
+        """
         super().__init__()
         assert len(obs_shape) == 3, "Input must be 3D (C,H,W)"
-        self.conv_net = nn.Sequential(
-            nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4),  # 84x84 -> 20x20
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),           # 20x20 -> 9x9
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),           # 9x9 -> 7x7
-            nn.ReLU()
-        )
+        C, H, W = obs_shape
 
-        # Compute flatten size
+        # default NatureCNN encoder
+        if conv_layers is None:
+            conv_layers = [
+                {"out_channels": 32, "kernel_size": 8, "stride": 4},
+                {"out_channels": 64, "kernel_size": 4, "stride": 2},
+                {"out_channels": 64, "kernel_size": 3, "stride": 1},
+            ]
+
+        # ----- ENCODER -----
+        conv_modules = []
+        in_channels = C
+        for layer_cfg in conv_layers:
+            conv_modules += [
+                nn.Conv2d(
+                    in_channels,
+                    layer_cfg["out_channels"],
+                    kernel_size=layer_cfg["kernel_size"],
+                    stride=layer_cfg["stride"],
+                ),
+                nn.ReLU(),
+            ]
+            in_channels = layer_cfg["out_channels"]
+
+        self.conv_net = nn.Sequential(*conv_modules)
+
         with torch.no_grad():
             n_flatten = self.conv_net(torch.zeros(1, *obs_shape)).view(1, -1).size(1)
 
         self.fc = nn.Linear(n_flatten, feature_dim)
-
         self.regressor = nn.Linear(feature_dim, state_dim)
 
-    def forward(self, obs):
-        # Normalize image to [0,1]
+        # ----- DECODER -----
+        self.use_decoder = use_decoder
+        if use_decoder:
+            # If no decoder provided, mirror the NatureCNN in reverse
+            if decoder_layers is None:
+                decoder_layers = [
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1},
+                    {"out_channels": 32, "kernel_size": 4, "stride": 2},
+                    {"out_channels": C,  "kernel_size": 8, "stride": 4},
+                ]
+
+            # Determine pre-decoder feature map shape (reverse of conv)
+            self.decoder_input_shape = self.conv_net(
+                torch.zeros(1, *obs_shape)
+            ).shape[1:]
+
+            # Linear layer to expand embedding back to feature map
+            decoder_input_dim = (
+                self.decoder_input_shape[0]
+                * self.decoder_input_shape[1]
+                * self.decoder_input_shape[2]
+            )
+            self.fc_decoder = nn.Linear(feature_dim, decoder_input_dim)
+
+            # Build transpose conv decoder
+            deconv_modules = []
+            in_channels = self.decoder_input_shape[0]
+            for layer_cfg in decoder_layers:
+                deconv_modules += [
+                    nn.ConvTranspose2d(
+                        in_channels,
+                        layer_cfg["out_channels"],
+                        kernel_size=layer_cfg["kernel_size"],
+                        stride=layer_cfg["stride"],
+                    ),
+                    nn.ReLU() if layer_cfg["out_channels"] != C else nn.Sigmoid(),
+                ]
+                in_channels = layer_cfg["out_channels"]
+
+            self.decoder = nn.Sequential(*deconv_modules)
+
+    def forward(self, obs): ## assume rgb images
+        # ---- Encoder ----
         x = obs / 255.0
         x = self.conv_net(x)
         x = x.reshape(x.size(0), -1)
-        x = self.fc(x)
-        e = F.relu(x)
-        x = self.regressor(e)
-        return e, x
+
+        e = F.relu(self.fc(x))        # embedding
+        state_pred = self.regressor(e)
+
+        # ---- Optional Decoder ----
+        if self.use_decoder:
+            d = self.fc_decoder(e)
+            d = d.view(
+                x.size(0),
+                self.decoder_input_shape[0],
+                self.decoder_input_shape[1],
+                self.decoder_input_shape[2],
+            )
+            recon = self.decoder(d)   # reconstructed image 0–1
+            return e, state_pred, recon
+
+        return e, state_pred, None
+    
+# class NatureCNNEncoderRegressor(nn.Module):
+#     def __init__(self, obs_shape=(3, 84, 84), state_dim=45, feature_dim=512):
+#         super().__init__()
+#         assert len(obs_shape) == 3, "Input must be 3D (C,H,W)"
+#         self.conv_net = nn.Sequential(
+#             nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4),  # 84x84 -> 20x20
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, kernel_size=4, stride=2),           # 20x20 -> 9x9
+#             nn.ReLU(),
+#             nn.Conv2d(64, 64, kernel_size=3, stride=1),           # 9x9 -> 7x7
+#             nn.ReLU()
+#         )
+
+#         # Compute flatten size
+#         with torch.no_grad():
+#             n_flatten = self.conv_net(torch.zeros(1, *obs_shape)).view(1, -1).size(1)
+
+#         self.fc = nn.Linear(n_flatten, feature_dim)
+
+#         self.regressor = nn.Linear(feature_dim, state_dim)
+
+#     def forward(self, obs):
+#         # Normalize image to [0,1]
+#         x = obs / 255.0
+#         x = self.conv_net(x)
+#         x = x.reshape(x.size(0), -1)
+#         x = self.fc(x)
+#         e = F.relu(x)
+#         x = self.regressor(e)
+#         return e, x
 
 
 class ConvEncoder(nn.Module):

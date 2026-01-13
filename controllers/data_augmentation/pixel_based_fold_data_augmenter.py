@@ -4,8 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 import random
 
-from agent_arena.agent.utilities.torch_utils import np_to_ts, ts_to_np
+from agent_arena.torch_utils import np_to_ts, ts_to_np
 from .utils import preprocess_rgb, postprocess_rgb, gaussian_kernel
+from torchvision.transforms.functional import adjust_brightness, adjust_contrast, adjust_saturation, adjust_hue
 
 
 def gaussian_2d(shape, sigma=1):
@@ -40,19 +41,28 @@ class PixelBasedFoldDataAugmenter:
         if self.depth_blur:
             kernel_size = self.config.depth_blur_kernel_size
             sigma = 1.0
-            self.kernel = gaussian_kernel(kernel_size, sigma).to(self.config.device)
+            self.kernel = gaussian_kernel(kernel_size, sigma)
             self.kernel = self.kernel.expand(1, 1, kernel_size, kernel_size)
             if kernel_size % 2 == 1:
                 self.padding = (kernel_size - 1) // 2
             else:
                 self.padding = kernel_size//2
+        
+        self.colour_jitter = self.config.get('colour_jitter', False)
+
+        # Jitter strength
+        self.brightness = self.config.get('brightness', 0.2)
+        self.contrast   = self.config.get('contrast', 0.2)
+        self.saturation = self.config.get('saturation', 0.2)
+        self.hue        = self.config.get('hue', 0.1)
     
 
     def __call__(self, sample_in, train=True, to_tensor=True, 
-                 single=False):
+                 single=False, device='cpu'):
         #print('before preprocess goal-rgb', sample['goal-rgb'].shape)
         # batch is assumed to have the shape B*T*C*H*W
         #print('transform!!!!')
+        
         allowed_keys = ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                         'goal-depth', 'goal-mask', 'action', 'reward', 'terminal']
         if 'observation' in sample_in:
@@ -60,6 +70,7 @@ class PixelBasedFoldDataAugmenter:
         else:
             sample = sample_in
         
+
         if 'action' in sample_in:
             # if sample action is a dict
             if isinstance(sample_in['action'], dict):
@@ -69,15 +80,16 @@ class PixelBasedFoldDataAugmenter:
                     sample['action'] = sample_in['action']['norm-pixel-pick-and-place']
             ## flatten the last two dimension
             sample['action'] = sample['action'].reshape(sample['action'].shape[0], sample['action'].shape[1], -1)
+            sample['action'] = sample['action'].clip(-1, 1)
             #print('sample action', sample['action'].shape)
 
         for k, v in sample.items():
             #print(k, v.shape)
             #print('self.device', self.config.device)
             if isinstance(v, np.ndarray):
-                sample[k] = np_to_ts(v.copy(), self.config.device)
+                sample[k] = np_to_ts(v.copy(), device)
             else:
-                sample[k] = v.to(self.config.device)
+                sample[k] = v.to(device)
             
             #sample[k] = sample[k].unsqueeze(0)
             sample[k] = sample[k].float()
@@ -149,15 +161,6 @@ class PixelBasedFoldDataAugmenter:
         
         if 'reward_scale' in self.config.keys() and train:
             sample['reward'] *= self.config.reward_scale
-        
-        # we assume the action is in the correct form
-        # if 'action' in sample.keys() and (not self.swap_action):
-        #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
-
-            # if 'swap_action' in self.config and self.config.swap_action:
-            # # print('swap action')
-            #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
-  
     
         # Random Rotation
         if self.random_rotation and train:
@@ -173,14 +176,14 @@ class PixelBasedFoldDataAugmenter:
 
                 rot = torch.stack([
                     torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
-                ], dim=0).to(self.config.device)
+                ], dim=0).to(device)
 
                 rot_inv = rot.transpose(-1, -2) 
 
 
                 # Rotate actions
                 num_points = 2
-                if self.config.primitive == 'norm-pixel-fold':
+                if self.config.primitive == 'dual-picker-norm-pixel-pick-and-place':
                     num_points = 4
                 rotation_matrices_tensor = rot_inv.expand(B*(T-1)*num_points, 2, 2).reshape(-1, 2, 2)
                 rotation_action = sample['action'].reshape(-1, 1, 2)
@@ -189,13 +192,13 @@ class PixelBasedFoldDataAugmenter:
                     .reshape(*sample['action'].shape)
                 #print('rotated_action', rotated_action.shape)
                 
-                if torch.abs(sample['action']).max() > 1:
-                    print('max action', torch.abs(sample['action']).max())
-                    continue
+                # if torch.abs(sample['action']).max() > 1:
+                #     #print('max action', torch.abs(sample['action']).max())
+                #     continue
                 #sample['action'] = rotated_action
 
                 # Rotate observations
-                affine_matrix = torch.zeros(B*T, 2, 3, device=self.config.device)
+                affine_matrix = torch.zeros(B*T, 2, 3, device=device)
                 affine_matrix[:, :2, :2] = rot.expand(B*T, 2, 2)
 
 
@@ -242,41 +245,6 @@ class PixelBasedFoldDataAugmenter:
             new_actions[:, 1] = -new_actions[:, 1]
             sample['action'] = new_actions.reshape(B, T, num_points*2)
             # sample['action'] = new_actions.reshape(*sample['action'].shape)
-        
-        # if 'action' in sample.keys() and (not self.swap_action):
-        #     # swap action to the correct order
-        #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
-            
-            # if self.swap_action:
-            #     # print('swap action')
-            #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
-
-
-
-        # if self.mask_out:
-        #     bg_value = self.config.bg_value \
-        #         if 'bg_value' in self.config else 0
-        #     # print('rgb', sample['rgb'].shape)
-        #     # print('mask', sample['mask'].shape)
-        #     if 'rgb' in sample:
-        #         sample['rgb'] = sample['rgb'] * sample['mask'] + \
-        #             bg_value * (1 - sample['mask'])
-        #     if 'depth' in sample:
-        #         sample['depth'] = sample['depth'] * sample['mask'] + \
-        #             bg_value * (1 - sample['mask'])
-            
-        #     if 'goal-rgb' in sample:
-        #         # make mask three channel
-        #         #print('goal-rgb', sample['goal-rgb'].shape)
-        #         #print('goal-mask', sample['goal-mask'].shape)
-        #         mask_ = sample['goal-mask'].repeat(1, 3, 1, 1)
-        #         #print('mask_', mask_.shape)
-        #         sample['goal-rgb'] = sample['goal-rgb'] * mask_ + \
-        #             bg_value * (1 - mask_)
-            
-        #     if 'goal-depth' in sample:
-        #         sample['goal-depth'] = sample['goal-depth'] * sample['goal-mask'] + \
-        #             bg_value * (1 - sample['goal-mask'])
 
         if self.maskout:
            
@@ -303,8 +271,33 @@ class PixelBasedFoldDataAugmenter:
                 sample['goal-depth'] = self.apply_mask(sample['goal-depth'], goal_mask)
 
                 
-        
-        
+        if self.colour_jitter and train:
+            if 'rgb' in sample:
+
+                rgb = sample['rgb']   # [B, T, C, H, W]
+
+                # Generate jitter parameters ONCE per call, shared across batch
+                b_factor  = 1.0 + (torch.rand(1) * 2 - 1) * self.brightness
+                c_factor  = 1.0 + (torch.rand(1) * 2 - 1) * self.contrast
+                s_factor  = 1.0 + (torch.rand(1) * 2 - 1) * self.saturation
+                h_factor  = (torch.rand(1) * 2 - 1) * self.hue
+
+                # Flatten batch/time dims for vectorized ops
+                B, T, C, H, W = rgb.shape
+                rgb_rs = rgb.view(B*T, C, H, W)
+
+                # Apply jitter ops
+                rgb_rs = adjust_brightness(rgb_rs, b_factor.item())
+                rgb_rs = adjust_contrast(rgb_rs, c_factor.item())
+                rgb_rs = adjust_saturation(rgb_rs, s_factor.item())
+                rgb_rs = adjust_hue(rgb_rs, h_factor.item())
+
+                # Clamp to valid range
+                rgb_rs = rgb_rs.clamp(0, 1)
+
+                # Reshape back
+                sample['rgb'] = rgb_rs.view(B, T, C, H, W)
+                
         if self.config.debug:
             if self.config.primitive == 'norm-pixel-fold':
                 from agent_arena.utilities.visual_utils import draw_pick_and_place
@@ -346,17 +339,8 @@ class PixelBasedFoldDataAugmenter:
             for k, v in sample.items():
                 sample[k] = ts_to_np(v)
         
-        # print all output shape
-        # print('HELLOO')
-        # for k, v in sample.items():
-        #     if isinstance(v, torch.Tensor):
-        #         print(k, v.shape)
-        # exit()
         
         return sample
-    
-    # def apply_mask(self, data, mask):
-    #     return data * mask + self.bg_value * (1 - mask)
     
     def postprocess(self, sample):
         
@@ -411,30 +395,6 @@ class PixelBasedFoldDataAugmenter:
                     res['depth'] * (self.config.depth_max - self.config.depth_min) \
                     + self.config.depth_min
         
-        # if 'action_heatmap' in res:
-        #     # convert action heatmap to action
-        #     #print('action heatmap shape', res['action_heatmap'].shape)
-        #     B, T, _, H, W = res['action_heatmap'].shape
-        #     action_heatmap = res['action_heatmap'].reshape(B*T, 2, H, W)
-            
-        #     # For pick action
-        #     pick_idx = np.argmax(action_heatmap[:, 0].reshape(B*T, -1), axis=1)
-        #     pick_idx = np.stack([pick_idx // W, pick_idx % W], axis=1).astype(float)
-            
-        #     # For place action
-        #     place_idx = np.argmax(action_heatmap[:, 1].reshape(B*T, -1), axis=1)
-        #     place_idx = np.stack([place_idx // W, place_idx % W], axis=1).astype(float)
-            
-        #     # Combine pick and place actions
-        #     action = np.concatenate([pick_idx, place_idx], axis=1)
-        #     res['action'] = action.reshape(B, T, 4)
-
-        #     res['action'] = res['action'] / np.array([H, W, H, W]) * 2 - 1
-
-        #     res['action'] = res['action'].reshape(B, T, 4)
-
-            #print('action', res['action'])
-
         if 'action' in res:
             res['action'] = res['action'].clip(-1, 1)
 
@@ -483,7 +443,7 @@ class PixelBasedFoldDataAugmenter:
         depth_process = train and self.process_depth
 
         depth_noise = \
-            torch.randn(depth.shape, device=self.config.device) \
+            torch.randn(depth.shape, device=depth.device) \
                 * (self.config.depth_noise_var if depth_process else 0)
 
         if self.depth_blur and depth_process:

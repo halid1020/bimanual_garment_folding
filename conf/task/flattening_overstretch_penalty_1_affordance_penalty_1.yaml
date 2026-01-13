@@ -1,0 +1,10 @@
+num_goals: 1
+garment_type: longsleeve
+asset_dir: assets
+task_name: flattening
+debug: false
+alignment: simple_rigid
+overstretch_penalty_scale: 1
+overstretch_penalty_threshold: 0.1
+affordance_penalty_scale: 1.0
+readjust_pick: false

@@ -1,30 +1,31 @@
 from agent_arena import Agent
-import numpy as np
-import cv2
 import random
 
-from .random_pick_and_place import RandomPickAndPlace
 from .random_pick_and_fling import RandomPickAndFling
-from .random_pick_and_drag import RandomPickAndDrag
-from .random_fold import RandomFold
+from .random_pick_and_place import RandomPickAndPlace
+from ..human.no_operation import NoOperation
+
 
 class RandomMultiPrimitive(Agent):
-    
+
     def __init__(self, config):
-        
         super().__init__(config)
+
+        # 🔁 MUST MATCH HumanMultiPrimitive
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
             "norm-pixel-pick-and-place",
-            "norm-pixel-pick-and-drag",
-            "norm-pixel-fold",
+            "no-operation"
         ]
+
         self.primitive_instances = [
             RandomPickAndFling(config),
-            RandomPickAndPlace(config),
-            RandomPickAndDrag(config),
-            RandomFold(config)]
-    
+            RandomPickAndPlace(config),   # MUST be dual-picker compatible
+            NoOperation(config)
+        ]
+
+        assert len(self.primitive_names) == len(self.primitive_instances)
+
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
 
@@ -34,30 +35,20 @@ class RandomMultiPrimitive(Agent):
     def update(self, infos, actions):
         pass
 
-    # def act(self, info_list, updates=[]):
-    #     """
-    #     Pop up a window shows the RGB image, and user can click on the image to
-    #     produce normalised pick-and-place action ranges from [-1, 1]
-    #     """
-    #     actions = []
-    #     for info in info_list:
-    #         actions.append(self.single_act(info))
-        
-    #     print('random action', actions[0])
-        
-    #     return actions
-    
-
     def single_act(self, state, update=False):
         """
-        Allow user to choose a primitive, then delegate to the chosen primitive's act method.
-        Shows rgb and goal_rgb images while prompting for input.
+        Sample a primitive uniformly and delegate action generation.
         """
 
-        pid = random.choice(range(len(self.primitive_instances)))
-        # Delegate action
-        action = self.primitive_instances[pid].single_act(state)
+        pid = random.randrange(len(self.primitive_instances))
+        primitive_name = self.primitive_names[pid]
+        primitive = self.primitive_instances[pid]
+
+        action = primitive.single_act(state)
 
         return {
-            self.primitive_names[pid]: action
+            primitive_name: action
         }
+
+    def act(self, info_list, update=False):
+        return [self.single_act(info) for info in info_list]

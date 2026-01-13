@@ -1,5 +1,5 @@
 num_goals: 10
-object: longsleeve
+garment_type: longsleeve
 asset_dir: assets
 task_name: centre-sleeve-folding
 debug: false

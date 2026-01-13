@@ -1,12 +1,56 @@
 import numpy as np
 import torch
-import torch.nn as nn
-from torchvision import datasets, models, transforms
-import torchvision.transforms.functional as TF
+from torchvision import transforms
 import torch.nn.functional as F
 
 
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
+from agent_arena.torch_utils import np_to_ts, ts_to_np
+
+
+def randomize_primitive_encoding_np(action_prim, K):
+    """
+    action_prim: np.ndarray of shape (N, 1) with values in [-1, 1]
+    K: int, number of primitives
+
+    Returns:
+        randomized primitive encoding, same shape (N, 1)
+    """
+
+    # Recover primitive id
+    prim_id = ((action_prim + 1.0) * 0.5 * K).astype(np.int64)
+    prim_id = np.clip(prim_id, 0, K - 1)
+
+    bin_width = 2.0 / K
+    bin_min = -1.0 + prim_id.astype(np.float32) * bin_width
+    bin_max = bin_min + bin_width
+
+    # Uniform sample inside the bin
+    rand = np.random.rand(*bin_min.shape).astype(np.float32)
+    randomized = bin_min + rand * bin_width
+
+    return randomized
+
+def randomize_primitive_encoding(action_prim, K):
+    """
+    action_prim: (N, 1) tensor in [-1, 1], original primitive encoding
+    K: number of primitives
+    """
+    # Recover primitive id
+    prim_id = torch.clamp(
+        ((action_prim + 1) * 0.5 * K - 1e6).long(),
+        min=0,
+        max=K - 1
+    )
+
+    bin_width = 2.0 / K
+    bin_min = -1.0 + prim_id.float() * bin_width
+    bin_max = bin_min + bin_width
+
+    # Uniform sample inside bin
+    rand = torch.rand_like(bin_min)
+    randomized = bin_min + rand * bin_width
+
+    return randomized
 
 def gaussian_kernel(kernel_size, sigma):
     x = torch.linspace(-sigma, sigma, kernel_size)

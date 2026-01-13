@@ -1,0 +1,6 @@
+num_goals: 1
+garment_type: fabric
+asset_dir: assets
+task_name: flattening
+debug: false
+alignment: simple_rigid

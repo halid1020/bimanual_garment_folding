@@ -16,8 +16,7 @@ from agent_arena import TrainableAgent
 import zarr
 from .replay_buffer import ReplayBuffer
 from .replay_buffer_zarr import ReplayBufferZarr
-
-from .wandb_logger import WandbLogger
+from ..data_augmentation.register_augmeters import build_data_augmenter
 
 
 class Critic(nn.Module):
@@ -125,6 +124,8 @@ class VanillaSAC(TrainableAgent):
         #self.act_steps_per_update = config.act_steps_per_update
         self.total_update_steps = config.total_update_steps
         self.info = None
+        self.save_success = config.get('save_success', False)
+        self.data_augmenter = build_data_augmenter(self.config.data_augmenter)
 
     def _make_actor_critic(self, config):
         # actor and critics (two critics for twin-Q)
@@ -215,12 +216,13 @@ class VanillaSAC(TrainableAgent):
             a, logp = self.actor.sample(self._process_context_for_input(obs_list))
             a = torch.clip(a, -self.config.action_range, self.config.action_range)
             a = a.detach().cpu().numpy().squeeze(0)
-            return a, logp.detach().cpu().numpy().squeeze(0)
+            return a, a #logp.detach().cpu().numpy().squeeze(0)
         else:
             mean, _ = self.actor(self._process_context_for_input(obs_list))
             action = torch.tanh(mean)
             action = torch.clip(action, -self.config.action_range, self.config.action_range)
-            return action.detach().cpu().numpy().squeeze(0), None
+            a = action.detach().cpu().numpy().squeeze(0)
+            return a, a
 
     def act(self, info_list, updates=None):
         self.set_eval()
@@ -359,7 +361,14 @@ class VanillaSAC(TrainableAgent):
                     'train/total_sim_steps': self.sim_steps 
                 }, step=self.act_steps)
 
+                if success and self.save_success:
+                    print('About to Save Success')
+                    self.logger.log_frames(arena.get_frames(), key='success episodes', step=self.act_steps)
+
             self.info = arena.reset()
+            if self.save_success:
+                print('set arena save videos')
+                arena.save_video = True
             self.set_train()
             self.reset([arena.id])
             self.episode_return = 0.0
@@ -368,7 +377,8 @@ class VanillaSAC(TrainableAgent):
             self.last_sim_steps = self.sim_steps
 
         # sample stochastic action for exploration
-        a, _ = self._select_action(self.info, stochastic=True)
+        a, a_add = self._select_action(self.info, stochastic=True)
+        #print(f'[vanilla sac] a {a}, a_add {a_add}',)
         # clip to action range
         #a = np.clip(a, -self.config.action_range, self.config.action_range)
         #dict_action = {'continuous': a}  # user should adapt to their arena's expected action format
@@ -407,7 +417,7 @@ class VanillaSAC(TrainableAgent):
         #next_obs_stack = np.stack(obs_list)[-self.context_horizon:].flatten() #TODO: .reshape(self.context_horizon * self.each_image_shape[0], *self.each_image_shape[1:])
 
         #print('\napplied action vecotr', a, type(a))
-        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a), reward, next_obs_for_replay, done)
+        self._add_transition_replay(obs_for_replay, self._post_process_action_to_replay(a_add), reward, next_obs_for_replay, done)
         
         
         self.act_steps += 1
@@ -416,7 +426,7 @@ class VanillaSAC(TrainableAgent):
         self.episode_length += 1
     
     def _add_transition_replay(self, obs_for_replay, a, reward, next_obs_for_replay, done):
-       
+        #print('[vanilla sac] action before add', a)
         self.replay.add(obs_for_replay, a, reward, next_obs_for_replay,  done)
 
     def _get_next_obs_for_process(self, next_info):
@@ -447,6 +457,7 @@ class VanillaSAC(TrainableAgent):
         if arenas is None or len(arenas) == 0:
             raise ValueError("SAC.train requires at least one Arena.")
         arena = arenas[0]
+        print('arena mode', arena.get_mode())
         self.set_train()
         self.last_done = True
         #print('here update!!')
@@ -508,7 +519,7 @@ class VanillaSAC(TrainableAgent):
             'update_steps': self.update_steps,
             'act_steps': self.act_steps,
             'sim_steps': self.sim_steps,
-            "wandb_run_id": self.logger.get_run_id(),
+           
         }
 
         if self.auto_alpha_learning:
@@ -594,28 +605,28 @@ class VanillaSAC(TrainableAgent):
         self.sim_steps = state.get('sim_steps', 0)
         self.last_sim_steps = self.sim_steps
 
-        # ---- W&B resume handling ----
-        run_id = state.get("wandb_run_id", None)
-        try:
-            if resume and run_id is not None:
-                print(f"[INFO] Attempting to resume W&B run ID: {run_id}")
-                self.logger = WandbLogger(
-                    project=self.config.project_name,
-                    name=self.config.exp_name,
-                    config=dict(self.config),
-                    run_id=run_id,
-                    resume=True
-                )
-            else:
-                raise ValueError("No valid run_id for resuming.")
-        except Exception as e:
-            print(f"[WARN] W&B resume failed ({e}). Starting a new run instead.")
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
+        # # ---- W&B resume handling ----
+        # run_id = state.get("wandb_run_id", None)
+        # try:
+        #     if resume and run_id is not None:
+        #         print(f"[INFO] Attempting to resume W&B run ID: {run_id}")
+        #         self.logger = WandbLogger(
+        #             project=self.config.project_name,
+        #             name=self.config.exp_name,
+        #             config=dict(self.config),
+        #             run_id=run_id,
+        #             resume=True
+        #         )
+        #     else:
+        #         raise ValueError("No valid run_id for resuming.")
+        # except Exception as e:
+        #     print(f"[WARN] W&B resume failed ({e}). Starting a new run instead.")
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
 
 
     def load(self, path: Optional[str] = None) -> int:
@@ -625,16 +636,17 @@ class VanillaSAC(TrainableAgent):
         replay_file = os.path.join(path, 'last_replay_buffer.pt')
 
         if not os.path.exists(model_file):
-            print(f"[WARN] Model file not found: {model_file}")
-
-            self.logger = WandbLogger(
-                project=self.config.project_name,
-                name=self.config.exp_name,
-                config=dict(self.config),
-                resume=False
-            )
-            
             return 0
+        #     print(f"[WARN] Model file not found: {model_file}")
+
+        #     self.logger = WandbLogger(
+        #         project=self.config.project_name,
+        #         name=self.config.exp_name,
+        #         config=dict(self.config),
+        #         resume=False
+        #     )
+            
+        #     return 0
 
         self._load_model(model_file, resume=True)
         
@@ -688,8 +700,6 @@ class VanillaSAC(TrainableAgent):
             raise ValueError(f"Unknown replay device type: {self.replay_device}")
 
 
-
-    
     def load_best(self, path: Optional[str] = None) -> int:
         path = path or self.save_dir
         path = os.path.join(path, 'checkpoints')
@@ -711,7 +721,3 @@ class VanillaSAC(TrainableAgent):
         for aid in arena_ids:
             self.internal_states[aid] = {}
             self.internal_states[aid]['obs_que'] = deque()
-
-    def set_log_dir(self, log_dir):
-        self.save_dir = log_dir
-        self.logger.set_log_dir(log_dir)

@@ -1,0 +1,10 @@
+defaults:
+  - agent: dreamerv3_multi_longsleeve_dual_picker_multi_primitive_flattening_default
+  - arena: multi_longsleeve_dual_picker_multi_primitive_readjust_pick_0.9_provide_semkey_pixel_no_success_stop_resol_64
+  - task: flattening_overstretch_penalty_1_no_big_bonus
+  - data_augmenter: identity
+
+train_and_eval: train_and_evaluate_single
+exp_name: dreamerv3_multi_longsleeve_dual_picker_multi_primitive_flattening_default
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

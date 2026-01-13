@@ -26,12 +26,13 @@ class RoboSuiteSkillArena(RoboSuiteArena):
         #self.param_dim = self.skill_controller.get_param_dim(base_action_dim)
 
         #self.action_space = None  # not used directly now
-        self.observation_space = self.env.observation_space
+        #self.observation_space = self.env.observation_space
         self.reward_scale = config.get('reward_scale', 1.0)
 
         self.current_obs = None
         self.done = False
         self.skill_step_count = 0
+        self.action_horiozn = self.config.get('action_horizon', 10000)
 
     def get_param_dim(self, skill_name):
         #print('action space', self.action_space)
@@ -42,6 +43,7 @@ class RoboSuiteSkillArena(RoboSuiteArena):
         self.done = False
         self.skill_step_count = 0
         self.current_obs = info["observation"]
+        
         return info
         
 
@@ -77,9 +79,9 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             #print('low_level_action', low_level_action)
             info = super().step(low_level_action)
 
-            reward = info["reward"]["default"]
+            reward = info["reward"]["default"] * self.reward_scale
             #print('reward scale', self.reward_scale)
-            cumulative_reward += reward * self.reward_scale
+            cumulative_reward += reward
             low_level_steps += 1
 
             skill_done = self.skill_controller.done()
@@ -99,6 +101,11 @@ class RoboSuiteSkillArena(RoboSuiteArena):
         self.current_obs = info["observation"]
         self.skill_step_count += 1
 
+        self.done |= self.skill_step_count >= self.action_horizon
+
+        self.current_obs['is_terminal'] = self.done
+        self.current_obs['is_first'] = False
+
         return {
             "observation": self.current_obs,
             "reward": {
@@ -114,10 +121,9 @@ class RoboSuiteSkillArena(RoboSuiteArena):
             "sim_steps": low_level_steps,
             "arena": self,
             "arena_id": self.id,
+            "discount": 1.0 if not self.done else 0.0
         }
 
-    def render(self):
-        return super().render()
 
     def close(self):
         super().close()

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=diff-flat-workspace-goal  # Job name
+#SBATCH --nodes=1                            # Number of nodes to run on
+#SBATCH --ntasks=1                           # Number of MPI tasks to request
+#SBATCH --cpus-per-task=4                    # Number of CPU cores per MPI task
+#SBATCH --mem=16G                            # Total memory to request
+#SBATCH --time=3-00:0:00                     # Time limit (DD-HH:MM:SS)
+#SBATCH --account=cs-garm-2025               # Project account to use
+#SBATCH --mail-type=END,FAIL                 # Mail events (NONE, BEGIN, END, FAIL, ALL)
+#SBATCH --mail-user=hcv530@york.ac.uk        # Where to send mail
+#SBATCH --output=%x-%j.log                   # Standard output log
+#SBATCH --error=%x-%j.err                    # Standard error log
+#SBATCH --partition=gpuplus
+#SBATCH --gres=gpu:1
+
+# Abort if any command fails
+set -e
+
+# 1. Clean Environment
+module purge
+
+# 2. Load Conda (Fixed Syntax)
+module load Miniconda3/23.5.2-0
+
+# 3. Activate your specific environment
+# We source bashrc to ensure 'conda activate' works in the script
+source ~/.bashrc
+
+# 4. Diagnostics
+echo "Job ID: $SLURM_JOB_ID"
+echo "Running on host: $(hostname)"
+echo "Working directory: $(pwd)"
+nvidia-smi  # Check if GPU is visible
+
+# 5. Project Setup
+# Ensure we are in the correct directory (Optional but safe)
+cd /users/hcv530/project/bimanual_garment_folding
+source ./setup.sh
+
+# 6. Run Training
+echo "Starting training at $(date)"
+
+python ./train/hydra_train.py \
+    --config-name diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_goal
+
+echo "Job completed at $(date)"

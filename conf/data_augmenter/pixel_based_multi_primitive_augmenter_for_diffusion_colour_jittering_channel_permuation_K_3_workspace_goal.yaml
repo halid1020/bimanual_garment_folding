@@ -7,6 +7,6 @@ color_jitter: true
 img_dim: [96, 96]
 randomise_prim_acts: false
 random_channel_permutation: true
-K: 0
+K: 3
 use_goal: True # No rotatin, flipping and colour jitting, channel permutation.
-use_workspace: True
+use_workspace: true

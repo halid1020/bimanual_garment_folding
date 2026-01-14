@@ -88,6 +88,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['robot0_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 3:4]
             sample['robot1_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 4:5]
         
+        if self.use_workspace and 'rgb-workspace-mask-goal' in sample:
+            sample['rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, :3]
+            sample['robot0_mask'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 3:4]
+            sample['robot1_mask'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 4:5]
+            sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
+        
         if self.use_goal and 'rgb-goal' in sample:
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
@@ -280,12 +286,19 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
             if 'rgb-workspace-mask' in sample:
                 sample['rgb-workspace-mask'] = torch.cat([obs, robot0_mask, robot1_mask], dim=2)
+            
+            
         
         if self.use_goal:
             goal_obs = self._unflatten_bt(goal_obs, BB, TT)
             sample['goal_rgb'] = goal_obs
+            
             if 'rgb-goal' in sample:
                 sample['rgb-goal'] = torch.cat([obs, goal_obs], dim=2)
+            
+            if 'rgb-workspace-mask-goal' in sample:
+                
+                sample['rgb-workspace-mask-goal'] = torch.cat([obs, robot0_mask, robot1_mask, goal_obs], dim=2)
 
 
         #print('[augmenter] rgb stats', sample['rgb'].max(), sample['rgb'].min())

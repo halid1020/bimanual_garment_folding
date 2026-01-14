@@ -320,6 +320,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 1
         elif self.config.input_obs == 'rgb-workspace-mask':
             self.input_channel = 5
+        elif self.config.input_obs == 'rgb-workspace-mask-goal':
+            self.input_channel = 8
         elif self.config.input_obs == 'rgb-goal':
             self.input_channel = 6
 
@@ -481,6 +483,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             if self.config.input_obs == 'rgb-workspace-mask':
                 nbatch['rgb-workspace-mask'] = torch.cat([
                     nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+            
+            if self.config.input_obs == 'rgb-workspace-mask-goal':
+                nbatch['rgb-workspace-mask-goal'] = torch.cat([
+                    nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
             
             if self.config.input_obs == 'rgb-goal':
                 nbatch['rgb-goal'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
@@ -719,10 +725,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return self.update_step
 
     def load_best(self):
+        # Construct the full path in one step
+        ckpt_path = os.path.join(self.save_dir, 'checkpoints', 'net_best.pt')
         
-        ckpt_path = os.path.join(self.save_dir, 'checkpoints')
+        # Check if the file exists before trying to load
+        if not os.path.exists(ckpt_path):
+            print(f"[Warning] Checkpoint not found at: {ckpt_path}")
+            return 0 # Return None or a generic error code (like -1) to indicate failure
         
-        ckpt_path = os.path.join(ckpt_path, 'net_best.pt')
+        # Load the state dictionary
         self.nets.load_state_dict(torch.load(ckpt_path))
 
         self.loaded = True
@@ -888,10 +899,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgb-goal'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
-        if self.config.input_obs == 'rgb-workspace-mask':
-            rgb = info['observation']['rgb'].astype(np.float32)
-
-            def resize_mask_to_rgb(mask):
+        def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]
 
                 # Ensure numpy array (already true, but safe)
@@ -912,6 +920,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 )
 
                 return mask[..., None]           # (H, W, 1)
+        
+        if self.config.input_obs == 'rgb-workspace-mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
 
             m0 = resize_mask_to_rgb(info['observation']['robot0_mask'])
             m1 = resize_mask_to_rgb(info['observation']['robot1_mask'])
@@ -920,6 +931,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 [rgb, m0, m1], axis=-1
             )
             #print('rgbd shape', info['observation']['rgbd'].shape)
+        if self.config.input_obs == 'rgb-workspace-mask-goal':
+            
+            rgb = info['observation']['rgb'].astype(np.float32)
+            goal = info['observation']['goal_rgb'].astype(np.float32)
+
+
+            m0 = resize_mask_to_rgb(info['observation']['robot0_mask'])
+            m1 = resize_mask_to_rgb(info['observation']['robot1_mask'])
+
+            info['observation']['rgb-workspace-mask-goal'] = np.concatenate(
+                [rgb, m0, m1, goal], axis=-1
+            )
+            
 
         input_data = {
             self.config.input_obs: info['observation'][self.config.input_obs]\

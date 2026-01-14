@@ -361,7 +361,7 @@ class PixelPickAndFling():
         
         # --- NEW LOGIC: Readjust to workspace ---
         # Must happen AFTER swap so we know p0 is robot0 and p1 is robot1
-        if env.readjust_to_workspace and env.apply_workspace:
+        if env.apply_workspace and env.readjust_to_workspace:
             
             p0, _ = readjust_norm_pixel_pick(p0,  env.robot0_mask)
             p1, _ = readjust_norm_pixel_pick(p1, env.robot1_mask)

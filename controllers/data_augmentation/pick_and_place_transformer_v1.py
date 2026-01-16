@@ -33,8 +33,7 @@ class PickAndPlaceTransformerV1:
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
         if self.all_goal_rotate:
-            self.rotation_degree = self.config.get('rotation_degree', 360)
-            self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.rotation_degree)
+            self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.config.get('rotation_degree', 360))
         #self.maskout = self.config.get('maskout', False)
 
         if self.depth_blur:
@@ -238,16 +237,6 @@ class PickAndPlaceTransformerV1:
                 sample[obs] = rotated_images[:, start_idx:end_idx]
                 start_idx = end_idx
 
-            # for obs in ['goal-rgb', 'goal-depth', 'goal-mask']:
-            #     if obs in sample:
-            #         new_obs = sample[obs].reshape(T, -1, H, W)
-            #         #print('new_obs', new_obs.shape)
-            #         grid = F.affine_grid(affine_matrix.reshape(T, 2, 3), new_obs.size(), align_corners=True)
-            #         rotated_images = F.grid_sample(new_obs, grid, align_corners=True)
-            #         sample[obs] = rotated_images.reshape(T, -1, H, W)
-                    #print('rotated_images', rotated_images.shape)
-        
-        
     
         # Random Rotation
         if self.random_rotation and train:

@@ -1,14 +1,14 @@
 import cv2
 import numpy as np
 
-REMOTE = True
+REMOTE = False
 
 if REMOTE:
     CV2_DISPLAY =  "localhost:10.0" 
-    SIM_DISPLAY =  "" #":0" #:0" # 
+    SIM_DISPLAY =  ""
 else:
-    CV2_DISPLAY =  ":0" #":0" # 
-    SIM_DISPLAY =  ":0" # 
+    CV2_DISPLAY =  ":0"
+    SIM_DISPLAY =  ":0"
 
 
 def apply_workspace_shade(rgb, mask, color, alpha=0.35):

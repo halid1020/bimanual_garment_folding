@@ -69,7 +69,7 @@ class PickAndPlaceTransformerV1:
                     sample['action'] = sample_in['action']['norm-pixel-pick-and-place']
             ## flatten the last two dimension
             sample['action'] = sample['action'].reshape(sample['action'].shape[0], -1)
-            print('sample action', sample['action'].shape)
+            #print('sample action', sample['action'].shape)
 
         for k, v in sample.items():
             #print(k, v.shape)

@@ -41,8 +41,9 @@ def main(cfg: DictConfig):
             arena,
             cfg.agent.validation_interval,
             cfg.agent.total_update_steps,
-            cfg.agent.eval_checkpoint,
+            eval_checkpoint=-2, # evaluate best model.
         )
+
     elif cfg.train_and_eval == 'train_plural_eval_single':
 
         train_arenas = [registered_arena[cfg.arena.name](cfg.arena) for _ in range(cfg.num_train_envs)]

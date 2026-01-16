@@ -56,7 +56,7 @@ dataset_config:
     goal_mask: 
       shape: [128, 128, 1]
       output_key: 'goal_mask'
-
+  cache_in_memory: True
   act_config:
     default: 
       shape: [4]

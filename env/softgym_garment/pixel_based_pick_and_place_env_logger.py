@@ -8,7 +8,7 @@ from .draw_utils import *
 
 class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
 
-    def __call__(self, episode_config, result, filename=None):
+    def __call__(self, episode_config, result, filename=None, wandb_logger=None):
         super().__call__(episode_config, result, filename=filename)
 
         eid = episode_config["eid"]
@@ -88,3 +88,9 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
         save_path = os.path.join(out_dir, f"episode_{eid}_trajectory.png")
         plt.savefig(save_path, dpi=200)
         plt.close(fig)
+
+        if wandb_logger is not None:
+            self.wandb_logger.log(
+                {f"trajectory/episode_{eid}": save_path}, 
+                step=episode_config.get('step') # Optional: if you have a step count
+            )

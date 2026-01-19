@@ -947,7 +947,7 @@ class RSSM(RLAgent):
         if self.config.get('visusalise', False):
             self.visualise(datasets)
         
-        if self.config.end_training_evaluate:
+        if self.config.get('end_training_evaluate', False):
             test_results = self.evaluate(test_dataset)
             train_results = self.evaluate(train_dataset)
             results = {'test_{}'.format(k): v for k, v in test_results.items()}

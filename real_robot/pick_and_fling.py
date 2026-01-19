@@ -20,7 +20,7 @@ HOME_AFTER = True
 GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
 GRIPPER_OFFSET_UR16e = 0.01 #To calibrate: This has to be accurate
 TABLE_HEIGHT = 0.03 #This has to be accurate
-FLING_LIFT_DIST = 0.1
+FLING_LIFT_DIST = 0.3
 
 
 def points_to_fling_path(
@@ -224,7 +224,7 @@ class PickAndFlingSkill:
             swing_stroke=0.4,
             swing_height=0.45,
             swing_angle=np.pi/4,
-            lift_height=0.3,
+            lift_height=0.4,
             place_height= 0.15, #0.05,
             fling_speed=1.0, #1.3,
             fling_acc=3 #5

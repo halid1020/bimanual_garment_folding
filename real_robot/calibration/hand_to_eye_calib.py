@@ -127,7 +127,7 @@ def capture_samples(config, args):
         print(f"\nMoving to pose {i+1}/{len(poses_rad)}: {poses_deg[i]}")
         
         # Move robot
-        robot.movej(joint_target, speed=0.5, acceleration=0.5)
+        robot.movej(joint_target, speed=0.1, acceleration=0.1)
         time.sleep(2.0) 
 
         ur_pose = robot.get_tcp_pose()
@@ -228,6 +228,7 @@ def capture_samples(config, args):
 
     samples = []
     print(f"\nStarting ChArUco sample collection for {len(poses_rad)} poses...")
+    robot.home()
 
     for i, joint_target in enumerate(poses_rad):
         print(f"\nMoving to pose {i+1}/{len(poses_rad)}: {poses_deg[i]}")
@@ -293,21 +294,77 @@ def capture_samples(config, args):
 
 # --------------------------- Main calibration logic ---------------------------
 
+# def run_hand_eye(samples, args):
+#     R_gripper2base_list = [] 
+#     t_gripper2base_list = [] 
+#     R_target2cam_list = []   
+#     t_target2cam_list = []   
+
+#     for s in samples:
+#         # A: T_gripper^base
+#         T_base2gripper = pose_list_to_matrix(s['robot_pose'])
+#         T_gripper2base = invert_homogeneous_matrix(T_base2gripper)
+#         R_g, t_g = matrix_to_pose_lists(T_gripper2base)
+#         R_gripper2base_list.append(R_g)
+#         t_gripper2base_list.append(t_g)
+
+#         # B: T_camera^target
+#         rvec = np.asarray(s['rvec']).reshape(3,1)
+#         tvec = np.asarray(s['tvec']).reshape(3,1)
+#         R_tc, _ = cv2.Rodrigues(rvec)
+#         R_target2cam_list.append(R_tc)
+#         t_target2cam_list.append(tvec.reshape(3,))
+
+#     if len(R_gripper2base_list) < 3:
+#         raise RuntimeError('Need at least 3 valid samples.')
+
+#     print(f"Running calibration with {len(R_gripper2base_list)} samples...")
+    
+#     R_cam2base, t_cam2base = cv2.calibrateHandEye(
+#         R_gripper2base_list, t_gripper2base_list, 
+#         R_target2cam_list, t_target2cam_list, 
+#         method=cv2.CALIB_HAND_EYE_TSAI
+#     )
+
+#     X = np.eye(4)
+#     X[:3, :3] = R_cam2base
+#     X[:3, 3] = t_cam2base.reshape(3,)
+
+#     out = {
+#         'camera_to_base': {'matrix': X.tolist()},
+#         'meta': {'samples': len(samples), 'board_type': 'charuco'}
+#     }
+    
+#     # Save using the dynamically generated filename
+#     with open(args.output, 'w') as f:
+#         yaml.dump(out, f)
+
+#     np.set_printoptions(precision=6, suppress=True)
+#     print('\nCalibration Result (T_base^camera):\n')
+#     print(X)
+#     print(f'\nWrote calibration to {args.output}')
+#     return X
+
 def run_hand_eye(samples, args):
     R_gripper2base_list = [] 
     t_gripper2base_list = [] 
     R_target2cam_list = []   
     t_target2cam_list = []   
 
+    print(f"Processing {len(samples)} samples...")
+
     for s in samples:
-        # A: T_gripper^base
+        # 1. Get T_base_gripper (Robot Report)
         T_base2gripper = pose_list_to_matrix(s['robot_pose'])
+        
+        # 2. Invert to get T_gripper_base (Required for Eye-to-Hand A matrices)
         T_gripper2base = invert_homogeneous_matrix(T_base2gripper)
         R_g, t_g = matrix_to_pose_lists(T_gripper2base)
+        
         R_gripper2base_list.append(R_g)
         t_gripper2base_list.append(t_g)
 
-        # B: T_camera^target
+        # 3. Get T_camera_target
         rvec = np.asarray(s['rvec']).reshape(3,1)
         tvec = np.asarray(s['tvec']).reshape(3,1)
         R_tc, _ = cv2.Rodrigues(rvec)
@@ -317,24 +374,30 @@ def run_hand_eye(samples, args):
     if len(R_gripper2base_list) < 3:
         raise RuntimeError('Need at least 3 valid samples.')
 
-    print(f"Running calibration with {len(R_gripper2base_list)} samples...")
-    
+    # Using PARK solver (Robust standard)
+    print("Solving AX=XB (Eye-to-Hand) using Park & Martin...")
     R_cam2base, t_cam2base = cv2.calibrateHandEye(
         R_gripper2base_list, t_gripper2base_list, 
         R_target2cam_list, t_target2cam_list, 
-        method=cv2.CALIB_HAND_EYE_TSAI
+        method=cv2.CALIB_HAND_EYE_PARK
     )
 
     X = np.eye(4)
     X[:3, :3] = R_cam2base
     X[:3, 3] = t_cam2base.reshape(3,)
 
+    # --- CRITICAL CHECK ---
+    # Sometimes solvers return T_camera_base instead of T_base_camera.
+    # If Z is negative or small, we might need to invert the result.
+    if X[2, 3] < 0.5: 
+        print("⚠️ Result seems inverted. Inverting matrix...")
+        X = invert_homogeneous_matrix(X)
+
     out = {
         'camera_to_base': {'matrix': X.tolist()},
         'meta': {'samples': len(samples), 'board_type': 'charuco'}
     }
     
-    # Save using the dynamically generated filename
     with open(args.output, 'w') as f:
         yaml.dump(out, f)
 
@@ -343,7 +406,6 @@ def run_hand_eye(samples, args):
     print(X)
     print(f'\nWrote calibration to {args.output}')
     return X
-
 # --------------------------- CLI ---------------------------------------
 
 def parse_args():

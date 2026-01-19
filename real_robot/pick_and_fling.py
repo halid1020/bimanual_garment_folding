@@ -16,13 +16,10 @@ LIFT_DIST = 0.08            # meters to lift after grasp
 MOVE_SPEED = 0.2
 MOVE_ACC = 0.2
 HOME_AFTER = True
-GRIPPER_OFFSET_UR5e = 0.012       # Gripper length offset
-GRIPPER_OFFSET_UR16e = 0
-TABLE_HEIGHT = 0.074
-FLING_LIFT_DIST = 0.1
-GRIPPER_OFFSET_UR5e = 0.012       # Gripper length offset
-GRIPPER_OFFSET_UR16e = 0
-TABLE_HEIGHT = 0.074
+
+GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.01 #To calibrate: This has to be accurate
+TABLE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
 
 
@@ -117,13 +114,13 @@ class PickAndFlingSkill:
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_0 = p_base_pick_0
         lift_after_0 = grasp_pick_0.copy()
-        lift_after_0 [2] += FLING_LIFT_DIST
+        lift_after_0[2] += FLING_LIFT_DIST
         
 
         approach_pick_1 = p_base_pick_1 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_1 = p_base_pick_1
         lift_after_1 = grasp_pick_1.copy()
-        lift_after_1 [2] += FLING_LIFT_DIST
+        lift_after_1[2] += FLING_LIFT_DIST
         
 
         # Motion sequence
@@ -160,8 +157,8 @@ class PickAndFlingSkill:
             speed=0.2, acc=0.1, blocking=True
         )
         print('lift_pick_0', lift_after_0, 'lift_pick_1', \
-              lift_after_1, 'lift_pick_1_world', transform_point(self.scene.T_ur5e_ur16e, lift_after_1))
-        self.dual_arm_stretch_and_fling(lift_after_0, transform_point(self.scene.T_ur5e_ur16e, lift_after_1))
+              lift_after_1, 'lift_pick_1_ur5e', transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1))
+        self.dual_arm_stretch_and_fling(lift_after_0, transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1))
 
         self.scene.both_home()
 
@@ -215,7 +212,7 @@ class PickAndFlingSkill:
         print('ur5e_path_world', ur5e_path_world)
         print('ur16e_path_world', ur16e_path_world)
 
-        self.scene.both_fling(ur5e_path_world, transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_path_world), 
+        self.scene.both_fling(ur5e_path_world, transform_pose(self.scene.T_ur5e_ur16e, ur16e_path_world), 
             fling_speed, fling_acc)
         
         self.scene.both_open_gripper()
@@ -229,8 +226,13 @@ class PickAndFlingSkill:
         """
         Assuming specific gripper and tcp orientation.
         """
+        ur16e_pose_base = transform_pose(self.scene.T_ur5e_ur16e, ur16e_pose_world)
+        print('[Alert] pre stretch ur5e_pose_base', ur5e_pose_world)
+        print('[Alert] pre stretch ur16e_pose_base', ur16e_pose_base)
+        
+
         r = self.scene.both_movel(ur5e_pose_world, \
-            transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world), \
+            ur16e_pose_base, \
             speed=max_speed,
             acc=1.2)
         if not r: return False

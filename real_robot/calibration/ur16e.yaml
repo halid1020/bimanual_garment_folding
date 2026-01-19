@@ -11,10 +11,44 @@ board:
 
 # List of joint positions in DEGREES [Base, Shoulder, Elbow, Wrist1, Wrist2, Wrist3]
 poses:
-  - [97.19, -88.66, 106.30, -151.85, -128.95, -63.00]
-  - [97.20, -79.85, 83.32, -151.85, -128.95, -63.00]
-  - [103.99, -75.36, 81.56, -177.81, -119.65, -63.00]
-  - [83.59, -60.39, 84.95, -177.80, -119.65, -63.00]
-  - [86.86, -63.37, 79.32, -161.58, -119.09, -64.17]
-  - [102.24, -60.77, 84.27, -178.79, -105.17, -64.17]
-  # Add more poses easily here without touching the code
+  # --- GROUP 1: THE SAFE CENTER (Known to work) ---
+  - [89.99, -66.28, 86.69, -105.49, -167.5, 6.67]   # Home
+  
+  # --- GROUP 2: THE "LADDER" (Height Variation) ---
+  # These work well for you. We need these to fix the scale.
+  - [89.99, -50.0, 70.0, -105.0, -167.5, 6.67]      # High
+  - [89.99, -60.0, 80.0, -105.0, -167.5, 6.67]      # Med-High
+  - [89.99, -80.0, 100.0, -105.0, -167.5, 6.67]     # Med-Low
+  - [89.99, -95.0, 110.0, -105.0, -167.5, 6.67]     # Low
+
+  # --- GROUP 3: GENTLE PITCH TILTS (Forward/Back) ---
+  # Wrist 1 changes. Reduced angle to +/- 15 degrees (was 20+)
+  # Tilt Forward (Wrist 1: -105 -> -90)
+  - [89.99, -66.28, 86.69, -90.0, -167.5, 6.67]     
+  # Tilt Backward (Wrist 1: -105 -> -120)
+  - [89.99, -66.28, 86.69, -120.0, -167.5, 6.67]    
+
+  # --- GROUP 4: GENTLE YAW TILTS (Left/Right) ---
+  # Wrist 2 changes. Reduced angle to +/- 10 degrees (was 17+)
+  # AND we slightly rotate Base to compensate for the board moving sideways.
+  
+  # Tilt Left (Wrist 2: -167 -> -157, Base: 90 -> 95)
+  - [95.0, -66.28, 86.69, -105.49, -157.0, 6.67]
+  # Tilt Right (Wrist 2: -167 -> -177, Base: 90 -> 85)
+  - [85.0, -66.28, 86.69, -105.49, -177.0, 6.67]
+
+  # --- GROUP 5: GENTLE TWISTS (Rotation) ---
+  # Wrist 3 changes. Reduced to +/- 20 degrees.
+  - [90.0, -66.0, 86.0, -105.0, -167.5, 26.0]       # Twist CW
+  - [90.0, -66.0, 86.0, -105.0, -167.5, -14.0]      # Twist CCW
+
+  # --- GROUP 6: CORNER CHECK (Moved closer to center) ---
+  # Base +/- 10 degrees only (was +/- 25)
+  - [100.0, -66.28, 86.69, -105.49, -167.5, 6.67]   # Leftish
+  # - [80.0, -66.28, 86.69, -105.49, -167.5, 6.67]    # Rightish
+  
+  # --- GROUP 7: COMBO (Height + Tilt) ---
+  # Low + Tilt Forward
+  - [89.99, -95.0, 110.0, -90.0, -167.5, 6.67]
+  # High + Tilt Back
+  - [89.99, -50.0, 70.0, -120.0, -167.5, 6.67]

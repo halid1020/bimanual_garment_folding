@@ -1,7 +1,32 @@
 from scipy.spatial.transform import Rotation
 import numpy as np
 from camera_utils import intrinsic_to_params
+import cv2
 
+def matrix_to_pose(T):
+    """
+    Converts a 4x4 homogeneous transformation matrix to a UR pose vector.
+    
+    Args:
+        T (np.array): 4x4 transformation matrix
+        
+    Returns:
+        list: [x, y, z, rx, ry, rz] where (rx, ry, rz) is the Rodrigues rotation vector.
+    """
+    # 1. Extract Translation (x, y, z)
+    t = T[:3, 3]
+    
+    # 2. Extract Rotation Matrix (3x3)
+    R = T[:3, :3]
+    
+    # 3. Convert Rotation Matrix to Rodrigues Vector (rx, ry, rz)
+    rvec, _ = cv2.Rodrigues(R)
+    
+    # 4. Flatten the rvec (it comes out as 3x1 usually)
+    rvec = rvec.flatten()
+    
+    # 5. Combine into a single list
+    return [t[0], t[1], t[2], rvec[0], rvec[1], rvec[2]]
 
 def pixel_to_camera_point(pixel, depth_m, intr):
     """Convert image pixel + depth (meters) to 3D camera coordinates."""

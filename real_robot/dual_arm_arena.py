@@ -7,7 +7,7 @@ import cv2
 # from agent_arena import Arena
 # from ..utilities.logger.dummy_logger import DummyLogger
 from dual_arm_scene import DualArmScene  # <-- your robot class path
-from mask_utils import get_mask_generator, get_mask_v2
+#ADDBACK from mask_utils import get_mask_generator, get_mask_v2
 from camera_utils import get_birdeye_rgb_and_pose, intrinsics_to_matrix
 from save_utils import save_colour
 from pick_and_place import PickAndPlaceSkill
@@ -35,7 +35,7 @@ class DualArmArena():
         self.pick_and_place_skill = PickAndPlaceSkill(self.dual_arm)
         self.pick_and_fling_skill = PickAndFlingSkill(self.dual_arm)
 
-        self.mask_generator = get_mask_generator()
+        #ADDBACK self.mask_generator = get_mask_generator()
 
         # Arena parameters
         self.num_train_trials = config.get("num_train_trials", 100)
@@ -51,7 +51,8 @@ class DualArmArena():
         self.resolution = (512, 512)
         self.action_step = 0
         self.horizon = self.config.horizon
-
+        self.evaluate_result = None
+        self.last_flattened_step = -1
         print('Finished init DualArmArena')
 
 
@@ -88,43 +89,46 @@ class DualArmArena():
         # -----------------------------
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
         print('raw_rgb shape', raw_rgb.shape)
-        raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb, debug=True)
+        #ADDBACK raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb, debug=True)
         workspace_mask_0, workspace_mask_1 = self.dual_arm.get_workspace_masks()
+        workspace_mask_0 = workspace_mask_0.astype(np.uint8)
+        workspace_mask_1 = workspace_mask_1.astype(np.uint8)
 
-        # Bird’s-eye transformation
-        rgb_bird_eye, self.map_x, self.map_y, _, _ = get_birdeye_rgb_and_pose(
-            raw_rgb,
-            self.dual_arm.get_T_base_cam(),
-            intrinsics_to_matrix(self.dual_arm.get_camera_intrinsic()),
-            rotate_ccw=False,
-        )
-        print('rgb_bird_eye.shape', rgb_bird_eye.shape)
+        # # Bird’s-eye transformation
+        # rgb_bird_eye, self.map_x, self.map_y, _, _ = get_birdeye_rgb_and_pose(
+        #     raw_rgb,
+        #     self.dual_arm.get_T_base_cam(),
+        #     intrinsics_to_matrix(self.dual_arm.get_camera_intrinsic()),
+        #     rotate_ccw=False,
+        # )
+        # print('rgb_bird_eye.shape', rgb_bird_eye.shape)
 
-        if self.debug:
-            save_colour(rgb_bird_eye, 'rgb_bird_eye', './tmp')
-            save_colour(raw_rgb, 'raw_rgb', './tmp')
+        # if self.debug:
+        #     save_colour(rgb_bird_eye, 'rgb_bird_eye', './tmp')
+        #     save_colour(raw_rgb, 'raw_rgb', './tmp')
 
-        depth_bird_eye = cv2.remap(raw_depth, self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
-        mask_bird_eye = cv2.remap(raw_cloth_mask.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
-        workspace_mask_0_be = cv2.remap(workspace_mask_0.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
-        workspace_mask_1_be = cv2.remap(workspace_mask_1.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        # depth_bird_eye = cv2.remap(raw_depth, self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        # mask_bird_eye = cv2.remap(raw_cloth_mask.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        # workspace_mask_0_be = cv2.remap(workspace_mask_0.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
+        # workspace_mask_1_be = cv2.remap(workspace_mask_1.astype(np.uint8), self.map_x, self.map_y, interpolation=cv2.INTER_NEAREST)
 
         # -----------------------------
         # Center crop bird’s-eye view around cloth
         # -----------------------------
-        ys, xs = np.where(mask_bird_eye > 0)
-        h, w = rgb_bird_eye.shape[:2]
+        #ys, xs = np.where(raw_rgb > 0)
+        h, w = raw_rgb.shape[:2]
         crop_size = min(h, w)  # ✅ Use minimum of width and height
 
-        if len(xs) > 0:
-            # Center around the cloth mask
-            cx, cy = int(np.mean(xs)), int(np.mean(ys))
-            x1 = np.clip(cx - crop_size // 2, 0, w - crop_size)
-            y1 = np.clip(cy - crop_size // 2, 0, h - crop_size)
-        else:
-            # Fallback: use image center
-            x1 = w // 2 - crop_size // 2
-            y1 = h // 2 - crop_size // 2
+        # if len(xs) > 0:
+        #     # Center around the cloth mask
+        #     cx, cy = int(np.mean(xs)), int(np.mean(ys))
+        #     x1 = np.clip(cx - crop_size // 2, 0, w - crop_size)
+        #     y1 = np.clip(cy - crop_size // 2, 0, h - crop_size)
+        # else:
+        #     # Fallback: use image center
+
+        x1 = w // 2 - crop_size // 2
+        y1 = h // 2 - crop_size // 2
 
         x2, y2 = x1 + crop_size, y1 + crop_size
 
@@ -133,21 +137,21 @@ class DualArmArena():
         self.crop_size = crop_size
 
         # Perform crops
-        crop_rgb = rgb_bird_eye[y1:y2, x1:x2]
-        crop_depth = depth_bird_eye[y1:y2, x1:x2]
-        crop_mask = mask_bird_eye[y1:y2, x1:x2]
-        crop_workspace_mask_0 = workspace_mask_0_be[y1:y2, x1:x2]
-        crop_workspace_mask_1 = workspace_mask_1_be[y1:y2, x1:x2]
+        crop_rgb = raw_rgb[y1:y2, x1:x2]
+        crop_depth = raw_depth[y1:y2, x1:x2]
+        #ADDBACK crop_mask = mask_bird_eye[y1:y2, x1:x2]
+        crop_workspace_mask_0 = workspace_mask_0[y1:y2, x1:x2]
+        crop_workspace_mask_1 = workspace_mask_1[y1:y2, x1:x2]
 
         ## Resize images
         self.cropped_resolution = crop_rgb.shape[:2]
         resized_rgb = cv2.resize(crop_rgb, self.resolution)
         resized_depth = cv2.resize(crop_depth, self.resolution)
-        resized_mask = cv2.resize(crop_mask, self.resolution)
+        #ADDBACK resized_mask = cv2.resize(crop_mask, self.resolution)
         resized_workspace_mask_0 = cv2.resize(crop_workspace_mask_0, self.resolution)
         resized_workspace_mask_1 = cv2.resize(crop_workspace_mask_1, self.resolution)
         
-        print('max resized mask', np.max(resized_mask), resized_mask.dtype)
+        #print('max resized mask', np.max(resized_mask), resized_mask.dtype)
     
 
         # -----------------------------
@@ -157,10 +161,10 @@ class DualArmArena():
             'observation': {
                 "rgb": resized_rgb,
                 "depth": resized_depth,
-                "mask": resized_mask.astype(np.bool),
+                #"mask": resized_mask.astype(np.bool),
             },
-            "workspace_mask_0": resized_workspace_mask_0.astype(np.bool),
-            "workspace_mask_1": resized_workspace_mask_1.astype(np.bool),
+            "workspace_mask_0": resized_workspace_mask_0.astype(np.bool_),
+            "workspace_mask_1": resized_workspace_mask_1.astype(np.bool_),
             "eid": self.eid,
             
         }
@@ -220,15 +224,15 @@ class DualArmArena():
             self.flattened_obs = self._get_info(task_related=False, flattened_obs=False)
 
             # Compute flatten coverage ratio (cloth area / total area)
-            mask = self.flattened_obs['observation']["mask"]
+            #mask = self.flattened_obs['observation']["mask"]
             save_colour(self.flattened_obs['observation']['rgb'], 'flattended_rgb', 'tmp')
-            save_mask(mask, 'flattened_mask', 'tmp')
-            cloth_pixels = np.sum(mask)
-            total_pixels = mask.size
-            self.flatten_coverage = cloth_pixels / total_pixels
+            #save_mask(mask, 'flattened_mask', 'tmp')
+            #cloth_pixels = np.sum(mask)
+            #total_pixels = mask.size
+            #self.flatten_coverage = cloth_pixels / total_pixels
 
             print(f"\n✅ Flattened observation captured successfully.")
-            print(f"   Cloth coverage ratio: {self.flatten_coverage:.3f}")
+            #print(f"   Cloth coverage ratio: {self.flatten_coverage:.3f}")
             print("=" * 60 + "\n")
 
         else:
@@ -246,19 +250,20 @@ class DualArmArena():
         action_type = list(action.keys())[0]
 
         # --- Step 1: Convert normalized → crop → full bird-eye pixels ---
-        standard_pixel_bird_eye = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
+        points_orig = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
 
         # add crop offset (x1, y1)
-        standard_pixel_bird_eye += np.array([self.x1, self.y1])
+        points_orig += np.array([self.x1, self.y1])
+        points_orig = points_orig.flatten()
 
-        # --- Step 2: Map back to original RGB image coordinates ---
-        points_orig = []
-        for pixel in standard_pixel_bird_eye:
-            x, y = pixel  # pixel = [x, y]
-            u = self.map_x[y, x]
-            v = self.map_y[y, x]
-            points_orig.append((u, v))
-        points_orig = np.array(points_orig).flatten()
+        # # --- Step 2: Map back to original RGB image coordinates ---
+        # points_orig = []
+        # for pixel in standard_pixel_bird_eye:
+        #     x, y = pixel  # pixel = [x, y]
+        #     u = self.map_x[y, x]
+        #     v = self.map_y[y, x]
+        #     points_orig.append((u, v))
+        # points_orig = np.array(points_orig).flatten()
 
         # --- Step 3: Execute robot skill ---
         if action_type == 'norm-pixel-pick-and-place':

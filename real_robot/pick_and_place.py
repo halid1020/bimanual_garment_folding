@@ -10,9 +10,11 @@ LIFT_DIST = 0.08            # meters to lift after grasp
 MOVE_SPEED = 0.2
 MOVE_ACC = 0.2
 HOME_AFTER = True
-GRIPPER_OFFSET_UR5e = 0.012       # Gripper length offset
-GRIPPER_OFFSET_UR16e = 0
-TABLE_HEIGHT = 0.074
+
+
+GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.01 #To calibrate: This has to be accurate
+TABLE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
 
 class PickAndPlaceSkill:

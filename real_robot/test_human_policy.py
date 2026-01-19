@@ -24,7 +24,7 @@ def main():
     print("Environment ready. Choose skill:")
     print('info evaluate', info['evaluation'])
 
-    while not info['done']:
+    while True:
         action = policy.single_act(info)
         info = arena.step(action)
         print('info evaluate', info['evaluation'])

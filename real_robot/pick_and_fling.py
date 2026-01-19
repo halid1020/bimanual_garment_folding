@@ -156,9 +156,60 @@ class PickAndFlingSkill:
             np.concatenate([lift_after_1, vertical_rotvec]),
             speed=0.2, acc=0.1, blocking=True
         )
-        print('lift_pick_0', lift_after_0, 'lift_pick_1', \
-              lift_after_1, 'lift_pick_1_ur5e', transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1))
-        self.dual_arm_stretch_and_fling(lift_after_0, transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1))
+
+        # -------------------------------------------------------------------------
+        # TODO IMPLEMENTED: Center & Align Grippers
+        # -------------------------------------------------------------------------
+        print("Centering and Aligning grippers between robots...")
+
+        # 1. Calculate Geometry in UR5e Frame (Acts as our Reference Frame)
+        # Convert UR16e point to UR5e frame so we can measure distance
+        p0_local = lift_after_0[:3]
+        p1_local = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1[:3])
+        
+        # Calculate current width (Euclidean distance)
+        curr_width = np.linalg.norm(p1_local - p0_local)
+        print(f"  Current Gripper Width: {curr_width:.4f} m")
+
+        # 2. Define the "Line between Arms" (Axis)
+        # Vector from UR5e Base to UR16e Base
+        base_to_base_vec = self.scene.T_ur5e_ur16e[:3, 3]
+        
+        # Midpoint between the two robots (Global Center)
+        center_point = base_to_base_vec / 2.0
+        
+        # Axis direction (Unit vector pointing from UR5e to UR16e)
+        axis_vec = base_to_base_vec / np.linalg.norm(base_to_base_vec)
+
+        # 3. Calculate Target Positions
+        # We want the pair of grippers to be centered at 'center_point'
+        # and aligned along 'axis_vec', while maintaining 'curr_width'.
+        
+        # UR5e Target: Shift from center towards UR5e (negative axis direction)
+        target_p0_local = center_point - (axis_vec * curr_width / 2.0)
+        
+        # UR16e Target: Shift from center towards UR16e (positive axis direction)
+        target_p1_local = center_point + (axis_vec * curr_width / 2.0)
+
+        # Preserve the lift height (Z) from the lift step
+        # (center_point Z is 0/base height, so we overwrite Z)
+        avg_z = (p0_local[2] + p1_local[2]) / 2.0
+        target_p0_local[2] = avg_z
+        target_p1_local[2] = avg_z
+
+        # 4. Prepare Pose Vectors for Motion
+        # UR5e is already in local frame
+        target_pose_0 = np.concatenate([target_p0_local, vertical_rotvec])
+
+        # UR16e target needs to be converted back to UR16e Base Frame
+        target_p1_ur16e = transform_point(self.scene.T_ur5e_ur16e, target_p1_local)
+        target_pose_1 = np.concatenate([target_p1_ur16e, vertical_rotvec])
+
+        # 5. Execute Centering Move
+        self.scene.both_movel(target_pose_0, target_pose_1, speed=0.2, acc=0.1, blocking=True)
+
+
+        self.dual_arm_stretch_and_fling(target_p0_local, transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_ur16e))
 
         self.scene.both_home()
 
@@ -227,9 +278,6 @@ class PickAndFlingSkill:
         Assuming specific gripper and tcp orientation.
         """
         ur16e_pose_base = transform_pose(self.scene.T_ur5e_ur16e, ur16e_pose_world)
-        print('[Alert] pre stretch ur5e_pose_base', ur5e_pose_world)
-        print('[Alert] pre stretch ur16e_pose_base', ur16e_pose_base)
-        
 
         r = self.scene.both_movel(ur5e_pose_world, \
             ur16e_pose_base, \

@@ -5,7 +5,7 @@ import math
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Slerp, Rotation
 
-from rg2_gripper import RG2
+from real_robot.rg2_gripper import RG2
 
 def path_avoid_singularity(path, radius=0.25, 
         detour_ratio=np.sqrt(2)):

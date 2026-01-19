@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 import math
 import os  # <--- Added for file path manipulation
-from ur import UR_RTDE
+from real_robot.ur import UR_RTDE
 
 # RealSense
 try:
@@ -86,22 +86,36 @@ def capture_samples(config, args):
     square_len = config.get('board', {}).get('square_length', args.square_size)
     marker_len = config.get('board', {}).get('marker_length', args.marker_size)
 
-    # --- ChArUco Board Setup ---
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-    board = cv2.aruco.CharucoBoard(
-        (squares_x, squares_y), 
-        square_len, 
-        marker_len, 
-        aruco_dict
-    )
+    # -------------------------------------------------------------------------
+    # 👇 CHANGE IS HERE: Switched to 4x4 Dictionary
+    # Try DICT_4X4_50 first. If it fails, change to DICT_4X4_250
+    # -------------------------------------------------------------------------
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     
+    # Create Board (OpenCV 4.7+ Style)
+    try:
+        board = cv2.aruco.CharucoBoard(
+            (squares_x, squares_y), 
+            square_len, 
+            marker_len, 
+            aruco_dict
+        )
+        detector_params = cv2.aruco.DetectorParameters()
+        detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
+    except AttributeError:
+        # Fallback for older OpenCV
+        print("⚠️ Warning: Using legacy OpenCV 4.x API.")
+        board = cv2.aruco.CharucoBoard_create(
+            squares_x, squares_y, square_len, marker_len, aruco_dict
+        )
+        detector = None 
+
     # --- Connection to Robot ---
     print(f"Connecting to robot at {robot_ip}...")
     robot = UR_RTDE(robot_ip, gripper=gripper_type)
 
     # --- Load Poses ---
     poses_deg = config['poses']
-    # Convert degrees to radians
     poses_rad = [
         [math.radians(a) for a in pose] for pose in poses_deg
     ]
@@ -114,7 +128,7 @@ def capture_samples(config, args):
         
         # Move robot
         robot.movej(joint_target, speed=0.5, acceleration=0.5)
-        time.sleep(2.0) # Wait for settling
+        time.sleep(2.0) 
 
         ur_pose = robot.get_tcp_pose()
 
@@ -129,19 +143,25 @@ def capture_samples(config, args):
         color = np.asanyarray(color_frame.get_data())
         gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
 
-        # Get intrinsics
         intr = color_frame.profile.as_video_stream_profile().intrinsics
         camera_matrix = np.array([[intr.fx, 0, intr.ppx], [0, intr.fy, intr.ppy], [0, 0, 1]], dtype=float)
         dist_coeffs = np.zeros((5, 1), dtype=float) 
 
         # --- ChArUco Detection ---
-        corners, ids, rejected = cv2.aruco.detectMarkers(gray, aruco_dict)
+        if detector is not None:
+            corners, ids, rejected = detector.detectMarkers(gray)
+        else:
+            corners, ids, rejected = cv2.aruco.detectMarkers(gray, aruco_dict)
         
+        # Visualization debug
+        print(f"   (Found {len(corners) if corners else 0} raw markers)")
+
         if len(corners) > 0:
             ret, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
                 corners, ids, gray, board
             )
             
+            # We need at least 4 corners to solve for pose
             if charuco_corners is not None and len(charuco_corners) > 3:
                 valid, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(
                     charuco_corners, charuco_ids, board, camera_matrix, dist_coeffs, None, None
@@ -151,20 +171,124 @@ def capture_samples(config, args):
                     samples.append({'robot_pose': ur_pose, 'rvec': rvec.flatten(), 'tvec': tvec.flatten()})
                     print(f"✅ Sample {i+1} captured.")
                     
-                    # Visualization
                     cv2.drawFrameAxes(color, camera_matrix, dist_coeffs, rvec, tvec, 0.1)
                     cv2.aruco.drawDetectedCornersCharuco(color, charuco_corners, charuco_ids)
                     cv2.imshow('ChArUco Capture', color)
                     cv2.waitKey(500)
                 else:
-                    print("❌ Pose estimation failed (invalid solution).")
+                    print("❌ Pose estimation failed.")
             else:
-                print("❌ Not enough ChArUco corners interpolated.")
+                print(f"❌ Not enough ChArUco corners (Found {len(charuco_corners) if charuco_corners is not None else 0}).")
         else:
-            print("❌ No ArUco markers detected.")
+            print("❌ No ArUco markers detected. (Check Dict 50 vs 250)")
 
     pipeline.stop()
     cv2.destroyAllWindows()
+    return samples
+
+# --------------------------- Main calibration logic ---------------------------
+
+def capture_samples(config, args):
+    pipeline, align = start_realsense()
+    
+    # --- Parse Config ---
+    robot_ip = config['robot']['ip']
+    gripper_type = config['robot'].get('gripper', 'rg2')
+    
+    squares_x = config.get('board', {}).get('squares_x', args.board_size[0])
+    squares_y = config.get('board', {}).get('squares_y', args.board_size[1])
+    square_len = config.get('board', {}).get('square_length', args.square_size)
+    marker_len = config.get('board', {}).get('marker_length', args.marker_size)
+
+    # 1. Setup Dictionary
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    
+    # 2. Setup Board
+    try:
+        board = cv2.aruco.CharucoBoard(
+            (squares_x, squares_y), 
+            square_len, 
+            marker_len, 
+            aruco_dict
+        )
+        charuco_detector = cv2.aruco.CharucoDetector(board)
+    except AttributeError:
+        print("❌ Error: OpenCV version mismatch. Please ensure opencv-contrib-python is installed.")
+        sys.exit(1)
+
+    # --- Connection to Robot ---
+    print(f"Connecting to robot at {robot_ip}...")
+    robot = UR_RTDE(robot_ip, gripper=gripper_type)
+
+    # --- Load Poses ---
+    poses_deg = config['poses']
+    poses_rad = [
+        [math.radians(a) for a in pose] for pose in poses_deg
+    ]
+
+    samples = []
+    print(f"\nStarting ChArUco sample collection for {len(poses_rad)} poses...")
+
+    for i, joint_target in enumerate(poses_rad):
+        print(f"\nMoving to pose {i+1}/{len(poses_rad)}: {poses_deg[i]}")
+        
+        robot.movej(joint_target, speed=0.5, acceleration=0.5)
+        time.sleep(2.0) 
+
+        ur_pose = robot.get_tcp_pose()
+
+        # Capture frames
+        frames = pipeline.wait_for_frames(timeout_ms=5000)
+        aligned = align.process(frames)
+        color_frame = aligned.get_color_frame()
+        if not color_frame:
+            print("No frame received.")
+            continue
+            
+        color = np.asanyarray(color_frame.get_data())
+        gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+
+        intr = color_frame.profile.as_video_stream_profile().intrinsics
+        camera_matrix = np.array([[intr.fx, 0, intr.ppx], [0, intr.fy, intr.ppy], [0, 0, 1]], dtype=float)
+        dist_coeffs = np.zeros((5, 1), dtype=float) 
+
+        # --- Detection ---
+        charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+        
+        # Debug info
+        if marker_corners:
+             print(f"   (Found {len(marker_corners)} markers -> {len(charuco_corners) if charuco_corners is not None else 0} interpolated corners)")
+
+        # --- Pose Estimation using solvePnP (The Robust Fix) ---
+        if charuco_corners is not None and len(charuco_corners) >= 4:
+            # 1. Get the 3D Object Points for the specific corners we found
+            # board.getChessboardCorners() gives all 3D corners of the board
+            all_obj_points = board.getChessboardCorners()
+            
+            # Filter to just the IDs we found
+            # charuco_ids is a list of indices, so we use it to select rows from all_obj_points
+            obj_points = all_obj_points[charuco_ids.flatten()]
+
+            # 2. Solve PnP with standard OpenCV (Available in ALL versions)
+            valid, rvec, tvec = cv2.solvePnP(obj_points, charuco_corners, camera_matrix, dist_coeffs)
+            
+            if valid:
+                samples.append({'robot_pose': ur_pose, 'rvec': rvec.flatten(), 'tvec': tvec.flatten()})
+                print(f"✅ Sample {i+1} captured.")
+                
+                # Visualization
+                cv2.drawFrameAxes(color, camera_matrix, dist_coeffs, rvec, tvec, 0.1)
+                cv2.aruco.drawDetectedCornersCharuco(color, charuco_corners, charuco_ids)
+                cv2.imshow('ChArUco Capture', color)
+                cv2.waitKey(500)
+            else:
+                print("❌ Pose estimation failed.")
+        else:
+            print(f"❌ Not enough ChArUco corners (Found {len(charuco_corners) if charuco_corners is not None else 0}, Need 4+).")
+
+    pipeline.stop()
+    cv2.destroyAllWindows()
+    robot.home()
     return samples
 
 # --------------------------- Main calibration logic ---------------------------

@@ -62,3 +62,9 @@ To create a new experiment, create a YAML file directly under the `conf` folder.
 * **`project_name`**: Used for Weights & Biases (WandB) logging. You can leave this as default.
 * **`save_root`**: The directory where logs and experiment data will be stored.
 * **`train_and_eval`**: Specifies which `agent-arena` API function to use for the experiment.
+
+
+
+####
+
+pip install pycurl

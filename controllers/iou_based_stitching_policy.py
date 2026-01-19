@@ -41,7 +41,7 @@ class IoUBasedStitchingPolicy(Agent):
         else:
             self.flattening_policy.load_checkpoint(config.flattening_checkpoint)
         
-        if config.get('flattening_checkpoint', 'best') == 'best':
+        if config.get('folding_checkpoint', 'best') == 'best':
             self.folding_policy.load_best()
         else:
             self.folding_policy.load_checkpoint(config.folding_checkpoint)

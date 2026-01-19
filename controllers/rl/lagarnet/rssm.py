@@ -944,7 +944,7 @@ class RSSM(RLAgent):
                 self.set_train()
         
         # Visualised, Evaluate & Save
-        if self.config.visusalise:
+        if self.config.get('visusalise', False):
             self.visualise(datasets)
         
         if self.config.end_training_evaluate:

@@ -1,6 +1,6 @@
 name: iou-based-stitching-policy
 flattening_policy: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_goal
 flattening_policy_log_dir: /mnt/ssd/garment_folding_data
-flattening_checkpoint: 33000
+flattening_checkpoint: 35000
 folding_policy: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_50_workspace
 folding_policy_log_dir: /mnt/ssd/garment_folding_data

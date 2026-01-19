@@ -944,15 +944,15 @@ class RSSM(RLAgent):
                 self.set_train()
         
         # Visualised, Evaluate & Save
-        if self.config.get('visusalise', False):
-            self.visualise(datasets)
+        # if self.config.get('visusalise', False):
+        #     self.visualise(datasets)
         
-        if self.config.get('end_training_evaluate', False):
-            test_results = self.evaluate(test_dataset)
-            train_results = self.evaluate(train_dataset)
-            results = {'test_{}'.format(k): v for k, v in test_results.items()}
-            results.update({'train_{}'.format(k): v for k, v in train_results.items()})
-            results['update_step'] = [self.config.total_update_steps-1]
+        # if self.config.get('end_training_evaluate', False):
+        #     test_results = self.evaluate(test_dataset)
+        #     train_results = self.evaluate(train_dataset)
+        #     results = {'test_{}'.format(k): v for k, v in test_results.items()}
+        #     results.update({'train_{}'.format(k): v for k, v in train_results.items()})
+        #     results['update_step'] = [self.config.total_update_steps-1]
             #eval_logger(results, self.config)
         
     def evaluate(self, dataset, train=False):

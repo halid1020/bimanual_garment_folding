@@ -12,17 +12,19 @@ class HumanPolicy:
     def single_act(self, info):
         """Get an action dict from user clicks."""
         while True:
-            cmd = input("\nSkill [1=pick-place, 2=pick-fling, q=quit]: ").strip().lower()
+            cmd = input("\nSkill [1=pick-fling, 2=pick-place, 3=no-operation, q=quit]: ").strip().lower()
             if cmd in ("q", "quit"):
                 return None
             elif cmd == "1":
-                skill_type = "pick_and_place"
+                prim_type = "pick_and_fling"
                 break
             elif cmd == "2":
-                skill_type = "pick_and_fling"
+                prim_type = "pick_and_place"
                 break
+            elif cmd == '3':
+                prim_type = "no_operation"
             else:
-                print("Invalid command. Please enter 1, 2, or q.")
+                print("Invalid command. Please enter 1, 2, 3 or q.")
 
         # Unpack scene info
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]
@@ -42,7 +44,7 @@ class HumanPolicy:
         # -------------------------------
         # Pick & Place
         # -------------------------------
-        if skill_type == "pick_and_place":
+        if prim_type == "pick_and_place":
             clicks = click_points_pick_and_place("Pick & Place", display_rgb, mask)
             #clicks = click_points_pick_and_place("Pick & Place", display_rgb)
 
@@ -67,7 +69,7 @@ class HumanPolicy:
         # -------------------------------
         # Pick & Fling
         # -------------------------------
-        elif skill_type == "pick_and_fling":
+        elif prim_type == "pick_and_fling":
             clicks = click_points_pick_and_fling("Pick & Fling", display_rgb, mask)
 
             pick_0, pick_1 = clicks
@@ -84,8 +86,11 @@ class HumanPolicy:
                     np.concatenate([pick_0_norm, pick_1_norm])
             }
 
+        elif prim_type == 'no_operation':
+            return {"no-operation": np.zeros(8)}
+
         else:
-            raise ValueError(f"Unknown skill type: {skill_type}")
+            raise ValueError(f"Unknown skill type: {prim_type}")
 
     def apply_workspace_masks(self, rgb, robot_0_mask, robot_1_mask):
         # Ensure masks are boolean and 2D

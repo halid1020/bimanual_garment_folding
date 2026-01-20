@@ -236,9 +236,10 @@ class DualArmArena():
         points_executed = points_orig.flatten()
 
         # --- Step 2: Workspace Constraint Logic (Snapping) ---
+        full_mask_0, full_mask_1 = self.dual_arm.get_workspace_masks()
         if len(points_orig) == 4:
             # We need to grab the Full Size masks
-            full_mask_0, full_mask_1 = self.dual_arm.get_workspace_masks()
+            
             
             # Extract pairs from the unsorted original points
             # points_orig is [pick_0, pick_1, place_0, place_1] (from network perspective)
@@ -325,6 +326,16 @@ class DualArmArena():
                 filename = f"{save_dir}/step_{self.action_step:03d}_snap.png"
                 cv2.imwrite(filename, debug_img)
                 print(f"[Debug] Saved snap visualization to {filename}")
+        elif len(points_orig) == 2:
+            p0_orig, p1_orig = points_orig[0], points_orig[1]
+
+            if p0_orig[0] < p1_orig[0]:
+                p0_orig, p1_orig = p1_orig, p0_orig
+            
+            final_pick_0 = self._snap_to_mask(p0_orig, full_mask_0)
+            final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
+            points_executed = np.concatenate([final_pick_0, final_pick_1])
+           
 
         # --- Step 3: Execute robot skill ---
         if action_type == 'norm-pixel-pick-and-place':
@@ -333,6 +344,8 @@ class DualArmArena():
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
             self.pick_and_fling_skill.step(points_executed)
+        elif action_type == 'no-operation':
+            pass
         
         self.action_step += 1
 

@@ -9,7 +9,7 @@ sys.path.append(os.getcwd())
 
 from thread_utils import ThreadWithResult
 from constants import *
-from motion_utils import safe_movel, safe_gripper, safe_home
+from motion_utils import safe_movel, safe_gripper, safe_home, safe_out_scene
 from scene_utils import load_camera_to_base, load_camera_to_gripper
 
 # Ensure matrix_to_pose is in this file!
@@ -152,6 +152,15 @@ class DualArmScene:
             t1.join(); t2.join()
             return t1.result and t2.result
         return True
+    
+    def both_out_scene(self, speed=1.5, acc=1.0, blocking=True):
+        t1 = ThreadWithResult(target=safe_out_scene, args=(self.ur5e, speed, acc, blocking, self.dry_run))
+        t2 = ThreadWithResult(target=safe_out_scene, args=(self.ur16e, speed, acc, blocking, self.dry_run))
+        t1.start(); t2.start()
+        if blocking:
+            t1.join(); t2.join()
+            return t1.result and t2.result
+        return True
 
     def both_open_gripper(self):
         t1 = ThreadWithResult(target=safe_gripper, args=(self.ur5e, "open", self.dry_run))
@@ -182,6 +191,7 @@ class DualArmScene:
 
     def go_camera_pos(self):
         self.both_home()
+        self.both_out_scene()
     
     def take_rgbd(self):
         return self.camera.take_rgbd()

@@ -26,13 +26,12 @@ class HumanPolicy:
 
         # Unpack scene info
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]
-        #ADDBACK mask = info["mask"]
+        mask = info['observation']["mask"]
         workspace_mask_0, workspace_mask_1 = info["workspace_mask_0"], info["workspace_mask_1"]
         
         print('rgb shape', rgb.shape)
         save_colour(rgb, 'policy_input_rgb', './tmp')
-        #ADDBACK print('mask shape', mask.shape)
-        #ADDBACK save_mask(mask, 'policy_input_mask', './tmp')
+        save_mask(mask, 'policy_input_mask', './tmp')
         save_mask(workspace_mask_0, 'policy_input_workspace_mask_0', './tmp')
         save_mask(workspace_mask_1, 'policy_input_workspace_mask_1', './tmp')
         display_rgb = self.apply_workspace_masks(rgb, workspace_mask_0, workspace_mask_1)
@@ -44,8 +43,8 @@ class HumanPolicy:
         # Pick & Place
         # -------------------------------
         if skill_type == "pick_and_place":
-            #ADDBACK  clicks = click_points_pick_and_place("Pick & Place", display_rgb, mask)
-            clicks = click_points_pick_and_place("Pick & Place", display_rgb)
+            clicks = click_points_pick_and_place("Pick & Place", display_rgb, mask)
+            #clicks = click_points_pick_and_place("Pick & Place", display_rgb)
 
             pick_0, place_0, pick_1, place_1 = clicks
 
@@ -69,8 +68,7 @@ class HumanPolicy:
         # Pick & Fling
         # -------------------------------
         elif skill_type == "pick_and_fling":
-            clicks = click_points_pick_and_fling("Pick & Fling", display_rgb)
-            #AddBack clicks = click_points_pick_and_fling("Pick & Fling", display_rgb, mask)
+            clicks = click_points_pick_and_fling("Pick & Fling", display_rgb, mask)
 
             pick_0, pick_1 = clicks
 

@@ -9,7 +9,8 @@ def main():
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'horizon': 20
+        'horizon': 20,
+        "debug": True
     }
     task_config = {
         'debug': True

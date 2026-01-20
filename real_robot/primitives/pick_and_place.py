@@ -2,7 +2,7 @@
 import math
 import numpy as np
 import time
-from transform_utils import point_on_table_base
+from transform_utils import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, TABLE_HEIGHT, FLING_LIFT_DIST
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
@@ -10,12 +10,6 @@ LIFT_DIST = 0.08            # meters to lift after grasp
 MOVE_SPEED = 0.2
 MOVE_ACC = 0.2
 HOME_AFTER = True
-
-
-GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
-GRIPPER_OFFSET_UR16e = 0.01 #To calibrate: This has to be accurate
-TABLE_HEIGHT = 0.03 #This has to be accurate
-FLING_LIFT_DIST = 0.1
 
 class PickAndPlaceSkill:
     """
@@ -47,26 +41,14 @@ class PickAndPlaceSkill:
                 pick_0, pick_1, place_0, place_1 -> each np.array([x, y, z])
         """
         pick_0, pick_1, place_0, place_1 = action[:2], action[2:4], action[4:6], action[6:8]
-        print("Picked pixels:", pick_0, place_0, pick_1, place_1)
+        #print("Picked pixels:", pick_0, place_0, pick_1, place_1)
         if pick_0[0] < pick_1[0]:
             pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
         
-        if place_0[0] < place_1[0]:
-            pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
-
         p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, TABLE_HEIGHT)
         p_base_place_0 = point_on_table_base(place_0[0], place_0[1], self.scene.intr, self.scene.T_ur5e_cam, TABLE_HEIGHT)
         p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
         p_base_place_1 = point_on_table_base(place_1[0], place_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
-
-        print(
-            "p_base_pick_0 (pre-offset):", p_base_pick_0,
-            "p_base_place_0 (pre-offset):", p_base_place_0
-        )
-        print(
-            "p_base_pick_1 (pre-offset):", p_base_pick_1,
-            "p_base_place_1 (pre-offset):", p_base_place_1
-        )
 
         # Ensure z is sensible
         def clamp_z(arr):
@@ -97,13 +79,13 @@ class PickAndPlaceSkill:
         grasp_pick_0 = p_base_pick_0
         lift_after_0 = grasp_pick_0 + np.array([0.0, 0.0, LIFT_DIST])
         approach_place_0 = p_base_place_0 + np.array([0.0, 0.0, APPROACH_DIST])
-        place_pose_0 = p_base_place_0
+        place_pose_0 = p_base_place_0  + np.array([0.0, 0.0, APPROACH_DIST])
 
         approach_pick_1 = p_base_pick_1 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_1 = p_base_pick_1
         lift_after_1 = grasp_pick_1 + np.array([0.0, 0.0, LIFT_DIST])
         approach_place_1 = p_base_place_1 + np.array([0.0, 0.0, APPROACH_DIST])
-        place_pose_1 = p_base_place_1
+        place_pose_1 = p_base_place_1  + np.array([0.0, 0.0, APPROACH_DIST])
 
         # Motion sequence
         print("Moving to home (safe start)")

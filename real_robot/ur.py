@@ -62,6 +62,7 @@ class UR_RTDE:
 
         #self.gripper = gripper
         self.home_joint = [np.pi/2, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0]
+        self.out_scene_joint = [np.pi, -np.pi / 2, np.pi / 2, -np.pi / 2, -np.pi / 2, 0]
         self.camera_state_joint = [math.radians(a) for a in [73.4,  -78.7,  0,   -29.7,  -82.3,  79.0]]
         if self.gripper is None:
             self.rtde_c.setTcp([0, 0, 0, 0, 0, 0])
@@ -85,8 +86,9 @@ class UR_RTDE:
     def home(self, speed=1.5, acceleration=1, blocking=True):
         return self.rtde_c.moveJ(self.home_joint, speed, acceleration, not blocking)
     
-    def camera_state(self, speed=1.5, acceleration=1, blocking=True):
-        return self.rtde_c.moveJ(self.camera_state_joint, speed, acceleration, not blocking)
+    def out_scene(self, speed=1.5, acceleration=1, blocking=True):
+        return self.rtde_c.moveJ(self.out_scene_joint, speed, acceleration, not blocking)
+    
 
     def movej(self, q, speed=1.5, acceleration=1, blocking=True):
         return self.rtde_c.moveJ(q, speed, acceleration, not blocking)

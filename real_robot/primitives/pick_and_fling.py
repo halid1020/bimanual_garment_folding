@@ -3,7 +3,7 @@ import math
 import numpy as np
 import time
 from transform_utils import point_on_table_base, transform_point, points_to_gripper_pose, \
-    points_to_action_frame, get_base_fling_poses, transform_pose
+    points_to_action_frame, get_base_fling_poses, transform_pose, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, TABLE_HEIGHT, FLING_LIFT_DIST
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
@@ -17,10 +17,7 @@ MOVE_SPEED = 0.2
 MOVE_ACC = 0.2
 HOME_AFTER = True
 
-GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
-GRIPPER_OFFSET_UR16e = 0.01 #To calibrate: This has to be accurate
-TABLE_HEIGHT = 0.03 #This has to be accurate
-FLING_LIFT_DIST = 0.3
+
 
 
 def points_to_fling_path(
@@ -84,12 +81,12 @@ class PickAndFlingSkill:
         p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
     
 
-        print(
-            "p_base_pick_0 (pre-offset):", p_base_pick_0,
-        )
-        print(
-            "p_base_pick_1 (pre-offset):", p_base_pick_1,
-        )
+        # print(
+        #     "p_base_pick_0 (pre-offset):", p_base_pick_0,
+        # )
+        # print(
+        #     "p_base_pick_1 (pre-offset):", p_base_pick_1,
+        # )
 
         # Ensure z is sensible
         def clamp_z(arr):
@@ -136,8 +133,8 @@ class PickAndFlingSkill:
         )
 
         # descend to grasp poses
-        print('grasp_pick_0', grasp_pick_0)
-        print('grasp_pick_1', grasp_pick_1)
+        # print('grasp_pick_0', grasp_pick_0)
+        # print('grasp_pick_1', grasp_pick_1)
         self.scene.both_movel(
             np.concatenate([grasp_pick_0, vertical_rotvec]),
             np.concatenate([grasp_pick_1, vertical_rotvec]),
@@ -169,7 +166,7 @@ class PickAndFlingSkill:
         
         # Calculate current width (Euclidean distance)
         curr_width = np.linalg.norm(p1_local - p0_local)
-        print(f"  Current Gripper Width: {curr_width:.4f} m")
+        #print(f"  Current Gripper Width: {curr_width:.4f} m")
 
         # 2. Define the "Line between Arms" (Axis)
         # Vector from UR5e Base to UR16e Base
@@ -231,12 +228,12 @@ class PickAndFlingSkill:
             ):
         
         width = self.scene.get_tcp_distance()
-        print('Width before stretch: {}'.format(width))
+        #print('Width before stretch: {}'.format(width))
     
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
             ur5e_pick_point_world, ur16e_pick_point_world, max_width=stretch_max_width)
         
-        print('ur5e_pose_world', ur5e_pose_world, 'ur16e_pose_world', ur16e_pose_world)
+        #print('ur5e_pose_world', ur5e_pose_world, 'ur16e_pose_world', ur16e_pose_world)
 
         # stretch
         r = self.dual_arm_stretch(ur5e_pose_world, ur16e_pose_world, 
@@ -246,7 +243,7 @@ class PickAndFlingSkill:
             max_time=stretch_max_time)
         if not r: return False
         width = self.scene.get_tcp_distance()
-        print('Width: {}'.format(width))
+        #print('Width: {}'.format(width))
         
         # fling
         ur5e_path_world, ur16e_path_world = points_to_fling_path(
@@ -260,8 +257,8 @@ class PickAndFlingSkill:
             place_height=place_height
         )
 
-        print('ur5e_path_world', ur5e_path_world)
-        print('ur16e_path_world', ur16e_path_world)
+        # print('ur5e_path_world', ur5e_path_world)
+        # print('ur16e_path_world', ur16e_path_world)
 
         self.scene.both_fling(ur5e_path_world, transform_pose(self.scene.T_ur5e_ur16e, ur16e_path_world), 
             fling_speed, fling_acc)
@@ -297,7 +294,7 @@ class PickAndFlingSkill:
 
         # enable force mode on both robots
         tcp_distance = self.scene.get_tcp_distance()
-        print('Force Mode')
+        #print('Force Mode')
         with self.scene.ur5e.start_force_mode() as left_force_guard:
             with self.scene.ur16e.start_force_mode() as right_force_guard:
                 start_time = time.time()
@@ -321,7 +318,7 @@ class PickAndFlingSkill:
                     # check for distance
                     tcp_distance = self.scene.get_tcp_distance()
                     if tcp_distance >= max_width:
-                        print('Max distance reached: {}'.format(tcp_distance))
+                        #print('Max distance reached: {}'.format(tcp_distance))
                         break
 
                     # check for speed
@@ -331,8 +328,8 @@ class PickAndFlingSkill:
                     max_acutal_speed = max(max_acutal_speed, actual_speed)
                     if max_acutal_speed > (max_speed * 0.4):
                         if actual_speed < speed_threshold:
-                            print('Action stopped at acutal_speed: {} with  max_acutal_speed: {}'.format(
-                                actual_speed, max_acutal_speed))
+                            # print('Action stopped at acutal_speed: {} with  max_acutal_speed: {}'.format(
+                            #     actual_speed, max_acutal_speed))
                             break
 
                     curr_time = time.time()

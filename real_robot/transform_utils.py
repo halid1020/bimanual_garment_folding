@@ -3,6 +3,11 @@ import numpy as np
 from camera_utils import intrinsic_to_params
 import cv2
 
+GRIPPER_OFFSET_UR5e = 0.05 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.03 #To calibrate: This has to be accurate
+TABLE_HEIGHT = 0.03 #This has to be accurate
+FLING_LIFT_DIST = 0.1
+
 def matrix_to_pose(T):
     """
     Converts a 4x4 homogeneous transformation matrix to a UR pose vector.

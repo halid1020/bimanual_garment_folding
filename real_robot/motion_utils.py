@@ -29,3 +29,10 @@ def safe_home(robot, speed=1.5, acc=1.0, blocking=True, dry_run=False):
         time.sleep(0.2)
         return True
     return robot.home(speed, acc, blocking)
+
+def safe_out_scene(robot, speed=1.5, acc=1.0, blocking=True, dry_run=False):
+    if dry_run:
+        print("[Dry-run] Moving home")
+        time.sleep(0.2)
+        return True
+    return robot.out_scene(speed, acc, blocking)

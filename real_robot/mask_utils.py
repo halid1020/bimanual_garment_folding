@@ -1,24 +1,24 @@
 import torch
 import cv2
-# from segment_anything import SamPredictor, sam_model_registry, SamAutomaticMaskGenerator
+from segment_anything import SamPredictor, sam_model_registry, SamAutomaticMaskGenerator
 from save_utils import save_colour
 import numpy as np
 import os
 
 MASK_THRESHOLD_V2=350000
 
-# def get_mask_generator():
-#     DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-#     print('Device {}'.format(DEVICE))
+def get_mask_generator():
+    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print('Device {}'.format(DEVICE))
 
-#     ### Masking Model Macros ###
-#     MODEL_TYPE = "vit_h"
-#     sam = sam_model_registry[MODEL_TYPE](checkpoint="/workspace/bimanual_garment_folding/models/sam_vit_h_4b8939.pth")
-#     sam.to(device=DEVICE)
-#     return SamAutomaticMaskGenerator(sam)
+    ### Masking Model Macros ###
+    MODEL_TYPE = "vit_h"
+    sam = sam_model_registry[MODEL_TYPE](checkpoint="../models/sam_vit_h_4b8939.pth")
+    sam.to(device=DEVICE)
+    return SamAutomaticMaskGenerator(sam)
 
 def get_mask_v2(mask_generator, rgb, mask_treshold_min=10000, mask_treshold_max=360000,
-                dark_threshold=80, min_variance=200, max_variance=5000,
+                dark_threshold=0, min_variance=200, max_variance=5000,
                 debug=False,
                 save_dir="./tmp"):
     """

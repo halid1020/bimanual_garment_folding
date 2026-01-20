@@ -68,3 +68,4 @@ To create a new experiment, create a YAML file directly under the `conf` folder.
 ####
 
 pip install pycurl
+pip install segment_anything #1.0

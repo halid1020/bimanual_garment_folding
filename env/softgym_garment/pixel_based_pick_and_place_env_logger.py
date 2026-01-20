@@ -91,6 +91,4 @@ class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
 
         if wandb_logger is not None:
             self.wandb_logger.log(
-                {f"trajectory/episode_{eid}": save_path}, 
-                step=episode_config.get('step') # Optional: if you have a step count
-            )
+                {f"trajectory/episode_{eid}": save_path})

@@ -495,8 +495,7 @@ class RSSM(RLAgent):
     
     def load_best(self):
 
-        if path is None:
-            path = self.save_dir
+        path = self.save_dir
         
         checkpoint_dir = os.path.join(path, 'checkpoints')
 

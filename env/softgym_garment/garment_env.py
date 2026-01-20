@@ -426,6 +426,7 @@ class GarmentEnv(Arena):
             if self.add_final_goal_to_obs:
                 for k, v in goal[-1]['observation'].items():
                     info['observation'][f'goal_{k}'] = v
+                    info['observation'][f'goal-{k}'] = v
 
         return info
     

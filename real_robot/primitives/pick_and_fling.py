@@ -199,14 +199,14 @@ class PickAndFlingSkill:
         target_pose_0 = np.concatenate([target_p0_local, vertical_rotvec])
 
         # UR16e target needs to be converted back to UR16e Base Frame
-        target_p1_ur16e = transform_point(self.scene.T_ur5e_ur16e, target_p1_local)
+        target_p1_ur16e = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_local)
         target_pose_1 = np.concatenate([target_p1_ur16e, vertical_rotvec])
 
         # 5. Execute Centering Move
         self.scene.both_movel(target_pose_0, target_pose_1, speed=0.2, acc=0.1, blocking=True)
 
 
-        self.dual_arm_stretch_and_fling(target_p0_local, transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_ur16e))
+        self.dual_arm_stretch_and_fling(target_p0_local, transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e))
 
         self.scene.both_home()
 
@@ -260,7 +260,7 @@ class PickAndFlingSkill:
         # print('ur5e_path_world', ur5e_path_world)
         # print('ur16e_path_world', ur16e_path_world)
 
-        self.scene.both_fling(ur5e_path_world, transform_pose(self.scene.T_ur5e_ur16e, ur16e_path_world), 
+        self.scene.both_fling(ur5e_path_world, transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_path_world), 
             fling_speed, fling_acc)
         
         self.scene.both_open_gripper()
@@ -274,7 +274,7 @@ class PickAndFlingSkill:
         """
         Assuming specific gripper and tcp orientation.
         """
-        ur16e_pose_base = transform_pose(self.scene.T_ur5e_ur16e, ur16e_pose_world)
+        ur16e_pose_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world)
 
         r = self.scene.both_movel(ur5e_pose_world, \
             ur16e_pose_base, \

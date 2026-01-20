@@ -1,5 +1,6 @@
 __pycache__
 assets
+*.zip
 tmp
 wandb
 runs

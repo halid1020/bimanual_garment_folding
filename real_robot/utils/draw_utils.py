@@ -22,8 +22,8 @@ PRIMITIVE_COLORS = {
 # Normalized → pixel coordinates
 # -------------------------------
 def norm_to_px(v, W, H):
-    x = int((v[0] + 1) * 0.5 * W)
-    y = int((v[1] + 1) * 0.5 * H)
+    x = int((v[1] + 1) * 0.5 * W)
+    y = int((v[0] + 1) * 0.5 * H)
     return x, y
 
 def apply_workspace_shade(rgb, mask, color, alpha=0.35):

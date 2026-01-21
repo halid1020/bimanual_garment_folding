@@ -1,7 +1,6 @@
 import os
 import cv2
 import numpy as np
-# from ..video_logger import VideoLogger
 import matplotlib.pyplot as plt
 
 from real_robot.utils.draw_utils import *
@@ -23,9 +22,6 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             robot1_masks = [info["observation"]["robot1_mask"] for info in result["information"]]
         
         actions = result["actions"]
-        # picker_traj = [info["observation"]["picker_norm_pixel_pos"]
-        #                for info in result["information"]]  # [T][2,2]
-
         H, W = 512, 512
 
         if filename is None:

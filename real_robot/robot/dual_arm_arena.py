@@ -370,10 +370,10 @@ class DualArmArena(Arena):
         # --- Step 3: Execute robot skill ---
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
-            self.pick_and_place_skill.step(points_executed)
+            self.pick_and_place_skill.step(points_executed.copy())
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
-            self.pick_and_fling_skill.step(points_executed)
+            self.pick_and_fling_skill.step(points_executed.copy())
         elif action_type == 'no-operation':
             pass
         
@@ -386,7 +386,7 @@ class DualArmArena(Arena):
         # --- Step 4: Capture new state ---
         self.info = self._get_info()
 
-        applied_action = (points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
+        applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
         self.info['applied_action'] = {
             action_type: applied_action.flatten()
         }

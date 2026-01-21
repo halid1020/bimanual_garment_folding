@@ -6,8 +6,9 @@ robot:
 board:
   squares_x: 5
   squares_y: 7
-  square_length: 0.02   # meters
-  marker_length: 0.015  # meters
+  square_length: 0.028   # meters
+  marker_length: 0.021  # meters
+
 
 # List of joint positions in DEGREES [Base, Shoulder, Elbow, Wrist1, Wrist2, Wrist3]
 poses:

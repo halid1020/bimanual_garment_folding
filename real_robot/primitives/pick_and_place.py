@@ -2,7 +2,7 @@
 import math
 import numpy as np
 import time
-from transform_utils import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, TABLE_HEIGHT, FLING_LIFT_DIST
+from real_robot.utils.transform_utils import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
@@ -45,10 +45,10 @@ class PickAndPlaceSkill:
         if pick_0[0] < pick_1[0]:
             pick_0, place_0, pick_1, place_1 = pick_1, place_1, pick_0, place_0
         
-        p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, TABLE_HEIGHT)
-        p_base_place_0 = point_on_table_base(place_0[0], place_0[1], self.scene.intr, self.scene.T_ur5e_cam, TABLE_HEIGHT)
-        p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
-        p_base_place_1 = point_on_table_base(place_1[0], place_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
+        p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, SURFACE_HEIGHT)
+        p_base_place_0 = point_on_table_base(place_0[0], place_0[1], self.scene.intr, self.scene.T_ur5e_cam, SURFACE_HEIGHT)
+        p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, SURFACE_HEIGHT)
+        p_base_place_1 = point_on_table_base(place_1[0], place_1[1], self.scene.intr, self.scene.T_ur16e_cam, SURFACE_HEIGHT)
 
         # Ensure z is sensible
         def clamp_z(arr):

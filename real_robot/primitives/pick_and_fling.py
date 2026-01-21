@@ -2,8 +2,8 @@
 import math
 import numpy as np
 import time
-from transform_utils import point_on_table_base, transform_point, points_to_gripper_pose, \
-    points_to_action_frame, get_base_fling_poses, transform_pose, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, TABLE_HEIGHT, FLING_LIFT_DIST
+from real_robot.utils.transform_utils import point_on_table_base, transform_point, points_to_gripper_pose, \
+    points_to_action_frame, get_base_fling_poses, transform_pose, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
@@ -77,8 +77,8 @@ class PickAndFlingSkill:
             pick_0,  pick_1 = pick_1, pick_0
 
         
-        p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, TABLE_HEIGHT)
-        p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, TABLE_HEIGHT)
+        p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, SURFACE_HEIGHT)
+        p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, SURFACE_HEIGHT)
     
 
         # print(

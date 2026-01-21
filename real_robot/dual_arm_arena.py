@@ -7,8 +7,8 @@ import math
 # from agent_arena import Arena
 # from ..utilities.logger.dummy_logger import DummyLogger
 from dual_arm_scene import DualArmScene
-from mask_utils import get_mask_generator, get_mask_v2
-from camera_utils import get_birdeye_rgb_and_pose, intrinsics_to_matrix
+from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
+from real_robot.utils.camera_utils import get_birdeye_rgb_and_pose, intrinsics_to_matrix
 from save_utils import save_colour, save_mask
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill

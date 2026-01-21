@@ -7,17 +7,16 @@ import os
 # Helper to ensure we can import from local folders if needed
 sys.path.append(os.getcwd())
 
-from thread_utils import ThreadWithResult
+from real_robot.utils.thread_utils import ThreadWithResult
 from constants import *
 from motion_utils import safe_movel, safe_gripper, safe_home, safe_out_scene
-from scene_utils import load_camera_to_base, load_camera_to_gripper
+from real_robot.utils.scene_utils import load_camera_to_base, load_camera_to_gripper
 
 # Ensure matrix_to_pose is in this file!
-from real_robot.transform_utils import tcp_pose_to_transform, pixels2base_on_table, transform_pose, matrix_to_pose
+from real_robot.utils.transform_utils import tcp_pose_to_transform, pixels2base_on_table, transform_pose, matrix_to_pose, SURFACE_HEIGHT
 from ur import UR_RTDE
 from realsense_camera import RealsenseCamera
 
-SURFACE_HEIGHT = 0.03 # relavent to base
 # World frame is at the middle of two arms and SURFACE_HEIGHT above the base frames
 # World frame axis follows the ones of the ur5e.
 

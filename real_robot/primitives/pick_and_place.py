@@ -7,8 +7,8 @@ from real_robot.utils.transform_utils import point_on_table_base, GRIPPER_OFFSET
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
 LIFT_DIST = 0.08            # meters to lift after grasp
-MOVE_SPEED = 0.2
-MOVE_ACC = 0.2
+MOVE_SPEED = 1.0
+MOVE_ACC = 0.5
 HOME_AFTER = True
 
 class PickAndPlaceSkill:
@@ -67,7 +67,6 @@ class PickAndPlaceSkill:
         p_base_pick_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
         p_base_place_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
         p_base_pick_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
-        
         p_base_place_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
 
         # Use current orientation for the TCP during motion (keep orientation same)
@@ -89,7 +88,7 @@ class PickAndPlaceSkill:
 
         # Motion sequence
         print("Moving to home (safe start)")
-        self.scene.both_home(speed=1.0, acc=0.8, blocking=True)
+        self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
 
         # move to approach above picks (both arms)
         self.scene.both_movel(
@@ -102,28 +101,28 @@ class PickAndPlaceSkill:
         self.scene.both_movel(
             np.concatenate([grasp_pick_0, vertical_rotvec]),
             np.concatenate([grasp_pick_1, vertical_rotvec]),
-            speed=0.08, acc=0.05, blocking=True
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Close gripper
-        print("Closing gripper...")
+        #print("Closing gripper...")
         self.scene.both_close_gripper()
         time.sleep(1.0)
 
         # Lift
-        print("Lifting object")
+        #print("Lifting object")
         self.scene.both_movel(
             np.concatenate([lift_after_0, vertical_rotvec]),
             np.concatenate([lift_after_1, vertical_rotvec]),
-            speed=0.2, acc=0.1, blocking=True
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Move to approach above place points
-        print("Move to approach above place point")
+        #print("Move to approach above place point")
         self.scene.both_movel(
             np.concatenate([approach_place_0, vertical_rotvec]),
             np.concatenate([approach_place_1, vertical_rotvec]),
-            speed=0.2, acc=0.1, blocking=True
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Descend to place
@@ -131,7 +130,7 @@ class PickAndPlaceSkill:
         self.scene.both_movel(
             np.concatenate([place_pose_0, vertical_rotvec]),
             np.concatenate([place_pose_1, vertical_rotvec]),
-            speed=0.08, acc=0.05, blocking=True
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Open gripper
@@ -144,11 +143,11 @@ class PickAndPlaceSkill:
         self.scene.both_movel(
             np.concatenate([approach_place_0, vertical_rotvec]),
             np.concatenate([approach_place_1, vertical_rotvec]),
-            speed=0.2, acc=0.1, blocking=True
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         if HOME_AFTER:
             print("Returning home")
-            self.scene.both_home(speed=1.0, acc=0.8, blocking=True)
+            self.scene.both_home(speed=MOVE_SPEED+0.5, acc=MOVE_ACC+0.5, blocking=True)
 
         print("Pick-and-place sequence finished.")

@@ -1,6 +1,7 @@
 import time
 import numpy as np
-from real_robot.utils.human_utils import click_points_pick_and_place, click_points_pick_and_fling
+from real_robot.utils.human_utils \
+    import click_points_pick_and_place, click_points_pick_and_fling
 from real_robot.utils.save_utils import save_colour, save_mask
 
 from agent_arena import Agent
@@ -15,7 +16,7 @@ class HumanPolicy(Agent):
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
         for arena_id in arena_ids:
-            self.internal_states[arena_id]['action_inference_time'] = []
+            self.internal_states[arena_id]['inference_time'] = []
 
     def single_act(self, info):
         """Get an action dict from user clicks."""
@@ -109,7 +110,7 @@ class HumanPolicy(Agent):
 
         # --- End Timer & Store Duration ---
         if self.measure_time:
-            self.internal_states[arena_id]['action_inference_time'].append(time.time() - start_time)
+            self.internal_states[arena_id]['inference_time'].append(time.time() - start_time)
         
         return action
 

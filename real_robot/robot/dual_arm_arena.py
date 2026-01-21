@@ -1,11 +1,8 @@
 import numpy as np
 from typing import Dict, Any, List, Optional
-from gym import spaces
 import cv2
-import math
+import time
 
-# from agent_arena import Arena
-# from ..utilities.logger.dummy_logger import DummyLogger
 from real_robot.robot.dual_arm_scene import DualArmScene
 from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
 from real_robot.utils.save_utils import save_colour
@@ -21,6 +18,8 @@ class DualArmArena():
         # super().__init__(config)
         self.name = "dual_arm_arena"
         self.config = config
+
+        self.measure_time = config.get('measure_time', False)
 
         # Robot initialization
         dry_run = config.get("dry_run", False)
@@ -48,7 +47,7 @@ class DualArmArena():
 
         self.resolution = (512, 512)
         self.action_step = 0
-        self.horizon = self.config.horizon
+        #self.horizon = self.config.horizon
         self.evaluate_result = None
         self.last_flattened_step = -1
         print('Finished init DualArmArena')
@@ -68,6 +67,9 @@ class DualArmArena():
         # Reset robot to safe state
         self.info = self._get_info()
         self.clear_frames()
+        self.primitive_time = []
+        self.perception_time = []
+        self.process_action_time = []
         return self.info
     
     def _get_info(self, task_related=True, flattened_obs=True):
@@ -137,7 +139,7 @@ class DualArmArena():
             for k, v in info['flattened_obs'].items():
                 info['observation'][f'flattened-{k}'] = v
 
-        info['done'] = self.action_step >= self.horizon
+        info['done'] = self.action_step >= self.action_horizon
 
         if task_related:
             info['evaluation'] = self.evaluate()
@@ -146,8 +148,8 @@ class DualArmArena():
            
             info['observation']['last_flattened_step'] = self.last_flattened_step
             info['success'] =  self.success()
-            if info['success']:
-                info['done'] = True
+            # if info['success']:
+            #     info['done'] = True
             
             if info['evaluation'] != {}:
                 info['reward'] = self.task.reward(self.last_info, None, info)
@@ -221,6 +223,10 @@ class DualArmArena():
         Convert normalized bird-eye pixels to original RGB image coordinates,
         snap them to the robot workspace masks, and execute the skill.
         """
+
+        if self.measure_time:
+            start_time = time.time()
+
         norm_pixels = np.array(list(action.values())[0]).reshape(-1, 2)
         action_type = list(action.keys())[0]
 
@@ -336,6 +342,10 @@ class DualArmArena():
             final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
             points_executed = np.concatenate([final_pick_0, final_pick_1])
            
+        
+        if self.measure_time:
+            self.process_action_time.append(time.time() - start_time)
+            start_time = time.time()
 
         # --- Step 3: Execute robot skill ---
         if action_type == 'norm-pixel-pick-and-place':
@@ -349,8 +359,18 @@ class DualArmArena():
         
         self.action_step += 1
 
+        if self.measure_time:
+            self.primitive_time.append(time.time() - start_time)
+            start_time = time.time()
+
         # --- Step 4: Capture new state ---
         self.info = self._get_info()
+
+        if self.measure_time:
+            self.perception_time.append(time.time() - start_time)
+
+        
+
         return self.info
     
     def get_frames(self) -> List[np.ndarray]:

@@ -1,23 +1,29 @@
 # main.py
-from dual_arm_arena import DualArmArena
+from robot.dual_arm_arena import DualArmArena
 from human_policy import HumanPolicy
 from garment_flattening_task import GarmentFlatteningTask
 from dotmap import DotMap
 
 def main():
-    config = {
+    anrea_config = {
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
         'horizon': 20,
-        "debug": True
+        "debug": True,
+        'measure_time': True
     }
     task_config = {
         'debug': True
     }
+    agent_config = {
+        'debug': False,
+        'measure_time': True
+    }
 
-    arena = DualArmArena(DotMap(config))
-    policy = HumanPolicy(arena)
+    arena = DualArmArena(DotMap(anrea_config))
+    policy = HumanPolicy(DotMap(agent_config))
+    policy.reset([0])
     task = GarmentFlatteningTask(DotMap(task_config))
     arena.set_task(task)
 

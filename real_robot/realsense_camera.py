@@ -3,7 +3,7 @@
 import cv2
 import numpy as np
 import pyrealsense2 as rs
-from save_utils import save_depth, save_colour
+from real_robot.utils.save_utils import save_depth, save_colour
 
 class RealsenseCamera():
 

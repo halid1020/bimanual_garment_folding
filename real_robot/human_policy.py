@@ -1,16 +1,29 @@
-# policies/human_policy.py
+import time
 import numpy as np
-from human_utils import click_points_pick_and_place, click_points_pick_and_fling
-from save_utils import save_colour, save_mask
+from real_robot.utils.human_utils import click_points_pick_and_place, click_points_pick_and_fling
+from real_robot.utils.save_utils import save_colour, save_mask
 
-class HumanPolicy:
+from agent_arena import Agent
+
+class HumanPolicy(Agent):
     """Interactive human-in-the-loop policy for giving pick/place actions."""
 
-    def __init__(self, arena):
-        self.arena = arena
+    def __init__(self, config):
+        super().__init__(config)
+        self.measure_time = config.get('measure_time', False)
+
+    def reset(self, arena_ids):
+        self.internal_states = {arena_id: {} for arena_id in arena_ids}
+        for arena_id in arena_ids:
+            self.internal_states[arena_id]['action_inference_time'] = []
 
     def single_act(self, info):
         """Get an action dict from user clicks."""
+        # --- Start Timer ---
+        if self.measure_time:
+            start_time = time.time()
+            arena_id = info['arena_id']
+
         while True:
             cmd = input("\nSkill [1=pick-fling, 2=pick-place, 3=no-operation, q=quit]: ").strip().lower()
             if cmd in ("q", "quit"):
@@ -31,11 +44,12 @@ class HumanPolicy:
         mask = info['observation']["mask"]
         workspace_mask_0, workspace_mask_1 = info["workspace_mask_0"], info["workspace_mask_1"]
         
-        print('rgb shape', rgb.shape)
-        save_colour(rgb, 'policy_input_rgb', './tmp')
-        save_mask(mask, 'policy_input_mask', './tmp')
-        save_mask(workspace_mask_0, 'policy_input_workspace_mask_0', './tmp')
-        save_mask(workspace_mask_1, 'policy_input_workspace_mask_1', './tmp')
+        if self.config.debug:
+            save_colour(rgb, 'policy_input_rgb', './tmp')
+            save_mask(mask, 'policy_input_mask', './tmp')
+            save_mask(workspace_mask_0, 'policy_input_workspace_mask_0', './tmp')
+            save_mask(workspace_mask_1, 'policy_input_workspace_mask_1', './tmp')
+        
         display_rgb = self.apply_workspace_masks(rgb, workspace_mask_0, workspace_mask_1)
 
             
@@ -60,7 +74,7 @@ class HumanPolicy:
             pick_1_norm = norm_xy(pick_1)
             place_1_norm = norm_xy(place_1)
 
-            return {
+            action = {
                 "norm-pixel-pick-and-place": \
                     np.concatenate([pick_0_norm, pick_1_norm, place_0_norm, place_1_norm])
                 
@@ -81,16 +95,23 @@ class HumanPolicy:
             pick_0_norm = norm_xy(pick_0)
             pick_1_norm = norm_xy(pick_1)
 
-            return {
+            action = {
                 "norm-pixel-pick-and-fling": \
                     np.concatenate([pick_0_norm, pick_1_norm])
             }
 
         elif prim_type == 'no_operation':
-            return {"no-operation": np.zeros(8)}
+            action = {"no-operation": np.zeros(8)}
 
         else:
             raise ValueError(f"Unknown skill type: {prim_type}")
+        
+
+        # --- End Timer & Store Duration ---
+        if self.measure_time:
+            self.internal_states[arena_id]['action_inference_time'].append(time.time() - start_time)
+        
+        return action
 
     def apply_workspace_masks(self, rgb, robot_0_mask, robot_1_mask):
         # Ensure masks are boolean and 2D

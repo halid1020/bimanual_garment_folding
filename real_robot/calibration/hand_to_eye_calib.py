@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 import math
 import os  # <--- Added for file path manipulation
-from real_robot.ur import UR_RTDE
+from real_robot.robot.ur import UR_RTDE
 
 # RealSense
 try:

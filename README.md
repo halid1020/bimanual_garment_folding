@@ -69,3 +69,5 @@ To create a new experiment, create a YAML file directly under the `conf` folder.
 
 pip install pycurl
 pip install segment_anything #1.0
+
+download sam_vit_h_4b8939.pth and put it under sam_vit

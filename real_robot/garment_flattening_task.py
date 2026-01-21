@@ -6,6 +6,8 @@ import json
 from tqdm import tqdm
 from statistics import mean
 
+from real_robot.utils.mask_utils import get_max_IoU
+
 
 IOU_FLATTENING_TRESHOLD = 0.82
 NC_FLATTENING_TRESHOLD = 0.95
@@ -19,7 +21,7 @@ def speedFolding_approx_reward(last_info, action, info):
         last_info = info
     delta_coverage = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage'] # -1 to 1
 
-    smoothness = info['evaluation']['max_IoU'] - last_info['evaluation']['max_IoU'] # -1 to 1
+    smoothness = info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened'] # -1 to 1
 
     alpha = 2
     beta = 1
@@ -32,9 +34,9 @@ def coverage_alignment_reward(last_info, action, info):
         last_info = info
     r_ca = speedFolding_approx_reward(last_info, action, info)
     dc = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage']
-    ds = info['evaluation']['max_IoU_to_flattend'] - last_info['evaluation']['max_IoU_to_flattend']
+    ds = info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened']
     nc = info['evaluation']['normalised_coverage']
-    iou = info['evaluation']['max_IoU_to_flattend']
+    iou = info['evaluation']['max_IoU_to_flattened']
     epsilon_c = 1e-4
     epsilon_s = 1e-4
     max_c = 0.99
@@ -76,7 +78,7 @@ class GarmentFlatteningTask():
     def reward(self, last_info, action, info):#
         reward = coverage_alignment_reward(last_info, action, info)
         if info['success']:
-            reward = info['arena'].horizon - info['observation']['action_step']
+            reward = info['arena'].action_horizon - info['observation']['action_step']
         
         reward_ = reward
         
@@ -89,7 +91,6 @@ class GarmentFlatteningTask():
         }
     
     def evaluate(self, arena):
-        return {}
         eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
@@ -114,15 +115,15 @@ class GarmentFlatteningTask():
         return eval_dict
 
     def _get_normalised_coverage(self, arena):
-        res = arena._get_coverage() / arena.flatten_coverage
+        res = arena.coverage / arena.flatten_coverage
         
         # clip between 0 and 1
         return np.clip(res, 0, 1)
     
     def _get_normalised_impovement(self, arena):
         
-        res = (arena._get_coverage() - arena.init_coverae) / \
-            (max(arena.flatten_coverage - arena.init_coverae, 0) + 1e-3)
+        res = (arena.coverage - arena.init_coverage) / \
+            (max(arena.flatten_coverage - arena.init_coverage, 0) + 1e-3)
         return np.clip(res, 0, 1)
     
     def _get_max_IoU_to_flattened(self, arena):
@@ -132,7 +133,7 @@ class GarmentFlatteningTask():
         return IoU
     
     def success(self, arena):
-        return True
+        # return True
     
         cur_eval = self.evaluate(arena)
         IoU = cur_eval['max_IoU_to_flattened']

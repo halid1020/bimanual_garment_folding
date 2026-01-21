@@ -6,6 +6,8 @@ from dotmap import DotMap
 import time
 import numpy as np
 
+from agent_arena.api import run
+
 def print_stats(name, data):
     """Helper to safely print mean and std of a list."""
     if not data or len(data) == 0:
@@ -19,13 +21,15 @@ def print_stats(name, data):
 
 def main():
     measure_time = True
-    debug = False
+    debug = True
+    project_name = 'bimanual_garment_folding'
+    exp_name = 'human_real_world'
 
     anrea_config = {
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'action_horizon': 5,
+        'action_horizon': 3,
         "debug": debug,
         'measure_time': measure_time
     }
@@ -37,29 +41,42 @@ def main():
         'measure_time': measure_time
     }
 
-    arena = DualArmArena(DotMap(anrea_config))
+    save_dir = './tmp'
+    
     policy = HumanPolicy(DotMap(agent_config))
+    policy.set_log_dir(save_dir, project_name, exp_name)
     policy.reset([0])
+
+    arena = DualArmArena(DotMap(anrea_config))
     task = GarmentFlatteningTask(DotMap(task_config))
     arena.set_task(task)
+    arena.set_log_dir(save_dir, project_name, exp_name)
 
-    total_time = []
-    info = arena.reset()
+    if measure_time:
+        start_time = time.time()
+    
+    run(policy, arena, mode='eval', episode_config={'eid': 0, 'save_video': False}, checkpoint=-1, policy_terminate=False, env_success_stop=False)
+    
+    if measure_time:
+        duration = time.time() - start_time
+        total_time = duration
 
-    print('info evaluate', info['evaluation'])
-    print('info done', info['done'])
-    while not info['done']:
-        if measure_time:
-            start_time = time.time()
-        action = policy.single_act(info)
-        info = arena.step(action)
+    # info = arena.reset()
 
-        if measure_time:
-            duration = time.time() - start_time
-            total_time.append(duration)
+    # print('info evaluate', info['evaluation'])
+    # print('info done', info['done'])
+    # while not info['done']:
+    #     if measure_time:
+    #         start_time = time.time()
+    #     action = policy.single_act(info)
+    #     info = arena.step(action)
+
+    #     if measure_time:
+    #         duration = time.time() - start_time
+    #         total_time.append(duration)
 
         
-        print('info evaluate', info['evaluation'])
+    #     print('info evaluate', info['evaluation'])
     
   
     if measure_time:
@@ -77,12 +94,12 @@ def main():
         process_action_time = getattr(arena, 'process_action_time', [])
 
         # Print Statistics
-        print_stats("Total Loop Time", total_time)
+        print("Total Time for this Trajectory", total_time)
         print("-" * 40)
-        print_stats("Policy Inference", inference_time)
-        print_stats("Perception", perception_time)
-        print_stats("Process Action", process_action_time)
-        print_stats("Primitives Exec", primitive_time)
+        print_stats("Policy Inference / Step", inference_time)
+        print_stats("Perception / Step", perception_time)
+        print_stats("Process Action / Step", process_action_time)
+        print_stats("Primitives Exec / Step", primitive_time)
         print("="*40 + "\n")
     
 

@@ -8,8 +8,11 @@ from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
 from real_robot.utils.save_utils import save_colour
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
+from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
 
-class DualArmArena():
+from agent_arena import Arena
+
+class DualArmArena(Arena):
     """
     Real Dual-Arm Arena implementation using UR5e and UR16e robots.
     """
@@ -31,6 +34,7 @@ class DualArmArena():
 
         self.pick_and_place_skill = PickAndPlaceSkill(self.dual_arm)
         self.pick_and_fling_skill = PickAndFlingSkill(self.dual_arm)
+        self.logger = PixelBasedPrimitiveEnvLogger()
 
         self.mask_generator = get_mask_generator()
 
@@ -50,6 +54,8 @@ class DualArmArena():
         #self.horizon = self.config.horizon
         self.evaluate_result = None
         self.last_flattened_step = -1
+        self.id = 0
+        self.init_coverage = None
         print('Finished init DualArmArena')
 
     def reset(self, episode_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -61,11 +67,15 @@ class DualArmArena():
 
         self.flattened_obs = None
         self.get_flattened_obs()
+        self.last_info = None
 
         self.action_step = 0
         
         # Reset robot to safe state
+        self.init_coverage = None
+        self.task.reset(self)
         self.info = self._get_info()
+        self.init_coverage = self.coverage
         self.clear_frames()
         self.primitive_time = []
         self.perception_time = []
@@ -82,7 +92,7 @@ class DualArmArena():
         # Capture post-interaction scene
         # -----------------------------
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
-        raw_cloth_mask = get_mask_v2(self.mask_generator, raw_rgb, debug=self.config.debug)
+        
         workspace_mask_0, workspace_mask_1 = self.dual_arm.get_workspace_masks()
         workspace_mask_0 = workspace_mask_0.astype(np.uint8)
         workspace_mask_1 = workspace_mask_1.astype(np.uint8)
@@ -103,8 +113,13 @@ class DualArmArena():
 
         # Perform crops
         crop_rgb = raw_rgb[y1:y2, x1:x2]
+        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.config.debug)
+        self.cloth_mask = crop_mask
+        self.coverage = np.sum(self.cloth_mask)
+        if self.init_coverage == None:
+            self.init_coverage = self.coverage
         crop_depth = raw_depth[y1:y2, x1:x2]
-        crop_mask = raw_cloth_mask[y1:y2, x1:x2]
+        #crop_mask = raw_cloth_mask[y1:y2, x1:x2]
         crop_workspace_mask_0 = workspace_mask_0[y1:y2, x1:x2]
         crop_workspace_mask_1 = workspace_mask_1[y1:y2, x1:x2]
 
@@ -126,12 +141,15 @@ class DualArmArena():
                 "rgb": resized_rgb,
                 "depth": resized_depth,
                 "mask": resized_mask.astype(np.bool_),
-                "raw_rgb": raw_rgb
+                "raw_rgb": raw_rgb,
+                "action_step": self.action_step
             },
-            "workspace_mask_0": self.resized_workspace_mask_0.astype(np.bool_),
-            "workspace_mask_1": self.resized_workspace_mask_1.astype(np.bool_),
+            "robot0_mask": self.resized_workspace_mask_0.astype(np.bool_),
+            "robot1_mask": self.resized_workspace_mask_1.astype(np.bool_),
             "eid": self.eid,
-            "arena_id": 0
+            "arena_id": 0,
+            "arena": self,
+            
         }
 
         if flattened_obs:
@@ -152,6 +170,7 @@ class DualArmArena():
             #     info['done'] = True
             
             if info['evaluation'] != {}:
+                print('evaluation', info['evaluation'])
                 info['reward'] = self.task.reward(self.last_info, None, info)
             
             goals = self.task.get_goals()
@@ -172,6 +191,7 @@ class DualArmArena():
             print("=" * 60)
             input("Press [Enter] to capture the flattened cloth state...")
             self.flattened_obs = self._get_info(task_related=False, flattened_obs=False)
+            self.flatten_coverage = self.coverage
             if self.config.debug:
                 save_colour(self.flattened_obs['observation']['rgb'], 'flattended_rgb', 'tmp')
             print(f"\n Flattened observation captured successfully.")
@@ -365,6 +385,11 @@ class DualArmArena():
 
         # --- Step 4: Capture new state ---
         self.info = self._get_info()
+
+        applied_action = (points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
+        self.info['applied_action'] = {
+            action_type: applied_action.flatten()
+        }
 
         if self.measure_time:
             self.perception_time.append(time.time() - start_time)

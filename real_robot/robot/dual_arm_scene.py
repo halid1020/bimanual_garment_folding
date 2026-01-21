@@ -8,7 +8,7 @@ import os
 sys.path.append(os.getcwd())
 
 from real_robot.utils.thread_utils import ThreadWithResult
-from constants import *
+# from constants import *
 from real_robot.utils.motion_utils import safe_movel, safe_gripper, safe_home, safe_out_scene
 from real_robot.utils.scene_utils import load_camera_to_base
 
@@ -16,7 +16,7 @@ from real_robot.utils.scene_utils import load_camera_to_base
 from real_robot.utils.transform_utils import tcp_pose_to_transform, pixels2base_on_table, \
     transform_pose, matrix_to_pose, SURFACE_HEIGHT
 from real_robot.robot.ur import UR_RTDE
-from realsense_camera import RealsenseCamera
+from real_robot.robot.realsense_camera import RealsenseCamera
 
 # World frame is at the middle of two arms and SURFACE_HEIGHT above the base frames
 # World frame axis follows the ones of the ur5e.
@@ -32,11 +32,11 @@ class DualArmScene:
         self.gripper_type = 'rg2'   
         
         # Both robots use Eye-to-Hand (Static Camera) calibration
-        self.ur16e_eye2hand_calib_file = "calibration/ur16e-calib.yaml"
-        self.ur5e_eye2hand_calib_file = "calibration/ur5e-calib.yaml" 
+        self.ur16e_eye2hand_calib_file = f"{os.environ['MP_FOLD_PATH']}/real_robot/calibration/ur16e-calib.yaml"
+        self.ur5e_eye2hand_calib_file = f"{os.environ['MP_FOLD_PATH']}/real_robot/calibration/ur5e-calib.yaml" 
 
         self.ur5e_radius = (0.1, 0.85)
-        self.ur16e_radius = (0.1, 0.9)
+        self.ur16e_radius = (0.2, 0.9)
 
         if not dry_run:
             self.ur5e = UR_RTDE(ur5e_robot_ip, self.gripper_type)

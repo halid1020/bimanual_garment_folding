@@ -18,7 +18,7 @@ class HumanPolicy(Agent):
         for arena_id in arena_ids:
             self.internal_states[arena_id]['inference_time'] = []
 
-    def single_act(self, info):
+    def single_act(self, info, update=False):
         """Get an action dict from user clicks."""
         # --- Start Timer ---
         if self.measure_time:
@@ -43,7 +43,7 @@ class HumanPolicy(Agent):
         # Unpack scene info
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]
         mask = info['observation']["mask"]
-        workspace_mask_0, workspace_mask_1 = info["workspace_mask_0"], info["workspace_mask_1"]
+        workspace_mask_0, workspace_mask_1 = info["robot0_mask"], info["robot1_mask"]
         
         if self.config.debug:
             save_colour(rgb, 'policy_input_rgb', './tmp')

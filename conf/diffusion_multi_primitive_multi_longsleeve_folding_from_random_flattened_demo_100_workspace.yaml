@@ -7,5 +7,5 @@ defaults:
 
 exp_name: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_workspace
 project_name: bimanual_garment_folding
-save_root: /mnt/scratch/users/hcv530/garment_folding_data
+save_root: /media/hcv530/T7/garment_folding_data
 train_and_eval: train_and_evaluate_single

@@ -43,6 +43,7 @@ class DualArmArena(Arena):
         self.num_val_trials = config.get("num_val_trials", 10)
         self.num_eval_trials = config.get("num_eval_trials", 30)
         self.action_horizon = config.get("action_horizon", 20)
+        self.snap_to_cloth_mask = config.get("snap_to_cloth_mask", False)
 
         self.current_episode = None
         self.frames = []
@@ -74,6 +75,7 @@ class DualArmArena(Arena):
         # Reset robot to safe state
         self.init_coverage = None
         self.task.reset(self)
+        input("Press [Enter] to finish resetting cloth state to a crumpled state...")
         self.info = self._get_info()
         self.init_coverage = self.coverage
         self.clear_frames()
@@ -253,6 +255,32 @@ class DualArmArena(Arena):
         # --- Step 1: Convert normalized → crop → full bird-eye pixels ---
         # Scale from [-1, 1] to [0, crop_size]
         points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
+
+        if self.snap_to_cloth_mask:
+            # Get the current mask
+            mask = self.info['observation']['mask'].astype(np.uint8)
+            
+            # --- EROSION STEP START ---
+            # Erode the mask by 2 pixels to force points slightly inward
+            kernel = np.ones((3, 3), np.uint8) # 3x3 kernel is standard for small erosions
+            eroded_mask = cv2.erode(mask, kernel, iterations=2)
+            
+            # Safety check: If erosion wiped out the whole mask (tiny cloth), revert to original
+            if np.sum(eroded_mask) == 0:
+                print("[Warning] Erosion removed entire mask. Using original mask.")
+                target_mask = mask
+            else:
+                target_mask = eroded_mask
+            # --- EROSION STEP END ---
+
+            snapped_points = []
+            for i, pt in enumerate(points_crop):
+                # Use the eroded 'target_mask' for snapping
+                if i < 2:
+                    snapped_points.append(self._snap_to_mask(pt, target_mask))
+                else:
+                    snapped_points.append(pt)
+            points_crop = np.array(snapped_points)
 
         # Add crop offset (x1, y1) to get coordinates in the Full Raw Image
         # Shape is (N, 2) where N is usually 4 (Pick0, Pick1, Place0, Place1)

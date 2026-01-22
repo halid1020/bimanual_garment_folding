@@ -69,9 +69,17 @@ class PickAndPlaceSkill:
         p_base_pick_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
         p_base_place_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
 
-        # Use current orientation for the TCP during motion (keep orientation same)
-        # The code expects rotation-vector-like [rx,ry,rz] for the TCP orientation
-        vertical_rotvec = [math.pi, 0.0, 0.0]
+        # # Use current orientation for the TCP during motion (keep orientation same)
+        # # The code expects rotation-vector-like [rx,ry,rz] for the TCP orientation
+        # vertical_rotvec = [math.pi, 0.0, 0.0]
+
+        # Get full pose (x,y,z, rx,ry,rz)
+        pose_0_home = self.scene.ur5e.get_tcp_pose()
+        pose_1_home = self.scene.ur16e.get_tcp_pose()
+
+        # Extract just the rotation vector [rx, ry, rz]
+        rot_0 = pose_0_home[3:6]
+        rot_1 = pose_1_home[3:6]
 
         # Compose approach/grasp/lift poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
@@ -92,15 +100,15 @@ class PickAndPlaceSkill:
 
         # move to approach above picks (both arms)
         self.scene.both_movel(
-            np.concatenate([approach_pick_0, vertical_rotvec]),
-            np.concatenate([approach_pick_1, vertical_rotvec]),
+            np.concatenate([approach_pick_0, rot_0]),
+            np.concatenate([approach_pick_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # descend to grasp poses
         self.scene.both_movel(
-            np.concatenate([grasp_pick_0, vertical_rotvec]),
-            np.concatenate([grasp_pick_1, vertical_rotvec]),
+            np.concatenate([grasp_pick_0, rot_0]),
+            np.concatenate([grasp_pick_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
@@ -112,24 +120,24 @@ class PickAndPlaceSkill:
         # Lift
         #print("Lifting object")
         self.scene.both_movel(
-            np.concatenate([lift_after_0, vertical_rotvec]),
-            np.concatenate([lift_after_1, vertical_rotvec]),
+            np.concatenate([lift_after_0, rot_0]),
+            np.concatenate([lift_after_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Move to approach above place points
         #print("Move to approach above place point")
         self.scene.both_movel(
-            np.concatenate([approach_place_0, vertical_rotvec]),
-            np.concatenate([approach_place_1, vertical_rotvec]),
+            np.concatenate([approach_place_0, rot_0]),
+            np.concatenate([approach_place_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Descend to place
         print("Descending to place point")
         self.scene.both_movel(
-            np.concatenate([place_pose_0, vertical_rotvec]),
-            np.concatenate([place_pose_1, vertical_rotvec]),
+            np.concatenate([place_pose_0, rot_0]),
+            np.concatenate([place_pose_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
@@ -141,8 +149,8 @@ class PickAndPlaceSkill:
         # Lift after release
         print("Lifting after releasing")
         self.scene.both_movel(
-            np.concatenate([approach_place_0, vertical_rotvec]),
-            np.concatenate([approach_place_1, vertical_rotvec]),
+            np.concatenate([approach_place_0, rot_0]),
+            np.concatenate([approach_place_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 

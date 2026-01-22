@@ -8,13 +8,11 @@ from real_robot.utils.transform_utils import point_on_table_base, transform_poin
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
 LIFT_DIST = 0.08            # meters to lift after grasp
-MOVE_SPEED = 0.2
-MOVE_ACC = 0.2
 HOME_AFTER = TrueMIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
 LIFT_DIST = 0.08            # meters to lift after grasp
-MOVE_SPEED = 0.2
-MOVE_ACC = 0.2
+MOVE_SPEED = 1.0
+MOVE_ACC = 0.5
 HOME_AFTER = True
 
 
@@ -105,7 +103,16 @@ class PickAndFlingSkill:
 
         # Use current orientation for the TCP during motion (keep orientation same)
         # The code expects rotation-vector-like [rx,ry,rz] for the TCP orientation
-        vertical_rotvec = [math.pi, 0.0, 0.0]
+        #vertical_rotvec = [math.pi, 0.0, 0.0]
+
+        # Get full pose (x,y,z, rx,ry,rz)
+        pose_0_home = self.scene.ur5e.get_tcp_pose()
+        pose_1_home = self.scene.ur16e.get_tcp_pose()
+
+        # Extract just the rotation vector [rx, ry, rz]
+        rot_0 = pose_0_home[3:6]
+        rot_1 = pose_1_home[3:6]
+
 
         # Compose approach/grasp/lift poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
@@ -127,18 +134,18 @@ class PickAndFlingSkill:
 
         # move to approach above picks (both arms)
         self.scene.both_movel(
-            np.concatenate([approach_pick_0, vertical_rotvec]),
-            np.concatenate([approach_pick_1, vertical_rotvec]),
+            np.concatenate([approach_pick_0, rot_0]),
+            np.concatenate([approach_pick_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # descend to grasp poses
-        # print('grasp_pick_0', grasp_pick_0)
-        # print('grasp_pick_1', grasp_pick_1)
+        print('grasp_pick_0', grasp_pick_0)
+        print('grasp_pick_1', grasp_pick_1)
         self.scene.both_movel(
-            np.concatenate([grasp_pick_0, vertical_rotvec]),
-            np.concatenate([grasp_pick_1, vertical_rotvec]),
-            speed=0.08, acc=0.05, blocking=True
+            np.concatenate([grasp_pick_0, rot_0]),
+            np.concatenate([grasp_pick_1, rot_1]),
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # Close gripper
@@ -149,9 +156,9 @@ class PickAndFlingSkill:
         # Lift
         print("Lifting object")
         self.scene.both_movel(
-            np.concatenate([lift_after_0, vertical_rotvec]),
-            np.concatenate([lift_after_1, vertical_rotvec]),
-            speed=0.2, acc=0.1, blocking=True
+            np.concatenate([lift_after_0, rot_0]),
+            np.concatenate([lift_after_1, rot_1]),
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
         # -------------------------------------------------------------------------
@@ -196,11 +203,11 @@ class PickAndFlingSkill:
 
         # 4. Prepare Pose Vectors for Motion
         # UR5e is already in local frame
-        target_pose_0 = np.concatenate([target_p0_local, vertical_rotvec])
+        target_pose_0 = np.concatenate([target_p0_local, rot_0])
 
         # UR16e target needs to be converted back to UR16e Base Frame
         target_p1_ur16e = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_local)
-        target_pose_1 = np.concatenate([target_p1_ur16e, vertical_rotvec])
+        target_pose_1 = np.concatenate([target_p1_ur16e, rot_1])
 
         # 5. Execute Centering Move
         self.scene.both_movel(target_pose_0, target_pose_1, speed=0.2, acc=0.1, blocking=True)
@@ -221,10 +228,10 @@ class PickAndFlingSkill:
             swing_stroke=0.4,
             swing_height=0.45,
             swing_angle=np.pi/4,
-            lift_height=0.4,
+            lift_height=0.35,
             place_height= 0.15, #0.05,
-            fling_speed=1.0, #1.3,
-            fling_acc=3 #5
+            fling_speed=1.3,
+            fling_acc=5
             ):
         
         width = self.scene.get_tcp_distance()
@@ -265,17 +272,94 @@ class PickAndFlingSkill:
         
         self.scene.both_open_gripper()
 
+    # def dual_arm_stretch(self, 
+    #     ur5e_pose_world, ur16e_pose_world,
+    #     force=12, init_force=30,
+    #     max_speed=0.15, 
+    #     max_width=0.7, max_time=5,
+    #     speed_threshold=0.001):
+    #     """
+    #     Assuming specific gripper and tcp orientation.
+    #     """
+    #     ur16e_pose_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world)
+
+    #     r = self.scene.both_movel(ur5e_pose_world, \
+    #         ur16e_pose_base, \
+    #         speed=max_speed,
+    #         acc=1.2)
+    #     if not r: return False
+
+    #     ur5e_tcp_pose = self.scene.ur5e.get_tcp_pose()
+    #     ur16e_tcp_pose = self.scene.ur16e.get_tcp_pose()
+
+    #     # task_frame = [0, 0, 0, 0, 0, 0]
+    #     selection_vector = [1, 0, 0, 0, 0, 0]
+    #     force_type = 2
+    #     # speed for compliant axis, deviation for non-compliant axis
+    #     limits = [max_speed, 2, 2, 1, 1, 1]
+    #     dt = 1.0/125
+
+    #     # enable force mode on both robots
+    #     tcp_distance = self.scene.get_tcp_distance()
+    #     #print('Force Mode')
+    #     with self.scene.ur5e.start_force_mode() as left_force_guard:
+    #         with self.scene.ur16e.start_force_mode() as right_force_guard:
+    #             start_time = time.time()
+    #             prev_time = start_time
+    #             max_acutal_speed = 0
+    #             while (time.time() - start_time) < max_time:
+    #                 f = force
+    #                 if max_acutal_speed < max_speed/20:
+    #                     f = init_force
+    #                 left_wrench = [f, 0, 0, 0, 0, 0]
+    #                 right_wrench = [-f, 0, 0, 0, 0, 0]
+
+    #                 # apply force
+    #                 r = left_force_guard.apply_force(ur5e_tcp_pose, selection_vector, 
+    #                     left_wrench, force_type, limits)
+    #                 if not r: return False
+    #                 r = right_force_guard.apply_force(ur16e_tcp_pose, selection_vector, 
+    #                     right_wrench, force_type, limits)
+    #                 if not r: return False
+
+    #                 # check for distance
+    #                 tcp_distance = self.scene.get_tcp_distance()
+    #                 if tcp_distance >= max_width:
+    #                     #print('Max distance reached: {}'.format(tcp_distance))
+    #                     break
+
+    #                 # check for speed
+    #                 l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
+    #                 r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
+    #                 actual_speed = max(l_speed, r_speed)
+    #                 max_acutal_speed = max(max_acutal_speed, actual_speed)
+    #                 if max_acutal_speed > (max_speed * 0.4):
+    #                     if actual_speed < speed_threshold:
+    #                         # print('Action stopped at acutal_speed: {} with  max_acutal_speed: {}'.format(
+    #                         #     actual_speed, max_acutal_speed))
+    #                         break
+
+    #                 curr_time = time.time()
+    #                 duration = curr_time - prev_time
+    #                 if duration < dt:
+    #                     time.sleep(dt - duration)
+    #     return r
+
+
     def dual_arm_stretch(self, 
         ur5e_pose_world, ur16e_pose_world,
-        force=12, init_force=30,
+        force=8,        # Reduced from 12 for gentler hold
+        init_force=15,   # Reduced from 30
         max_speed=0.15, 
-        max_width=0.7, max_time=5,
-        speed_threshold=0.001):
+        max_width=0.7, 
+        max_time=5,
+        speed_threshold=0.005): # Increased slightly to detect stop earlier
         """
-        Assuming specific gripper and tcp orientation.
+        Fixed tensioning logic to prevent over-stretching.
         """
         ur16e_pose_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world)
 
+        # Move to initial grasp pose
         r = self.scene.both_movel(ur5e_pose_world, \
             ur16e_pose_base, \
             speed=max_speed,
@@ -285,25 +369,36 @@ class PickAndFlingSkill:
         ur5e_tcp_pose = self.scene.ur5e.get_tcp_pose()
         ur16e_tcp_pose = self.scene.ur16e.get_tcp_pose()
 
-        # task_frame = [0, 0, 0, 0, 0, 0]
-        selection_vector = [1, 0, 0, 0, 0, 0]
+        selection_vector = [1, 0, 0, 0, 0, 0] # Compliant along X
         force_type = 2
-        # speed for compliant axis, deviation for non-compliant axis
         limits = [max_speed, 2, 2, 1, 1, 1]
         dt = 1.0/125
 
+        # Record starting width to ensure we don't stretch 500% of object size
+        start_width = self.scene.get_tcp_distance()
+        
+        # Calculate a dynamic max width (e.g., max 150% of original width OR hard limit)
+        # This prevents ripping small objects.
+        safe_limit_width = min(max_width, start_width * 1.5) 
+
+        print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
+
         # enable force mode on both robots
-        tcp_distance = self.scene.get_tcp_distance()
-        #print('Force Mode')
         with self.scene.ur5e.start_force_mode() as left_force_guard:
             with self.scene.ur16e.start_force_mode() as right_force_guard:
                 start_time = time.time()
                 prev_time = start_time
-                max_acutal_speed = 0
+                
                 while (time.time() - start_time) < max_time:
-                    f = force
-                    if max_acutal_speed < max_speed/20:
+                    elapsed = time.time() - start_time
+                    
+                    # LOGIC FIX 1: Time-based kickstart, not speed-based.
+                    # Apply higher force only for the first 0.2 seconds to overcome static friction.
+                    if elapsed < 0.2:
                         f = init_force
+                    else:
+                        f = force
+                        
                     left_wrench = [f, 0, 0, 0, 0, 0]
                     right_wrench = [-f, 0, 0, 0, 0, 0]
 
@@ -317,25 +412,25 @@ class PickAndFlingSkill:
 
                     # check for distance
                     tcp_distance = self.scene.get_tcp_distance()
-                    if tcp_distance >= max_width:
-                        #print('Max distance reached: {}'.format(tcp_distance))
+                    if tcp_distance >= safe_limit_width:
+                        print(f'[Stretch] Max allowable width reached: {tcp_distance:.3f}')
                         break
 
-                    # check for speed
+                    # check for speed (LOGIC FIX 2)
+                    # Calculate actual separation speed (rate of change of distance)
                     l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
                     r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
                     actual_speed = max(l_speed, r_speed)
-                    max_acutal_speed = max(max_acutal_speed, actual_speed)
-                    if max_acutal_speed > (max_speed * 0.4):
+                    
+                    # Only check for stop after the initial kickstart period
+                    if elapsed > 0.5:
                         if actual_speed < speed_threshold:
-                            # print('Action stopped at acutal_speed: {} with  max_acutal_speed: {}'.format(
-                            #     actual_speed, max_acutal_speed))
+                            print(f'[Stretch] Tension detected (speed {actual_speed:.4f} < {speed_threshold}). Stopping.')
                             break
 
                     curr_time = time.time()
                     duration = curr_time - prev_time
                     if duration < dt:
                         time.sleep(dt - duration)
-        return r
-
-
+                    prev_time = curr_time
+        return True

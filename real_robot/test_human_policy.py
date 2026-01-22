@@ -21,7 +21,7 @@ def print_stats(name, data):
 
 def main():
     measure_time = True
-    debug = True
+    debug = False
     project_name = 'bimanual_garment_folding'
     exp_name = 'human_real_world'
 
@@ -29,9 +29,10 @@ def main():
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'action_horizon': 3,
+        'action_horizon': 10,
         "debug": debug,
-        'measure_time': measure_time
+        'measure_time': measure_time,
+        "snap_to_cloth_mask": True
     }
     task_config = {
         'debug': debug

@@ -1,4 +1,4 @@
-garment_type: longsleeve
+garment_type: trousers
 name: multi-garment-vectorised-single-picker-pick-and-place-env
 picker_radius: 0.03
 picker_threshold: 0.007

@@ -11,7 +11,7 @@ use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
-demo_horizon: 10
+demo_horizon: 6
 batch_size: 64
 disable_updown: True
 action_shape: [8]
@@ -29,13 +29,13 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_flattening_horizon_10_workspace_snap_human_demo_100"
+  data_path: "multi_longsleeve_multi_primitive_folding_from_random_flattened_horizon_10_human_demo_100_workspace"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True
   obs_config:
-
+    
     robot0_mask: 
       shape: [128, 128, 1]
       output_key: 'robot0_mask'
@@ -55,18 +55,6 @@ dataset_config:
     rgb: 
       shape: [128, 128, 3]
       output_key: 'rgb'
-
-    goal_rgb: 
-      shape: [128, 128, 3]
-      output_key: 'goal_rgb'
-    
-    goal_depth: 
-      shape: [128, 128, 1]
-      output_key: 'goal_depth'
-    
-    goal_mask: 
-      shape: [128, 128, 1]
-      output_key: 'goal_mask'
 
   act_config:
     default: 

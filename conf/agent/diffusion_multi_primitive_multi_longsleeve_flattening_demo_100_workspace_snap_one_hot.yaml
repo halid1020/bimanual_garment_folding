@@ -33,8 +33,9 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
+  cache_in_memory: True
   obs_config:
-
+    
     robot0_mask: 
       shape: [128, 128, 1]
       output_key: 'robot0_mask'

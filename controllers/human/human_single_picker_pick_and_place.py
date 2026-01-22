@@ -2,6 +2,8 @@ from agent_arena import Agent
 import numpy as np
 import cv2
 from .utils import draw_text_top_right
+from .utils import draw_text_top_right, apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
+import os
 
 class HumanSinglePickerPickAndPlace(Agent):
     
@@ -93,7 +95,7 @@ class HumanSinglePickerPickAndPlace(Agent):
         
         # Store click coordinates
         clicks = []
-        
+        os.environ["DISPLAY"] = CV2_DISPLAY
         def mouse_callback(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
                 clicks.append((x, y))
@@ -112,7 +114,8 @@ class HumanSinglePickerPickAndPlace(Agent):
             cv2.waitKey(1)
         
         cv2.destroyAllWindows()
-        
+        os.environ["DISPLAY"] = SIM_DISPLAY
+
         # Normalize the coordinates to [-1, 1]
         height, width = rgb.shape[:2]
         pick1_y, pick1_x = clicks[0]

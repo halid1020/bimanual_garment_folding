@@ -6,7 +6,7 @@ obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'rgb-workspace-mask'
+input_obs: 'rgb-workspace-mask-goal' # TODO: we need to implement this
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
@@ -33,7 +33,6 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
-  cache_in_memory: True
   obs_config:
 
     robot0_mask: 
@@ -81,6 +80,6 @@ primitives:
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
   - name: no-operation
     dim: 0
-mask_out_irrelavent_action_dim: false
+mask_out_irrelavent_action_dim: true
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_workspace
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_workspace_goal

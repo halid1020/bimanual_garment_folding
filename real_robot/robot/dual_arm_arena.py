@@ -255,10 +255,10 @@ class DualArmArena(Arena):
         # --- Step 1: Convert normalized → crop → full bird-eye pixels ---
         # Scale from [-1, 1] to [0, crop_size]
         points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
-
+        print('points crop before snapping', points_crop)
         if self.snap_to_cloth_mask:
             # Get the current mask
-            mask = self.info['observation']['mask'].astype(np.uint8)
+            mask = self.cloth_mask
             
             # --- EROSION STEP START ---
             # Erode the mask by 2 pixels to force points slightly inward
@@ -281,8 +281,8 @@ class DualArmArena(Arena):
                 else:
                     snapped_points.append(pt)
             points_crop = np.array(snapped_points)
-
-        # Add crop offset (x1, y1) to get coordinates in the Full Raw Image
+        print('point scrop after snapping', points_crop)
+        # Add crop offset (x1, y1) to get,  coordinates in the Full Raw Image
         # Shape is (N, 2) where N is usually 4 (Pick0, Pick1, Place0, Place1)
         points_orig = points_crop + np.array([self.x1, self.y1])
         

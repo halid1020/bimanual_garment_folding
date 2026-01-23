@@ -19,7 +19,7 @@ class DualArmArena(Arena):
 
     def __init__(self, config):
         # super().__init__(config)
-        self.name = "dual_arm_arena"
+        self.name = "dual_arm_garment_arena"
         self.config = config
 
         self.measure_time = config.get('measure_time', False)

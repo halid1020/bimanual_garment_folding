@@ -1,12 +1,13 @@
 # main.py
 from robot.dual_arm_arena import DualArmArena
 from human_policy import HumanPolicy
-from garment_flattening_task import GarmentFlatteningTask
+
 from dotmap import DotMap
 import time
 import numpy as np
-
 from agent_arena.api import run
+
+from real_robot.tasks.garment_folding_task import GarmentFoldingTask
 
 def print_stats(name, data):
     """Helper to safely print mean and std of a list."""
@@ -35,7 +36,10 @@ def main():
         "snap_to_cloth_mask": True
     }
     task_config = {
-        'debug': debug
+        'debug': debug,
+        'goal_steps': 3,
+        'num_goals': 3,
+        'task_name': 'centre_sleeve_folding'
     }
     agent_config = {
         'debug': debug,
@@ -49,7 +53,10 @@ def main():
     policy.reset([0])
 
     arena = DualArmArena(DotMap(anrea_config))
-    task = GarmentFlatteningTask(DotMap(task_config))
+
+    task_config = DotMap(task_config)
+    task_config.demonstrator = policy
+    task = GarmentFoldingTask(task_config)
     arena.set_task(task)
     arena.set_log_dir(save_dir, project_name, exp_name)
 
@@ -61,23 +68,6 @@ def main():
     if measure_time:
         duration = time.time() - start_time
         total_time = duration
-
-    # info = arena.reset()
-
-    # print('info evaluate', info['evaluation'])
-    # print('info done', info['done'])
-    # while not info['done']:
-    #     if measure_time:
-    #         start_time = time.time()
-    #     action = policy.single_act(info)
-    #     info = arena.step(action)
-
-    #     if measure_time:
-    #         duration = time.time() - start_time
-    #         total_time.append(duration)
-
-        
-    #     print('info evaluate', info['evaluation'])
     
   
     if measure_time:

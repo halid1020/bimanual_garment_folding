@@ -437,8 +437,7 @@ class RSSM(RLAgent):
             'optimiser': self.optimiser.state_dict()
         }
         
-        if path is None:
-            path = self.save_dir
+        path = self.save_dir
         
         os.makedirs(os.path.join(path, 'checkpoints'), exist_ok=True)
     

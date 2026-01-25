@@ -51,6 +51,7 @@ class DualArmArena(Arena):
 
         self.current_episode = None
         self.frames = []
+        self.all_infos = []
         self.goal = None
         self.debug = config.get("debug", False)
 
@@ -84,15 +85,21 @@ class DualArmArena(Arena):
         self.task.reset(self)
         if self.init_from == 'crumpled':
             input("Press [Enter] to finish resetting cloth state to a crumpled state...")
-        self.info = self._get_info()
+        #self.info = self._get_info()
+        
+        self.info = {}
+        self.all_infos = [self.info]
+        self.info = self._process_info(self.info)
+        
         self.init_coverage = self.coverage
         self.clear_frames()
         self.primitive_time = []
         self.perception_time = []
         self.process_action_time = []
+        self.all_infos = [self.info]
         return self.info
     
-    def _get_info(self, task_related=True, flattened_obs=True):
+    def _process_info(self, info, task_related=True, flattened_obs=True):
         # Return to camera position after manipulation
         self.dual_arm.both_open_gripper()
         self.dual_arm.both_home()
@@ -146,7 +153,7 @@ class DualArmArena(Arena):
         # -----------------------------
         # Store and return information
         # -----------------------------
-        info = {
+        info.update({
             'observation': {
                 "rgb": resized_rgb,
                 "depth": resized_depth,
@@ -160,7 +167,7 @@ class DualArmArena(Arena):
             "eid": self.eid,
             "arena_id": 0,
             "arena": self,
-        }
+        })
 
         if flattened_obs:
             info['flattened_obs'] = self.get_flattened_obs()
@@ -192,6 +199,9 @@ class DualArmArena(Arena):
         self.dual_arm.both_home()
         return info
 
+    def get_trajectory_infos(self):
+        return self.all_infos
+    
     def get_flattened_obs(self):
         """
         Loads flattened observation from a human-readable directory (PNGs + JSON).
@@ -199,11 +209,11 @@ class DualArmArena(Arena):
         """
         if self.flattened_obs is None:
             # 1. Ask for garment ID
-            garment_id = input("\n[Arena] Enter garment name (e.g. shirt_01): ").strip()
+            self.garment_id = input("\n[Arena] Enter garment name (e.g. shirt_01): ").strip()
             
             # 2. Setup asset directory path
             base_asset_dir = f"{os.environ.get('MP_FOLD_PATH', '.')}/assets"
-            save_dir = os.path.join(base_asset_dir, 'real_garments', garment_id)
+            save_dir = os.path.join(base_asset_dir, 'real_garments', self.garment_id)
             
             # Define filenames
             fn_rgb = os.path.join(save_dir, "rgb.png")
@@ -216,7 +226,7 @@ class DualArmArena(Arena):
 
             # 3. Check if directory and critical files exist
             if os.path.exists(save_dir) and os.path.exists(fn_info):
-                print(f"[Arena] Found cached observation folder for '{garment_id}'. Loading images...")
+                print(f"[Arena] Found cached observation folder for '{self.garment_id}'. Loading images...")
                 try:
                     # Load Images
                     # Note: cv2.imread loads as BGR, we usually work in RGB, so convert if needed. 
@@ -272,7 +282,7 @@ class DualArmArena(Arena):
                 input("Press [Enter] to capture the flattened cloth state...")
                 
                 # Capture
-                self.flattened_obs = self._get_info(task_related=False, flattened_obs=False)
+                self.flattened_obs = self._process_info(task_related=False, flattened_obs=False)
                 self.flatten_coverage = self.coverage
                 
                 obs = self.flattened_obs['observation']
@@ -409,12 +419,14 @@ class DualArmArena(Arena):
             pass
         
         self.action_step += 1
+        self.info = {}
+        self.all_infos.append(self.info)
 
         if self.measure_time:
             self.primitive_time.append(time.time() - start_time)
             start_time = time.time()
 
-        self.info = self._get_info()
+        self.info = self._process_info(self.info)
 
         applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
         self.info['applied_action'] = {

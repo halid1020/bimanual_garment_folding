@@ -60,6 +60,7 @@ class GarmentFoldingTask():
         while step < self.goal_steps: 
             # Capture action from demonstrator
             #print('ask action!!!')
+            print(f'[Goal Manager] Current step {step}, goal_steps {self.goal_steps}')
             action = self.demonstrator.single_act(info) 
             actions.append(action)
             
@@ -80,12 +81,11 @@ class GarmentFoldingTask():
         
         # --- 1. Ask User for Garment ID ---
         
-        self.garment_name = input(" Please enter the Garment ID/Name: ").strip()
-        if not self.garment_name:
-            self.garment_name = "default_garment"
-            print(f" No input. Using '{self.garment_name}'.")
+        self.garment_id = arena.garment_id
+        if not self.garment_id:
+            self.garment_id = "default_garment"
 
-        self.goal_dir = os.path.join(self.asset_dir, arena.name, self.name, self.garment_name, 'goals')
+        self.goal_dir = os.path.join(self.asset_dir, arena.name, self.name, self.garment_id, 'goals')
 
 
         # --- 4. Loop over goals ---
@@ -96,7 +96,7 @@ class GarmentFoldingTask():
             if not os.path.exists(goal_path):
                 print(f'Generating goal {i}...')
 
-                print(f"\n[Goal Manager] Cached goals NOT found for '{self.garment_name}'.")
+                print(f"\n[Goal Manager] Cached goals NOT found for '{self.garment_id}'.")
                 print(f"[Goal Manager] Directory: {self.goal_dir}")
                 
                 
@@ -172,18 +172,7 @@ class GarmentFoldingTask():
         """Evaluate folding quality using particle alignment and semantic keypoints."""
         if len(self.goals) == 0:
             return {}
-        cur_particles = arena.get_mesh_particles_positions()
-
-        # Evaluate particle alignment against each goal
-        particle_distances = []
-        key_distances = []
-        for goal in self.goals:
-            goal_particles = goal[-1]['observation']["particle_positions"]
-            #print('goal len', len(goal_particles))
-            mdp, kdp = self._compute_particle_distance(cur_particles, goal_particles, arena)
-            particle_distances.append(mdp)
-            key_distances.append(kdp)
-       
+        
         return {
             'max_IoU': self._get_max_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
@@ -349,7 +338,7 @@ class GarmentFoldingTask():
         return IoU
     
     def _get_normalised_coverage(self, arena):
-        res = arena._get_coverage() / arena.flatten_coverage
+        res = arena.coverage / arena.flatten_coverage
         
         # clip between 0 and 1
         return np.clip(res, 0, 1)

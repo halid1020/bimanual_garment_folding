@@ -144,10 +144,11 @@ class DualArmArena(Arena):
                 "depth": resized_depth,
                 "mask": resized_mask.astype(np.bool_),
                 "raw_rgb": raw_rgb,
-                "action_step": self.action_step
+                "action_step": self.action_step,
+                "robot0_mask": self.resized_workspace_mask_0.astype(np.bool_),
+                "robot1_mask": self.resized_workspace_mask_1.astype(np.bool_),
             },
-            "robot0_mask": self.resized_workspace_mask_0.astype(np.bool_),
-            "robot1_mask": self.resized_workspace_mask_1.astype(np.bool_),
+            
             "eid": self.eid,
             "arena_id": 0,
             "arena": self,

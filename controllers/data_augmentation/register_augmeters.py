@@ -12,7 +12,7 @@ from .pick_and_place_transformer_v1 import PickAndPlaceTransformerV1
 def build_data_augmenter(cfg_str):
 
     # load config from cfg_str
-    config_path = os.path.join("conf", "data_augmenter", f"{cfg_str}.yaml")
+    config_path = os.path.join(os.environ['MP_FOLD_PATH'], "conf", "data_augmenter", f"{cfg_str}.yaml")
     cfg = flattening_policy_config = OmegaConf.load(config_path)
 
     name = cfg.name

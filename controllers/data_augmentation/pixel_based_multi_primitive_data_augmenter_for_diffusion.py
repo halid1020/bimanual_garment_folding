@@ -30,6 +30,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.randomise_prim_acts = self.config.get("randomise_prim_acts", False)
         self.use_workspace = self.config.get('use_workspace', False)
         self.use_goal = self.config.get('use_goal', False)
+        self.random_crop = self.config.get('random_crop', False)
+
+        if self.random_crop:
+            self.crop_scale = self.config.get('crop_scale', [0.8, 1.0])
 
         if self.color_jitter:
             self.color_aug = K.ColorJitter(
@@ -117,19 +121,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if self.use_workspace:
             robot0_mask = sample['robot0_mask'].float()
             robot1_mask = sample['robot1_mask'].float()
-            #TODO: apply the same rotation and flipping as the "observation"
-
-            # # Ensure shape (B,T,H,W)
-            # if robot0_mask.dim() == 5:
-            #     robot0_mask = robot0_mask.squeeze(2)
-            #     robot1_mask = robot1_mask.squeeze(2)
-
+            
             robot0_mask, _, _ = self._flatten_bt(robot0_mask)  # (B*T,H,W,1)
             robot1_mask, _, _ = self._flatten_bt(robot1_mask)
 
-            # # Add channel dim → (N,1,H,W)
-            # robot0_mask = robot0_mask.unsqueeze(1)
-            # robot1_mask = robot1_mask.unsqueeze(1)
 
        
 
@@ -156,9 +151,69 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                     pa_cpu = np.zeros((1,2))
                 self._save_debug_image(cpu_img, pa_cpu, prefix="diffusion_augment_before_action", step=b)
 
-        # We'll do geometric ops using channels-first tensors
-        # Convert (N,H,W,3) -> (N,3,H,W)
-        #print('obs shape', obs.shape)
+        
+        #TODO: crop the observation, goal, and workspace in the same way, but with random window size that its scale ranges in the self.crop_scale
+        # also apply the cropping on the actions which ranges from -1 and 1 on the pixel space. Clip them to -1 and 1 if it goes beyond the cropped image.
+
+        # =========================
+        #       RANDOM CROP
+        # =========================
+        if self.random_crop and train:
+            #print('here!')
+            # Current shape of obs is (N, H, W, C) where N = B*T
+            _, H, W, _ = obs.shape
+
+            # 1. Determine Crop Parameters (Global for batch to ensure consistency)
+            scale = random.uniform(self.crop_scale[0], self.crop_scale[1])
+            new_h = int(H * scale)
+            new_w = int(W * scale)
+            
+            # Ensure dimensions are valid
+            new_h = max(1, min(new_h, H))
+            new_w = max(1, min(new_w, W))
+            
+            # Sample Top-Left corner
+            top = random.randint(0, H - new_h)
+            left = random.randint(0, W - new_w)
+
+            # 2. Crop the Visual Inputs (Slicing)
+            obs = obs[:, top:top+new_h, left:left+new_w, :]
+
+            y_cord, x_cord = 0, 1
+            if self.use_goal:
+                goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
+            
+            if self.use_workspace:
+                robot0_mask = robot0_mask[:, top:top+new_h, left:left+new_w, :]
+                robot1_mask = robot1_mask[:, top:top+new_h, left:left+new_w, :]
+
+            # 3. Adjust Actions (Pixel Space Method)
+            # Based on _save_debug_image: index 0 is Y (Height), index 1 is X (Width)
+            
+            # A. Denormalize: [-1, 1] -> [0, H] or [0, W]
+            # pixel = (norm + 1) * (size / 2)
+            B, A = pixel_actions.shape
+            pixel_actions = pixel_actions.reshape(-1, 2)
+            act_y_pixel = (pixel_actions[:, y_cord] + 1.0) * (H / 2.0)
+            act_x_pixel = (pixel_actions[:, x_cord] + 1.0) * (W / 2.0)
+
+            # B. Shift: Apply the crop offset
+            # The new (0,0) is at (top, left) of the old image
+            act_y_pixel_new = act_y_pixel - top
+            act_x_pixel_new = act_x_pixel - left
+
+            # C. Renormalize: [0, new_h] -> [-1, 1]
+            # norm = pixel / (size / 2) - 1
+            pixel_actions[:, y_cord] = act_y_pixel_new / (new_h / 2.0) - 1.0
+            pixel_actions[:, x_cord] = act_x_pixel_new / (new_w / 2.0) - 1.0
+
+            # 4. Clip actions to stay within the new valid range
+            pixel_actions = torch.clamp(pixel_actions, -1 + 1e-6, 1.0-1e-6).reshape(B, A)
+            
+
+        # =========================
+        #       Resize
+        # =========================
         obs = obs.permute(0, 3, 1, 2).contiguous()  # (N,C,H,W)
         obs = F.interpolate(obs,
             size=tuple(self.config.img_dim), mode='bilinear', align_corners=False)
@@ -206,7 +261,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             N = pixel_actions_.shape[0]
             rotation_matrices_tensor = rot_inv.expand(N, 2, 2).reshape(-1, 2, 2)
             rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B, A)
-            rotated_action = rotated_action.clip(-1, 1)
+            rotated_action = rotated_action.clip(-1+1e-6, 1-1e-6)
             
             B, C, H, W = obs.shape
             affine_matrix = torch.zeros(B, 2, 3, device=device)
@@ -227,8 +282,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
        
         # Vertical Flip
         if self.vertical_flip and (random.random() < 0.5) and train:
+            #print('Flip!')
             B, C, H, W = obs.shape
             obs = torch.flip(obs, [2])
+            
             if self.use_workspace:
                 robot0_mask = torch.flip(robot0_mask, [2])
                 robot1_mask = torch.flip(robot1_mask, [2])
@@ -266,15 +323,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 else:
                     pa_cpu = np.zeros((1,2))
                 self._save_debug_image(cpu_img, pa_cpu, prefix="diffusion_augment_after_action", step=b)
-
+            #exit(1)
         # =========================
         #      RESHAPE BACK
         # =========================
         # # obs -> (N,H,W,3)
-        # 
-        #obs = obs.permute(0, 2, 3, 1).contiguous()
+        
         obs = self._unflatten_bt(obs, BB, TT)  # (B, T, 3, H, W)
-        #print('[diffusion augmenter] obs.shape', obs.shape)
         sample["rgb"] = obs
 
         if self.use_workspace:
@@ -301,7 +356,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 sample['rgb-workspace-mask-goal'] = torch.cat([obs, robot0_mask, robot1_mask, goal_obs], dim=2)
 
 
-        #print('[augmenter] rgb stats', sample['rgb'].max(), sample['rgb'].min())
         if train:
             #print('pixel_actions', pixel_actions.shape)
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)
@@ -317,8 +371,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 full_action =  pixel_actions
 
             sample["action"] = full_action.to(device)
-
-        #print('[diffusion augmenter] after action', sample["action"].shape)
 
         return sample
     

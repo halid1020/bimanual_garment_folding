@@ -9,6 +9,9 @@ randomise_prim_acts: false
 random_channel_permutation: true
 K: 3
 use_goal: True # No rotatin, flipping and colour jitting, channel permutation.
+goal_rotation: True
+goal_tranlation: True
+goal_trans_range: [0, 0.2]
 use_workspace: true
 random_crop: true
 crop_scale: [0.8, 1.0]

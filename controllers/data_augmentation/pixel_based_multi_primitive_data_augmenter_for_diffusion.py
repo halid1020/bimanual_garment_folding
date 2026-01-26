@@ -32,6 +32,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.use_goal = self.config.get('use_goal', False)
         self.random_crop = self.config.get('random_crop', False)
 
+        if self.use_goal:
+            self.goal_rotation = self.config.get('goal_rotation', False)
+            self.goal_translation = self.config.get('goal_translation', False)
+            if self.goal_translation:
+                self.goal_trans_range = self.config.get('goal_trans_range', [0, 0.2]) 
+                # the translation vector has manginitude wihtin 0 and 0.2 on the pixel space ranges from -1 and 1.
+
         if self.random_crop:
             self.crop_scale = self.config.get('crop_scale', [0.8, 1.0])
 
@@ -152,9 +159,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 self._save_debug_image(cpu_img, pa_cpu, prefix="diffusion_augment_before_action", step=b)
 
         
-        #TODO: crop the observation, goal, and workspace in the same way, but with random window size that its scale ranges in the self.crop_scale
-        # also apply the cropping on the actions which ranges from -1 and 1 on the pixel space. Clip them to -1 and 1 if it goes beyond the cropped image.
-
         # =========================
         #       RANDOM CROP
         # =========================
@@ -293,6 +297,84 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             pixel_actions = pixel_actions.reshape(-1, 2)
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(BB*(TT-1), -1)
+
+        
+        # =========================
+        #   DEBUG: Goal Before Aug
+        # =========================
+        if self.debug and self.use_goal:
+            n_show = min(4, goal_obs.shape[0])
+            for b in range(n_show):
+                # goal_obs is (N, C, H, W), convert to (H, W, C) for plotting
+                cpu_img = goal_obs[b].permute(1, 2, 0).detach().cpu().numpy().astype(np.float32)
+                # Pass dummy points (0,0) as goals usually don't have action points to visualize
+                dummy_pts = np.zeros((1, 2)) 
+                self._save_debug_image(cpu_img, dummy_pts, prefix="goal_augment_before", step=b)
+
+        # =========================
+        #   GOAL AUGMENTATION
+        # =========================
+        if self.use_goal and train and (self.goal_rotation or self.goal_translation):
+            
+            # 1. Initialize Affine Matrix (Identity)
+            # Shape (1, 2, 3) to broadcast the SAME transformation across the whole batch
+            aff_params = torch.eye(2, 3, device=device).unsqueeze(0)
+
+            # 2. Goal Rotation
+            if self.goal_rotation:
+                # Sample a NEW random index separate from the observation rotation
+                # This ensures parameters are different from obs, but shared for all goals
+                k_rot = torch.randint(
+                    int(360 / self.config.rotation_degree), size=(1,), device=device
+                )
+                goal_degree = self.config.rotation_degree * k_rot
+                theta_g = torch.deg2rad(goal_degree.float())
+                
+                c_g = torch.cos(theta_g)
+                s_g = torch.sin(theta_g)
+                
+                # Update rotation (2x2) part of the affine matrix
+                aff_params[:, 0, 0] = c_g
+                aff_params[:, 0, 1] = -s_g
+                aff_params[:, 1, 0] = s_g
+                aff_params[:, 1, 1] = c_g
+
+            # 3. Goal Translation
+            if self.goal_translation:
+                # Sample magnitude and angle for the translation vector
+                # The magnitude is in normalized pixel space [-1, 1], making it relative to W and H
+                r_min, r_max = self.goal_trans_range
+                mag = (r_max - r_min) * torch.rand(1, device=device) + r_min
+                angle = 2 * np.pi * torch.rand(1, device=device)
+                
+                tx = mag * torch.cos(angle)
+                ty = mag * torch.sin(angle)
+                
+                # Update translation vector (last column)
+                aff_params[:, 0, 2] = tx
+                aff_params[:, 1, 2] = ty
+
+            # 4. Apply Affine Grid Sample
+            if self.goal_rotation or self.goal_translation:
+                # Expand params to match the flattened batch size of goals (N_goal, 2, 3)
+                N_goal = goal_obs.shape[0]
+                current_aff = aff_params.expand(N_goal, -1, -1)
+                
+                # Generate grid and sample
+                # affine_grid uses normalized coordinates [-1, 1], so the translation 
+                # calculated above is automatically relative to W and H.
+                grid_g = F.affine_grid(current_aff, goal_obs.shape, align_corners=True)
+                goal_obs = F.grid_sample(goal_obs, grid_g, align_corners=True)
+        
+        # =========================
+        #   DEBUG: Goal After Aug
+        # =========================
+        if self.debug and self.use_goal:
+            n_show = min(4, goal_obs.shape[0])
+            for b in range(n_show):
+                cpu_img = goal_obs[b].permute(1, 2, 0).detach().cpu().numpy().astype(np.float32)
+                dummy_pts = np.zeros((1, 2))
+                self._save_debug_image(cpu_img, dummy_pts, prefix="goal_augment_after", step=b)
 
         # =========================
         #     COLOR JITTER (GLOBAL)

@@ -99,11 +99,9 @@ class PickAndPlaceSkill:
         self.move_speed = 0.2
         self.move_acc = 0.2
         self.home_after = True
-        # Safety threshold for real world (larger than sim usually)
         self.collision_threshold = 0.35 
 
     def reset(self):
-        print("[PickAndPlaceSkill] Resetting...")
         self.scene.both_home()
         self.scene.both_open_gripper()
         time.sleep(0.5)
@@ -151,6 +149,9 @@ class PickAndPlaceSkill:
         rot_0 = pose_0_home[3:6]
         rot_1 = pose_1_home[3:6]
 
+        # TODO: The line between the two finger on the gripper is perpendicular to the y-axis
+        # I want to also control the rotation of the gripper given by the arguments of the function.
+
         # -------------------------------------------------------------------
         # 2. PREPARE TRAJECTORIES FOR COLLISION CHECKING
         # -------------------------------------------------------------------
@@ -184,8 +185,6 @@ class PickAndPlaceSkill:
         # -------------------------------------------------------------------
         conflict, min_dist = check_trajectories_close(traj0_check, traj1_check, threshold=self.collision_threshold)
         
-        print(f"[PickAndPlace] Trajectory Min Dist: {min_dist:.4f}m | Conflict: {conflict}")
-        
         # Reset to home before starting
         self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
         self.scene.both_open_gripper()
@@ -194,8 +193,7 @@ class PickAndPlaceSkill:
         # Note: We pass the ORIGINAL (local frame) points to the execute functions
         # because the robots expect commands in their own base frames.
         if conflict:
-            print(">>> COLLISION DETECTED. Executing SEQUENTIAL Pick-and-Place. <<<")
-            
+           
             # Robot 0
             self._execute_single_arm(
                 self.scene.ur5e, 
@@ -211,13 +209,10 @@ class PickAndPlaceSkill:
             self.scene.ur16e.home(speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
 
         else:
-            print(">>> Path Clear. Executing SIMULTANEOUS Pick-and-Place. <<<")
             self._execute_dual_arm(
                 p_base_pick_0, p_base_place_0, rot_0,
                 p_base_pick_1, p_base_place_1, rot_1
             )
-
-        print("Pick-and-place sequence finished.")
 
     def _execute_single_arm(self, robot, pick_pt, place_pt, rot):
         """Helper to run PnP on a single robot instance."""

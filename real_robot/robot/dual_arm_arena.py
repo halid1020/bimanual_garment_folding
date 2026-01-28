@@ -409,6 +409,12 @@ class DualArmArena(Arena):
             self.process_action_time.append(time.time() - start_time)
             start_time = time.time()
 
+        # TODO: The line between the two finger on the gripper is perpendicular to the y-axis
+        # I want to also calculate the rotation of the end-effector needed so that the line 
+        # between the two finger will perpendicular to the cutline of the cloth mask
+        # if the pixel is inside the mask or completely outside the mask, the roation give is 0
+        # but it will different for the grasping pixel that is on the border of
+
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
             self.pick_and_place_skill.step(points_executed.copy())

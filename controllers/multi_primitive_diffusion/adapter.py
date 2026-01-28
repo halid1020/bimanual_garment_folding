@@ -99,12 +99,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.network_action_dim = max(self.action_dims)
             if self.primitive_integration == 'bin_as_output':
                 self.network_action_dim += 1
+            self.data_save_action_dim = self.network_action_dim
+            if self.primitive_integration == 'one-hot-encoding':
+                self.data_save_action_dim += 1
+            
             self.primitive_action_masks = self._build_primitive_action_masks()
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
             
             
         else:
             self.network_action_dim = config.action_dim
+            self.data_save_action_dim = config.action_dim
 
         self._init_networks()
 
@@ -219,12 +224,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                             observations[k].append(v_)
                 
                 add_action = action
-                if self.config.primitive_integration == 'bin_as_output': # Unused dimenstions are zeros
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
+                    # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.prim_name2id[action_name]
                     prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
-                    add_action = np.zeros(self.network_action_dim)
+                    add_action = np.zeros(self.data_save_action_dim)
+                    print('add action dim', add_action.shape)
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                     #add_action = np.concatenate([prim_act, action_param])
@@ -239,7 +246,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actions['default'].append(add_action)  
               
                 info = arena.step(action)
-                print('[diffusion] demo reward', info['reward'])
+                # print('[diffusion] demo reward', info['reward'])
                 policy.update(info, add_action)
                 info['reward'] = 0
                 done = info['done']

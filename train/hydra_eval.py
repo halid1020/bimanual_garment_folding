@@ -2,12 +2,13 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 
-from train.utils import register_agent_arena, registered_arena, build_task
+from train.utils import register_agent, register_arena, build_task
 import agent_arena.api as ag_ar
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
-    register_agent_arena()
+    register_agent()
+    register_arena()
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
@@ -29,10 +30,19 @@ def main(cfg: DictConfig):
 
     # logging
     
-    arena = registered_arena[cfg.arena.name](cfg.arena) #We want to bulid this with agent arena.
+    arena = ag_ar.build_arena(
+        cfg.arena.name, 
+        cfg.arena,
+        project_name=cfg.project_name,
+        exp_name=cfg.exp_name,
+        save_dir=save_dir)
+    
+    
+    # arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
+
+
     task = build_task(cfg.task)
     arena.set_task(task)
-    arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
     
     
 

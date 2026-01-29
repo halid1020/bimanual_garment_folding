@@ -3,14 +3,14 @@ from omegaconf import DictConfig, OmegaConf
 import os
 from tqdm import tqdm
 
-from train.utils import register_agent_arena, registered_arena, build_task, build_data_augmenter
+from train.utils import register_agent, registered_arena, build_task, build_data_augmenter
 import agent_arena.api as ag_ar
 from agent_arena import TrainableAgent
-from train.utils import register_agent_arena,  build_data_augmenter
+from train.utils import register_agent,  build_data_augmenter
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
-    register_agent_arena()
+    register_agent()
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 

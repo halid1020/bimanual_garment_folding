@@ -3,12 +3,12 @@ from omegaconf import DictConfig, OmegaConf
 import os
 import agent_arena.api as ag_ar
 
-from train.utils import register_agent_arena, registered_arena, build_task
+from train.utils import register_agent, registered_arena, build_task
 from env.parallel import Parallel
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
-    register_agent_arena()
+    register_agent()
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 

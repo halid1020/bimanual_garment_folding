@@ -5,7 +5,7 @@ import numpy as np
 from omegaconf import OmegaConf
 
 # Assuming these are your custom modules
-from train.utils import register_agent_arena, registered_arena, build_task
+from train.utils import register_agent, registered_arena, build_task
 import agent_arena.api as ag_ar
 
 def parse_args():
@@ -16,7 +16,7 @@ def parse_args():
 def main():
     args = parse_args()
     
-    register_agent_arena()
+    register_agent()
 
     # 1. Load the Arena Config
     arena_conf_path = os.path.join('./conf/', "arena", f"{args.arena_name}.yaml")

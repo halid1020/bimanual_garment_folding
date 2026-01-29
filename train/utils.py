@@ -51,19 +51,33 @@ from controllers.rl.lagarnet.gc_rssm import GC_RSSM
 
 
 
-registered_arena = {
-    'single-garment-fixed-init-env':  SingleGarmentFixedInitialEnv,
-    'single-garment-vectorised-fold-prim-env': SingleGarmentVectorisedFoldPrimEnv,
-    'single-garment-subgoal-init-vectorised-fold-prim-env': SingleGarmentSubgoalInitVectorisedFoldPrimEnv,
-    'multi-garment-env': MultiGarmentEnv,
-    'multi-garment-vectorised-dual-picker-pick-and-place-env': MultiGarmentVectorisedDualPickerPickAndPlaceEnv,
-    'multi-garment-vectorised-single-picker-pick-and-place-env': MultiGarmentVectorisedSinglePickerPickAndPlaceEnv,
-    'robosuite-env': RoboSuiteArena,
-    'robosuite-skill-env': RoboSuiteSkillArena,
-    'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv,
-    'dm_control': DMC_Arena
-}
-def register_agent_arena():
+# registered_arena = {
+#     'single-garment-fixed-init-env':  SingleGarmentFixedInitialEnv,
+#     'single-garment-vectorised-fold-prim-env': SingleGarmentVectorisedFoldPrimEnv,
+#     'single-garment-subgoal-init-vectorised-fold-prim-env': SingleGarmentSubgoalInitVectorisedFoldPrimEnv,
+#     'multi-garment-env': MultiGarmentEnv,
+#     'multi-garment-vectorised-dual-picker-pick-and-place-env': MultiGarmentVectorisedDualPickerPickAndPlaceEnv,
+#     'multi-garment-vectorised-single-picker-pick-and-place-env': MultiGarmentVectorisedSinglePickerPickAndPlaceEnv,
+#     'robosuite-env': RoboSuiteArena,
+#     'robosuite-skill-env': RoboSuiteSkillArena,
+#     'single-garment-second-last-goal-init-vectorised-fold-prim-env': SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv,
+#     'dm_control': DMC_Arena
+# }
+
+def register_arena():
+    ag_ar.register_arena('single-garment-fixed-init-env', SingleGarmentFixedInitialEnv)
+    ag_ar.register_arena('single-garment-vectorised-fold-prim-env', SingleGarmentVectorisedFoldPrimEnv)
+    ag_ar.register_arena('single-garment-subgoal-init-vectorised-fold-prim-env', SingleGarmentSubgoalInitVectorisedFoldPrimEnv)
+    ag_ar.register_arena('multi-garment-env', MultiGarmentEnv)
+    ag_ar.register_arena('multi-garment-vectorised-dual-picker-pick-and-place-env', MultiGarmentVectorisedDualPickerPickAndPlaceEnv)
+    ag_ar.register_arena('multi-garment-vectorised-single-picker-pick-and-place-env', MultiGarmentVectorisedSinglePickerPickAndPlaceEnv)
+    ag_ar.register_arena('robosuite-env', RoboSuiteArena)
+    ag_ar.register_arena('robosuite-skill-env', RoboSuiteSkillArena)
+    ag_ar.register_arena('single-garment-second-last-goal-init-vectorised-fold-prim-env', SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv)
+    ag_ar.register_arena('dm_control',  DMC_Arena)
+
+
+def register_agent():
     ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
     ag_ar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
     ag_ar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)

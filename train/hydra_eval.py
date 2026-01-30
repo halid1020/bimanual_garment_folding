@@ -22,14 +22,6 @@ def main(cfg: DictConfig):
     
     print('[hydra eval] agent', cfg.agent.name, agent)
     
-    # data_augmenter
-    
-    # Data Augmenter should be part of agent.
-    # augmenter = build_data_augmenter(cfg.data_augmenter)
-    # agent.set_data_augmenter(augmenter)
-
-    # logging
-    
     arena = ag_ar.build_arena(
         cfg.arena.name, 
         cfg.arena,
@@ -37,10 +29,6 @@ def main(cfg: DictConfig):
         exp_name=cfg.exp_name,
         save_dir=save_dir)
     
-    
-    # arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
-
-
     task = build_task(cfg.task)
     arena.set_task(task)
     

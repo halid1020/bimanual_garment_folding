@@ -199,14 +199,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             policy.reset([arena.id])
             print('[multi-primitive diffusion] reset episode id', episode_id)
             info = arena.reset(train_configs[episode_id])
-            policy.init(info)
+            policy.init([info])
             info['reward'] = 0
             done = info['done']
             #print('done', done)
             while not done:
                 action = policy.single_act(info)
-                #print('demo action', action)
-
+                
                 if action is None:
                     break
                 
@@ -893,18 +892,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
     def _process_info(self, info):
 
         if 'depth' in info['observation'].keys():
-            depth = info['observation']['depth']
+            depth = info['observation']['depth'][0] #get the view from first camera.
+
             if len(depth.shape) == 2:
-                    depth = np.expand_dims(depth, axis=-1)
-                    info['observation']['depth'] = depth
+                depth = np.expand_dims(depth, axis=-1)
+                info['observation']['depth'] = depth
 
         if self.config.input_obs == 'rgbd':
             info['observation']['rgbd'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), depth], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
         
         if self.config.input_obs == 'rgb-goal':
             info['observation']['rgb-goal'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), info['observation']['goal_rgb'][0].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]
@@ -976,7 +976,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.config.input_obs: vis,  
         }
 
-        vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
+        # vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
 
         #plt.imsave('tmp/input_obs.png', vis_to_save)
 

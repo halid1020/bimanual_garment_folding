@@ -3,12 +3,13 @@ from omegaconf import DictConfig, OmegaConf
 import os
 import agent_arena.api as ag_ar
 
-from train.utils import register_agent, registered_arena, build_task
+from train.utils import register_agent, register_arena, build_task
 from env.parallel import Parallel
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
 def main(cfg: DictConfig):
     register_agent()
+    register_arena()
 
     print(OmegaConf.to_yaml(cfg))  # sanity check merged config
 
@@ -21,20 +22,19 @@ def main(cfg: DictConfig):
         exp_name=cfg.exp_name,
         save_dir=save_dir)
     
-    # augmenter = build_data_augmenter(cfg.data_augmenter)
-    # agent.set_data_augmenter(augmenter)
-    # logging
-    # save_dir = os.path.join(cfg.save_root, cfg.exp_name)
-    
-    # agent.set_log_dir(save_dir)
 
     if cfg.train_and_eval == 'train_and_evaluate_single':
         # training
 
-        arena = registered_arena[cfg.arena.name](cfg.arena) #We want to bulid this with agent arena.
+        arena = ag_ar.build_arena(
+            cfg.arena.name, 
+            cfg.arena,
+            project_name=cfg.project_name,
+            exp_name=cfg.exp_name,
+            save_dir=save_dir)
+            
         task = build_task(cfg.task)
         arena.set_task(task)
-        arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
 
         res = ag_ar.train_and_evaluate_single(
             agent,

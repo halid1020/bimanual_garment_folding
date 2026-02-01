@@ -38,8 +38,7 @@ def main(cfg: DictConfig):
     ag_ar.evaluate(
         agent,
         arena,
-        -1,
-        load_best=True,
+        -2, # load best checkpoint
         policy_terminate=False,
         env_success_stop=False
     )

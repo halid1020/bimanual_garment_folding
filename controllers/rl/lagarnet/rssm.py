@@ -503,10 +503,10 @@ class RSSM(RLAgent):
             print('No checkpoint found in directory {}'.format(checkpoint_dir))
             return 0
         
-        checkpoints = os.listdir(checkpoint_dir)
-        checkpoints = [int(c.split('_')[1].split('.')[0]) for c in checkpoints]
-        checkpoints.sort()
-        checkpoint = checkpoints[-1]
+        # checkpoints = os.listdir(checkpoint_dir)
+        # checkpoints = [int(c.split('_')[1].split('.')[0]) for c in checkpoints]
+        # checkpoints.sort()
+        # checkpoint = checkpoints[-1]
         model_dir = os.path.join(checkpoint_dir, f'model_best.pth')
 
         

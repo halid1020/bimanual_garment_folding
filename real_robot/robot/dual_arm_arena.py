@@ -489,7 +489,7 @@ class DualArmArena(Arena):
             self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
-            self.pick_and_fling_skill.step(full_action)
+            self.pick_and_fling_skill.step(full_action, record_debug=self.debug)
         elif action_type == 'no-operation':
             pass
         

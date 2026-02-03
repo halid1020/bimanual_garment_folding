@@ -4,7 +4,7 @@ from real_robot.utils.camera_utils import intrinsic_to_params
 import cv2
 
 GRIPPER_OFFSET_UR5e = 0.06 #To calibrate: This has to be accurate
-GRIPPER_OFFSET_UR16e = 0.04 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.045 #To calibrate: This has to be accurate
 SURFACE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
 

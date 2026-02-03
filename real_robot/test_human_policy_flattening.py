@@ -22,7 +22,7 @@ def print_stats(name, data):
 
 def main():
     measure_time = True
-    debug = False
+    debug = True
     project_name = 'bimanual_garment_folding'
     exp_name = 'human_real_world'
 

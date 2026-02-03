@@ -14,8 +14,9 @@ APPROACH_DIST = 0.08        # meters above target to approach from
 LIFT_DIST = 0.12            # meters to lift after grasp
 MOVE_SPEED = 1.0
 MOVE_ACC = 0.5
-FLING_SPEED = 2.5
-FLING_ACC = 1.0
+FLING_SPEED = 3.0
+FLING_ACC = 1.5
+HANG_HEIGHT = 0.35
 HOME_AFTER = True
 
 # --- HELPER: Apply Rotation ---
@@ -38,7 +39,7 @@ def points_to_fling_path(
         width=None,   
         swing_stroke=0.6, 
         swing_angle=np.pi/4,
-        lift_height=0.4,
+        lift_height=HANG_HEIGHT,
         place_height=0.05):
     tx_world_action = points_to_action_frame(right_point, left_point)
     tx_world_fling_base = tx_world_action.copy()
@@ -199,8 +200,8 @@ class PickAndFlingSkill:
         target_p1_local = center_point + (axis_vec * curr_width / 2.0)
 
         avg_z = (p0_local[2] + p1_local[2]) / 2.0
-        target_p0_local[2] = avg_z
-        target_p1_local[2] = avg_z
+        target_p0_local[2] = HANG_HEIGHT
+        target_p1_local[2] = HANG_HEIGHT
 
         # 4. Prepare Pose Vectors for Motion (Maintain current rotation)
         target_pose_0 = np.concatenate([target_p0_local, rot_0])
@@ -227,7 +228,7 @@ class PickAndFlingSkill:
             swing_stroke=0.4,
             swing_height=0.45,
             swing_angle=np.pi/4,
-            lift_height=0.35,
+            lift_height=HANG_HEIGHT,
             place_height=0.15,
             fling_speed=FLING_SPEED,  
             fling_acc=FLING_ACC,

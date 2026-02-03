@@ -14,6 +14,8 @@ APPROACH_DIST = 0.08        # meters above target to approach from
 LIFT_DIST = 0.12            # meters to lift after grasp
 MOVE_SPEED = 1.0
 MOVE_ACC = 0.5
+FLING_SPEED = 2.5
+FLING_ACC = 1.0
 HOME_AFTER = True
 
 # --- HELPER: Apply Rotation ---
@@ -32,13 +34,13 @@ def apply_local_z_rotation(axis_angle, angle_rad):
 
 # --- HELPER: Fling Path ---
 def points_to_fling_path(
-        left_point, right_point,
+        right_point, left_point,
         width=None,   
         swing_stroke=0.6, 
         swing_angle=np.pi/4,
         lift_height=0.4,
         place_height=0.05):
-    tx_world_action = points_to_action_frame(left_point, right_point)
+    tx_world_action = points_to_action_frame(right_point, left_point)
     tx_world_fling_base = tx_world_action.copy()
     # height is managed by get_base_fling_poses
     tx_world_fling_base[2,3] = 0
@@ -48,14 +50,14 @@ def points_to_fling_path(
         lift_height=lift_height,
         place_height=place_height)
     if width is None:
-        width = np.linalg.norm((left_point - right_point)[:2])
-    left_path = base_fling.copy()
-    left_path[:,0] = -width/2
+        width = np.linalg.norm((right_point - left_point)[:2])
     right_path = base_fling.copy()
-    right_path[:,0] = width/2
-    left_path_w = transform_pose(tx_world_fling_base, left_path)
+    right_path[:,0] = -width/2
+    left_path = base_fling.copy()
+    left_path[:,0] = width/2
     right_path_w = transform_pose(tx_world_fling_base, right_path)
-    return left_path_w, right_path_w
+    left_path_w = transform_pose(tx_world_fling_base, left_path)
+    return right_path_w, left_path_w
 
 
 class PickAndFlingSkill:
@@ -227,8 +229,8 @@ class PickAndFlingSkill:
             swing_angle=np.pi/4,
             lift_height=0.35,
             place_height=0.15,
-            fling_speed=1.0,  
-            fling_acc=3.0,
+            fling_speed=FLING_SPEED,  
+            fling_acc=FLING_ACC,
             drag_speed=0.2,   
             drag_acc=0.2
             ):
@@ -250,8 +252,8 @@ class PickAndFlingSkill:
         
         # 2. Generate Full Path (includes Drag point at end)
         ur5e_path_full, ur16e_path_full = points_to_fling_path(
-            left_point=ur5e_pick_point_world,
-            right_point=ur16e_pick_point_world,
+            right_point=ur5e_pick_point_world,
+            left_point=ur16e_pick_point_world,
             width=width,
             swing_stroke=swing_stroke,
             swing_angle=swing_angle,
@@ -333,8 +335,8 @@ class PickAndFlingSkill:
 
         print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
 
-        with self.scene.ur5e.start_force_mode() as left_force_guard:
-            with self.scene.ur16e.start_force_mode() as right_force_guard:
+        with self.scene.ur5e.start_force_mode() as right_force_guard:
+            with self.scene.ur16e.start_force_mode() as left_force_guard:
                 start_time = time.time()
                 prev_time = start_time
                 
@@ -349,14 +351,14 @@ class PickAndFlingSkill:
                     # Apply force along Y-axis (Index 1). 
                     # UR5e: +f moves towards UR5e base (Correct per previous observation)
                     # UR16e: +f moves towards UR16e base (Flipped from -f to fix direction)
-                    left_wrench = [0, f, 0, 0, 0, 0]
                     right_wrench = [0, f, 0, 0, 0, 0]
+                    left_wrench = [0, f, 0, 0, 0, 0]
 
-                    r = left_force_guard.apply_force(task_frame, selection_vector, 
-                        left_wrench, force_type, limits)
-                    if not r: return False
                     r = right_force_guard.apply_force(task_frame, selection_vector, 
                         right_wrench, force_type, limits)
+                    if not r: return False
+                    r = left_force_guard.apply_force(task_frame, selection_vector, 
+                        left_wrench, force_type, limits)
                     if not r: return False
                     
                     # --- FIX END ---

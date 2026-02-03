@@ -4,7 +4,7 @@ from real_robot.utils.camera_utils import intrinsic_to_params
 import cv2
 
 GRIPPER_OFFSET_UR5e = 0.06 #To calibrate: This has to be accurate
-GRIPPER_OFFSET_UR16e = 0.05 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.015 #To calibrate: This has to be accurate
 SURFACE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
 
@@ -63,7 +63,7 @@ def rot_from_directions(from_vec, to_vec):
     rot = Rotation.from_rotvec(rotvec)
     return rot
 
-def points_to_action_frame(left_point, right_point):
+def points_to_action_frame(right_point, left_point):
     """
     Compute transfrom from action frame to world
     Action frame: centered on the mid-point between gripers,
@@ -75,14 +75,14 @@ def points_to_action_frame(left_point, right_point):
     left * -------> * right
             (x-axis)
     """
-    left_point, right_point = left_point.copy(), right_point.copy()
-    center_point = (left_point + right_point) / 2
+    right_point, left_point = right_point.copy(), left_point.copy()
+    center_point = (right_point + left_point) / 2
     # enforce z
-    left_point[2] = center_point[2]
     right_point[2] = center_point[2]
+    left_point[2] = center_point[2]
     # compute forward direction
     forward_direction = np.cross(
-        np.array([0,0,1]), (right_point - left_point))
+        np.array([0,0,1]), (left_point - right_point))
     forward_direction = forward_direction / np.linalg.norm(forward_direction)
     # default facing +y
     rot = rot_from_directions(
@@ -178,11 +178,11 @@ def transform_pose(tx, pose):
     tf_pose = mat_to_pose(tf_pose_mat)
     return tf_pose
 
-def points_to_gripper_pose(left_point, right_point, max_width=None):
+def points_to_gripper_pose(right_point, left_point, max_width=None):
 
-    tx_world_action = points_to_action_frame(left_point, right_point)
+    tx_world_action = points_to_action_frame(right_point, left_point)
 
-    width = np.linalg.norm((left_point - right_point)[:2])
+    width = np.linalg.norm((right_point - left_point)[:2])
     if max_width is not None:
         width = min(width, max_width)
     left_pose_action = np.array([-width/2, 0, 0, 0, np.pi,0])

@@ -50,7 +50,7 @@ class GarmentFoldingTask():
         
         measure_time = arena.measure_time
         arena.measure_time = False
-        info = arena._get_info()
+        info = arena._process_info({})
         arena.info = info
         self.demonstrator.reset([arena.id])
         

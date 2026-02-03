@@ -2,26 +2,39 @@
 import math
 import numpy as np
 import time
-from real_robot.utils.transform_utils import point_on_table_base, transform_point, points_to_gripper_pose, \
-    points_to_action_frame, get_base_fling_poses, transform_pose, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST
+from scipy.spatial.transform import Rotation as R
+from real_robot.utils.transform_utils import (
+    point_on_table_base, transform_point, points_to_gripper_pose,
+    points_to_action_frame, get_base_fling_poses, transform_pose, 
+    GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST
+)
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        # meters above target to approach from
-LIFT_DIST = 0.08            # meters to lift after grasp
-HOME_AFTER = TrueMIN_Z = 0.015
-APPROACH_DIST = 0.08        # meters above target to approach from
-LIFT_DIST = 0.08            # meters to lift after grasp
+LIFT_DIST = 0.12            # meters to lift after grasp
 MOVE_SPEED = 1.0
 MOVE_ACC = 0.5
 HOME_AFTER = True
 
+# --- HELPER: Apply Rotation ---
+def apply_local_z_rotation(axis_angle, angle_rad):
+    """
+    Applies a rotation around the local Z-axis of the given axis-angle pose.
+    """
+    if abs(angle_rad) < 1e-4:
+        return axis_angle
+        
+    r_current = R.from_rotvec(axis_angle)
+    r_diff = R.from_euler('z', angle_rad, degrees=False)
+    r_new = r_current * r_diff
+    
+    return r_new.as_rotvec()
 
-
+# --- HELPER: Fling Path ---
 def points_to_fling_path(
         left_point, right_point,
         width=None,   
         swing_stroke=0.6, 
-        #swing_height=0.45, 
         swing_angle=np.pi/4,
         lift_height=0.4,
         place_height=0.05):
@@ -31,7 +44,6 @@ def points_to_fling_path(
     tx_world_fling_base[2,3] = 0
     base_fling = get_base_fling_poses(
         stroke=swing_stroke,
-        #lift_height=swing_height,
         swing_angle=swing_angle,
         lift_height=lift_height,
         place_height=place_height)
@@ -47,7 +59,7 @@ def points_to_fling_path(
 
 
 class PickAndFlingSkill:
-    """from transform_utils import point_on_table_base
+    """
     Pick-and-Fling skill primitive.
     Step executes a fling motion with pick coordinates.
     """
@@ -68,12 +80,32 @@ class PickAndFlingSkill:
         time.sleep(0.5)
 
     def step(self, action):
-        pick_0, pick_1 = action[:2], action[2:4]
+        # 1. Unpack Action: [pick0_x, pick0_y, pick1_x, pick1_y, angle0, angle1]
+        if len(action) >= 6:
+            pick_0_xy = action[0:2]
+            pick_1_xy = action[2:4]
+            angle_0 = action[4]
+            angle_1 = action[5]
+        else:
+            # Fallback for legacy
+            pick_0_xy = action[0:2]
+            pick_1_xy = action[2:4]
+            angle_0, angle_1 = 0.0, 0.0
 
-        if pick_0[0] < pick_1[0]:
-            pick_0,  pick_1 = pick_1, pick_0
+        # 2. Sort Logic: Group points with their angles before sorting
+        pair_0 = {'pick': pick_0_xy, 'angle': angle_0}
+        pair_1 = {'pick': pick_1_xy, 'angle': angle_1}
 
+        # Swap if first point is less than second (Coordinate-dependent sorting)
+        if pair_0['pick'][0] < pair_1['pick'][0]:
+            pair_0, pair_1 = pair_1, pair_0
+            
+        pick_0 = pair_0['pick']
+        pick_1 = pair_1['pick']
+        rot_angle_0 = pair_0['angle']
+        rot_angle_1 = pair_1['angle']
         
+        # 3. Calculate Table Coordinates
         p_base_pick_0 = point_on_table_base(pick_0[0], pick_0[1], self.scene.intr, self.scene.T_ur5e_cam, SURFACE_HEIGHT)
         p_base_pick_1 = point_on_table_base(pick_1[0], pick_1[1], self.scene.intr, self.scene.T_ur16e_cam, SURFACE_HEIGHT)
 
@@ -92,18 +124,16 @@ class PickAndFlingSkill:
         p_base_pick_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
         p_base_pick_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
 
-        # Use current orientation for the TCP during motion (keep orientation same)
-        # The code expects rotation-vector-like [rx,ry,rz] for the TCP orientation
-        #vertical_rotvec = [math.pi, 0.0, 0.0]
-
-        # Get full pose (x,y,z, rx,ry,rz)
+        # 4. Calculate Orientation
         pose_0_home = self.scene.ur5e.get_tcp_pose()
         pose_1_home = self.scene.ur16e.get_tcp_pose()
 
-        # Extract just the rotation vector [rx, ry, rz]
-        rot_0 = pose_0_home[3:6]
-        rot_1 = pose_1_home[3:6]
+        rot_0_base = pose_0_home[3:6]
+        rot_1_base = pose_1_home[3:6]
 
+        # Apply the edge alignment rotation
+        rot_0 = apply_local_z_rotation(rot_0_base, rot_angle_0)
+        rot_1 = apply_local_z_rotation(rot_1_base, rot_angle_1)
 
         # Compose approach/grasp/lift poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
@@ -111,13 +141,11 @@ class PickAndFlingSkill:
         lift_after_0 = grasp_pick_0.copy()
         lift_after_0[2] += FLING_LIFT_DIST
         
-
         approach_pick_1 = p_base_pick_1 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_1 = p_base_pick_1
         lift_after_1 = grasp_pick_1.copy()
         lift_after_1[2] += FLING_LIFT_DIST
         
-
         # Motion sequence
         self.scene.both_open_gripper()
         self.scene.both_home(speed=1.0, acc=0.8, blocking=True)
@@ -148,57 +176,40 @@ class PickAndFlingSkill:
         )
 
         # -------------------------------------------------------------------------
-        # TODO IMPLEMENTED: Center & Align Grippers
+        # Center & Align Grippers (Logic Preserved)
         # -------------------------------------------------------------------------
         print("Centering and Aligning grippers between robots...")
 
-        # 1. Calculate Geometry in UR5e Frame (Acts as our Reference Frame)
-        # Convert UR16e point to UR5e frame so we can measure distance
+        # 1. Calculate Geometry in UR5e Frame
         p0_local = lift_after_0[:3]
         p1_local = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1[:3])
         
-        # Calculate current width (Euclidean distance)
+        # Calculate current width
         curr_width = np.linalg.norm(p1_local - p0_local)
-        #print(f"  Current Gripper Width: {curr_width:.4f} m")
 
         # 2. Define the "Line between Arms" (Axis)
-        # Vector from UR5e Base to UR16e Base
         base_to_base_vec = self.scene.T_ur5e_ur16e[:3, 3]
-        
-        # Midpoint between the two robots (Global Center)
         center_point = base_to_base_vec / 2.0
-        
-        # Axis direction (Unit vector pointing from UR5e to UR16e)
         axis_vec = base_to_base_vec / np.linalg.norm(base_to_base_vec)
 
         # 3. Calculate Target Positions
-        # We want the pair of grippers to be centered at 'center_point'
-        # and aligned along 'axis_vec', while maintaining 'curr_width'.
-        
-        # UR5e Target: Shift from center towards UR5e (negative axis direction)
         target_p0_local = center_point - (axis_vec * curr_width / 2.0)
-        
-        # UR16e Target: Shift from center towards UR16e (positive axis direction)
         target_p1_local = center_point + (axis_vec * curr_width / 2.0)
 
-        # Preserve the lift height (Z) from the lift step
-        # (center_point Z is 0/base height, so we overwrite Z)
         avg_z = (p0_local[2] + p1_local[2]) / 2.0
         target_p0_local[2] = avg_z
         target_p1_local[2] = avg_z
 
-        # 4. Prepare Pose Vectors for Motion
-        # UR5e is already in local frame
+        # 4. Prepare Pose Vectors for Motion (Maintain current rotation)
         target_pose_0 = np.concatenate([target_p0_local, rot_0])
 
-        # UR16e target needs to be converted back to UR16e Base Frame
         target_p1_ur16e = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_local)
         target_pose_1 = np.concatenate([target_p1_ur16e, rot_1])
 
         # 5. Execute Centering Move
         self.scene.both_movel(target_pose_0, target_pose_1, speed=0.2, acc=0.1, blocking=True)
 
-
+        # 6. Perform Stretch and Fling
         self.dual_arm_stretch_and_fling(target_p0_local, transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e))
 
         self.scene.both_home()
@@ -215,57 +226,82 @@ class PickAndFlingSkill:
             swing_height=0.45,
             swing_angle=np.pi/4,
             lift_height=0.35,
-            place_height= 0.15, #0.05,
-            fling_speed=1.0,
-            fling_acc=3
+            place_height=0.15,
+            fling_speed=1.0,  
+            fling_acc=3.0,
+            drag_speed=0.2,   
+            drag_acc=0.2
             ):
         
         width = self.scene.get_tcp_distance()
-        #print('Width before stretch: {}'.format(width))
     
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
             ur5e_pick_point_world, ur16e_pick_point_world, max_width=stretch_max_width)
         
-        #print('ur5e_pose_world', ur5e_pose_world, 'ur16e_pose_world', ur16e_pose_world)
-
-        # stretch
+        # 1. Stretch
         r = self.dual_arm_stretch(ur5e_pose_world, ur16e_pose_world, 
             force=stretch_force, 
             max_speed=stretch_max_speed, 
             max_width=stretch_max_width,
             max_time=stretch_max_time)
         if not r: return False
-        width = self.scene.get_tcp_distance()
-        #print('Width: {}'.format(width))
         
-        # fling
-        ur5e_path_world, ur16e_path_world = points_to_fling_path(
+        width = self.scene.get_tcp_distance()
+        
+        # 2. Generate Full Path (includes Drag point at end)
+        ur5e_path_full, ur16e_path_full = points_to_fling_path(
             left_point=ur5e_pick_point_world,
             right_point=ur16e_pick_point_world,
             width=width,
             swing_stroke=swing_stroke,
-            #swing_height=swing_height,
             swing_angle=swing_angle,
             lift_height=lift_height,
             place_height=place_height
         )
 
-        # print('ur5e_path_world', ur5e_path_world)
-        # print('ur16e_path_world', ur16e_path_world)
+        # 3. Slice the paths
+        # Fling part: All points EXCEPT the last one (0, 1, 2, 3)
+        ur5e_fling_path = ur5e_path_full[:-1]
+        ur16e_fling_path = ur16e_path_full[:-1]
+        
+        # Drag part: ONLY the last point (4)
+        ur5e_drag_target = ur5e_path_full[-1]
+        ur16e_drag_target = ur16e_path_full[-1]
 
-        self.scene.both_fling(ur5e_path_world, transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_path_world), 
-            fling_speed, fling_acc)
+        # 4. Execute Fast Fling
+        # Transform UR16e path to UR5e/Base frame
+        ur16e_fling_path_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_fling_path)
+        
+        self.scene.both_fling(
+            ur5e_fling_path, 
+            ur16e_fling_path_base, 
+            fling_speed, 
+            fling_acc
+        )
+        
+        # 5. Execute Slow Drag
+        # FIX: Use transform_pose instead of transform_point because drag_target is a 6D pose
+        ur16e_drag_target_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_drag_target)
+
+        # Ensure flat input for both_movel
+        self.scene.both_movel(
+            ur5e_drag_target.flatten(), 
+            ur16e_drag_target_base.flatten(), 
+            speed=drag_speed, 
+            acc=drag_acc, 
+            blocking=True
+        )
         
         self.scene.both_open_gripper()
 
     def dual_arm_stretch(self, 
         ur5e_pose_world, ur16e_pose_world,
-        force=8,        # Reduced from 12 for gentler hold
-        init_force=15,   # Reduced from 30
+        force=8,        
+        init_force=15,  
         max_speed=0.15, 
         max_width=0.7, 
         max_time=5,
-        speed_threshold=0.005): # Increased slightly to detect stop earlier
+        speed_threshold=0.005): 
         """
         Fixed tensioning logic to prevent over-stretching.
         """
@@ -286,11 +322,7 @@ class PickAndFlingSkill:
         limits = [max_speed, 2, 2, 1, 1, 1]
         dt = 1.0/125
 
-        # Record starting width to ensure we don't stretch 500% of object size
         start_width = self.scene.get_tcp_distance()
-        
-        # Calculate a dynamic max width (e.g., max 150% of original width OR hard limit)
-        # This prevents ripping small objects.
         safe_limit_width = min(max_width, start_width * 1.5) 
 
         print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
@@ -304,8 +336,6 @@ class PickAndFlingSkill:
                 while (time.time() - start_time) < max_time:
                     elapsed = time.time() - start_time
                     
-                    # LOGIC FIX 1: Time-based kickstart, not speed-based.
-                    # Apply higher force only for the first 0.2 seconds to overcome static friction.
                     if elapsed < 0.2:
                         f = init_force
                     else:
@@ -328,13 +358,11 @@ class PickAndFlingSkill:
                         print(f'[Stretch] Max allowable width reached: {tcp_distance:.3f}')
                         break
 
-                    # check for speed (LOGIC FIX 2)
-                    # Calculate actual separation speed (rate of change of distance)
+                    # check for speed
                     l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
                     r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
                     actual_speed = max(l_speed, r_speed)
                     
-                    # Only check for stop after the initial kickstart period
                     if elapsed > 0.5:
                         if actual_speed < speed_threshold:
                             print(f'[Stretch] Tension detected (speed {actual_speed:.4f} < {speed_threshold}). Stopping.')

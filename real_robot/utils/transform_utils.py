@@ -3,8 +3,8 @@ import numpy as np
 from real_robot.utils.camera_utils import intrinsic_to_params
 import cv2
 
-GRIPPER_OFFSET_UR5e = 0.055 #To calibrate: This has to be accurate
-GRIPPER_OFFSET_UR16e = 0.0 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR5e = 0.06 #To calibrate: This has to be accurate
+GRIPPER_OFFSET_UR16e = 0.04 #To calibrate: This has to be accurate
 SURFACE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
 
@@ -96,40 +96,53 @@ def get_base_fling_poses(
         stroke=0.6, 
         lift_height=0.45, 
         swing_angle=np.pi/4,
-        place_height=0.05
+        place_height=0.05,
+        drag_dist=0.2  # <--- NEW: Distance to drag after landing
     ):
     """
-    Basic fling trajectory: single trajectory on y-plane.
-    From -y to +y, x=0
-    Waypoint 1 is at place_y
-
+    Fling trajectory with a final drag motion.
+    
+    Trajectory:
+    0: Start (Lifted)
+    1: Forward Swing
+    2: Backward Swing (Wind up)
+    3: Landing (Touch down)
+    4: Drag (Move forward on table)
+    
                   z
     ----stroke----^
     --------------->y
     |             |
-    |2     0     1|lift_height
+    |2     0     1| lift_height
     |             |
-    |            3|place_height
+    |            3 -> 4 | place_height (Drag 3->4)
     ---------------
     """
 
     base_fling_pos = np.array([
-        [0,0,lift_height],
-        [0,place_y,lift_height],
-        [0,place_y-stroke,lift_height],
-        [0,place_y,place_height]
+        [0, 0, lift_height],                  # 0: Center High
+        [0, place_y, lift_height],            # 1: Forward Swing High
+        [0, place_y - stroke, lift_height],   # 2: Backward Swing High
+        [0, place_y, place_height],           # 3: Touch Down
+        [0, place_y + drag_dist, place_height]# 4: Drag Forward
     ])
-    init_rot = Rotation.from_rotvec([0,np.pi,0])
-    base_fling_rot = Rotation.from_euler('xyz',[
-        [0,0,0],
-        [swing_angle,0,0],
-        [-swing_angle,0,0],
-        [swing_angle/8,0,0]
+
+    init_rot = Rotation.from_rotvec([0, np.pi, 0])
+    
+    # We repeat the last rotation for the drag step so the gripper 
+    # doesn't twist while dragging.
+    base_fling_rot = Rotation.from_euler('xyz', [
+        [0, 0, 0],
+        [swing_angle, 0, 0],
+        [-swing_angle, 0, 0],
+        [swing_angle/8, 0, 0],    # Rotation at touch down
+        [swing_angle/8, 0, 0]     # Rotation during drag (Same as above)
     ])
+
     fling_rot = base_fling_rot * init_rot
     fling_pose = pos_rot_to_pose(base_fling_pos, fling_rot)
+    
     return fling_pose
-
 
 def pose_to_pos_rot(pose):
     pos = pose[...,:3]

@@ -36,7 +36,7 @@ class DualArmScene:
         self.ur5e_eye2hand_calib_file = f"{os.environ['MP_FOLD_PATH']}/real_robot/calibration/ur5e-calib.yaml" 
 
         self.ur5e_radius = (0.1, 0.85)
-        self.ur16e_radius = (0.2, 0.9)
+        self.ur16e_radius = (0.25, 0.9)
 
         if not dry_run:
             self.ur5e = UR_RTDE(ur5e_robot_ip, self.gripper_type)

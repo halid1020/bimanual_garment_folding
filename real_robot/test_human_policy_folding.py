@@ -30,7 +30,7 @@ def main():
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'action_horizon': 3,
+        'action_horizon': 15,
         "debug": debug,
         'measure_time': measure_time,
         "snap_to_cloth_mask": True

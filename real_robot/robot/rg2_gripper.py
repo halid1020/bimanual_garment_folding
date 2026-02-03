@@ -9,6 +9,7 @@ class RG2:
         self.robot_ip = robot_ip
         self.port = 41414
         self.connected = True  # 🔧 Track connection state
+        self.open_width = 30
 
     def get_rg_width(self):
         if not self.connected:
@@ -70,7 +71,7 @@ class RG2:
 
     def open(self):
         """Open gripper to max width"""
-        return self.rg_grip(100.0, 40)
+        return self.rg_grip(self.open_width, 40)
 
     def close(self):
         """Close gripper fully"""
@@ -102,9 +103,8 @@ def main():
         rg_width = rg_gripper.get_rg_width()
         print("rg_width:", rg_width)
 
-        target_force = 40.0
-        rg_gripper.rg_grip(100.0, target_force)
-        rg_gripper.rg_grip(0.0, target_force)
+        rg_gripper.open()
+        rg_gripper.close()
     finally:
         rg_gripper.disconnect()
 

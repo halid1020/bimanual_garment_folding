@@ -68,10 +68,8 @@ poses:
   # ---------------------------------------------------------------------------
   # GROUP 8: PROPELLER (Aggressive Roll)
   # ---------------------------------------------------------------------------
-  # 45-degree rotations. Crucial for locking the orientation matrix.
-  # (Corrected from 90 deg to 45 deg to ensure visibility)
-  - [89.99, -66.28, 86.69, -105.49, -167.5, 51.0]   # Twist CW 45°
-  - [89.99, -66.28, 86.69, -105.49, -167.5, -38.0]  # Twist CCW 45°
+  - [89.99, -66.28, 86.69, -105.49, -167.5, 40.0]   # Twist CW (Reduced from 51)
+  - [89.99, -66.28, 86.69, -105.49, -167.5, -25.0]  # Twist CCW (Reduced from -38)
 
   # ---------------------------------------------------------------------------
   # GROUP 9: DEEP PITCH (Aggressive Wrist 1)
@@ -85,14 +83,18 @@ poses:
   # GROUP 10: SWING (Aggressive Yaw)
   # ---------------------------------------------------------------------------
   # Hard side-to-side rotation with Base compensation.
-  - [105.0, -66.28, 86.69, -105.49, -137.0, 6.67]   # Yaw Left (Hard)
-  - [75.0, -66.28, 86.69, -105.49, -197.0, 6.67]    # Yaw Right (Hard)
+  # GROUP 10: SWING (Adjusted for visibility)
+  - [100.0, -66.28, 86.69, -105.49, -145.0, 6.67]   # Yaw Left (Reduced Base/Wrist)
+  - [80.0, -66.28, 86.69, -105.49, -185.0, 6.67]    # Yaw Right (Reduced Base/Wrist)
 
   # ---------------------------------------------------------------------------
   # GROUP 11: MICROSCOPE (Max Resolution)
   # ---------------------------------------------------------------------------
   # Closest safe distance to camera + Rotation. 
   # Maximizes pixel count on markers for precision.
+  # GROUP 11: MICROSCOPE
+  # Keep the center one, it was good
   - [89.99, -50.0, 60.0, -105.0, -167.5, 6.67]      # Very High Center
-  - [89.99, -50.0, 60.0, -105.0, -167.5, 51.0]      # Very High + Twist CW
-  - [89.99, -50.0, 60.0, -105.0, -167.5, -38.0]     # Very High + Twist CCW
+  # Reduce the twist significantly for these close-ups
+  - [89.99, -50.0, 60.0, -105.0, -167.5, 25.0]      # Very High + Soft Twist
+  - [89.99, -50.0, 60.0, -105.0, -167.5, -15.0]     # Very High + Soft Twist

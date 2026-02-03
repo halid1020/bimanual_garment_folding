@@ -3,12 +3,11 @@ from typing import Dict, Any, List, Optional
 import cv2
 import time
 import os
-import json   # Added for human-readable metadata
-import shutil # Added for directory management
+import json
+import shutil
 
 from real_robot.robot.dual_arm_scene import DualArmScene
 from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
-from real_robot.utils.save_utils import save_colour
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
 from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
@@ -85,7 +84,6 @@ class DualArmArena(Arena):
         self.task.reset(self)
         if self.init_from == 'crumpled':
             input("Press [Enter] to finish resetting cloth state to a crumpled state...")
-        #self.info = self._get_info()
         
         self.info = {}
         self.all_infos = [self.info]
@@ -98,25 +96,50 @@ class DualArmArena(Arena):
         self.process_action_time = []
         self.all_infos = [self.info]
         return self.info
+
+    def _process_depth(self, raw_depth):
+        """
+        Process raw depth image:
+        1. Convert to meters
+        2. Estimate table height (95th percentile)
+        3. Clip to range [table - 0.1m, table + 0.1m]
+        4. Normalize (0 = Deepest/Background, 1 = Shallowest/Closest)
+        """
+        # 1. Convert to Meters (RealSense is usually uint16 mm)
+        if raw_depth.dtype == np.uint16:
+            depth_m = raw_depth.astype(np.float32) / 1000.0
+        else:
+            depth_m = raw_depth.astype(np.float32)
+
+        # 2. Estimate Camera Height (Distance to Table)
+        # 95th percentile is robust against sensor noise (dropouts)
+        camera_height = np.percentile(depth_m, 95)
+        
+        # 3. Define Clipping Range (+- 0.1m around table)
+        # Objects on table will be closer (smaller value) than camera_height
+        min_dist = camera_height - 0.1
+        max_dist = camera_height + 0.1
+        
+        clipped_depth = np.clip(depth_m, min_dist, max_dist)
+        
+        # 4. Min-Max Normalization (Inverted)
+        # 0 = Deepest point (max_dist), 1 = Shallowest point (min_dist)
+        # Formula: (max - value) / (max - min)
+        norm_depth = (max_dist - clipped_depth) / (max_dist - min_dist)
+        
+        return norm_depth
     
     def _process_info(self, info, task_related=True, flattened_obs=True):
-        # Return to camera position after manipulation
         self.dual_arm.both_open_gripper()
         self.dual_arm.both_home()
         self.dual_arm.both_out_scene()
 
-        # -----------------------------
-        # Capture post-interaction scene
-        # -----------------------------
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
         
         workspace_mask_0, workspace_mask_1 = self.dual_arm.get_workspace_masks()
         workspace_mask_0 = workspace_mask_0.astype(np.uint8)
         workspace_mask_1 = workspace_mask_1.astype(np.uint8)
 
-        # -----------------------------
-        # Center crop bird’s-eye view around cloth
-        # -----------------------------
         h, w = raw_rgb.shape[:2]
         crop_size = min(h, w)  
 
@@ -128,7 +151,6 @@ class DualArmArena(Arena):
         self.y1 = y1
         self.crop_size = crop_size
 
-        # Perform crops
         crop_rgb = raw_rgb[y1:y2, x1:x2]
         crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.config.debug)
         self.cloth_mask = crop_mask
@@ -136,6 +158,8 @@ class DualArmArena(Arena):
         if self.init_coverage == None:
             self.init_coverage = self.coverage
         crop_depth = raw_depth[y1:y2, x1:x2]
+
+        crop_depth = self._process_depth(crop_depth)
         
         crop_workspace_mask_0 = workspace_mask_0[y1:y2, x1:x2]
         crop_workspace_mask_1 = workspace_mask_1[y1:y2, x1:x2]
@@ -146,13 +170,9 @@ class DualArmArena(Arena):
         resized_depth = cv2.resize(crop_depth, self.resolution)
         resized_mask = cv2.resize(crop_mask.astype(np.uint8), self.resolution)
         
-        # Store resized workspace masks for use in step()
         self.resized_workspace_mask_0 = cv2.resize(crop_workspace_mask_0, self.resolution, interpolation=cv2.INTER_NEAREST)
         self.resized_workspace_mask_1 = cv2.resize(crop_workspace_mask_1, self.resolution, interpolation=cv2.INTER_NEAREST)
 
-        # -----------------------------
-        # Store and return information
-        # -----------------------------
         info.update({
             'observation': {
                 "rgb": resized_rgb,
@@ -203,19 +223,11 @@ class DualArmArena(Arena):
         return self.all_infos
     
     def get_flattened_obs(self):
-        """
-        Loads flattened observation from a human-readable directory (PNGs + JSON).
-        If not found, asks user to set it up, captures it, and saves it as images.
-        """
         if self.flattened_obs is None:
-            # 1. Ask for garment ID
             self.garment_id = input("\n[Arena] Enter garment name (e.g. shirt_01): ").strip()
-            
-            # 2. Setup asset directory path
             base_asset_dir = f"{os.environ.get('MP_FOLD_PATH', '.')}/assets"
             save_dir = os.path.join(base_asset_dir, 'real_garments', self.garment_id)
             
-            # Define filenames
             fn_rgb = os.path.join(save_dir, "rgb.png")
             fn_raw_rgb = os.path.join(save_dir, "raw_rgb.png")
             fn_depth = os.path.join(save_dir, "depth.png")
@@ -224,32 +236,20 @@ class DualArmArena(Arena):
             fn_r1_mask = os.path.join(save_dir, "robot1_mask.png")
             fn_info = os.path.join(save_dir, "info.json")
 
-            # 3. Check if directory and critical files exist
             if os.path.exists(save_dir) and os.path.exists(fn_info):
                 print(f"[Arena] Found cached observation folder for '{self.garment_id}'. Loading images...")
                 try:
-                    # Load Images
-                    # Note: cv2.imread loads as BGR, we usually work in RGB, so convert if needed. 
-                    # Assuming the rest of your pipeline expects RGB.
                     rgb = cv2.cvtColor(cv2.imread(fn_rgb), cv2.COLOR_BGR2RGB)
                     raw_rgb = cv2.cvtColor(cv2.imread(fn_raw_rgb), cv2.COLOR_BGR2RGB)
-                    
-                    # Load Depth (IMREAD_UNCHANGED keeps 16-bit depth if saved as such)
                     depth = cv2.imread(fn_depth, cv2.IMREAD_UNCHANGED)
-                    
-                    # Load Masks (Read as grayscale/uint8)
                     mask_img = cv2.imread(fn_mask, cv2.IMREAD_GRAYSCALE)
-                    # Convert back to boolean/binary mask
                     mask = (mask_img > 127).astype(np.bool_)
-                    
                     r0_mask = (cv2.imread(fn_r0_mask, cv2.IMREAD_GRAYSCALE) > 127).astype(np.bool_)
                     r1_mask = (cv2.imread(fn_r1_mask, cv2.IMREAD_GRAYSCALE) > 127).astype(np.bool_)
 
-                    # Load Metadata JSON
                     with open(fn_info, 'r') as f:
                         meta_info = json.load(f)
 
-                    # Reconstruct Dictionary
                     self.flattened_obs = {
                         'observation': {
                             "rgb": rgb,
@@ -265,44 +265,35 @@ class DualArmArena(Arena):
                         "arena": self
                     }
                     
-                    # Set Coverage
                     self.flatten_coverage = np.sum(mask)
                     print("[Arena] Successfully loaded flattened state from PNGs/JSON.")
 
                 except Exception as e:
                     print(f"[Arena] Error loading data: {e}. Will recapture manually.")
-                    self.flattened_obs = None # Force recapture
+                    self.flattened_obs = None
 
-            # 4. If not loaded (or failed load), capture manually
             if self.flattened_obs is None:
                 print("\n" + "=" * 60)
                 print(f"No valid data found in '{save_dir}'.")
                 print("Please prepare the flattened garment position manually.")
                 print("=" * 60)
                 input("Press [Enter] to capture the flattened cloth state...")
-                
-                # Capture
-                self.flattened_obs = self._process_info(task_related=False, flattened_obs=False)
+                self.flattened_obs = {}
+                self.flattened_obs = self._process_info(self.flattened_obs, task_related=False, flattened_obs=False)
                 self.flatten_coverage = self.coverage
                 
                 obs = self.flattened_obs['observation']
-                
-                # 5. Save to disk as Human Readable Files
                 print(f"[Arena] Saving human-readable observation to {save_dir}...")
                 os.makedirs(save_dir, exist_ok=True)
                 
                 try:
-                    # Save Images (Convert RGB -> BGR for OpenCV saving)
                     cv2.imwrite(fn_rgb, cv2.cvtColor(obs['rgb'], cv2.COLOR_RGB2BGR))
                     cv2.imwrite(fn_raw_rgb, cv2.cvtColor(obs['raw_rgb'], cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(fn_depth, obs['depth']) # Depth usually saves fine as png (16bit or 8bit)
-                    
-                    # Save Masks (Convert Bool -> 0-255 Uint8)
+                    cv2.imwrite(fn_depth, obs['depth'])
                     cv2.imwrite(fn_mask, (obs['mask'] * 255).astype(np.uint8))
                     cv2.imwrite(fn_r0_mask, (obs['robot0_mask'] * 255).astype(np.uint8))
                     cv2.imwrite(fn_r1_mask, (obs['robot1_mask'] * 255).astype(np.uint8))
                     
-                    # Save Metadata JSON
                     meta_info = {
                         "eid": int(self.flattened_obs.get("eid", 0)),
                         "action_step": int(obs.get("action_step", 0)),
@@ -320,7 +311,6 @@ class DualArmArena(Arena):
         
         return self.flattened_obs
 
-    # ... [The rest of the methods: _snap_to_mask, step, get_frames, etc. remain unchanged] ...
     def _snap_to_mask(self, point, mask):
         point = np.array(point, dtype=int)
         h, w = mask.shape
@@ -343,6 +333,46 @@ class DualArmArena(Arena):
         
         return np.array([nearest_yx[1], nearest_yx[0]])
 
+    def _get_grasp_rotation(self, mask, point):
+        """
+        Calculates rotation angle by finding the strongest edge in the neighborhood.
+        """
+        x, y = int(point[0]), int(point[1])
+        h, w = mask.shape
+
+        r = 15
+        x1, y1 = max(0, x - r), max(0, y - r)
+        x2, y2 = min(w, x + r + 1), min(h, y + r + 1)
+        
+        roi = mask[y1:y2, x1:x2].astype(np.float32)
+        
+        if np.min(roi) == np.max(roi):
+            return 0.0
+
+        roi = cv2.GaussianBlur(roi, (7, 7), 1.0)
+
+        gx = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=5)
+        gy = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=5)
+        
+        magnitude = np.sqrt(gx**2 + gy**2)
+        max_idx = np.unravel_index(np.argmax(magnitude), magnitude.shape)
+        
+        if magnitude[max_idx] < 1e-3:
+            return 0.0
+            
+        best_gx = gx[max_idx]
+        best_gy = gy[max_idx]
+        
+        angle = np.arctan2(best_gy, best_gx)
+        angle += np.pi / 2 
+        
+        while angle > np.pi / 2:
+            angle -= np.pi
+        while angle < -np.pi / 2:
+            angle += np.pi
+            
+        return angle
+
     def step(self, action):
         if self.measure_time:
             start_time = time.time()
@@ -354,7 +384,7 @@ class DualArmArena(Arena):
         if self.snap_to_cloth_mask:
             mask = self.cloth_mask
             kernel = np.ones((3, 3), np.uint8) 
-            eroded_mask = cv2.erode(mask, kernel, iterations=2)
+            eroded_mask = cv2.erode(mask, kernel, iterations=6)
             
             if np.sum(eroded_mask) == 0:
                 print("[Warning] Erosion removed entire mask. Using original mask.")
@@ -374,6 +404,19 @@ class DualArmArena(Arena):
         points_executed = points_orig.flatten()
 
         full_mask_0, full_mask_1 = self.dual_arm.get_workspace_masks()
+        
+        # --- Robot Assignment, Rotation, and Validity Logic ---
+        pick_angles = [0.0, 0.0]
+        valid_flags = [1.0, 1.0] # Default True
+
+        # Helper to check if a crop-space point is on the cloth mask
+        def check_validity(pt_crop):
+            x, y = int(pt_crop[0]), int(pt_crop[1])
+            h, w = self.cloth_mask.shape
+            if 0 <= x < w and 0 <= y < h:
+                return 1.0 if self.cloth_mask[y, x] > 0 else 0.0
+            return 0.0
+
         if len(points_orig) == 4:
             p0_orig, p1_orig = points_orig[0], points_orig[1]
             l0_orig, l1_orig = points_orig[2], points_orig[3]
@@ -394,6 +437,19 @@ class DualArmArena(Arena):
                 final_pick_0, final_pick_1, 
                 final_place_0, final_place_1
             ])
+            
+            # Rotation & Validity Calculation
+            pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
+            pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
+            
+            angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
+            angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+            pick_angles = [angle_0, angle_1]
+
+            # Validity: check mask at the crop coordinates
+            valid_0 = check_validity(pt0_crop)
+            valid_1 = check_validity(pt1_crop)
+            valid_flags = [valid_0, valid_1]
 
         elif len(points_orig) == 2:
             p0_orig, p1_orig = points_orig[0], points_orig[1]
@@ -404,23 +460,36 @@ class DualArmArena(Arena):
             final_pick_0 = self._snap_to_mask(p0_orig, full_mask_0)
             final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
             points_executed = np.concatenate([final_pick_0, final_pick_1])
+            
+            pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
+            pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
+            
+            angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
+            angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+            pick_angles = [angle_0, angle_1]
+
+            valid_0 = check_validity(pt0_crop)
+            valid_1 = check_validity(pt1_crop)
+            valid_flags = [valid_0, valid_1]
            
         if self.measure_time:
             self.process_action_time.append(time.time() - start_time)
             start_time = time.time()
 
-        # TODO: The line between the two finger on the gripper is perpendicular to the y-axis
-        # I want to also calculate the rotation of the end-effector needed so that the line 
-        # between the two finger will perpendicular to the cutline of the cloth mask
-        # if the pixel is inside the mask or completely outside the mask, the roation give is 0
-        # but it will different for the grasping pixel that is on the border of
+        # Concatenate: [coords, angles, flags]
+        # Size: 8 + 2 + 2 = 12 floats (for pick-place)
+        full_action = np.concatenate([
+            points_executed.copy(), 
+            np.array(pick_angles),
+            np.array(valid_flags)
+        ])
 
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
-            self.pick_and_place_skill.step(points_executed.copy())
+            self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
-            self.pick_and_fling_skill.step(points_executed.copy())
+            self.pick_and_fling_skill.step(full_action)
         elif action_type == 'no-operation':
             pass
         

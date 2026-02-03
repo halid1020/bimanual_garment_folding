@@ -219,14 +219,11 @@ class PickAndFlingSkill:
             speed=0.2, acc=0.1, blocking=True,
             record=record_debug
         )
-        if record_debug: self._append_scene_trajectory(full_trajectory)
-
         # 3, 4, 5. Stretch, Fling, Drag (Pass the accumulator)
         self.dual_arm_stretch_and_fling(
             target_p0_local, 
             transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e),
-            record_debug=record_debug,
-            full_trajectory_ref=full_trajectory
+            record_debug=record_debug
         )
 
         self.scene.both_home()
@@ -249,14 +246,10 @@ class PickAndFlingSkill:
             fling_acc=FLING_ACC,
             drag_speed=0.2,   
             drag_acc=0.2,
-            record_debug=False,
-            full_trajectory_ref=None
+            record_debug=False
             ):
         
-        # Use existing reference if passed, else create local (legacy support)
-        if full_trajectory_ref is None:
-            full_trajectory_ref = {'ur5e': [], 'ur16e': []}
-
+       
         width = self.scene.get_tcp_distance()
     
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
@@ -268,8 +261,7 @@ class PickAndFlingSkill:
             max_speed=stretch_max_speed, 
             max_width=stretch_max_width,
             max_time=stretch_max_time,
-            record_debug=record_debug,
-            full_trajectory_ref=full_trajectory_ref)
+            record_debug=record_debug)
             
         if not r: return {}
         
@@ -301,8 +293,7 @@ class PickAndFlingSkill:
             fling_acc,
             record=record_debug 
         )
-        if record_debug: self._append_scene_trajectory(full_trajectory_ref)
-
+       
         # 5. Execute Slow Drag
         ur16e_drag_target_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_drag_target)
 
@@ -314,7 +305,6 @@ class PickAndFlingSkill:
             blocking=True,
             record=record_debug
         )
-        if record_debug: self._append_scene_trajectory(full_trajectory_ref)
         
         self.scene.both_open_gripper()
         
@@ -325,7 +315,8 @@ class PickAndFlingSkill:
         max_speed=0.15, 
         max_width=0.7, 
         max_time=5,
-        speed_threshold=0.005): 
+        speed_threshold=0.005,
+        record_debug=False): 
         
         """
         Fixed tensioning logic to prevent over-stretching.
@@ -335,17 +326,12 @@ class PickAndFlingSkill:
         ur16e_pose_ur16ebase = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_ur5ebase)
 
         # Move to initial grasp pose
-        r = self.scene.both_movel(ur5e_pose_ur5ebase, \
+        self.scene.both_movel(ur5e_pose_ur5ebase, \
             ur16e_pose_ur16ebase, \
             speed=max_speed,
-            acc=1.2,
-            record=record_debug) # Record approach to stretch
+            acc=1.2) # Record approach to stretch
             
-        if record_debug and full_trajectory_ref is not None:
-             self._append_scene_trajectory(full_trajectory_ref)
-             
-        if not r: return False
-
+    
         # --- FIX START ---
         # Task frame is Robot Base Frame (all zeros)
         task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
@@ -369,14 +355,6 @@ class PickAndFlingSkill:
                 
                 while (time.time() - start_time) < max_time:
                     elapsed = time.time() - start_time
-                    
-                    # --- Record Trajectory Manually inside Loop ---
-                    if record_debug and full_trajectory_ref is not None:
-                        # Capture current TCP positions (approx 125Hz if not throttled, 
-                        # but loop has sleep, so it depends on cycle time)
-                        full_trajectory_ref['ur5e'].append(self.scene.ur5e.get_tcp_pose()[:3])
-                        full_trajectory_ref['ur16e'].append(self.scene.ur16e.get_tcp_pose()[:3])
-                    # ---------------------------------------------
                     
                     if elapsed < 0.2:
                         f = init_force

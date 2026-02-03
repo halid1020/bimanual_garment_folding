@@ -155,7 +155,7 @@ class DualArmScene:
                     traj['ur16e'].append(p16)
                 except Exception:
                     pass # Ignore read errors during loop
-                time.sleep(0.01) # ~100Hz max polling
+                time.sleep(0.1) # ~100Hz max polling
             self.last_trajectory = traj
 
         if blocking:

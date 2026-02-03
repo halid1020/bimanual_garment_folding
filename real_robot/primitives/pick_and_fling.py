@@ -10,8 +10,8 @@ from real_robot.utils.transform_utils import (
 )
 
 MIN_Z = 0.015
-APPROACH_DIST = 0.08        # meters above target to approach from
-LIFT_DIST = 0.12            # meters to lift after grasp
+APPROACH_DIST = 0.08        
+LIFT_DIST = 0.12            
 MOVE_SPEED = 1.0
 MOVE_ACC = 0.5
 FLING_SPEED = 3.0
@@ -21,16 +21,11 @@ HOME_AFTER = True
 
 # --- HELPER: Apply Rotation ---
 def apply_local_z_rotation(axis_angle, angle_rad):
-    """
-    Applies a rotation around the local Z-axis of the given axis-angle pose.
-    """
     if abs(angle_rad) < 1e-4:
         return axis_angle
-        
     r_current = R.from_rotvec(axis_angle)
     r_diff = R.from_euler('z', angle_rad, degrees=False)
     r_new = r_current * r_diff
-    
     return r_new.as_rotvec()
 
 # --- HELPER: Fling Path ---
@@ -43,7 +38,6 @@ def points_to_fling_path(
         place_height=0.05):
     tx_world_action = points_to_action_frame(right_point, left_point)
     tx_world_fling_base = tx_world_action.copy()
-    # height is managed by get_base_fling_poses
     tx_world_fling_base[2,3] = 0
     base_fling = get_base_fling_poses(
         stroke=swing_stroke,
@@ -62,11 +56,6 @@ def points_to_fling_path(
 
 
 class PickAndFlingSkill:
-    """
-    Pick-and-Fling skill primitive.
-    Step executes a fling motion with pick coordinates.
-    """
-
     def __init__(self, scene):
         self.scene = scene
         self.vertical_rotvec = [math.pi, 0.0, 0.0]
@@ -90,22 +79,22 @@ class PickAndFlingSkill:
             accumulator['ur16e'].extend(traj['ur16e'])
 
     def step(self, action, record_debug=False):
-        # Initialize accumulator for the whole process
+        print('recording ?', record_debug)
+        # Initialize accumulator 
         full_trajectory = {'ur5e': [], 'ur16e': []}
 
-        # 1. Unpack Action: [pick0_x, pick0_y, pick1_x, pick1_y, angle0, angle1]
+        # 1. Unpack Action
         if len(action) >= 6:
             pick_0_xy = action[0:2]
             pick_1_xy = action[2:4]
             angle_0 = action[4]
             angle_1 = action[5]
         else:
-            # Fallback for legacy
             pick_0_xy = action[0:2]
             pick_1_xy = action[2:4]
             angle_0, angle_1 = 0.0, 0.0
 
-        # 2. Sort Logic: Group points with their angles before sorting
+        # 2. Sort Logic
         pair_0 = {'pick': pick_0_xy, 'angle': angle_0}
         pair_1 = {'pick': pick_1_xy, 'angle': angle_1}
 
@@ -144,7 +133,7 @@ class PickAndFlingSkill:
         rot_0 = apply_local_z_rotation(rot_0_base, rot_angle_0)
         rot_1 = apply_local_z_rotation(rot_1_base, rot_angle_1)
 
-        # Compose approach/grasp/lift poses
+        # Compose poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
         grasp_pick_0 = p_base_pick_0
         lift_after_0 = grasp_pick_0.copy()
@@ -159,25 +148,25 @@ class PickAndFlingSkill:
         self.scene.both_open_gripper()
         self.scene.both_home(speed=1.0, acc=0.8, blocking=True)
 
-        # Move to approach (No recording needed yet, haven't grasped)
+        # Approach (Not recorded)
         self.scene.both_movel(
             np.concatenate([approach_pick_0, rot_0]),
             np.concatenate([approach_pick_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
-        # Descend to grasp (No recording needed yet)
+        # Grasp (Not recorded)
         self.scene.both_movel(
             np.concatenate([grasp_pick_0, rot_0]),
             np.concatenate([grasp_pick_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
         )
 
-        # --- GRASP HAPPENS HERE ---
+        # --- GRASP ---
         self.scene.both_close_gripper()
         time.sleep(1.0)
 
-        # --- RECORDING STARTS HERE ---
+        # --- RECORDING START ---
         
         # 1. Lift
         self.scene.both_movel(
@@ -188,11 +177,8 @@ class PickAndFlingSkill:
         )
         if record_debug: self._append_scene_trajectory(full_trajectory)
 
-        # -------------------------------------------------------------------------
-        # Center & Align Grippers
-        # -------------------------------------------------------------------------
+        # 2. Centering & Aligning
         print("Centering and Aligning grippers between robots...")
-
         p0_local = lift_after_0[:3]
         p1_local = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1[:3])
         curr_width = np.linalg.norm(p1_local - p0_local)
@@ -212,27 +198,29 @@ class PickAndFlingSkill:
         target_p1_ur16e = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), target_p1_local)
         target_pose_1 = np.concatenate([target_p1_ur16e, rot_1])
 
-        # 2. Centering Move
         self.scene.both_movel(
             target_pose_0, 
             target_pose_1, 
             speed=0.2, acc=0.1, blocking=True,
             record=record_debug
         )
-        # 3, 4, 5. Stretch, Fling, Drag (Pass the accumulator)
+        if record_debug: self._append_scene_trajectory(full_trajectory)
+
+        # 3. Stretch, Fling, Drag
         self.dual_arm_stretch_and_fling(
             target_p0_local, 
-            transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e),
-            record_debug=record_debug
+            transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e), # Pass correct func arg
+            target_p1_ur16e, # Pass correct target
+            record_debug=record_debug,
+            full_trajectory_ref=full_trajectory # Pass accumulator
         )
 
         self.scene.both_home()
         return full_trajectory
 
-
     def dual_arm_stretch_and_fling(self, 
-            ur5e_pick_point_world, 
-            ur16e_pick_point_world,
+            ur5e_pick_point_world, # Actually in UR5e Base from step() call above
+            ur16e_pick_point_world, # Actually in UR16e Base from step() call above
             stretch_force=20,
             stretch_max_speed=0.15,
             stretch_max_width=0.7, 
@@ -246,44 +234,62 @@ class PickAndFlingSkill:
             fling_acc=FLING_ACC,
             drag_speed=0.2,   
             drag_acc=0.2,
-            record_debug=False
+            record_debug=False,
+            full_trajectory_ref=None
             ):
         
-       
-        width = self.scene.get_tcp_distance()
-    
+        # 1. Prepare Grasp/Stretch Poses
+        # Note: Input points are already target centers from 'step', 
+        # so we convert them to full pose with rotation if needed or use directly.
+        # Since 'step' passed calculated points, let's treat them as points to gripper pose.
+        
+        # Re-using the points_to_gripper_pose logic might be redundant if points are already aligned,
+        # but ensures rotation format is consistent.
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
             ur5e_pick_point_world, ur16e_pick_point_world, max_width=stretch_max_width)
         
-        # 3. Stretch (Recorded internally inside the force loop)
+        # 2. Stretch
         r = self.dual_arm_stretch(ur5e_pose_world, ur16e_pose_world, 
             force=stretch_force, 
             max_speed=stretch_max_speed, 
             max_width=stretch_max_width,
             max_time=stretch_max_time,
-            record_debug=record_debug)
+            record_debug=record_debug,
+            full_trajectory_ref=full_trajectory_ref)
             
-        if not r: return {}
+        if not r: return False
         
-        width = self.scene.get_tcp_distance()
-        
+        # --- FIX: Update Start Points from Actual Robots ---
+        current_p5_base = self.scene.ur5e.get_tcp_pose()
+        current_p16_base = self.scene.ur16e.get_tcp_pose() 
+
+        new_ur5e_point = current_p5_base[:3]
+        # Transform UR16e Base -> UR5e Base
+        current_p16_in_ur5ebase = transform_pose(self.scene.T_ur5e_ur16e, current_p16_base)
+        new_ur16e_point = current_p16_in_ur5ebase[:3]
+
+        # 3. Generate Path
         ur5e_path_full, ur16e_path_full = points_to_fling_path(
-            right_point=ur5e_pick_point_world,
-            left_point=ur16e_pick_point_world,
-            width=width,
+            right_point=new_ur5e_point,
+            left_point=new_ur16e_point,
+            width=None, 
             swing_stroke=swing_stroke,
             swing_angle=swing_angle,
             lift_height=lift_height,
             place_height=place_height
         )
-
+        
+        # 4. Overwrite Start Points
+        ur5e_path_full[0][:3] = new_ur5e_point
+        ur16e_path_full[0][:3] = new_ur16e_point
+        
+        # 5. Slice paths
         ur5e_fling_path = ur5e_path_full[:-1]
         ur16e_fling_path = ur16e_path_full[:-1]
-        
         ur5e_drag_target = ur5e_path_full[-1]
         ur16e_drag_target = ur16e_path_full[-1]
 
-        # 4. Execute Fast Fling
+        # 6. Fast Fling
         ur16e_fling_path_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_fling_path)
         
         self.scene.both_fling(
@@ -293,8 +299,9 @@ class PickAndFlingSkill:
             fling_acc,
             record=record_debug 
         )
-       
-        # 5. Execute Slow Drag
+        if record_debug: self._append_scene_trajectory(full_trajectory_ref)
+        
+        # 7. Slow Drag
         ur16e_drag_target_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_drag_target)
 
         self.scene.both_movel(
@@ -305,43 +312,39 @@ class PickAndFlingSkill:
             blocking=True,
             record=record_debug
         )
+        if record_debug: self._append_scene_trajectory(full_trajectory_ref)
         
         self.scene.both_open_gripper()
-        
+        return True
+
     def dual_arm_stretch(self, 
-        ur5e_pose_ur5ebase, ur16e_pose_ur5ebase,
+        ur5e_pose_world, ur16e_pose_world,
         force=8,        
         init_force=15,  
         max_speed=0.15, 
         max_width=0.7, 
         max_time=5,
         speed_threshold=0.005,
-        record_debug=False): 
+        record_debug=False,
+        full_trajectory_ref=None): 
         
-        """
-        Fixed tensioning logic to prevent over-stretching.
-        FIX: Uses Base Frame for forceMode (Y-axis) with positive force for both
-             to ensure they pull towards their own bases.
-        """
-        ur16e_pose_ur16ebase = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_ur5ebase)
+        ur16e_pose_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world)
 
         # Move to initial grasp pose
-        self.scene.both_movel(ur5e_pose_ur5ebase, \
-            ur16e_pose_ur16ebase, \
+        self.scene.both_movel(ur5e_pose_world, \
+            ur16e_pose_base, \
             speed=max_speed,
-            acc=1.2) # Record approach to stretch
-            
+            acc=1.2,
+            record=record_debug) 
+        if record_debug and full_trajectory_ref:
+            self._append_scene_trajectory(full_trajectory_ref)
     
-        # --- FIX START ---
-        # Task frame is Robot Base Frame (all zeros)
+        # Task frame = Base Frame
         task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
-        
-        # Select Y-axis (Index 1) for compliance
         selection_vector = [0, 1, 0, 0, 0, 0] 
-        
         force_type = 2
         limits = [max_speed, 2, 2, 1, 1, 1]
-        dt = 1.0/125
+        dt = 0.1 # <--- UPDATE: Loop sleep time 0.1s
 
         start_width = self.scene.get_tcp_distance()
         safe_limit_width = min(max_width, start_width * 1.5) 
@@ -354,6 +357,11 @@ class PickAndFlingSkill:
                 prev_time = start_time
                 
                 while (time.time() - start_time) < max_time:
+                    # --- RECORDING IN LOOP ---
+                    if record_debug and full_trajectory_ref:
+                        full_trajectory_ref['ur5e'].append(self.scene.ur5e.get_tcp_pose()[:3])
+                        full_trajectory_ref['ur16e'].append(self.scene.ur16e.get_tcp_pose()[:3])
+                    
                     elapsed = time.time() - start_time
                     
                     if elapsed < 0.2:
@@ -361,9 +369,6 @@ class PickAndFlingSkill:
                     else:
                         f = force
                     
-                    # Apply force along Y-axis (Index 1). 
-                    # UR5e: +f moves towards UR5e base (Correct per previous observation)
-                    # UR16e: +f moves towards UR16e base (Flipped from -f to fix direction)
                     right_wrench = [0, f, 0, 0, 0, 0]
                     left_wrench = [0, f, 0, 0, 0, 0]
 
@@ -374,11 +379,8 @@ class PickAndFlingSkill:
                         left_wrench, force_type, limits)
                     if not r: return False
                     
-                    # --- FIX END ---
-
                     tcp_distance = self.scene.get_tcp_distance()
                     if tcp_distance >= safe_limit_width:
-                        print(f'[Stretch] Max allowable width reached: {tcp_distance:.3f}')
                         break
 
                     l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
@@ -387,7 +389,6 @@ class PickAndFlingSkill:
                     
                     if elapsed > 0.5:
                         if actual_speed < speed_threshold:
-                            print(f'[Stretch] Tension detected (speed {actual_speed:.4f} < {speed_threshold}). Stopping.')
                             break
 
                     curr_time = time.time()

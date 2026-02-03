@@ -31,7 +31,6 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
         images = []
         for i, act in enumerate(actions):
-            # TODO: at the top-left corner, use white text to indicidate step id and applied primitive type "Step 1: Pick-and-Place" or "Step 2: Pick-and-Fling"
             key = list(act.keys())[0]
             val = act[key]
 
@@ -113,7 +112,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 # Retrieve trajectory of NEXT environment step
                 #traj = picker_traj[i + 1]
 
-                # ## TODO: do not overlap with the step-wise primitive information text
+                # ## TODO: change the following code according the trajecotry saving
                 # if traj is None or len(traj) == 0:
                 #     draw_text_with_bg(
                 #         img,

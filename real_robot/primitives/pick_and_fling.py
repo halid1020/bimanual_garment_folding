@@ -315,29 +315,25 @@ class PickAndFlingSkill:
         
         self.scene.both_open_gripper()
         
-        # --- End of recording (release happens here) ---
-        return full_trajectory_ref
-
     def dual_arm_stretch(self, 
-        ur5e_pose_world, ur16e_pose_world,
+        ur5e_pose_ur5ebase, ur16e_pose_ur5ebase,
         force=8,        
         init_force=15,  
         max_speed=0.15, 
         max_width=0.7, 
         max_time=5,
-        speed_threshold=0.005,
-        record_debug=False,
-        full_trajectory_ref=None): 
+        speed_threshold=0.005): 
         
         """
         Fixed tensioning logic to prevent over-stretching.
-        Includes manual trajectory recording since this uses forceMode loop.
+        FIX: Uses Base Frame for forceMode (Y-axis) with positive force for both
+             to ensure they pull towards their own bases.
         """
-        ur16e_pose_base = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_world)
+        ur16e_pose_ur16ebase = transform_pose(np.linalg.inv(self.scene.T_ur5e_ur16e), ur16e_pose_ur5ebase)
 
         # Move to initial grasp pose
-        r = self.scene.both_movel(ur5e_pose_world, \
-            ur16e_pose_base, \
+        r = self.scene.both_movel(ur5e_pose_ur5ebase, \
+            ur16e_pose_ur16ebase, \
             speed=max_speed,
             acc=1.2,
             record=record_debug) # Record approach to stretch
@@ -347,10 +343,13 @@ class PickAndFlingSkill:
              
         if not r: return False
 
-        ur5e_tcp_pose = self.scene.ur5e.get_tcp_pose()
-        ur16e_tcp_pose = self.scene.ur16e.get_tcp_pose()
-
-        selection_vector = [1, 0, 0, 0, 0, 0] 
+        # --- FIX START ---
+        # Task frame is Robot Base Frame (all zeros)
+        task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+        
+        # Select Y-axis (Index 1) for compliance
+        selection_vector = [0, 1, 0, 0, 0, 0] 
+        
         force_type = 2
         limits = [max_speed, 2, 2, 1, 1, 1]
         dt = 1.0/125
@@ -380,17 +379,21 @@ class PickAndFlingSkill:
                         f = init_force
                     else:
                         f = force
-                        
-                    left_wrench = [f, 0, 0, 0, 0, 0]
-                    right_wrench = [-f, 0, 0, 0, 0, 0]
+                    
+                    # Apply force along Y-axis (Index 1). 
+                    # UR5e: +f moves towards UR5e base (Correct per previous observation)
+                    # UR16e: +f moves towards UR16e base (Flipped from -f to fix direction)
+                    left_wrench = [0, f, 0, 0, 0, 0]
+                    right_wrench = [0, f, 0, 0, 0, 0]
 
-                    # apply force
-                    r = left_force_guard.apply_force(ur5e_tcp_pose, selection_vector, 
+                    r = left_force_guard.apply_force(task_frame, selection_vector, 
                         left_wrench, force_type, limits)
                     if not r: return False
-                    r = right_force_guard.apply_force(ur16e_tcp_pose, selection_vector, 
+                    r = right_force_guard.apply_force(task_frame, selection_vector, 
                         right_wrench, force_type, limits)
                     if not r: return False
+                    
+                    # --- FIX END ---
 
                     tcp_distance = self.scene.get_tcp_distance()
                     if tcp_distance >= safe_limit_width:

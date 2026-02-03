@@ -7,6 +7,9 @@ GRIPPER_OFFSET_UR5e = 0.06 #To calibrate: This has to be accurate
 GRIPPER_OFFSET_UR16e = 0.015 #To calibrate: This has to be accurate
 SURFACE_HEIGHT = 0.03 #This has to be accurate
 FLING_LIFT_DIST = 0.1
+MOVE_SPEED = 1.5
+MOVE_ACC = 1.0
+DRAG_DIST = 0.4
 
 def matrix_to_pose(T):
     """
@@ -97,7 +100,7 @@ def get_base_fling_poses(
         lift_height=0.45, 
         swing_angle=np.pi/4,
         place_height=0.05,
-        drag_dist=0.2  # <--- NEW: Distance to drag after landing
+        drag_dist=DRAG_DIST  # <--- NEW: Distance to drag after landing
     ):
     """
     Fling trajectory with a final drag motion.

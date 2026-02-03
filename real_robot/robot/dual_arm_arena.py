@@ -374,127 +374,136 @@ class DualArmArena(Arena):
         return angle
 
     def step(self, action):
+        print('!!! step')
         if self.measure_time:
             start_time = time.time()
 
         norm_pixels = np.array(list(action.values())[0]).reshape(-1, 2)
         action_type = list(action.keys())[0]
 
-        points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
-        if self.snap_to_cloth_mask:
-            mask = self.cloth_mask
-            kernel = np.ones((3, 3), np.uint8) 
-            eroded_mask = cv2.erode(mask, kernel, iterations=6)
-            
-            if np.sum(eroded_mask) == 0:
-                print("[Warning] Erosion removed entire mask. Using original mask.")
-                target_mask = mask
-            else:
-                target_mask = eroded_mask
+        if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
 
-            snapped_points = []
-            for i, pt in enumerate(points_crop):
-                if i < 2:
-                    snapped_points.append(self._snap_to_mask(pt, target_mask))
+            points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
+            if self.snap_to_cloth_mask:
+                mask = self.cloth_mask
+                kernel = np.ones((3, 3), np.uint8) 
+                eroded_mask = cv2.erode(mask, kernel, iterations=6)
+                
+                if np.sum(eroded_mask) == 0:
+                    print("[Warning] Erosion removed entire mask. Using original mask.")
+                    target_mask = mask
                 else:
-                    snapped_points.append(pt)
-            points_crop = np.array(snapped_points)
-        
-        points_orig = points_crop + np.array([self.x1, self.y1])
-        points_executed = points_orig.flatten()
+                    target_mask = eroded_mask
 
-        full_mask_0, full_mask_1 = self.dual_arm.get_workspace_masks()
-        
-        # --- Robot Assignment, Rotation, and Validity Logic ---
-        pick_angles = [0.0, 0.0]
-        valid_flags = [1.0, 1.0] # Default True
-
-        # Helper to check if a crop-space point is on the cloth mask
-        def check_validity(pt_crop):
-            x, y = int(pt_crop[0]), int(pt_crop[1])
-            h, w = self.cloth_mask.shape
-            if 0 <= x < w and 0 <= y < h:
-                return 1.0 if self.cloth_mask[y, x] > 0 else 0.0
-            return 0.0
-
-        if len(points_orig) == 4:
-            p0_orig, p1_orig = points_orig[0], points_orig[1]
-            l0_orig, l1_orig = points_orig[2], points_orig[3]
-
-            pair_a = (p0_orig, l0_orig)
-            pair_b = (p1_orig, l1_orig)
-
-            if pair_a[0][0] < pair_b[0][0]:
-                pair_a, pair_b = pair_b, pair_a
+                snapped_points = []
+                for i, pt in enumerate(points_crop):
+                    if i < 2:
+                        snapped_points.append(self._snap_to_mask(pt, target_mask))
+                    else:
+                        snapped_points.append(pt)
+                points_crop = np.array(snapped_points)
             
-            final_pick_0 = self._snap_to_mask(pair_a[0], full_mask_0)
-            final_place_0 = self._snap_to_mask(pair_a[1], full_mask_0)
-            
-            final_pick_1 = self._snap_to_mask(pair_b[0], full_mask_1)
-            final_place_1 = self._snap_to_mask(pair_b[1], full_mask_1)
+            points_orig = points_crop + np.array([self.x1, self.y1])
+            points_executed = points_orig.flatten()
 
-            points_executed = np.concatenate([
-                final_pick_0, final_pick_1, 
-                final_place_0, final_place_1
+            full_mask_0, full_mask_1 = self.dual_arm.get_workspace_masks()
+            
+            # --- Robot Assignment, Rotation, and Validity Logic ---
+            pick_angles = [0.0, 0.0]
+            valid_flags = [1.0, 1.0] # Default True
+
+            # Helper to check if a crop-space point is on the cloth mask
+            def check_validity(pt_crop):
+                x, y = int(pt_crop[0]), int(pt_crop[1])
+                h, w = self.cloth_mask.shape
+                if 0 <= x < w and 0 <= y < h:
+                    return 1.0 if self.cloth_mask[y, x] > 0 else 0.0
+                return 0.0
+
+            if len(points_orig) == 4:
+                p0_orig, p1_orig = points_orig[0], points_orig[1]
+                l0_orig, l1_orig = points_orig[2], points_orig[3]
+
+                pair_a = (p0_orig, l0_orig)
+                pair_b = (p1_orig, l1_orig)
+
+                if pair_a[0][0] < pair_b[0][0]:
+                    pair_a, pair_b = pair_b, pair_a
+                
+                final_pick_0 = self._snap_to_mask(pair_a[0], full_mask_0)
+                final_place_0 = self._snap_to_mask(pair_a[1], full_mask_0)
+                
+                final_pick_1 = self._snap_to_mask(pair_b[0], full_mask_1)
+                final_place_1 = self._snap_to_mask(pair_b[1], full_mask_1)
+
+                points_executed = np.concatenate([
+                    final_pick_0, final_pick_1, 
+                    final_place_0, final_place_1
+                ])
+                
+                # Rotation & Validity Calculation
+                pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
+                pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
+                
+                angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
+                angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+                pick_angles = [angle_0, angle_1]
+
+                # Validity: check mask at the crop coordinates
+                valid_0 = check_validity(pt0_crop)
+                valid_1 = check_validity(pt1_crop)
+                valid_flags = [valid_0, valid_1]
+
+            elif len(points_orig) == 2:
+                p0_orig, p1_orig = points_orig[0], points_orig[1]
+
+                if p0_orig[0] < p1_orig[0]:
+                    p0_orig, p1_orig = p1_orig, p0_orig
+                
+                final_pick_0 = self._snap_to_mask(p0_orig, full_mask_0)
+                final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
+                points_executed = np.concatenate([final_pick_0, final_pick_1])
+                
+                pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
+                pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
+                
+                angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
+                angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+                pick_angles = [angle_0, angle_1]
+
+                valid_0 = check_validity(pt0_crop)
+                valid_1 = check_validity(pt1_crop)
+                valid_flags = [valid_0, valid_1]
+
+            # Concatenate: [coords, angles, flags]
+            # Size: 8 + 2 + 2 = 12 floats (for pick-place)
+            full_action = np.concatenate([
+                points_executed.copy(), 
+                np.array(pick_angles),
+                np.array(valid_flags)
             ])
-            
-            # Rotation & Validity Calculation
-            pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
-            pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
-            
-            angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
-            angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
-            pick_angles = [angle_0, angle_1]
-
-            # Validity: check mask at the crop coordinates
-            valid_0 = check_validity(pt0_crop)
-            valid_1 = check_validity(pt1_crop)
-            valid_flags = [valid_0, valid_1]
-
-        elif len(points_orig) == 2:
-            p0_orig, p1_orig = points_orig[0], points_orig[1]
-
-            if p0_orig[0] < p1_orig[0]:
-                p0_orig, p1_orig = p1_orig, p0_orig
-            
-            final_pick_0 = self._snap_to_mask(p0_orig, full_mask_0)
-            final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
-            points_executed = np.concatenate([final_pick_0, final_pick_1])
-            
-            pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
-            pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
-            
-            angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
-            angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
-            pick_angles = [angle_0, angle_1]
-
-            valid_0 = check_validity(pt0_crop)
-            valid_1 = check_validity(pt1_crop)
-            valid_flags = [valid_0, valid_1]
            
         if self.measure_time:
             self.process_action_time.append(time.time() - start_time)
             start_time = time.time()
 
-        # Concatenate: [coords, angles, flags]
-        # Size: 8 + 2 + 2 = 12 floats (for pick-place)
-        full_action = np.concatenate([
-            points_executed.copy(), 
-            np.array(pick_angles),
-            np.array(valid_flags)
-        ])
+        self.info = {}
 
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
             self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
-            self.pick_and_fling_skill.step(full_action, record_debug=self.debug)
+            traj = self.pick_and_fling_skill.step(full_action, record_debug=self.debug)
+            self.info['debug_trajectory'] = traj
         elif action_type == 'no-operation':
+            print('no operation!!!')
             pass
+        else:
+            raise ValueError
         
         self.action_step += 1
-        self.info = {}
+        
         self.all_infos.append(self.info)
 
         if self.measure_time:
@@ -503,10 +512,11 @@ class DualArmArena(Arena):
 
         self.info = self._process_info(self.info)
 
-        applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
-        self.info['applied_action'] = {
-            action_type: applied_action.flatten()
-        }
+        if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
+            applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
+            self.info['applied_action'] = {
+                action_type: applied_action.flatten()
+            }
 
         if self.measure_time:
             self.perception_time.append(time.time() - start_time)

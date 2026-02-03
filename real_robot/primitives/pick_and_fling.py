@@ -6,14 +6,13 @@ from scipy.spatial.transform import Rotation as R
 from real_robot.utils.transform_utils import (
     point_on_table_base, transform_point, points_to_gripper_pose,
     points_to_action_frame, get_base_fling_poses, transform_pose, 
-    GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST
+    GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST,
+    MOVE_ACC, MOVE_SPEED
 )
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        
 LIFT_DIST = 0.12            
-MOVE_SPEED = 1.0
-MOVE_ACC = 0.5
 FLING_SPEED = 3.0
 FLING_ACC = 1.5
 HANG_HEIGHT = 0.35
@@ -146,7 +145,7 @@ class PickAndFlingSkill:
         
         # Motion sequence
         self.scene.both_open_gripper()
-        self.scene.both_home(speed=1.0, acc=0.8, blocking=True)
+        self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
 
         # Approach (Not recorded)
         self.scene.both_movel(
@@ -201,7 +200,7 @@ class PickAndFlingSkill:
         self.scene.both_movel(
             target_pose_0, 
             target_pose_1, 
-            speed=0.2, acc=0.1, blocking=True,
+            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True,
             record=record_debug
         )
         if record_debug: self._append_scene_trajectory(full_trajectory)

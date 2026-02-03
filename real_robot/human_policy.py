@@ -37,6 +37,7 @@ class HumanPolicy(Agent):
                 break
             elif cmd == '3':
                 prim_type = "no_operation"
+                break
             else:
                 print("Invalid command. Please enter 1, 2, 3 or q.")
 

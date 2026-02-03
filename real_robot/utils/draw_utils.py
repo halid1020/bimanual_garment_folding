@@ -21,9 +21,14 @@ PRIMITIVE_COLORS = {
 # -------------------------------
 # Normalized → pixel coordinates
 # -------------------------------
-def norm_to_px(v, W, H):
-    x = int((v[1] + 1) * 0.5 * W)
-    y = int((v[0] + 1) * 0.5 * H)
+def norm_to_px(v, W, H, swap=False):
+    xid = 1
+    yid = 0
+    if swap:
+        xid = 0
+        yid = 1
+    x = int((v[xid] + 1) * 0.5 * W)
+    y = int((v[yid] + 1) * 0.5 * H)
     return x, y
 
 def apply_workspace_shade(rgb, mask, color, alpha=0.35):
@@ -193,5 +198,103 @@ def draw_pick_and_place(img, action):
 
     if len(action) > 4:
         cv2.circle(img, swap(right_pick), 10, RED,  3)
+
+    return img
+
+
+# ------------------------------------------------------------------------------
+# Add/Replace these in real_robot/utils/draw_utils.py
+# ------------------------------------------------------------------------------
+
+def draw_gradient_path(img, points, cmap, thickness=6):
+    """
+    Draws a polyline from a list of (x,y) points using a color gradient,
+    ending with a triangular arrowhead.
+    NOTE: Assumes input 'points' are (x,y) and swaps them to (y,x) for drawing calls.
+    """
+    if points is None or len(points) < 2:
+        return
+
+    num_pts = len(points)
+    
+    # 1. Draw the line segments with gradient
+    for i in range(1, num_pts):
+        # alpha goes from >0.0 to 1.0
+        alpha = i / (num_pts - 1)
+        
+        # Map alpha to colormap value (255 -> 0 gives transition)
+        value = np.uint8([[[int((1.0 - alpha) * 255)]]])
+        color = cv2.applyColorMap(value, cmap)[0, 0].tolist()
+
+        # Note: Calling swap() to convert (x,y) -> (y,x) for cv2 convention in this file
+        cv2.line(
+            img, 
+            points[i - 1], 
+            points[i], 
+            color, 
+            thickness
+        )
+    
+    # 2. Draw the Arrowhead at the end
+    # Use the last two points to determine orientation
+    p_from = points[-2]
+    p_to = points[-1]
+
+    # Get the final color (alpha=1.0 -> value=0 corresponds to end of colormap)
+    value_end = np.uint8([[[0]]])
+    color_end = cv2.applyColorMap(value_end, cmap)[0, 0].tolist()
+
+    # Draw arrowhead using swapped coordinates (y,x)
+    draw_big_arrowhead(
+        img, 
+        p_from, 
+        p_to, 
+        color_end, 
+        size=30 # Same size as used in draw_colored_line
+    )
+
+def draw_pick_and_fling(img, action, traj_0=None, traj_1=None):
+    """
+    Draws pick markers and optional fling trajectories with arrowheads.
+    
+    Args:
+        img: The image to draw on.
+        action: The normalized action vector [pick0_x, pick0_y, pick1_x, pick1_y, ...].
+        traj_0: (Optional) List of (x,y) pixels for the first robot's trajectory.
+        traj_1: (Optional) List of (x,y) pixels for the second robot's trajectory.
+    """
+    H, W = img.shape[:2]
+    
+    # 1. Parse Pick Points (norm_to_px returns x,y)
+    pick_0 = norm_to_px(action[:2], W, H, swap=True)
+    pick_1 = norm_to_px(action[2:4], W, H, swap=True)
+
+    # 2. Sort Left/Right by X-coordinate to ensure consistent coloring (Blue=Left, Red=Right)
+    picks_data = [(pick_0, traj_0), (pick_1, traj_1)]
+    picks_sorted = sorted(picks_data, key=lambda p: p[0][0]) 
+
+    (left_pick, left_traj), (right_pick, right_traj) = picks_sorted
+
+    # 3. Define Colors
+    cmap_left = cv2.COLORMAP_COOL    # Blue-ish
+    cmap_right = cv2.COLORMAP_AUTUMN # Red-ish
+
+    # Extract solid colors for circles (start of colormap)
+    # Using 255 here gets the start color, matching the logic in draw_gradient_path where 1.0 alpha maps to 0 value.
+    BLUE = cv2.applyColorMap(np.uint8([[[255]]]), cmap_left)[0, 0].tolist()
+    RED  = cv2.applyColorMap(np.uint8([[[255]]]), cmap_right)[0, 0].tolist()
+
+    # 4. Draw Trajectories (if provided)
+    # Increase thickness slightly for better visibility against backgrounds
+    if left_traj is not None:
+        draw_gradient_path(img, left_traj, cmap_right, thickness=6)
+    
+    if right_traj is not None:
+        draw_gradient_path(img, right_traj, cmap_left, thickness=6)
+
+    # 5. Draw Pick Circles (Hollow)
+    # Calling swap() to convert (x,y) -> (y,x)
+    cv2.circle(img, left_pick, 10, BLUE, 3)
+    cv2.circle(img, right_pick, 10, RED, 3)
 
     return img

@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 from real_robot.utils.draw_utils import *
 from real_robot.robot.video_logger import VideoLogger
 
-
-
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
     def __call__(self, episode_config, result, filename=None):
@@ -29,6 +27,55 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         out_dir = os.path.join(self.log_dir, filename, 'performance_visualisation')
         os.makedirs(out_dir, exist_ok=True)
 
+        # --- Helper: Project 3D points to 2D image coordinates ---
+        def project_trajectory(points_3d, T_base_cam, intr, arena_meta):
+            """
+            Projects 3D points (base frame) -> 2D pixels (observation frame).
+            Accounts for Camera Extrinsics -> Intrinsics -> Crop -> Resize.
+            """
+            if not points_3d: return []
+            
+            # --- FIX: Handle RealSense Intrinsics Object vs Numpy Matrix ---
+            if hasattr(intr, 'fx'): # It is a pyrealsense2.intrinsics object
+                fx, fy = intr.fx, intr.fy
+                cx, cy = intr.ppx, intr.ppy
+            else: # It is a numpy matrix
+                fx, fy = intr[0,0], intr[1,1]
+                cx, cy = intr[0,2], intr[1,2]
+            # -------------------------------------------------------------
+
+            # 1. Base -> Camera Frame
+            T_cam_base = np.linalg.inv(T_base_cam)
+            points_2d = []
+            
+            # Arena Crop/Resize parameters
+            # Note: We must access these from the arena instance stored in info
+            crop_x1 = arena_meta.x1
+            crop_y1 = arena_meta.y1
+            crop_size = arena_meta.crop_size
+            target_res = 512.0 # The resolution of the image we are drawing on
+            
+            scale = target_res / crop_size
+
+            for p in points_3d:
+                p_h = np.append(p, 1.0) # Homogeneous
+                p_cam = T_cam_base @ p_h
+                
+                z = p_cam[2]
+                if z <= 0: continue # Skip points behind camera
+
+                # 2. Camera -> Raw Pixel
+                u_raw = (p_cam[0] * fx / z) + cx
+                v_raw = (p_cam[1] * fy / z) + cy
+
+                # 3. Raw Pixel -> Cropped & Resized Pixel
+                u_final = (u_raw - crop_x1) * scale
+                v_final = (v_raw - crop_y1) * scale
+                
+                points_2d.append((int(u_final), int(v_final)))
+            
+            return points_2d
+
         images = []
         for i, act in enumerate(actions):
             key = list(act.keys())[0]
@@ -48,7 +95,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 img = apply_workspace_shade(
                     img,
                     mask0,
-                    color=(255, 0, 0),  # Blue in BGR
+                    color=(0, 0, 255),  # Blue in BGR
                     alpha=0.2
                 )
                 
@@ -62,7 +109,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 img = apply_workspace_shade(
                     img,
                     mask1,
-                    color=(0, 0, 255),  # Red in BGR
+                    color=(255, 0, 0),  # Red in BGR
                     alpha=0.2
                 )
             
@@ -86,103 +133,47 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 primitive_color
             )
 
-
-
-            # RED   = (50, 50, 200)     # softer red
-            # BLUE  = (200, 50, 50)     # softer blue
-            # print('result length', len(result["information"]))
-            # print('action lenght', len(actions))
             # ================================
             #          FOLD / PICK-PLACE
             # ================================
             if key == "norm-pixel-pick-and-place":
-                applied_action = result["information"][i+1]['applied_action']
-                # print('applied action before', applied_action)
-                applied_action = applied_action['norm-pixel-pick-and-place']
-                # print('applied action', applied_action)
-                img = draw_pick_and_place(img, applied_action)
+                # Ensure we have info for the next step to get 'applied_action'
+                if i + 1 < len(result["information"]):
+                    info_next = result["information"][i+1]
+                    if 'applied_action' in info_next:
+                        applied_action = info_next['applied_action']
+                        applied_action = applied_action.get('norm-pixel-pick-and-place')
+                        if applied_action is not None:
+                            img = draw_pick_and_place(img, applied_action)
 
             # ================================
             #        PICK & FLING
             # ================================
             elif key == "norm-pixel-pick-and-fling":
-                pick_0 = norm_to_px(val[:2], W, H)
-                pick_1 = norm_to_px(val[2:4], W, H)
+                # 1. Prepare Trajectories
+                traj_px_0, traj_px_1 = None, None
+                
+                # Check next step for trajectory data
+                if i + 1 < len(result["information"]):
+                    info_next = result["information"][i+1]
+                    traj_data = info_next.get("debug_trajectory")
+                    arena_instance = info_next.get("arena")
 
-                # Retrieve trajectory of NEXT environment step
-                #traj = picker_traj[i + 1]
+                    if traj_data and arena_instance:
+                        scene = arena_instance.dual_arm
+                        # Project points
+                        traj_px_0 = project_trajectory(traj_data['ur5e'], scene.T_ur5e_cam, scene.intr, arena_instance)
+                        traj_px_1 = project_trajectory(traj_data['ur16e'], scene.T_ur16e_cam, scene.intr, arena_instance)
 
-                # ## TODO: change the following code according the trajecotry saving
-                # if traj is None or len(traj) == 0:
-                #     draw_text_with_bg(
-                #         img,
-                #         "Rejected",
-                #         (10, TEXT_Y_STATUS),
-                #         MILD_RED,
-                #         scale=1.2
-                #     )
-                    
-                # else:
-                #     traj = traj[10:-10]
-
-                #     traj_px_0 = [norm_to_px(step[0], W, H) for step in traj]
-                #     traj_px_1 = [norm_to_px(step[1], W, H) for step in traj]
-
-                #     T = len(traj)
-                #     num_samples = 20
-                #     idx = np.linspace(0, T - 1, min(T, num_samples)).astype(int)
-
-                #     sampled_0 = [traj_px_0[j] for j in idx]
-                #     sampled_1 = [traj_px_1[j] for j in idx]
-
-                #     # Colormaps
-                #     cmap0 = cv2.COLORMAP_COOL
-                #     cmap1 = cv2.COLORMAP_AUTUMN
-
-                #     BLUE = cv2.applyColorMap(
-                #         np.uint8([[[0]]]), cmap0
-                #     )[0, 0].tolist()
-                    
-                #     RED = cv2.applyColorMap(
-                #         np.uint8([[[0]]]), cmap1
-                #     )[0, 0].tolist()
-
-                #     for s in range(1, len(idx)):
-                #         alpha = s / (len(idx) - 1)
-
-                #         value = np.uint8([[[int((1.0 - alpha) * 255)]]])
-                #         color0 = cv2.applyColorMap(value, cmap0)[0, 0].tolist()
-                #         color1 = cv2.applyColorMap(value, cmap1)[0, 0].tolist()
-
-                #         cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 8)
-                #         cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 8)
-
-                def draw_hollow_circle(img, p, color, radius=10, thickness=3):
-                    cv2.circle(img, swap(p), radius, color, thickness)
-
-                draw_hollow_circle(img, pick_0, BLUE)
-                draw_hollow_circle(img, pick_1, RED)
-                    # # ------------------------------------------------------------------
-
-                    # # Final triangle marker
-                    # def draw_triangle_down(img, center, color, size=15):
-                    #     cx, cy = center  # (x, y)
-
-                    #     pts = np.array([
-                    #         (cy - size, cx - size),  # top-left
-                    #         (cy + size, cx - size),  # top-right
-                    #         (cy,        cx + size),  # bottom (apex)
-                    #     ], np.int32)
-
-                    #     cv2.fillPoly(img, [pts], color)
-
-                    # draw_triangle_down(img, traj_px_0[-1], BLUE)
-                    # draw_triangle_down(img, traj_px_1[-1], RED)
+                # 2. Call the clean draw function
+                # Note: val contains the action parameters for this step
+                img = draw_pick_and_fling(img, val, traj_0=traj_px_0, traj_1=traj_px_1)
 
             images.append(img)
 
         # Add final frame
-        images.append(frames[-1])
+        if len(frames) > len(images):
+             images.append(frames[-1])
 
         # ===========================================
         #  CONCAT images in a matplotlib grid
@@ -193,6 +184,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
         # Compute number of rows
         num_rows = (num_images + MAX_COLS - 1) // MAX_COLS
+        if num_rows == 0: num_rows = 1
 
         # Create the figure
         fig, axes = plt.subplots(

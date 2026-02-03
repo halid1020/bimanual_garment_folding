@@ -2,7 +2,8 @@ import math
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
-from real_robot.utils.transform_utils import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT
+from real_robot.utils.transform_utils \
+    import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, MOVE_ACC, MOVE_SPEED
 
 # --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
 def segment_distance(p1, p2, p3, p4):
@@ -60,7 +61,7 @@ def segment_distance(p1, p2, p3, p4):
     dP = w + (sc * u) - (tc * v)
     return np.linalg.norm(dP)
 
-def check_trajectories_close(traj0_points, traj1_points, threshold=0.3):
+def check_trajectories_close(traj0_points, traj1_points, threshold=0.1):
     min_dist = float("inf")
     for i in range(len(traj0_points)-1):
         for j in range(len(traj1_points)-1):
@@ -86,8 +87,7 @@ def apply_local_z_rotation(axis_angle, angle_rad):
 MIN_Z = 0.015
 APPROACH_DIST = 0.08
 LIFT_DIST = 0.08
-MOVE_SPEED = 1.0
-MOVE_ACC = 0.5
+
 HOME_AFTER = True
 
 class PickAndPlaceSkill:
@@ -99,11 +99,11 @@ class PickAndPlaceSkill:
         self.move_speed = 0.2
         self.move_acc = 0.2
         self.home_after = True
-        self.collision_threshold = 0.35 
+        self.collision_threshold = 0.15
 
     def reset(self):
-        self.scene.both_home()
         self.scene.both_open_gripper()
+        self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
         time.sleep(0.5)
 
     def step(self, action):

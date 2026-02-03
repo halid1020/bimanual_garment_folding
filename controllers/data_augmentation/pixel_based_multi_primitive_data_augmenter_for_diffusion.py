@@ -31,6 +31,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.use_workspace = self.config.get('use_workspace', False)
         self.use_goal = self.config.get('use_goal', False)
         self.random_crop = self.config.get('random_crop', False)
+        
+        # New config for RGB Noise
+        self.rgb_noise_factor = self.config.get('rgb_noise_factor', 0.0)
 
         if self.use_goal:
             self.goal_rotation = self.config.get('goal_rotation', False)
@@ -391,7 +394,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             perm = torch.randperm(3, device=obs.device)
             obs = obs[:, perm, :, :]
 
-        
+        # =========================
+        #       RGB NOISE
+        # =========================
+        if self.rgb_noise_factor > 0 and train:
+            # Generate Gaussian noise N(0, noise_factor)
+            # torch.randn_like creates N(0, 1), multiplying by factor scales the std dev
+            noise = torch.randn_like(obs) * self.rgb_noise_factor
+            obs = obs + noise
+            # Clamp result to ensure it stays valid image range [0, 1]
+            obs = torch.clamp(obs, 0, 1)
 
         # =========================
         # debug save after

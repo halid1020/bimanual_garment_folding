@@ -8,3 +8,4 @@ img_dim: [96, 96]
 randomise_prim_acts: false
 random_channel_permutation: false
 K: 0
+rgb_noise_factor: 0.01

@@ -227,8 +227,8 @@ class PickAndFlingSkill:
             swing_angle=np.pi/4,
             lift_height=0.35,
             place_height=0.15,
-            fling_speed=1.0,  
-            fling_acc=3.0,
+            fling_speed=0.5,  
+            fling_acc=1.5,
             drag_speed=0.2,   
             drag_acc=0.2
             ):

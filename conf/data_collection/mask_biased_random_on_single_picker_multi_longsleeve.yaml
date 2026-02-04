@@ -1,0 +1,16 @@
+defaults:
+  # 1. Point to the nested folders using absolute paths from 'conf' root
+  # Syntax: - /path/to/folder@node_name: file_name
+  - /run_exp/agent@agent: random_multi_primitive_multi_longsleeve_flattening
+  - /run_exp/arena@arena: multi_longsleeve_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128
+  - /run_exp/task@task: flattening_overstretch_penalty_1_no_big_bonus
+  
+  # 2. General settings generic to this experiment type
+  - optional data_augmenter: identity 
+  - _self_
+
+# Experiment Constants
+exp_name: random_multi_primitive_multi_longsleeve_flattening
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

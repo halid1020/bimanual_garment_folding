@@ -288,6 +288,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     qbar.update(1)
                 
             episode_id += 1
+            print('[multi-primitive-diffusion] arena.get_num_episodes', arena.get_num_episodes() )
             episode_id %= arena.get_num_episodes()
 
         arena.action_horizon = org_horizon

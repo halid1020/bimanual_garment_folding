@@ -56,8 +56,8 @@ source ./setup.sh
 # 6. Run Training
 echo "Starting training at \$(date)"
 
-python ./train/hydra_train.py \\
-    --config-name ${EXP_NAME}
+python ./tool/hydra_train.py \\
+    --config-name run_exp/${EXP_NAME}
 
 echo "Job completed at \$(date)"
 EOF

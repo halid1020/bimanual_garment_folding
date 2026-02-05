@@ -3,6 +3,7 @@ import os
 import torch
 from hydra import compose
 from .garment_phase_classifier import GarmentPhaseClassifier
+from .online_garment_phase_classifier import OnlineGarmentPhaseClassifier
 
 class VLMBasedStitchingPolicy(Agent):
 
@@ -38,7 +39,11 @@ class VLMBasedStitchingPolicy(Agent):
         self.folding_policy.load_best()
 
         # 🔹 VLM phase classifier initialized with config flags
-        self.phase_classifier = GarmentPhaseClassifier(config)
+        if config.use_online_classifier:
+            print('[VLMBasedStitchingPolicy] Using OnlineGarmentPhaseClassifier')
+            self.phase_classifier = OnlineGarmentPhaseClassifier(config)
+        else:
+            self.phase_classifier = GarmentPhaseClassifier(config)
         
         # Buffers to store context for the VLM
         self.history_buffer = [] 

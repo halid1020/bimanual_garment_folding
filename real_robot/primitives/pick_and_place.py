@@ -3,7 +3,8 @@ import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
 from real_robot.utils.transform_utils \
-    import point_on_table_base, GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, MOVE_ACC, MOVE_SPEED
+    import point_on_table_base, GRIPPER_OFFSET_UR5e, \
+        GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, MOVE_ACC, MOVE_SPEED
 
 # --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
 def segment_distance(p1, p2, p3, p4):

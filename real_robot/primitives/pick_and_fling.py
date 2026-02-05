@@ -5,82 +5,11 @@ import time
 from scipy.spatial.transform import Rotation as R
 from real_robot.utils.transform_utils import (
     point_on_table_base, transform_point, points_to_gripper_pose,
-    points_to_action_frame, get_base_fling_poses, transform_pose, 
+    transform_pose, 
     GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST,
     MOVE_ACC, MOVE_SPEED
 )
-
-# --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
-def segment_distance(p1, p2, p3, p4):
-    """Calculates the closest distance between two line segments (p1-p2) and (p3-p4)."""
-    u = p2 - p1
-    v = p4 - p3
-    w = p1 - p3
-    a = np.dot(u, u)
-    b = np.dot(u, v)
-    c = np.dot(v, v)
-    d = np.dot(u, w)
-    e = np.dot(v, w)
-    D = a * c - b * b
-    sc, sN, sD = D, D, D
-    tc, tN, tD = D, D, D
-
-    if D < 1e-6: 
-        sN = 0.0
-        sD = 1.0
-        tN = e
-        tD = c
-    else:
-        sN = (b * e - c * d)
-        tN = (a * e - b * d)
-        if sN < 0.0:
-            sN = 0.0
-            tN = e
-            tD = c
-        elif sN > sD:
-            sN = sD
-            tN = e + b
-            tD = c
-    
-    if tN < 0.0:
-        tN = 0.0
-        if -d < 0.0:
-            sN = 0.0
-        elif -d > a:
-            sN = sD
-        else:
-            sN = -d
-            sD = a
-    elif tN > tD:
-        tN = tD
-        if (-d + b) < 0.0:
-            sN = 0.0
-        elif (-d + b) > a:
-            sN = sD
-        else:
-            sN = (-d + b)
-            sD = a
-
-    sc = 0.0 if abs(sN) < 1e-6 else sN / sD
-    tc = 0.0 if abs(tN) < 1e-6 else tN / tD
-
-    dP = w + (sc * u) - (tc * v)
-    return np.linalg.norm(dP)
-
-def check_trajectories_close(traj0_points, traj1_points, threshold=0.1):
-    """Checks if two point-sequences (polylines) ever get closer than threshold."""
-    min_dist = float("inf")
-    for i in range(len(traj0_points)-1):
-        for j in range(len(traj1_points)-1):
-            dist = segment_distance(
-                np.array(traj0_points[i]), np.array(traj0_points[i+1]), 
-                np.array(traj1_points[j]), np.array(traj1_points[j+1])
-            )
-            min_dist = min(min_dist, dist)
-            if min_dist < threshold:
-                return True, min_dist
-    return False, min_dist
-# -----------------------------------------------
+from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        
@@ -91,41 +20,9 @@ HANG_HEIGHT = 0.3
 HOME_AFTER = True
 MIN_STRETCH_DIST = 0.3
 COLLISION_THRESHOLD = 0.15  # Safety distance in meters
+STRETCH_MAX_WIDTH = 0.6
+STRETCH_FORCE = 10
 
-# --- HELPER: Apply Rotation ---
-def apply_local_z_rotation(axis_angle, angle_rad):
-    if abs(angle_rad) < 1e-4:
-        return axis_angle
-    r_current = R.from_rotvec(axis_angle)
-    r_diff = R.from_euler('z', angle_rad, degrees=False)
-    r_new = r_current * r_diff
-    return r_new.as_rotvec()
-
-# --- HELPER: Fling Path ---
-def points_to_fling_path(
-        right_point, left_point,
-        width=None,   
-        swing_stroke=0.6, 
-        swing_angle=np.pi/4,
-        lift_height=HANG_HEIGHT,
-        place_height=0.05):
-    tx_world_action = points_to_action_frame(right_point, left_point)
-    tx_world_fling_base = tx_world_action.copy()
-    tx_world_fling_base[2,3] = 0
-    base_fling = get_base_fling_poses(
-        stroke=swing_stroke,
-        swing_angle=swing_angle,
-        lift_height=lift_height,
-        place_height=place_height)
-    if width is None:
-        width = np.linalg.norm((right_point - left_point)[:2])
-    right_path = base_fling.copy()
-    right_path[:,0] = -width/2
-    left_path = base_fling.copy()
-    left_path[:,0] = width/2
-    right_path_w = transform_pose(tx_world_fling_base, right_path)
-    left_path_w = transform_pose(tx_world_fling_base, left_path)
-    return right_path_w, left_path_w
 
 
 class PickAndFlingSkill:
@@ -334,9 +231,9 @@ class PickAndFlingSkill:
     def dual_arm_stretch_and_fling(self, 
             ur5e_pick_point_world, # Actually in UR5e Base from step() call above
             ur16e_pick_point_world, # Actually in UR16e Base from step() call above
-            stretch_force=15,
+            stretch_force=STRETCH_FORCE,
             stretch_max_speed=0.15,
-            stretch_max_width=0.7, 
+            stretch_max_width=STRETCH_MAX_WIDTH, 
             stretch_max_time=5,
             swing_stroke=0.4,
             swing_height=0.45,
@@ -426,10 +323,10 @@ class PickAndFlingSkill:
 
     def dual_arm_stretch(self, 
         ur5e_pose_world, ur16e_pose_world,
-        force=8,        # Increased default
-        init_force=10,   # Increased default ("The Kick")
+        force=STRETCH_FORCE,        # Increased default
+        init_force=STRETCH_FORCE+2,   # Increased default ("The Kick")
         max_speed=0.15, 
-        max_width=0.7, 
+        max_width=STRETCH_MAX_WIDTH, 
         max_time=5,
         speed_threshold=0.005, # Lowered threshold (more sensitive)
         record_debug=False,

@@ -1,4 +1,5 @@
 import datetime
+import cv2
 import torch
 import re
 from transformers import AutoProcessor, Gemma3nForConditionalGeneration, Gemma3ForConditionalGeneration, Qwen3VLForConditionalGeneration, AutoModelForImageTextToText
@@ -58,13 +59,20 @@ class GarmentPhaseClassifier:
         # 2. Add Reference Demo Images (TODO: Fixed)
         if self.config.use_demo and demo_images:
             content.append({"type": "text", "text": "\nREFERENCE DEMO SEQUENCE (Success path):"})
-            for _ in demo_images:
+            for id, demo_image in enumerate(demo_images):
+                print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+                print(type(demo_image))
+                # print(demo_image)
+                cv2.imwrite(f"DemoImage_{id}.png", demo_image)
                 content.append({"type": "image"})
 
         # 3. Add Trajectory History Images (TODO: Fixed)
         if self.config.use_history and history_images:
             content.append({"type": "text", "text": "\nPAST TRAJECTORY IMAGES (Previous states):"})
-            for _ in history_images:
+            for hist in history_images:
+                # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+                # print(type(hist))
+                # print(hist)
                 content.append({"type": "image"})
 
         # 4. Add Current Observation

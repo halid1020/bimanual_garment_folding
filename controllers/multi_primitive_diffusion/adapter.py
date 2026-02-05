@@ -87,6 +87,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.last_actions = {}
         self.obs_deque = {}
         self.collect_on_success = self.config.get('collect_on_success', True)
+        self.measure_time = config.get('measure_time', False)
 
         self.primitive_integration = self.config.primitive_integration
         if self.primitive_integration != 'none':
@@ -740,6 +741,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return -2
 
     def single_act(self, info, update=False):
+        
+        if self.measure_time:
+            start_time = time.time()
+            arena_id = info['arena_id']
+
+   
 
         if update == True:
             last_action = self.last_actions[info['arena_id']]
@@ -852,6 +859,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         self.last_actions[info['arena_id']] = action
 
+        if self.measure_time:
+            self.internal_states[[info['arena_id']]]['inference_time'].append(time.time() - start_time)
+        
+
         return out_action
 
     def act(self, infos, updates):
@@ -909,7 +920,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 if mask.ndim == 3:
                     mask = mask[..., 0]
 
-                # 🔴 CRITICAL: cast dtype
+                # CRITICAL: cast dtype
                 if mask.dtype != np.uint8 and mask.dtype != np.float32:
                     mask = mask.astype(np.float32)
 

@@ -47,6 +47,7 @@ class DualArmArena(Arena):
         self.action_horizon = config.get("action_horizon", 20)
         self.snap_to_cloth_mask = config.get("snap_to_cloth_mask", False)
         self.init_from = config.get("init_from", "crumpled")
+        self.maskout_background = config.get("maskout_background", False)
 
         self.current_episode = None
         self.frames = []
@@ -169,6 +170,12 @@ class DualArmArena(Arena):
         resized_rgb = cv2.resize(crop_rgb, self.resolution)
         resized_depth = cv2.resize(crop_depth, self.resolution)
         resized_mask = cv2.resize(crop_mask.astype(np.uint8), self.resolution)
+
+        if self.maskout_background:
+            # apply resized_mask on resized_rgb and resized_depeth.
+            is_background = resized_mask == 0
+            resized_rgb[is_background] = 0
+            resized_depth[is_background] = 0
         
         self.resized_workspace_mask_0 = cv2.resize(crop_workspace_mask_0, self.resolution, interpolation=cv2.INTER_NEAREST)
         self.resized_workspace_mask_1 = cv2.resize(crop_workspace_mask_1, self.resolution, interpolation=cv2.INTER_NEAREST)

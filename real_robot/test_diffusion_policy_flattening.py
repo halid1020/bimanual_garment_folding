@@ -36,7 +36,8 @@ def main():
         'action_horizon': 10,
         "debug": debug,
         'measure_time': measure_time,
-        "snap_to_cloth_mask": True
+        "snap_to_cloth_mask": True,
+        "maskout_background": True,
     }
     task_config = {
         'debug': debug
@@ -71,7 +72,10 @@ def main():
     if measure_time:
         start_time = time.time()
     
-    run(policy, arena, mode='eval', episode_config={'eid': 0, 'save_video': False}, checkpoint=-1, policy_terminate=False, env_success_stop=False)
+    run(policy, arena, mode='eval', 
+        episode_config={'eid': 0, 'save_video': False}, 
+        checkpoint=-1, 
+        policy_terminate=False, env_success_stop=False)
     
     if measure_time:
         duration = time.time() - start_time

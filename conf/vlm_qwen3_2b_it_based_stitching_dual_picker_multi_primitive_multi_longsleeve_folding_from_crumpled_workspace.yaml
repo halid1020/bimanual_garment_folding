@@ -1,0 +1,11 @@
+defaults:
+  - agent: vlm_qwen3_2b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace ##
+  - arena: multi_longsleeve_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_horizon_30_workspace
+  - task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
+  # - data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0
+
+
+exp_name: vlm_qwen3_2b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace
+project_name: bimanual_garment_folding
+save_root: ./tmp/garment_folding_data
+train_and_eval: train_and_evaluate_single

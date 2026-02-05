@@ -9,4 +9,4 @@ num_train_envs: 4
 
 exp_name: dreamerv3_dmc_walker_walk_sanity
 project_name: bimanual_garment_folding
-save_root: /mnt/ssd/garment_folding_data
+save_root: ./tmp/garment_folding_data

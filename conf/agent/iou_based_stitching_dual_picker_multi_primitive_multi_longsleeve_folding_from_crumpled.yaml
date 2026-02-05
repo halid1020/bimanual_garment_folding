@@ -1,8 +1,8 @@
 name: oracle-based-stitching-policy
 flattening_policy: diffusion_dual_picker_single_primitive_multi_longsleeve_flattening_demo_20
-flattening_policy_log_dir: /mnt/ssd/garment_folding_data
+flattening_policy_log_dir: ./tmp/garment_folding_data
 folding_policy: diffusion_dual_picker_single_primitive_multi_longsleeve_folding_from_random_flattened_demo_100
-folding_policy_log_dir: /mnt/ssd/garment_folding_data
+folding_policy_log_dir: ./tmp/garment_folding_data
 
 exp_name: ${exp_name}
 project_name: ${project_name}

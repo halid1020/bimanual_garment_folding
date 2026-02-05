@@ -6,5 +6,5 @@ defaults:
 
 exp_name: diffusion_multi_primitive_multi_longsleeve_flattening_demo_20_one_hot
 project_name: bimanual_garment_folding
-save_root: /mnt/ssd/garment_folding_data
+save_root: ./tmp/garment_folding_data
 train_and_eval: train_and_evaluate_single

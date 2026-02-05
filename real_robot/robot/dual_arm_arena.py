@@ -8,6 +8,7 @@ import shutil
 
 from real_robot.robot.dual_arm_scene import DualArmScene
 from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
+from real_robot.utils.transform_utils import MOVE_ACC, MOVE_SPEED
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
 from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
@@ -132,8 +133,8 @@ class DualArmArena(Arena):
     
     def _process_info(self, info, task_related=True, flattened_obs=True):
         self.dual_arm.both_open_gripper()
-        self.dual_arm.both_home()
-        self.dual_arm.both_out_scene()
+        self.dual_arm.both_home(MOVE_SPEED, MOVE_ACC)
+        self.dual_arm.both_out_scene(MOVE_SPEED, MOVE_ACC)
 
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
         
@@ -223,7 +224,7 @@ class DualArmArena(Arena):
                     info['goal'][k] = v
         
         self.last_info = info
-        self.dual_arm.both_home()
+        self.dual_arm.both_home(MOVE_SPEED, MOVE_ACC)
         return info
 
     def get_trajectory_infos(self):

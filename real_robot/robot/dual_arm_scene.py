@@ -46,6 +46,7 @@ class DualArmScene:
             self.ur16e = UR_RTDE(ur16e_robot_ip, self.gripper_type)
             self.camera = RealsenseCamera()
             self.intr = self.camera.get_intrinsic()
+            self.both_open_gripper()
             self.both_home()
         else:
             print("[Dry-run] Skipping robot and camera init.")

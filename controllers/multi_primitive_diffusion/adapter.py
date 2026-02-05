@@ -100,12 +100,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.network_action_dim = max(self.action_dims)
             if self.primitive_integration == 'bin_as_output':
                 self.network_action_dim += 1
+            self.data_save_action_dim = self.network_action_dim
+            if self.primitive_integration == 'one-hot-encoding':
+                self.data_save_action_dim += 1
+            
             self.primitive_action_masks = self._build_primitive_action_masks()
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
             
             
         else:
             self.network_action_dim = config.action_dim
+            self.data_save_action_dim = config.action_dim
 
         self._init_networks()
 
@@ -195,14 +200,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             policy.reset([arena.id])
             print('[multi-primitive diffusion] reset episode id', episode_id)
             info = arena.reset(train_configs[episode_id])
-            policy.init(info)
+            policy.init([info])
             info['reward'] = 0
             done = info['done']
             #print('done', done)
             while not done:
                 action = policy.single_act(info)
-                #print('demo action', action)
-
+                
                 if action is None:
                     break
                 
@@ -210,6 +214,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     #print('k', k)
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                            #print('k ', k, 'v', v)
                             v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
                         elif k in ['mask', 'goal_mask']:
@@ -220,12 +225,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                             observations[k].append(v_)
                 
                 add_action = action
-                if self.config.primitive_integration == 'bin_as_output': # Unused dimenstions are zeros
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
+                    # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.prim_name2id[action_name]
                     prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
-                    add_action = np.zeros(self.network_action_dim)
+                    add_action = np.zeros(self.data_save_action_dim)
+                    print('add action dim', add_action.shape)
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                     #add_action = np.concatenate([prim_act, action_param])
@@ -240,13 +247,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actions['default'].append(add_action)  
               
                 info = arena.step(action)
-                print('[diffusion] demo reward', info['reward'])
+                # print('[diffusion] demo reward', info['reward'])
                 policy.update(info, add_action)
                 info['reward'] = 0
                 done = info['done']
                 if (self.collect_on_success and info['success']):
                     break
-                
+            print('[debug] keys', info['observation'].keys())
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -272,6 +279,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
+                    print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
@@ -281,6 +289,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     qbar.update(1)
                 
             episode_id += 1
+            print('[multi-primitive-diffusion] arena.get_num_episodes', arena.get_num_episodes() )
             episode_id %= arena.get_num_episodes()
 
         arena.action_horizon = org_horizon
@@ -897,18 +906,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
     def _process_info(self, info):
 
         if 'depth' in info['observation'].keys():
-            depth = info['observation']['depth']
+            depth = info['observation']['depth'][0] #get the view from first camera.
+
             if len(depth.shape) == 2:
-                    depth = np.expand_dims(depth, axis=-1)
-                    info['observation']['depth'] = depth
+                depth = np.expand_dims(depth, axis=-1)
+                info['observation']['depth'] = depth
 
         if self.config.input_obs == 'rgbd':
             info['observation']['rgbd'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), depth], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
         
         if self.config.input_obs == 'rgb-goal':
             info['observation']['rgb-goal'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), info['observation']['goal_rgb'][0].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]
@@ -980,7 +990,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.config.input_obs: vis,  
         }
 
-        vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
+        # vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
 
         #plt.imsave('tmp/input_obs.png', vis_to_save)
 

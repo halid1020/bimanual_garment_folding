@@ -1,0 +1,7 @@
+name: 'raven-pixel'
+task: 'stack-block-pyramid'
+view_mode: 'top_down'
+img_res: 128
+action_horizon: 10
+goal_dir: './assets'
+add_final_goal_to_obs: True

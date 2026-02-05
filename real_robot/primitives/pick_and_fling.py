@@ -10,6 +10,78 @@ from real_robot.utils.transform_utils import (
     MOVE_ACC, MOVE_SPEED
 )
 
+# --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
+def segment_distance(p1, p2, p3, p4):
+    """Calculates the closest distance between two line segments (p1-p2) and (p3-p4)."""
+    u = p2 - p1
+    v = p4 - p3
+    w = p1 - p3
+    a = np.dot(u, u)
+    b = np.dot(u, v)
+    c = np.dot(v, v)
+    d = np.dot(u, w)
+    e = np.dot(v, w)
+    D = a * c - b * b
+    sc, sN, sD = D, D, D
+    tc, tN, tD = D, D, D
+
+    if D < 1e-6: 
+        sN = 0.0
+        sD = 1.0
+        tN = e
+        tD = c
+    else:
+        sN = (b * e - c * d)
+        tN = (a * e - b * d)
+        if sN < 0.0:
+            sN = 0.0
+            tN = e
+            tD = c
+        elif sN > sD:
+            sN = sD
+            tN = e + b
+            tD = c
+    
+    if tN < 0.0:
+        tN = 0.0
+        if -d < 0.0:
+            sN = 0.0
+        elif -d > a:
+            sN = sD
+        else:
+            sN = -d
+            sD = a
+    elif tN > tD:
+        tN = tD
+        if (-d + b) < 0.0:
+            sN = 0.0
+        elif (-d + b) > a:
+            sN = sD
+        else:
+            sN = (-d + b)
+            sD = a
+
+    sc = 0.0 if abs(sN) < 1e-6 else sN / sD
+    tc = 0.0 if abs(tN) < 1e-6 else tN / tD
+
+    dP = w + (sc * u) - (tc * v)
+    return np.linalg.norm(dP)
+
+def check_trajectories_close(traj0_points, traj1_points, threshold=0.1):
+    """Checks if two point-sequences (polylines) ever get closer than threshold."""
+    min_dist = float("inf")
+    for i in range(len(traj0_points)-1):
+        for j in range(len(traj1_points)-1):
+            dist = segment_distance(
+                np.array(traj0_points[i]), np.array(traj0_points[i+1]), 
+                np.array(traj1_points[j]), np.array(traj1_points[j+1])
+            )
+            min_dist = min(min_dist, dist)
+            if min_dist < threshold:
+                return True, min_dist
+    return False, min_dist
+# -----------------------------------------------
+
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        
 LIFT_DIST = 0.12            
@@ -18,6 +90,7 @@ FLING_ACC = 1.5
 HANG_HEIGHT = 0.3
 HOME_AFTER = True
 MIN_STRETCH_DIST = 0.3
+COLLISION_THRESHOLD = 0.15  # Safety distance in meters
 
 # --- HELPER: Apply Rotation ---
 def apply_local_z_rotation(axis_angle, angle_rad):
@@ -84,7 +157,20 @@ class PickAndFlingSkill:
         full_trajectory = {'ur5e': [], 'ur16e': []}
 
         # 1. Unpack Action
-        if len(action) >= 6:
+        # Standard: [x1,y1, x2,y2, a1,a2] (Length 6)
+        # With Flags: [x1,y1, x2,y2, a1,a2, valid1, valid2] (Length 8)
+        
+        valid_0 = 1.0
+        valid_1 = 1.0
+
+        if len(action) >= 8:
+            pick_0_xy = action[0:2]
+            pick_1_xy = action[2:4]
+            angle_0 = action[4]
+            angle_1 = action[5]
+            valid_0 = action[6]
+            valid_1 = action[7]
+        elif len(action) >= 6:
             pick_0_xy = action[0:2]
             pick_1_xy = action[2:4]
             angle_0 = action[4]
@@ -93,6 +179,12 @@ class PickAndFlingSkill:
             pick_0_xy = action[0:2]
             pick_1_xy = action[2:4]
             angle_0, angle_1 = 0.0, 0.0
+
+        # --- SAFETY CHECK 1: MASK VALIDITY ---
+        # If either point is not on the mask, we skip the entire fling action.
+        if valid_0 < 0.5 or valid_1 < 0.5:
+            print(f"[PickAndFling] ABORT: Invalid pick point on cloth mask. (Flags: {valid_0}, {valid_1})")
+            return full_trajectory
 
         # 2. Sort Logic
         pair_0 = {'pick': pick_0_xy, 'angle': angle_0}
@@ -122,6 +214,27 @@ class PickAndFlingSkill:
 
         p_base_pick_0 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR5e])
         p_base_pick_1 += np.array([0.0, 0.0, GRIPPER_OFFSET_UR16e])
+
+        # --- SAFETY CHECK 2: COLLISION DETECTION ---
+        # Transform UR16e (Robot 1) point to UR5e (Robot 0) base frame for comparison
+        p_pick_1_in_0 = transform_point(self.scene.T_ur5e_ur16e, p_base_pick_1)
+        
+        # Get current home positions (approximate start of trajectory)
+        start_0 = self.scene.ur5e.get_tcp_pose()[:3]
+        start_1_in_0 = transform_point(self.scene.T_ur5e_ur16e, self.scene.ur16e.get_tcp_pose()[:3])
+
+        # Define simple linear trajectories for the "reach" phase: Home -> High Approach -> Pick
+        # This catches if arms cross each other to get to their pick points
+        traj0 = [start_0, p_base_pick_0 + [0,0,APPROACH_DIST], p_base_pick_0]
+        traj1 = [start_1_in_0, p_pick_1_in_0 + [0,0,APPROACH_DIST], p_pick_1_in_0]
+
+        conflict, dist = check_trajectories_close(traj0, traj1, threshold=COLLISION_THRESHOLD)
+        
+        if conflict:
+            print(f"[PickAndFling] ABORT: Trajectory Collision Detected! Min Dist: {dist:.4f}m")
+            return full_trajectory
+
+        # -------------------------------------------
 
         # 4. Calculate Orientation
         pose_0_home = self.scene.ur5e.get_tcp_pose()
@@ -211,7 +324,6 @@ class PickAndFlingSkill:
         self.dual_arm_stretch_and_fling(
             target_p0_local, 
             transform_point(self.scene.T_ur5e_ur16e, target_p1_ur16e), # Pass correct func arg
-           # target_p1_ur16e, # Pass correct target
             record_debug=record_debug,
             full_trajectory_ref=full_trajectory # Pass accumulator
         )
@@ -240,12 +352,6 @@ class PickAndFlingSkill:
             ):
         
         # 1. Prepare Grasp/Stretch Poses
-        # Note: Input points are already target centers from 'step', 
-        # so we convert them to full pose with rotation if needed or use directly.
-        # Since 'step' passed calculated points, let's treat them as points to gripper pose.
-        
-        # Re-using the points_to_gripper_pose logic might be redundant if points are already aligned,
-        # but ensures rotation format is consistent.
         ur5e_pose_world, ur16e_pose_world = points_to_gripper_pose(
             ur5e_pick_point_world, ur16e_pick_point_world, max_width=stretch_max_width)
         

@@ -10,7 +10,7 @@ input_obs: 'rgb'
 use_mask: False
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 100
+num_demos: 200
 batch_size: 64
 disable_updown: True
 collect_on_success: False # This is important!

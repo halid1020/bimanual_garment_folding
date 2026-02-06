@@ -15,9 +15,9 @@ def main(cfg: DictConfig):
     # --- Automatic save_root detection ---
     hostname = socket.gethostname()
     
-    if hostname == "pc282":
+    if "pc282" in hostname:
         new_save_root = '/media/hcv530/T7/garment_folding_data'
-    elif hostname == "thanos":
+    elif "thanos" in hostname:
         new_save_root = '/data/ah390/bimanual_garment_folding'
     elif "viking" in hostname:
         new_save_root = '/mnt/scratch/users/hcv530/garment_folding_data'

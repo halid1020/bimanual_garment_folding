@@ -10,7 +10,7 @@ input_obs: 'rgb'
 use_mask: False
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 100
+num_demos: 200
 batch_size: 64
 disable_updown: True
 collect_on_success: False # This is important!
@@ -27,7 +27,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "raven_pixel_stacking_block_pyradmid_oracle_demo"
+  data_path: "raven_pixel_packing_boxes_oracle_demo"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"

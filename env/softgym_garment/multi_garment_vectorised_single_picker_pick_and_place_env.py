@@ -7,7 +7,6 @@ from .pixel_based_pick_and_place_env_logger import PixelBasedPickAndPlaceEnvLogg
 global ENV_NUM
 ENV_NUM = 0
 
-# @ray.remote
 class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
     
     def __init__(self, config):
@@ -38,3 +37,14 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
         return self.info
+    
+import os
+import ray
+
+@ray.remote(num_gpus=0.05)
+class MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay(MultiGarmentVectorisedSinglePickerPickAndPlaceEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Specify GPU ID
+        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Make CUDA calls synchronous

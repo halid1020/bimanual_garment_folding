@@ -8,14 +8,16 @@ import numpy as np
 import cv2
 from dotmap import DotMap
 from tqdm import tqdm
+from tool.utils import register_agent, register_arena, build_task
 
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import agent_arena as ag_ar
-from agent_arena.utilities.perform_parallel import setup_arenas, step_arenas
+from agent_arena.utilities.perform_parallel \
+    import setup_arenas_with_class, step_arenas
 from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
-from lagarnet.utils import obs_config, action_config, reward_names, evaluation_names
+from tool.lagarnet_utils import obs_config, action_config, reward_names, evaluation_names
 
 def get_actions(agents, arena_ids, ready_infos, actions):
     """
@@ -32,16 +34,7 @@ def get_actions(agents, arena_ids, ready_infos, actions):
     for info, a in zip(ready_infos, ready_actions):
         arena_id = info['arena_id']
         idx = arena_ids.index(arena_id)
-        
-        # Handle specific action keys for your domain
-        if 'norm-pixel-pick-and-place' in a:
-            action = a['norm-pixel-pick-and-place']
-        else:
-            action = a
-            
-        # Stack pick/place for storage [2, ...]
-        action = np.stack([action['pick_0'], action['place_0']])
-        actions[idx]['norm-pixel-pick-and-place'].append(action)
+        actions[idx]['norm-pixel-pick-and-place'].append(a)
 
     return ready_actions
 
@@ -81,43 +74,40 @@ def build_single_agent(cfg):
     """
     # 1. Identify Agent Name
     # Priority: cfg.agent.name -> cfg.exp_name
-    agent_name = cfg.agent.get('name', cfg.exp_name)
+    agent_name = cfg.agent.name
 
     print(f"Building Agent: {agent_name}...")
 
-    # 2. Configure Agent
-    if 'oracle' not in agent_name:
-        # Retrieve config path details from Hydra, defaulting if missing
-        agent_config_name = cfg.agent.get('config_name', 'default')
-        # Some agents need the arena name they were trained on
-        agent_trained_arena = cfg.agent.get('trained_arena_name', 'default')
+    # # 2. Configure Agent
+    # if 'oracle' not in agent_name:
+    #     # Retrieve config path details from Hydra, defaulting if missing
+    #     agent_config_name = cfg.agent.get('config_name', 'default')
+    #     # Some agents need the arena name they were trained on
+    #     agent_trained_arena = cfg.agent.get('trained_arena_name', 'default')
         
-        agent_config = ag_ar.retrieve_config(
-            agent_name, 
-            agent_trained_arena, 
-            agent_config_name,
-            config_dir='../configuration'
-        )
-    else:
-        # Oracles usually just need a flag
-        agent_config = DotMap({'oracle': True})
+    #     agent_config = ag_ar.retrieve_config(
+    #         agent_name, 
+    #         agent_trained_arena, 
+    #         agent_config_name,
+    #         config_dir='../configuration'
+    #     )
+    # else:
+    #     # Oracles usually just need a flag
+    #     agent_config = DotMap({'oracle': True})
     
     # 3. Build & Setup Logging
-    agent = ag_ar.build_agent(agent_name, config=agent_config)
+    save_dir = os.path.join(cfg.agent_save_root, cfg.agent_exp_name)
+    agent = ag_ar.build_agent(
+        agent_name, 
+        config=cfg, 
+        save_dir=save_dir)
     
     # Save logs to the experiment directory
-    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
-    agent.set_log_dir(save_dir)
+
     
     # 4. Load Checkpoint (if not Oracle)
-    if 'oracle' not in agent_name:
-        ckpt = cfg.get('checkpoint', -1)
-        if ckpt != -1:
-            print(f'Loading checkpoint {ckpt}')
-            agent.load_checkpoint(ckpt)
-        else:
-            print('Loading the latest checkpoint')
-            agent.load()
+    if isinstance(agent, ag_ar.TrainableAgent):
+        agent.load()
             
     return agent
 
@@ -127,7 +117,9 @@ def build_single_agent(cfg):
 
 @hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
 def main(cfg: DictConfig):
-    
+    register_agent()
+    register_arena()
+
     print("--- Configuration ---")
     # Resolve=True ensures all ${variables} are expanded
     print(OmegaConf.to_yaml(cfg, resolve=True))
@@ -138,17 +130,18 @@ def main(cfg: DictConfig):
     # 1. Setup Arenas
     # IMPORTANT: setup_arenas usually expects a String ID or a Config Dict depending on implementation.
     # We pass cfg.arena.name (the registry string) if available, otherwise we might pass the dict.
-    arena_arg = cfg.arena.get('name') 
-    if not arena_arg:
-         # Fallback: if name isn't explicit, pass the whole config object if setup_arenas supports it
-         arena_arg = cfg.arena 
-
-    print(f"Setting up arenas with ID/Config: {arena_arg}")
     
     # Note: If setup_arenas expects the Hydra DictConfig, you might need: setup_arenas(cfg.arena, ...)
     # But usually it expects a string ID like "softgym|domain:..."
-    arenas = setup_arenas(arena_arg, num_processes=cfg.parallel_processes)
     
+    arena_class = ag_ar.get_arena_class(cfg.arena.name)
+    print('arena class', arena_class)
+    arenas = setup_arenas_with_class(
+        arena_class, cfg.arena,
+        num_processes=cfg.parallel_processes)
+    
+    ray.get([e.set_task.remote(build_task(cfg.task)) for e in arenas])
+
     process = []
     for i, arena in enumerate(arenas):
         # Assuming arena is a Ray actor
@@ -182,10 +175,10 @@ def main(cfg: DictConfig):
     actions = [{'norm-pixel-pick-and-place': []} for _ in range(len(arenas))]
 
     # 4. Dataset Setup
-    os.makedirs(cfg.save_root, exist_ok=True)
+    #os.makedirs(cfg.data_dir, exist_ok=True) # TODO: this need to be in the TrajectoryDataset class
     dataset = TrajectoryDataset(
         data_path=cfg.data_path,
-        data_dir=cfg.save_root,
+        data_dir=cfg.data_dir,
         io_mode='a',
         obs_config=obs_config,
         act_config=action_config,

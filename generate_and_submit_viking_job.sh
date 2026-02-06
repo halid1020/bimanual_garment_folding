@@ -1,20 +1,23 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # 1. Check if an experiment name was provided
 if [ -z "$1" ]; then
     echo "Error: No experiment name provided."
-    echo "Usage: ./run_exp.sh <experiment_name>"
+    echo "Usage: ./run_exp.sh <experiment_name> [days]"
     exit 1
 fi
 
 EXP_NAME=$1
+# 2. Get days from the second argument, defaulting to 3 if not provided
+DAYS=${2:-3}
+
 OUT_DIR="./tmp"
 SCRIPT_PATH="${OUT_DIR}/submit_${EXP_NAME}.sh"
 
-# 2. Create the output directory if it doesn't exist
+# 3. Create the output directory if it doesn't exist
 mkdir -p "$OUT_DIR"
 
-# 3. Create the file using a Heredoc
+# 4. Create the file using a Heredoc
 cat << EOF > "$SCRIPT_PATH"
 #!/usr/bin/env bash
 #SBATCH --job-name=${EXP_NAME}
@@ -22,7 +25,7 @@ cat << EOF > "$SCRIPT_PATH"
 #SBATCH --ntasks=1                           # Number of MPI tasks to request
 #SBATCH --cpus-per-task=4                    # Number of CPU cores per MPI task
 #SBATCH --mem=16G                            # Total memory to request
-#SBATCH --time=3-00:00:00                    # Time limit (DD-HH:MM:SS)
+#SBATCH --time=${DAYS}-00:00:00              # Time limit (DD-HH:MM:SS)
 #SBATCH --account=cs-garm-2025               # Project account to use
 #SBATCH --mail-type=END,FAIL                 # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=hcv530@york.ac.uk        # Where to send mail
@@ -62,10 +65,10 @@ python ./tool/hydra_train.py \\
 echo "Job completed at \$(date)"
 EOF
 
-# 4. Make the generated file executable
+# 5. Make the generated file executable
 chmod +x "$SCRIPT_PATH"
 
-# 5. Submit the job immediately
-echo "Generated script at: $SCRIPT_PATH"
+# 6. Submit the job immediately
+echo "Generated script at: $SCRIPT_PATH (Requested Time: ${DAYS} days)"
 echo "Submitting job..."
 sbatch "$SCRIPT_PATH"

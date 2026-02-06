@@ -137,7 +137,7 @@ class GarmentPhaseClassifier:
 
         print(f"[GarmentPhaseClassifier] messages are this \n\n{messages}")
 
-        print("fglfkhlfhklfgklfglkfg ", type(history_images), history_images)
+        print("fglfkhlfhklfgklfglkfg ", type(history_images), history_images[0].shape if history_images else None)
         print("                                                    ")
         print("                                                    ")
         print("                                                    ")

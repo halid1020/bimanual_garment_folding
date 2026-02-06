@@ -3,8 +3,6 @@ defaults:
   - /agent@agent::  diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_200
   - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
   - /task@task:  flattening_overstretch_penalty_1_no_big_bonus
-  - /data_augmenter@data_augmenter: pixel-based-single-picker-pick-and-place-data-augmenter
-
 
 exp_name: diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_200
 project_name: bimanual_garment_folding

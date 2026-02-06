@@ -32,6 +32,7 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
+  cache_in_memory: True
   obs_config:
     mask: 
       shape: [128, 128, 1]
@@ -65,10 +66,3 @@ dataset_config:
 primitive_integration: 'none'
 
 data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_K_0
-# primitives:
-#   - name: norm-pixel-fold
-#     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
-# mask_out_irrelavent_action_dim: true
-
-# exp_name: ${exp_name}
-# project_name: ${project_name}

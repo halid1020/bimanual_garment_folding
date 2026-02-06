@@ -11,9 +11,8 @@ from .garment_env import GarmentEnv
 
 global ENV_NUM
 ENV_NUM = 0
-# self.all_garment_types = ['longsleeve', 'trousers', 'skirt', 'dress']
 
-# @ray.remote
+
 class MultiGarmentEnv(GarmentEnv):
     
     def __init__(self, config):

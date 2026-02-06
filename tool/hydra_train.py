@@ -1,17 +1,40 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
+import socket
 import agent_arena.api as ag_ar
 
-from train.utils import register_agent, register_arena, build_task
+from tool.utils import register_agent, register_arena, build_task
 from env.parallel import Parallel
 
-@hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)
+@hydra.main(config_path="../conf", version_base=None)
 def main(cfg: DictConfig):
     register_agent()
     register_arena()
 
-    print(OmegaConf.to_yaml(cfg))  # sanity check merged config
+    # --- Automatic save_root detection ---
+    hostname = socket.gethostname()
+    
+    if "pc282" in hostname:
+        new_save_root = '/media/hcv530/T7/garment_folding_data'
+    elif "thanos" in hostname:
+        new_save_root = '/data/ah390/bimanual_garment_folding'
+    elif "viking" in hostname:
+        new_save_root = '/mnt/scratch/users/hcv530/garment_folding_data'
+    else:
+        new_save_root = cfg.save_root # Fallback to config default
+
+    # Update the config object (must unset 'struct' to modify)
+    OmegaConf.set_struct(cfg, False)
+    cfg.save_root = new_save_root
+    OmegaConf.set_struct(cfg, True)
+    # -------------------------------------
+
+    print("--- Configuration ---")
+    print(OmegaConf.to_yaml(cfg, resolve=True))
+    print(f"Detected Host: {hostname}")
+    print(f"Using Save Root: {cfg.save_root}")
+    print("---------------------")
 
     save_dir = os.path.join(cfg.save_root, cfg.exp_name)
 

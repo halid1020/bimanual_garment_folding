@@ -1,16 +1,16 @@
 name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
-action_dim: 5
+action_dim: 4
 obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
 input_obs: 'rgb'
-use_mask: False
+use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 100
+num_demos: 200
 batch_size: 64
 disable_updown: True
 collect_on_success: False # This is important!
@@ -18,7 +18,7 @@ data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
-demo_policy:  "raven-pixel-oracle"
+demo_policy: "human-single-picker-pick-and-place"
 validation_interval: 1000
 total_update_steps: 50000
 eval_checkpoint: -1
@@ -27,13 +27,12 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "raven_pixel_stacking_block_pyradmid_oracle_demo"
+  data_path: "multi_skirt_single_picker_single_primitive_flattening_human"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True
   obs_config:
-    
     mask: 
       shape: [128, 128, 1]
       output_key: 'mask'
@@ -57,13 +56,12 @@ dataset_config:
     goal_mask: 
       shape: [128, 128, 1]
       output_key: 'goal_mask'
-
-
+  
   act_config:
     default: 
-      shape: [5]
+      shape: [4]
       output_key: 'default'
 
 primitive_integration: 'none'
 
-data_augmenter: multi_primitive_augmenter_for_diffusion_K_0
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_K_0

@@ -1,5 +1,5 @@
 name: 'raven-pixel'
-task: 'stack-block-pyramid'
+task: 'packing-boxes'
 view_mode: 'top_down'
 img_res: 128
 action_horizon: 20

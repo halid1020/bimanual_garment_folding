@@ -9,5 +9,11 @@ fi
 cd ../bimanual_garment_folding
 
 export PYTHONPATH=${PWD}:$PYTHONPATH
-export AGENT_ARENA_PATH='../agent_arena_v0/agent_arena'
+
+cd ../agent-arena-v0/agent_arena
+
+export AGENT_ARENA_PATH=${PWD}
+export RAVENS_ASSETS_DIR=${AGENT_ARENA_PATH}/arena/raven/environments/assets
+
+cd ../../bimanual_garment_folding
 

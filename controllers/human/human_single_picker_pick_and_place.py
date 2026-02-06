@@ -1,7 +1,8 @@
 from agent_arena import Agent
 import numpy as np
 import cv2
-from .utils import draw_text_top_right
+from .utils import draw_text_top_right, apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
+import os
 
 class HumanSinglePickerPickAndPlace(Agent):
     
@@ -23,13 +24,12 @@ class HumanSinglePickerPickAndPlace(Agent):
     def single_act(self, state, update=False):
         """
         Pop up a window shows the RGB image, and user can click on the image to
-        produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
+        produce normalised pick-and-place actions for one object, ranges from [-1, 1]
         """
         rgb = state['observation']['rgb']
         
         ## make it bgr to rgb using cv2
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
-        
 
         ## resize
         rgb = cv2.resize(rgb, (512, 512))
@@ -50,16 +50,8 @@ class HumanSinglePickerPickAndPlace(Agent):
 
             draw_text_top_right(rgb, text_lines)
         
-        
         # Create a copy of the image to draw on
         img = rgb.copy()
-
-        # put img and goal_img side by side
-        # if 'goal' in state.keys():
-        #     goal_rgb = state['goal']['rgb']
-        #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
-        #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
-        #     img = np.concatenate([img, goal_rgb], axis=1)
 
         if 'goals' in state.keys():
             goals = state['goals']  # list of goal infos
@@ -91,31 +83,70 @@ class HumanSinglePickerPickAndPlace(Agent):
         line_x = rgb.shape[1]   # x-position = width of left image (512)
         cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
         
-        # Store click coordinates
-        clicks = []
+        # ----------------- UI / UNDO LOGIC START -----------------
         
+        # Create a separate panel for buttons (80 pixels wide)
+        button_panel_width = 80
+        
+        # Define Undo button rectangle inside panel
+        button_top_left = (10, 10)
+        button_bottom_right = (button_panel_width - 10, 50)
+        
+        clicks = []
+        os.environ["DISPLAY"] = CV2_DISPLAY
+        
+        def redraw_image():
+            temp_img = img.copy()
+            
+            # Draw pick-and-place clicks
+            for i, (x, y) in enumerate(clicks):
+                # For single picker: Green (0, 255, 0)
+                color = (0, 255, 0)
+                
+                if i % 2 == 0:  # Pick action (odd clicks in 1-based count)
+                    cv2.circle(temp_img, (x, y), 5, color, -1)
+                else:  # Place action (even clicks)
+                    cv2.drawMarker(temp_img, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
+
+            # Draw button panel
+            panel_img = np.ones((img.shape[0], button_panel_width, 3), dtype=np.uint8) * 50
+            cv2.rectangle(panel_img, button_top_left, button_bottom_right, (0, 0, 0), -1)
+            cv2.putText(panel_img, 'UNDO', (button_top_left[0] + 5, button_top_left[1] + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            # Concatenate image + panel
+            display_img = np.concatenate([temp_img, panel_img], axis=1)
+            cv2.imshow('Click Pick and Place Points (2 clicks needed)', display_img)
+
         def mouse_callback(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
-                clicks.append((x, y))
-                if len(clicks) % 2 == 1:  # Pick action (odd clicks)
-                    color = (0, 255, 0) if len(clicks) <= 2 else (0, 0, 255)  # Green for first, Red for second
-                    cv2.circle(img, (x, y), 5, color, -1)
-                else:  # Place action (even clicks)
-                    color = (0, 255, 0) if len(clicks) <= 2 else (0, 0, 255)  # Green for first, Red for second
-                    cv2.drawMarker(img, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
-                cv2.imshow('Click Pick and Place Points (2 clicks needed)', img)
+                # Check if click is in the button panel
+                if x >= img.shape[1]: 
+                    panel_x = x - img.shape[1]
+                    # Check collision with Undo Button
+                    if button_top_left[0] <= panel_x <= button_bottom_right[0] and \
+                       button_top_left[1] <= y <= button_bottom_right[1]:
+                        if clicks:
+                            clicks.pop()
+                            redraw_image()
+                else:
+                    # Valid click on the image area
+                    if len(clicks) < 2:
+                        clicks.append((x, y))
+                        redraw_image()
         
-        cv2.imshow('Click Pick and Place Points (2 clicks needed)', img)
+        redraw_image()
         cv2.setMouseCallback('Click Pick and Place Points (2 clicks needed)', mouse_callback)
         
         while len(clicks) < 2:
             cv2.waitKey(1)
         
         cv2.destroyAllWindows()
-        
+        os.environ["DISPLAY"] = SIM_DISPLAY
+
         # Normalize the coordinates to [-1, 1]
         height, width = rgb.shape[:2]
-        pick1_y, pick1_x = clicks[0]
+        pick1_y, pick1_x = clicks[0] # Note: OpenCV gives (x, y), code uses y, x for norm
         place1_y, place1_x = clicks[1]
         
         normalized_action1 = [
@@ -124,8 +155,6 @@ class HumanSinglePickerPickAndPlace(Agent):
             (place1_x / width) * 2 - 1,
             (place1_y / height) * 2 - 1
         ]
-        
-      
         
         return np.asarray(normalized_action1)
         

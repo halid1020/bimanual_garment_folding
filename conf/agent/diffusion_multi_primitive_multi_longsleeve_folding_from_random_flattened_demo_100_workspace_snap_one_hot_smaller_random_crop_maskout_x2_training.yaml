@@ -1,0 +1,92 @@
+name: multi-primitive-diffusion
+oracle: False # TODO: fix this, I need to add this because of build_agent function
+obs_dim: 512
+action_dim: 8
+obs_horizon: 1
+pred_horizon: 1
+num_diffusion_iters: 100
+action_horizon: 1
+input_obs: 'rgb-workspace-mask'
+use_mask: True
+eval_action_sampler: 'normal'
+include_state: False
+num_demos: 100
+demo_horizon: 10
+batch_size: 64
+disable_updown: True
+action_shape: [8]
+collect_on_success: False # This is important!
+data_obs: 'image'
+data_state: 'agent_pos'
+data_action: 'action'
+train_mode: 'from_policy'
+demo_policy: "human-multi-primitive"
+validation_interval: 1000
+total_update_steps: 100000
+eval_checkpoint: -1
+debug: False
+add_all_demos: True
+
+dataset_mode: "general"
+dataset_config:
+  data_path: "multi_longsleeve_multi_primitive_folding_from_random_flattened_horizon_10_human_demo_100_workspace"
+  data_dir: "./data/datasets"
+  seq_length: 1
+  io_mode: "w"
+  cache_in_memory: True
+  obs_config:
+    
+    robot0_mask: 
+      shape: [128, 128, 1]
+      output_key: 'robot0_mask'
+    
+    robot1_mask: 
+      shape: [128, 128, 1]
+      output_key: 'robot1_mask'
+
+    mask: 
+      shape: [128, 128, 1]
+      output_key: 'mask'
+    
+    depth: 
+      shape: [128, 128, 1]
+      output_key: 'depth'
+    
+    rgb: 
+      shape: [128, 128, 3]
+      output_key: 'rgb'
+
+    # goal_rgb: 
+    #   shape: [128, 128, 3]
+    #   output_key: 'goal_rgb'
+    
+    # goal_depth: 
+    #   shape: [128, 128, 1]
+    #   output_key: 'goal_depth'
+    
+    # goal_mask: 
+    #   shape: [128, 128, 1]
+    #   output_key: 'goal_mask'
+
+  act_config:
+    default: 
+      shape: [9]
+      output_key: 'default'
+
+primitive_integration: 'one-hot-encoding'
+primitive_classifier:
+  hidden_dims: [256, 128]
+  activation: relu        # relu | gelu | silu | tanh | leaky_relu
+  dropout: 0.1            # 0.0 to disable
+  use_layernorm: true
+  
+primitives:
+  - name: norm-pixel-pick-and-fling
+    dim: 4 # [pick_0, pick_1]
+  - name: norm-pixel-pick-and-place
+    dim: 8 #params: [pick_0, pick_1, place_0, place_1]
+  - name: no-operation
+    dim: 0
+mask_out_irrelavent_action_dim: true
+
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_workspace_smaller_random_crop

@@ -1,0 +1,29 @@
+garment_type: dress
+name: multi-garment-env
+picker_radius: 0.03
+picker_threshold: 0.007
+picker_low: [-5, 0, -5]
+picker_high: [5, 5, 5]
+grasp_mode: {around: 1.0}
+picker_initial_pos: [[0.7, 0.2, 0.7], [-0.7, 0.2, 0.7]]
+init_state_path: assets/init_states
+disp: false
+ray_id: 0
+action_horizon: 30
+image_resolution: [128, 128]
+track_semkey_on_frames: false
+num_val_trials: 10
+readjust_pick_poss: 1.0
+provide_semkey_pos: false
+provide_flattened_semkey_pos: false
+provide_semkey_norm_pixel: true
+provide_flattened_semkey_norm_pixel: true
+stop_on_success: False
+
+apply_workspace: true
+robot0_radius: [0.1, 0.9] #left
+robot1_radius: [0.1, 0.85] #right
+robot0_base: [0, -0.85, 0]
+robot1_base: [0, 0.85, 0]
+readjust_to_workspace: true
+add_final_goal_to_obs: True

@@ -66,7 +66,7 @@ def get_coverage(positions, particle_radius, resolution=500):
 
     return np.sum(mask) * cell_area
 
-# @ray.remote
+
 class GarmentEnv(Arena):
     
     def __init__(self, config):
@@ -423,9 +423,10 @@ class GarmentEnv(Arena):
                     info['goal'][k] = v
                 info['goals'] = goals[0]
             
-            if self.add_final_goal_to_obs:
-                for k, v in goal[-1]['observation'].items():
-                    info['observation'][f'goal_{k}'] = v
+                if self.add_final_goal_to_obs:
+                    for k, v in goal[-1]['observation'].items():
+                        info['observation'][f'goal_{k}'] = v
+                        info['observation'][f'goal-{k}'] = v
 
         return info
     
@@ -619,6 +620,10 @@ class GarmentEnv(Arena):
         particles = self.get_particle_positions()
         return particles[:self.num_mesh_particles]
     
+    def get_canon_mesh_particles_positions(self):
+        return self.flattened_obs['observation']['particle_positions']
+        
+
     # Input is N*3
     def set_particle_positions(self, particle_positions):
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]

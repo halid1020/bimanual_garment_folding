@@ -20,13 +20,13 @@ def max_IoU_reward(last_info, action, info):
     """
         The reward function used in the original implementation.
     """
-    return info['evaluation']['max_IoU'] # 0-1
+    return info['evaluation']['max_IoU_to_flattened'] # 0-1
 
 def canon_IoU_reward(last_info, action, info):
     """
         The reward function used in the original implementation.
     """
-    return info['evaluation']['canon_IoU'] # 0-1
+    return info['evaluation']['canon_IoU_to_flattened'] # 0-1
 
 def max_IoU_differance_reward(last_info, action, info):
     """
@@ -34,7 +34,7 @@ def max_IoU_differance_reward(last_info, action, info):
     """
     if last_info is None:
         last_info = info
-    return info['evaluation']['max_IoU'] - last_info['evaluation']['max_IoU'] # -1 to 1
+    return info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened'] # -1 to 1
 
 def canon_IoU_differance_reward(last_info, action, info):
     """
@@ -42,11 +42,11 @@ def canon_IoU_differance_reward(last_info, action, info):
     """
     if last_info is None:
         last_info = info
-    return info['evaluation']['canon_IoU'] - last_info['evaluation']['canon_IoU'] # -1 to 1
+    return info['evaluation']['canon_IoU_to_flattened'] - last_info['evaluation']['canon_IoU_to_flattened'] # -1 to 1
 
 def canon_l2_tanh_reward(last_info, action, info):
-    cur_pos = info['observation']['particle_position'][:, :2]
-    goal_pos = info['goal']['particle_position'][:, :2]
+    cur_pos = info['observation']['particle_positions'][:, :2]
+    goal_pos = info['flattened_obs']['observation']['particle_positions'][:, :2]
     flipped_goal_pos = goal_pos.copy()
     flipped_goal_pos[:, 0] =  -1 * flipped_goal_pos[:, 0]
 
@@ -159,10 +159,10 @@ def learningTounfold_reward(last_info, actino, info):
     """
     lam = 0.55
     alpha = 1.0
-
+    #sprint('info flattened_obs keys', info['flattened_obs'].keys())
     theta_p = calculate_orientation_difference(
-        info['observation']['particle_position'], #
-        info['goal']['particle_position'])
+        info['observation']['particle_positions'], #
+        info['flattened_obs']['observation']['particle_positions'])
     
     theta_f = 0 # Unknown how to calculate
     theta = alpha*theta_p + (1-alpha)*theta_f
@@ -181,12 +181,29 @@ def speedFolding_approx_reward(last_info, action, info):
         last_info = info
     delta_coverage = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage'] # -1 to 1
 
-    smoothness = info['evaluation']['max_IoU'] - last_info['evaluation']['max_IoU'] # -1 to 1
+    smoothness = info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened'] # -1 to 1
 
     alpha = 2
     beta = 1
 
     return max(np.tanh(alpha*delta_coverage + beta*smoothness), 0) # 0-1
+
+# def coverage_alignment_reward(last_info, action, info):
+#     """
+#         In the original paper, it used a pretrained smoothness classifier to calculate the smoothness of the folding.
+#         Here, we use the max IoU to approximate the smoothness.
+#     """
+#     if last_info is None:
+#         last_info = info
+#     #print(info['evaluation'])
+#     delta_coverage = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage'] # -1 to 1
+
+#     smoothness = info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened'] # -1 to 1
+
+#     alpha = 2
+#     beta = 1
+
+#     return max(np.tanh(alpha*delta_coverage + beta*smoothness), 0) # 0-1
 
 def coverage_alignment_reward(last_info, action, info):
 
@@ -194,9 +211,9 @@ def coverage_alignment_reward(last_info, action, info):
         last_info = info
     r_ca = speedFolding_approx_reward(last_info, action, info)
     dc = info['evaluation']['normalised_coverage'] - last_info['evaluation']['normalised_coverage']
-    ds = info['evaluation']['max_IoU_to_flattend'] - last_info['evaluation']['max_IoU_to_flattend']
+    ds = info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened']
     nc = info['evaluation']['normalised_coverage']
-    iou = info['evaluation']['max_IoU_to_flattend']
+    iou = info['evaluation']['max_IoU_to_flattened']
     epsilon_c = 1e-4
     epsilon_s = 1e-4
     max_c = 0.99
@@ -210,11 +227,6 @@ def coverage_alignment_reward(last_info, action, info):
         return b
     
     return r_ca
-
-
-
-
-
 
 def calculate_orientation_difference(cur_pos, goal_pos):
     # Calculate the center of mass for current and goal positions

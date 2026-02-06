@@ -1,15 +1,11 @@
-import os
-import cv2
 import numpy as np
-import matplotlib.pyplot as plt
-import json
-from tqdm import tqdm
+
 from statistics import mean
 
-from agent_arena import save_video
-from .utils import get_max_IoU, IOU_FLATTENING_TRESHOLD, NC_FLATTENING_TRESHOLD
-from .folding_rewards import *
+from .utils import *
+from .garment_flattening_rewards import *
 from .garment_task import GarmentTask
+THRESHOLD_COEFF = 0.3
 
 class GarmentFlatteningTask(GarmentTask):
     def __init__(self, config):
@@ -60,19 +56,43 @@ class GarmentFlatteningTask(GarmentTask):
         reward_2 -= self.config.get("affordance_penalty_scale", 0) * aff_score_pen
     
         #print('rev aff score', aff_score_rev)
+        cloth_funnel_weighted_reward, cloth_funnel_tanh_reward = clothfunnel_reward(last_info, action, info)
+        
         return {
             'coverage_alignment': ca_reward,
             'augmented_coverage_alignment_with_stretch_penalty': aug_ca_reward_pen,
             'coverage_alignment_with_stretch_and_affordance_penalty': reward_2,
-            'coverage_alignment_with_stretch_penalty': ca_reward_pen
+            'coverage_alignment_with_stretch_penalty': ca_reward_pen,
+
+            'clothfunnel_default': cloth_funnel_weighted_reward,
+            'clothfunnel_tanh_reward': cloth_funnel_tanh_reward,
+            'normalised_coverage': normalised_coverage_reward(last_info, action, info),
+            'speedFolding_approx': speedFolding_approx_reward(last_info, action, info),
+            'coverage_differance': coverage_differance_reward(last_info, action, info),
+            'learningToUnfold_approx': learningTounfold_reward(last_info, action, info),
+            'max_IoU': max_IoU_reward(last_info, action, info),
+            'max_IoU_differance': max_IoU_differance_reward(last_info, action, info),
+            'canon_IoU': canon_IoU_reward(last_info, action, info),
+            'canon_IoU_differance': canon_IoU_differance_reward(last_info, action, info),
+            'canon_l2_tanh_reward': canon_l2_tanh_reward(last_info, action, info),
+            'planet_clothpick_hueristic': planet_clothpick_hueristic_reward(last_info, action, info),
+            'coverage_aligment': coverage_alignment_reward(last_info, action, info),
         }
+    
+    
     
     def evaluate(self, arena):
         eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'normalised_improvement': self._get_normalised_impovement(arena),
-            'overstretch': arena.overstretch
+            'overstretch': arena.overstretch,
+            'canon_IoU_to_flattened': self._get_canon_IoU_to_flattened(arena),
+            'canon_l2_distance': self._get_canon_l2_distance(arena),
+            # 'normalised_hausdorff_distance': self._get_normalised_hausdorff_distance(arena),
+            
+            'deform_l2_distance': self._get_deform_l2_distance(arena),
+            'rigid_l2_distance': self._get_rigid_l2_distance(arena),
         }
 
         if arena.action_step == len(self.ncs):
@@ -91,6 +111,28 @@ class GarmentFlatteningTask(GarmentTask):
             'maximum_trj_normalised_improvement': max(self.nis),
         })
         return eval_dict
+    
+    def _get_canon_l2_distance(self, arena):
+        pos = arena.get_mesh_particles_positions()
+        goal_pos = arena.get_canon_mesh_particles_positions()
+
+        flipped_goal_pos = goal_pos.copy()
+        flipped_goal_pos[:, 0] = -1 * flipped_goal_pos[:, 0]
+        disance_1 = np.mean(np.linalg.norm(pos - goal_pos, axis=1))
+        disance_2 = np.mean(np.linalg.norm(pos - flipped_goal_pos, axis=1))
+        return min(disance_1, disance_2)
+    
+    def _get_deform_l2_distance(self, arena):
+        cur_verts = arena.get_mesh_particles_positions()
+        goal_verts = arena.get_canon_mesh_particles_positions()
+        threshold = np.sqrt(arena.get_cloth_area()) * THRESHOLD_COEFF
+        return get_deform_distance(cur_verts, goal_verts, threshold=threshold)
+
+    def _get_rigid_l2_distance(self, arena):
+        cur_verts = arena.get_mesh_particles_positions()
+        goal_verts = arena.get_canon_mesh_particles_positions()
+        threshold = np.sqrt(arena.get_cloth_area()) * THRESHOLD_COEFF
+        return get_rigid_distance(cur_verts, goal_verts, threshold=threshold)
 
     def _get_normalised_coverage(self, arena):
         res = arena._get_coverage() / arena.flatten_coverage
@@ -108,6 +150,12 @@ class GarmentFlatteningTask(GarmentTask):
         cur_mask = arena.cloth_mask
         IoU, matched_IoU = get_max_IoU(cur_mask, arena.get_flattened_obs()['observation']['mask'], debug=self.config.debug)
         
+        return IoU
+    
+    def _get_canon_IoU_to_flattened(self, arena):
+        cur_mask = arena.cloth_mask
+        goal_mask = arena.get_flattened_obs()['observation']['mask']
+        IoU = calculate_iou(cur_mask, goal_mask)
         return IoU
     
     def success(self, arena):

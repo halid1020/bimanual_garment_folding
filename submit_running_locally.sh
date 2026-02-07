@@ -3,33 +3,44 @@
 # 1. Check if a config name was provided
 if [ -z "$1" ]; then
     echo "Usage: ./submit_running_locally.sh <config_name> [f]"
-    echo "  f : Run in foreground (optional)"
+    echo "  f : Run in foreground (no log file)"
     exit 1
 fi
 
 CONFIG_NAME=$1
-MODE=$2 # Capture the second argument
+MODE=$2
 LOG_DIR="tmp"
-LOG_FILE="$LOG_DIR/${CONFIG_NAME}.txt"
 
-# 2. Ensure the log directory exists
-mkdir -p "$LOG_DIR"
-
-echo "Experiment: $CONFIG_NAME"
-
-# 3. Execution Logic
 if [ "$MODE" == "f" ]; then
-    echo "Running in FOREGROUND... (Press Ctrl+C to stop)"
-    # Run directly in terminal, still logging to file and console via 'tee'
-    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" 2>&1 | tee "$LOG_FILE"
+    echo "--- Running in FOREGROUND ---"
+    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME"
 else
-    echo "Running in BACKGROUND..."
-    echo "Logging output to: $LOG_FILE"
+    mkdir -p "$LOG_DIR"
+    echo "--- Running in BACKGROUND ---"
+
+    # 2. Use a wrapper to ensure the log file name includes the correct PID
+    # We launch a background task that captures its own PID to name the file
+    (
+        # Launch python in background inside this subshell
+        python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" &
+        PYTHON_PID=$!
+        
+        # Create a symlink or move the output to a file named with the PID
+        # But for simplicity, we redirect the outer subshell to a file 
+        # based on the PID we just captured.
+        echo $PYTHON_PID > "$LOG_DIR/last_pid.txt"
+        wait $PYTHON_PID
+    ) > "$LOG_DIR/${CONFIG_NAME}_TEMP.txt" 2>&1 &
     
-    # Run in background
-    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" > "$LOG_FILE" 2>&1 &
+    # 3. Give the subshell a moment to write the PID file
+    sleep 0.5
+    ACTUAL_PID=$(cat "$LOG_DIR/last_pid.txt")
+    mv "$LOG_DIR/${CONFIG_NAME}_TEMP.txt" "$LOG_DIR/${CONFIG_NAME}_${ACTUAL_PID}.txt"
+    rm "$LOG_DIR/last_pid.txt"
+
+    # 4. Disown the background wrapper
+    disown $!
     
-    PID=$!
-    disown $PID
-    echo "Process started with PID: $PID. You can now safely close this terminal."
+    echo "Log file: $LOG_DIR/${CONFIG_NAME}_${ACTUAL_PID}.txt"
+    echo "Process started with PID: $ACTUAL_PID."
 fi

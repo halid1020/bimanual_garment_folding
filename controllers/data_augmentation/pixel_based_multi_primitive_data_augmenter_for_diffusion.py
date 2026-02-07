@@ -405,6 +405,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             # Clamp result to ensure it stays valid image range [0, 1]
             obs = torch.clamp(obs, 0, 1)
 
+            if self.use_goal:
+                noise = torch.randn_like(obs) * self.rgb_noise_factor
+                goal_obs = goal_obs + noise
+                goal_obs = torch.clamp(goal_obs, 0, 1)
+
         # =========================
         # debug save after
         # =========================

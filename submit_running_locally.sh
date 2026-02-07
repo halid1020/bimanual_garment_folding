@@ -2,28 +2,34 @@
 
 # 1. Check if a config name was provided
 if [ -z "$1" ]; then
-    echo "Usage: ./submit_running_locally.sh <config_name>"
+    echo "Usage: ./submit_running_locally.sh <config_name> [f]"
+    echo "  f : Run in foreground (optional)"
     exit 1
 fi
 
 CONFIG_NAME=$1
+MODE=$2 # Capture the second argument
 LOG_DIR="tmp"
 LOG_FILE="$LOG_DIR/${CONFIG_NAME}.txt"
 
 # 2. Ensure the log directory exists
 mkdir -p "$LOG_DIR"
 
-echo "Starting experiment: $CONFIG_NAME"
-echo "Logging output to: $LOG_FILE"
+echo "Experiment: $CONFIG_NAME"
 
-# 3. Run the command in the background
-# We use -u for unbuffered output to ensure the log file updates in real-time
-python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" > "$LOG_FILE" 2>&1 &
-
-# 4. Get the Process ID (PID) of the last background command
-PID=$!
-
-# 5. Disown the process so it persists after the terminal closes
-disown $PID
-
-echo "Process started with PID: $PID. You can now safely close this terminal."
+# 3. Execution Logic
+if [ "$MODE" == "f" ]; then
+    echo "Running in FOREGROUND... (Press Ctrl+C to stop)"
+    # Run directly in terminal, still logging to file and console via 'tee'
+    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" 2>&1 | tee "$LOG_FILE"
+else
+    echo "Running in BACKGROUND..."
+    echo "Logging output to: $LOG_FILE"
+    
+    # Run in background
+    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME" > "$LOG_FILE" 2>&1 &
+    
+    PID=$!
+    disown $PID
+    echo "Process started with PID: $PID. You can now safely close this terminal."
+fi

@@ -252,7 +252,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 done = info['done']
                 if (self.collect_on_success and info['success']):
                     break
-            print('[debug] keys', info['observation'].keys())
+            # print('[debug] keys', info['observation'].keys())
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -278,7 +278,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
-                    print(f'[debug] k {k}')
+                    # print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)

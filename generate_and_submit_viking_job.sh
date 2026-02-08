@@ -3,7 +3,7 @@
 # 1. Check if an experiment name was provided
 if [ -z "$1" ]; then
     echo "Error: No experiment name provided."
-    echo "Usage: ./run_exp.sh <experiment_name> [days]"
+    echo "Usage: ./generate_and_submit_viking_job.sh <experiment_name> [days]"
     exit 1
 fi
 

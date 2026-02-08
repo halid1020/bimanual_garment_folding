@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - /agent@agent: random_single_picker_single_primitive_multi_dress_flattening_ray
+  - /arena@arena: multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
+  - /task@task: flattening_overstretch_penalty_1_no_big_bonus
+  - _self_
+
+parallel_processes: 4
+trials: 10000
+single_agent: True
+agent_save_root: 'tmp'
+agent_exp_name: 'data-collection-test'
+data_path: 'mask_biased_random_on_multi_dress_with_single_picker_pick_and_place'
+data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets

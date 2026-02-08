@@ -1,6 +1,6 @@
 
 import pathlib
-from agent_arena import TrainableAgent
+from actoris_harena import TrainableAgent
 from gym.spaces import Dict, Box
 import gym
 import numpy as np
@@ -42,7 +42,7 @@ class DreamerV3Adapter(TrainableAgent):
         if self.use_bc_policy_to_seed:
             from omegaconf import OmegaConf
             import os
-            import agent_arena.api as ag_ar
+            import actoris_harena.api as ag_ar
             from train.utils import build_data_augmenter   # adjust import path if needed
 
             self.bc_policy_config_name = config.bc_policy_config_name
@@ -69,7 +69,7 @@ class DreamerV3Adapter(TrainableAgent):
         
         self.human_prefill = self.config.get('human_prefill', 0)
         if self.human_prefill:
-            import agent_arena as ag_ar
+            import actoris_harena as ag_ar
             self.human_policy = ag_ar.build_agent(self.config.human_demo_policy)
            
             

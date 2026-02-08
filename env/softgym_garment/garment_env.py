@@ -7,7 +7,7 @@ import json
 
 # from softgym.utils.env_utils import get_coverage
 import pyflex
-from agent_arena import Arena
+from actoris_harena import Arena
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
 import gym
@@ -450,7 +450,7 @@ class GarmentEnv(Arena):
         if self.debug and len(self.video_frames) > 0:
             #print('[GarmentEnv] debug!')
             # save gif to a directory
-            from agent_arena.utilities.visual_utils import save_numpy_as_gif
+            from actoris_harena.utilities.visual_utils import save_numpy_as_gif
             save_numpy_as_gif(self.video_frames, './tmp', 'debug-frames')
         
         #print('reward', info['reward'])

@@ -1,6 +1,6 @@
 import argparse
-import agent_arena.api as ag_ar
-from agent_arena import train_and_evaluate
+import actoris_harena.api as ag_ar
+from actoris_harena import train_and_evaluate
 import matplotlib.pyplot as plt
 import numpy as np
 from dotmap import DotMap

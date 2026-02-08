@@ -1,4 +1,4 @@
-import agent_arena as ag_ar
+import actoris_harena as ag_ar
 from dotmap import DotMap
 
 

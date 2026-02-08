@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from gym import spaces
 import cv2
 
-# from agent_arena import Arena
+# from actoris_harena import Arena
 # from ..utilities.logger.dummy_logger import DummyLogger
 from dual_arm_scene import DualArmScene  # <-- your robot class path
 from mask_utils import get_mask_generator, get_mask_v2

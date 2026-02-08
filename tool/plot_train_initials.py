@@ -6,7 +6,7 @@ from omegaconf import OmegaConf
 
 # Assuming these are your custom modules
 from train.utils import register_agent, registered_arena, build_task
-import agent_arena.api as ag_ar
+import actoris_harena.api as ag_ar
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Agent Arena Environment")

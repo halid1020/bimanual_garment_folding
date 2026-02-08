@@ -16,12 +16,12 @@ from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy imp
 from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy import WaistHemAlignmentFoldingStochasticPolicy
 
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
-from agent_arena.utilities.perform_single import perform_single
+from actoris_harena.utilities.perform_single import perform_single
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 
 # --- dataset class: try plausible import; adjust if your project stores it elsewhere ---
-from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 
 # ---------------------------------------------------------------------------
 # Observation / action configs (unchanged except typos fixed)

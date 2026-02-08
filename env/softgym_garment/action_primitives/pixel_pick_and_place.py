@@ -218,7 +218,7 @@
 #             r0p, c0p = norm_pixel_to_index(pixel_action[:2], (W, H))
 #             r0l, c0l = norm_pixel_to_index(pixel_action[4:6], (W, H))
 
-#             # from agent_arena.utilities.save_utils import save_mask
+#             # from actoris_harena.utilities.save_utils import save_mask
 #             # save_mask(env.robot0_mask, 'robot0-mask', 'tmp')
             
 #             if not env.robot0_mask[r0p, c0p]:
@@ -237,7 +237,7 @@
 #             r1p, c1p = norm_pixel_to_index(pixel_action[2:4], (W, H))
 #             r1l, c1l = norm_pixel_to_index(pixel_action[6:8], (W, H))
             
-#             # from agent_arena.utilities.save_utils import save_mask
+#             # from actoris_harena.utilities.save_utils import save_mask
 #             # save_mask(env.robot1_mask, 'robot1-mask', 'tmp')
             
 #             if not env.robot1_mask[r1p, c1p]:

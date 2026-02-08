@@ -14,10 +14,10 @@ from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
 from omegaconf import OmegaConf
 
-from agent_arena.torch_utils import *
-from agent_arena.registration.dataset import *
-from agent_arena.agent.oracle.builder import OracleBuilder
-from agent_arena import RLAgent
+from actoris_harena.torch_utils import *
+from actoris_harena.registration.dataset import *
+from actoris_harena.agent.oracle.builder import OracleBuilder
+from actoris_harena import RLAgent
 from dotmap import DotMap
 
 from .networks import ImageEncoder, ImageDecoder
@@ -114,7 +114,7 @@ class RSSM(RLAgent):
         planning_config["no_op"] = self.no_op
         planning_config = DotMap(planning_config)
                 
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
             config=planning_config)

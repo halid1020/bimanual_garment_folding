@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 from statistics import median
 from statistics import mean
 
-from agent_arena import save_video
-from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
+from actoris_harena import save_video
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
 
 from .utils import get_max_IoU
 from .folding_rewards import *

@@ -13,9 +13,9 @@ from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 
-from agent_arena import TrainableAgent
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
-from agent_arena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena import TrainableAgent
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
@@ -141,7 +141,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             )
             self.stats = dataset.stats
         elif self.config.dataset_mode == 'general':
-            from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
             config = self.config.dataset_config.toDict()
             #print('config', config)
@@ -174,14 +174,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         arena = arenas[0] # assume only one arena
         org_horizon = arena.action_horizon
         arena.action_horizon = self.config.get('demo_horizon', org_horizon)
-        from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+        from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
         config = self.config.dataset_config #.toDict()
         config['io_mode'] = 'a'
         #print('config', config)
         dataset = TrajectoryDataset(**config)
 
-        import agent_arena as ag_ar
+        import actoris_harena as ag_ar
         policy = ag_ar.build_agent(self.config.demo_policy)
 
         qbar = tqdm(total=self.config.num_demos, 

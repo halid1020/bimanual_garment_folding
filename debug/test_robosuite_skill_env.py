@@ -1,8 +1,8 @@
 import numpy as np
 import time
 from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
-from agent_arena.utilities.visual_utils import save_video as sv
-from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
+from actoris_harena.utilities.visual_utils import save_video as sv
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
 
 
 def random_skill_action(skill_env):

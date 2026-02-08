@@ -2,7 +2,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import socket
-import agent_arena.api as ag_ar
+import actoris_harena.api as ag_ar
 
 from tool.utils import register_agent, register_arena, build_task
 from env.parallel import Parallel

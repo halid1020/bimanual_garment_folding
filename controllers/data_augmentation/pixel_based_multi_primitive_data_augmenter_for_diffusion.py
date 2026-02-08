@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 import kornia.augmentation as K
 
-from agent_arena.torch_utils import np_to_ts, ts_to_np
+from actoris_harena.torch_utils import np_to_ts, ts_to_np
 from .utils import randomize_primitive_encoding
 
 

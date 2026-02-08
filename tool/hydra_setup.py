@@ -4,8 +4,8 @@ import os
 from tqdm import tqdm
 
 from train.utils import register_agent, registered_arena, build_task, build_data_augmenter
-import agent_arena.api as ag_ar
-from agent_arena import TrainableAgent
+import actoris_harena.api as ag_ar
+from actoris_harena import TrainableAgent
 from train.utils import register_agent,  build_data_augmenter
 
 @hydra.main(config_path="../conf", config_name="mp_sac_v5", version_base=None)

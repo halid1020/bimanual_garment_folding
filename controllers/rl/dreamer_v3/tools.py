@@ -9,7 +9,7 @@ import random
 
 import numpy as np
 import uuid
-from agent_arena.utilities.logger.logger_interface import Logger
+from actoris_harena.utilities.logger.logger_interface import Logger
 
 import torch
 from torch import nn

@@ -1,5 +1,5 @@
-from agent_arena.agent import MPC_CEM
-from agent_arena.agent.utilities.utils import *
+from actoris_harena.agent import MPC_CEM
+from actoris_harena.agent.utilities.utils import *
 import numpy as np
 from gym.spaces import Box
 

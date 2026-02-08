@@ -1,4 +1,4 @@
-from agent_arena import Agent
+from actoris_harena import Agent
 import numpy as np
 import cv2
 from .utils import draw_text_top_right, apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY

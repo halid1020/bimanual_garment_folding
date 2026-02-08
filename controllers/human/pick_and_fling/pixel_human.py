@@ -1,4 +1,4 @@
-from agent_arena import Agent
+from actoris_harena import Agent
 import numpy as np
 import cv2
 import os

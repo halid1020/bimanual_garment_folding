@@ -1,7 +1,7 @@
 # Author: Halid Kadi
 
 from tool.lagarnet_utils import obs_config, action_config, reward_names, plot_results, evaluation_names #see from the folder
-from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 import argparse
 
 

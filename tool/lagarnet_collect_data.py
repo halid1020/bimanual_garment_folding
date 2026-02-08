@@ -13,10 +13,10 @@ from tool.utils import register_agent, register_arena, build_task
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import agent_arena as ag_ar
-from agent_arena.utilities.perform_parallel \
+import actoris_harena as ag_ar
+from actoris_harena.utilities.perform_parallel \
     import setup_arenas_with_class, step_arenas
-from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 from tool.lagarnet_utils import obs_config, action_config, reward_names, evaluation_names
 
 def get_actions(agents, arena_ids, ready_infos, actions):

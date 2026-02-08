@@ -4,7 +4,7 @@ import os
 
 # Assuming these are your custom registration tools
 from tool.utils import register_agent, register_arena, build_task
-import agent_arena.api as ag_ar
+import actoris_harena.api as ag_ar
 
 # 1. Update config_path to point to the root 'conf' directory
 @hydra.main(config_path="../conf", version_base=None)

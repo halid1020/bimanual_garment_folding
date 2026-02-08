@@ -6,8 +6,8 @@ import json
 from tqdm import tqdm
 
 from scipy.spatial.distance import cdist
-from agent_arena import Task
-from agent_arena import save_video
+from actoris_harena import Task
+from actoris_harena import save_video
 from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
     simple_rigid_align, chamfer_alignment_with_rotation
 from ..utils.keypoint_gui import KeypointGUI

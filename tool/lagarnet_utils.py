@@ -1,8 +1,8 @@
 import os
 import matplotlib.pyplot as plt
-from agent_arena.utilities.visual_utils \
+from actoris_harena.utilities.visual_utils \
     import plot_pick_and_place_trajectory as pt
-from agent_arena.utilities.visual_utils \
+from actoris_harena.utilities.visual_utils \
     import plot_image_trajectory
 
 obs_config = {

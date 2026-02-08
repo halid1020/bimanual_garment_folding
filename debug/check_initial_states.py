@@ -1,6 +1,6 @@
 import argparse
-import agent_arena.api as ag_ar
-from agent_arena.utilities.perform_single import perform_single
+import actoris_harena.api as ag_ar
+from actoris_harena.utilities.perform_single import perform_single
 import matplotlib.pyplot as plt
 import numpy as np
 from dotmap import DotMap
@@ -16,7 +16,7 @@ from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy imp
 from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy import WaistHemAlignmentFoldingStochasticPolicy
 
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
-from agent_arena.utilities.perform_single import perform_single
+from actoris_harena.utilities.perform_single import perform_single
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 import cv2
 

@@ -5,3 +5,4 @@ img_res: 128
 action_horizon: 20
 goal_dir: './assets'
 add_final_goal_to_obs: True
+snap_to_mask: True

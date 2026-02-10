@@ -13,9 +13,9 @@ from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 
-from agent_arena import TrainableAgent
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
-from agent_arena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena import TrainableAgent
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
@@ -142,7 +142,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             )
             self.stats = dataset.stats
         elif self.config.dataset_mode == 'general':
-            from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
             config = self.config.dataset_config.toDict()
             #print('config', config)
@@ -175,14 +175,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         arena = arenas[0] # assume only one arena
         org_horizon = arena.action_horizon
         arena.action_horizon = self.config.get('demo_horizon', org_horizon)
-        from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+        from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
         config = self.config.dataset_config #.toDict()
         config['io_mode'] = 'a'
         #print('config', config)
         dataset = TrajectoryDataset(**config)
 
-        import agent_arena as ag_ar
+        import actoris_harena as ag_ar
         policy = ag_ar.build_agent(self.config.demo_policy)
 
         qbar = tqdm(total=self.config.num_demos, 
@@ -253,7 +253,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 done = info['done']
                 if (self.collect_on_success and info['success']):
                     break
-            print('[debug] keys', info['observation'].keys())
+            # print('[debug] keys', info['observation'].keys())
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -279,7 +279,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
-                    print(f'[debug] k {k}')
+                    # print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
@@ -504,8 +504,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             B = nbatch[self.config.input_obs].shape[0]
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon]\
-                .flatten(end_dim=1)
+                .flatten(end_dim=1).float()
 
+            if 'action' in nbatch:
+                nbatch['action'] = nbatch['action'].float()
+            
+            if 'vector_state' in nbatch:
+                 nbatch['vector_state'] = nbatch['vector_state'].float()
           
             # encoder vision features
             #print('[diffusion] input obs shape', input_obs.shape)

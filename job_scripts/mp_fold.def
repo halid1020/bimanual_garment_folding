@@ -1,0 +1,46 @@
+Bootstrap: docker
+From: nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+%files
+    /home/hcv530/project/softgym /app/softgym
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Europe/London
+    export PYFLEXROOT=/app/softgym/PyFlex
+    export export PYTHONPATH=$PYTHONPATH:/app/softgym:/app/actoris_harena:/app/bimanual_garment_folding:/app/softgym/PyFlex/bindings/build
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${PYFLEXROOT}/external/SDL2-2.0.4/lib/x64
+    export SOFTGYM_PATH=/app/softgym
+
+%post
+    # 1. Added 'unzip' to this list
+    apt-get update && apt-get install -y \
+        git build-essential libgl1-mesa-dev freeglut3-dev \
+        libglfw3 libgles2-mesa-dev libsdl2-dev \
+        python3.10 python3.10-dev python3-pip \
+        ffmpeg xvfb wget curl unzip
+
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+    python -m pip install --upgrade pip setuptools wheel
+    
+    # Install gdown so the command works later
+    python -m pip install gdown
+
+    # 3. Setup Actoris Harena
+    mkdir -p /app
+    cd /app
+    git clone --branch develop https://github.com/halid1020/actoris_harena.git
+    cd actoris_harena
+    python -m pip install -e ".[torch]"
+
+    # 4. Setup Bimanual Garment Folding
+    cd /app
+    git clone https://github.com/halid1020/bimanual_garment_folding.git
+    cd bimanual_garment_folding
+    
+    # Now unzip will be found
+    gdown 1QPIBy4IUOKTcNYU36HOgU2DNWPHpzkNS
+    unzip assets.zip
+    rm assets.zip  # Optional: remove zip to save image space
+
+    apt-get clean

@@ -7,7 +7,7 @@ import json
 
 # from softgym.utils.env_utils import get_coverage
 import pyflex
-from agent_arena import Arena
+from actoris_harena import Arena
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
 import gym
@@ -66,7 +66,7 @@ def get_coverage(positions, particle_radius, resolution=500):
 
     return np.sum(mask) * cell_area
 
-# @ray.remote
+
 class GarmentEnv(Arena):
     
     def __init__(self, config):
@@ -450,7 +450,7 @@ class GarmentEnv(Arena):
         if self.debug and len(self.video_frames) > 0:
             #print('[GarmentEnv] debug!')
             # save gif to a directory
-            from agent_arena.utilities.visual_utils import save_numpy_as_gif
+            from actoris_harena.utilities.visual_utils import save_numpy_as_gif
             save_numpy_as_gif(self.video_frames, './tmp', 'debug-frames')
         
         #print('reward', info['reward'])
@@ -620,6 +620,10 @@ class GarmentEnv(Arena):
         particles = self.get_particle_positions()
         return particles[:self.num_mesh_particles]
     
+    def get_canon_mesh_particles_positions(self):
+        return self.flattened_obs['observation']['particle_positions']
+        
+
     # Input is N*3
     def set_particle_positions(self, particle_positions):
         particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]

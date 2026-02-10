@@ -127,7 +127,7 @@ save_success: True
 num_actions: 'to_be_defined'
 
 use_bc_policy_to_seed: False 
-# bc_policy_config: 'bc_policy_config_name' # use agent_arena to bulid, update steps is decided in the config
+# bc_policy_config: 'bc_policy_config_name' # use actoris_harena to bulid, update steps is decided in the config
 # bc_prefill: 1000
 # bc_data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion
 random_prefill: 10

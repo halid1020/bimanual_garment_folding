@@ -1,4 +1,4 @@
-from agent_arena import Agent
+from actoris_harena import Agent
 import os
 from hydra import compose
 
@@ -18,7 +18,7 @@ class IoUBasedStitchingPolicy(Agent):
         )
         
 
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         print(f'[iou_based_stitching_policy] Building flattening agent from {config.flattening_policy}')
         self.flattening_policy = ag_ar.build_agent(
             flattening_policy_config.agent.name, 

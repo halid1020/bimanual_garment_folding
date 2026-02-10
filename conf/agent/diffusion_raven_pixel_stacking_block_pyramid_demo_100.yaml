@@ -31,6 +31,7 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
+  cache_in_memory: True
   obs_config:
     
     mask: 

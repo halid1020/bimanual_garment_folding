@@ -9,7 +9,7 @@ from .draw_utils import *
 class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
 
     def __call__(self, episode_config, result, filename=None, wandb_logger=None):
-        super().__call__(episode_config, result, filename=filename)
+        super().__call__(episode_config, result, filename=filename, wandb_logger=None)
 
         eid = episode_config["eid"]
         frames = [info["observation"]["rgb"] for info in result["information"]]

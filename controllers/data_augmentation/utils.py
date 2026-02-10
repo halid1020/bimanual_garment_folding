@@ -4,7 +4,7 @@ from torchvision import transforms
 import torch.nn.functional as F
 
 
-from agent_arena.torch_utils import np_to_ts, ts_to_np
+from actoris_harena.torch_utils import np_to_ts, ts_to_np
 
 
 def randomize_primitive_encoding_np(action_prim, K):

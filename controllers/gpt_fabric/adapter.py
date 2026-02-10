@@ -1,5 +1,5 @@
 from .utils import METHODS
-from agent_arena import Agent
+from actoris_harena import Agent
 from .rgbd_manipulation_part_obs import RGBD_manipulation_part_obs
 from openai import OpenAI
 

@@ -51,7 +51,7 @@ batch_size: 50
 sequence_size: 50
 total_update_steps: 50001
 test_interval: 1000
-validation_interval: 5000
+validation_interval: 1000
 
 refresh_init_state: False
 

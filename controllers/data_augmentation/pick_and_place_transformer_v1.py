@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import random
 
-from agent_arena.torch_utils import np_to_ts, ts_to_np
+from actoris_harena.torch_utils import np_to_ts, ts_to_np
 from .utils import preprocess_rgb, postprocess_rgb, gaussian_kernel
 
 
@@ -82,7 +82,7 @@ class PickAndPlaceTransformerV1:
 
         # plot pre process action on image
         # if True:
-        #     from agent_arena.utilities.visual_utils import draw_pick_and_place
+        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
         #     import cv2
         #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy()
         #     print('rgb shape', rgb.shape)
@@ -401,7 +401,7 @@ class PickAndPlaceTransformerV1:
         
         ## plot pre process action on image
         # if True:
-        #     from agent_arena.utilities.visual_utils import draw_pick_and_place
+        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
         #     import cv2
         #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy().transpose(1, 2, 0)
         #     rgb = (rgb * 255).astype(np.uint8)

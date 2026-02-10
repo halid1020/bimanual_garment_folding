@@ -14,10 +14,10 @@ from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
 from omegaconf import OmegaConf
 
-from agent_arena.torch_utils import *
-from agent_arena.registration.dataset import *
-from agent_arena.agent.oracle.builder import OracleBuilder
-from agent_arena import RLAgent
+from actoris_harena.torch_utils import *
+from actoris_harena.registration.dataset import *
+from actoris_harena.agent.oracle.builder import OracleBuilder
+from actoris_harena import RLAgent
 from dotmap import DotMap
 
 from .networks import ImageEncoder, ImageDecoder
@@ -114,7 +114,7 @@ class RSSM(RLAgent):
         planning_config["no_op"] = self.no_op
         planning_config = DotMap(planning_config)
                 
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
             config=planning_config)
@@ -472,22 +472,40 @@ class RSSM(RLAgent):
 
         ## find the latest checkpoint
         if not os.path.exists(checkpoint_dir):
-            print('No checkpoint found in directory {}'.format(checkpoint_dir))
+            print('[RSSM.load] No checkpoint found in directory {}'.format(checkpoint_dir))
             return 0
         
-        checkpoints = os.listdir(checkpoint_dir)
-        checkpoints = [int(c.split('_')[1].split('.')[0]) for c in checkpoints]
+        # Get all items in directory
+        raw_items = os.listdir(checkpoint_dir)
+        
+        # Filter: only keep items that start with 'model_' and end with '.pth'
+        # This automatically ignores 'best', 'checkpoint.txt', and other subdirectories
+        checkpoints = []
+        for c in raw_items:
+            if c.startswith('model_') and c.endswith('.pth'):
+                try:
+                    # Extract number from 'model_100.pth' -> 100
+                    checkpoint_id = int(c.split('_')[1].split('.')[0])
+                    checkpoints.append(checkpoint_id)
+                except (ValueError, IndexError):
+                    continue # Skip anything that doesn't fit the pattern
+
+        if not checkpoints:
+            print(f'[RSSM, load] No valid numbered checkpoints found in {checkpoint_dir}')
+            return 0
+            
         checkpoints.sort()
         checkpoint = checkpoints[-1]
+
         model_dir = os.path.join(checkpoint_dir, f'model_{checkpoint}.pth')
 
         
         if not os.path.exists(model_dir):
-            print('No model found for loading in directory {}'.format(model_dir))
+            print('[RSSM, load] No model found for loading in directory {}'.format(model_dir))
             return 0
         
         self._load_from_model_dir(model_dir)
-        print('Loaded checkpoint {}'.format(checkpoint))
+        print('[RSSM, load] Loaded checkpoint {}'.format(checkpoint))
         self.loaded = True
         return checkpoint
 

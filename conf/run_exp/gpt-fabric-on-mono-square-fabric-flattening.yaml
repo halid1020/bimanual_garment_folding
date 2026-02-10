@@ -1,0 +1,8 @@
+defaults:
+  - agent: gpt_fabric_v0
+  - arena:  mono_square_fabric
+  - task: fabric_flattening
+
+exp_name: gpt_fabric_v0
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

@@ -1,8 +1,10 @@
 __pycache__
 assets
+assets.zip
 tmp
 wandb
 runs
 datasets
 outputs
 models
+*.sif

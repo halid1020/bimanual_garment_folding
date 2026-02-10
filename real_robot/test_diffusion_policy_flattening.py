@@ -3,13 +3,13 @@ from dotmap import DotMap
 import time
 import numpy as np
 from hydra import compose, initialize
-from agent_arena.api import run
-import agent_arena.api as ag_ar
+from actoris_harena.api import run
+import actoris_harena.api as ag_ar
 import os
 
 from robot.dual_arm_arena import DualArmArena
 from registration.agent import register_agents
-from real_robot.tasks.garment_flattening_task import GarmentFlatteningTask
+from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 
 def print_stats(name, data):
@@ -42,7 +42,7 @@ def main():
     task_config = {
         'debug': debug
     }
-    agent_config_name = 'diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot'
+    agent_config_name = 'run_exp/diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot_goal_smaller_random_crop_goal_rot_trans_maskout_x2_training'
 
     save_dir = '/home/halid/project/garment_folding_data'
 
@@ -65,7 +65,7 @@ def main():
     policy.reset([0])
 
     arena = DualArmArena(DotMap(anrea_config))
-    task = GarmentFlatteningTask(DotMap(task_config))
+    task = RealWorldGarmentFlatteningTask(DotMap(task_config))
     arena.set_task(task)
     arena.set_log_dir(save_dir, project_name, exp_name)
 

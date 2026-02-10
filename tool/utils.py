@@ -2,7 +2,7 @@ import actoris_harena as ag_ar
 from dotmap import DotMap
 
 from dotmap import DotMap
-import agent_arena as ag_ar
+import actoris_harena as ag_ar
 
 from env.softgym_garment.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.softgym_garment.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
@@ -16,10 +16,12 @@ from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_en
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
 from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
 from env.dm_control.dmc_arena import DMC_Arena
+from real_robot.robot.dual_arm_arena import DualArmArena
 
 from env.softgym_garment.tasks.garment_folding import GarmentFoldingTask
 from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
-
+from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
+from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
 
 from controllers.rl.primitive_encoding_sac \
     import PrimitiveEncodingSAC
@@ -46,6 +48,7 @@ from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
+from controllers.human.real_world_human_policy import RealWordHumanPolicy
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
@@ -64,6 +67,7 @@ def register_arena():
     ag_ar.register_arena('robosuite-env', RoboSuiteArena)
     ag_ar.register_arena('robosuite-skill-env', RoboSuiteSkillArena)
     ag_ar.register_arena('dm_control',  DMC_Arena)
+    ag_ar.register_arena('real-world-dual-arm-multi-primitive', DualArmArena)
 
 
 def register_agent():
@@ -83,6 +87,7 @@ def register_agent():
     ag_ar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
     ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
     ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
+    ag_ar.register_agent('real-world-human', RealWordHumanPolicy)
     ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
     ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
     ag_ar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
@@ -112,6 +117,10 @@ def build_task(task_cfg):
        
     elif task_cfg.task_name == 'dummy':
         task = None
+    elif task_cfg.task_name == 'real-world-garment-flattening':
+        task = RealWorldGarmentFlatteningTask(task_cfg)
+    elif task_cfg.task_name == 'real-world-garment-folding':
+        task = RealWorldGarmentFoldingTask(task_cfg)
     else:
         raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
     return task

@@ -5,7 +5,7 @@ from real_robot.utils.mask_utils import get_max_IoU
 from .utils import *
 
 
-class GarmentFlatteningTask():
+class RealWorldGarmentFlatteningTask():
     def __init__(self, config):
         self.goals = []
         self.config = config

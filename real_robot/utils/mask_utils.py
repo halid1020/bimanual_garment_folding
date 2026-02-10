@@ -14,7 +14,8 @@ def get_mask_generator():
 
     ### Masking Model Macros ###
     MODEL_TYPE = "vit_h"
-    sam = sam_model_registry[MODEL_TYPE](checkpoint="../models/sam_vit_h_4b8939.pth")
+    REAL_ROBOT_PATH = os.environ['REAL_ROBOT_PATH']
+    sam = sam_model_registry[MODEL_TYPE](checkpoint=f"{REAL_ROBOT_PATH}/models/sam_vit_h_4b8939.pth")
     sam.to(device=DEVICE)
     return SamAutomaticMaskGenerator(sam)
 

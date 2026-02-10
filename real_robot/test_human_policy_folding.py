@@ -1,13 +1,13 @@
 # main.py
 from robot.dual_arm_arena import DualArmArena
-from human_policy import HumanPolicy
+from bimanual_garment_folding.controllers.human.real_world_human_policy import HumanPolicy
 
 from dotmap import DotMap
 import time
 import numpy as np
 from agent_arena.api import run
 
-from real_robot.tasks.garment_folding_task import GarmentFoldingTask
+from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
 
 def print_stats(name, data):
     """Helper to safely print mean and std of a list."""
@@ -56,7 +56,7 @@ def main():
 
     task_config = DotMap(task_config)
     task_config.demonstrator = policy
-    task = GarmentFoldingTask(task_config)
+    task = RealWorldGarmentFoldingTask(task_config)
     arena.set_task(task)
     arena.set_log_dir(save_dir, project_name, exp_name)
 

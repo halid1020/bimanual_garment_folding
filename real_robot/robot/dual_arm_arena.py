@@ -13,7 +13,7 @@ from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
 from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
 
-from agent_arena import Arena
+from actoris_harena import Arena
 
 class DualArmArena(Arena):
     """
@@ -154,7 +154,7 @@ class DualArmArena(Arena):
         self.crop_size = crop_size
 
         crop_rgb = raw_rgb[y1:y2, x1:x2]
-        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.config.debug)
+        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
         self.cloth_mask = crop_mask
         self.coverage = np.sum(self.cloth_mask)
         if self.init_coverage == None:
@@ -222,6 +222,7 @@ class DualArmArena(Arena):
                 info['goal'] = {}
                 for k, v in goal[-1]['observation'].items():
                     info['goal'][k] = v
+                    info['observation'][f'goal_{k}'] = v
         
         self.last_info = info
         self.dual_arm.both_home(MOVE_SPEED, MOVE_ACC)

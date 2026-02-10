@@ -728,7 +728,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         ckpt_files = sorted(ckpt_files, key=lambda x: int(x.split('_')[1].split('.')[0]))
         
         if len(ckpt_files) == 0:
-            print('No checkpoint found')
+            print('[MultiPrimitiveDiffusion, load] No checkpoint found')
             return 0
         ckpt_file = ckpt_files[-1]
         ckpt_path = os.path.join(ckpt_path, ckpt_file)
@@ -745,13 +745,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         # Check if the file exists before trying to load
         if not os.path.exists(ckpt_path):
-            print(f"[Warning] Checkpoint not found at: {ckpt_path}")
+            print(f"[MultiPrimitiveDiffusion, load_best] Checkpoint not found at: {ckpt_path}")
             return 0 # Return None or a generic error code (like -1) to indicate failure
         
         # Load the state dictionary
         self.nets.load_state_dict(torch.load(ckpt_path))
 
         self.loaded = True
+        print(f"[MultiPrimitiveDiffusion, load_best] Best checkpoint is loaded")
         return -2
 
     def single_act(self, info, update=False):

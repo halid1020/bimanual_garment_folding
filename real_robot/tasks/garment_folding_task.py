@@ -11,10 +11,10 @@ SUCCESS_TRESHOLD = 0.05
 IOU_TRESHOLDS = [0.8, 0.8, 0.82]
 
 
-class GarmentFoldingTask():
+class RealWorldGarmentFoldingTask():
     def __init__(self, config):
         self.num_goals = config.num_goals
-        self.name = config.task_name
+        self.name = config.fold_name
         self.goal_steps = config.goal_steps
 
         self.config = config

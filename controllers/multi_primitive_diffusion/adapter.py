@@ -503,8 +503,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             B = nbatch[self.config.input_obs].shape[0]
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon]\
-                .flatten(end_dim=1)
+                .flatten(end_dim=1).float()
 
+            if 'action' in nbatch:
+                nbatch['action'] = nbatch['action'].float()
+            
+            if 'vector_state' in nbatch:
+                 nbatch['vector_state'] = nbatch['vector_state'].float()
           
             # encoder vision features
             #print('[diffusion] input obs shape', input_obs.shape)

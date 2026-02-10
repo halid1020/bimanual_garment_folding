@@ -4,7 +4,7 @@ defaults:
   - /arena@arena: raven_pixel_towers_of_hanoi
   - /task@task: dummy
 
-exp_name: iffusion_raven_pixel_towers_of_hanoi_demo_200
+exp_name: diffusion_raven_pixel_towers_of_hanoi_demo_200
 project_name: bimanual_garment_folding
 save_root: /media/hcv530/T7/garment_folding_data
 #/data/ah390/bimanual_garment_folding #St Andrews Thanos

@@ -4,24 +4,9 @@ from dotmap import DotMap
 from dotmap import DotMap
 import actoris_harena as ag_ar
 
-from env.softgym_garment.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
-from env.softgym_garment.single_garment_vectorised_fold_prim_env import SingleGarmentVectorisedFoldPrimEnv
-from env.softgym_garment.multi_garment_env import MultiGarmentEnv
-# from env.softgym_garment.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
-from env.softgym_garment.multi_garment_vectorised_single_picker_pick_and_place_env \
-    import MultiGarmentVectorisedSinglePickerPickAndPlaceEnv, MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay
-from env.softgym_garment.multi_garment_vectorised_dual_picker_pick_and_place_env import MultiGarmentVectorisedDualPickerPickAndPlaceEnv
-from env.softgym_garment.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
-from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
-from env.robosuite_env.robosuite_arena import RoboSuiteArena    
-from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
-from env.dm_control.dmc_arena import DMC_Arena
-from real_robot.robot.dual_arm_arena import DualArmArena
 
-from env.softgym_garment.tasks.garment_folding import GarmentFoldingTask
-from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
-from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
-from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
+
+
 
 from controllers.rl.primitive_encoding_sac \
     import PrimitiveEncodingSAC
@@ -48,7 +33,7 @@ from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
 from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
-from controllers.human.real_world_human_policy import RealWordHumanPolicy
+
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
@@ -56,18 +41,7 @@ from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
 from controllers.rl.lagarnet.gc_rssm import GC_RSSM
 
 
-def register_arena():
-    ag_ar.register_arena('single-garment-fixed-init-env', SingleGarmentFixedInitialEnv)
-    ag_ar.register_arena('single-garment-vectorised-fold-prim-env', SingleGarmentVectorisedFoldPrimEnv)
-    ag_ar.register_arena('single-garment-subgoal-init-vectorised-fold-prim-env', SingleGarmentSubgoalInitVectorisedFoldPrimEnv)
-    ag_ar.register_arena('multi-garment-env', MultiGarmentEnv)
-    ag_ar.register_arena('multi-garment-vectorised-dual-picker-pick-and-place-env', MultiGarmentVectorisedDualPickerPickAndPlaceEnv)
-    ag_ar.register_arena('multi-garment-vectorised-single-picker-pick-and-place-env', MultiGarmentVectorisedSinglePickerPickAndPlaceEnv)
-    ag_ar.register_arena('multi-garment-vectorised-single-picker-pick-and-place-env-ray', MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay)
-    ag_ar.register_arena('robosuite-env', RoboSuiteArena)
-    ag_ar.register_arena('robosuite-skill-env', RoboSuiteSkillArena)
-    ag_ar.register_arena('dm_control',  DMC_Arena)
-    ag_ar.register_arena('real-world-dual-arm-multi-primitive', DualArmArena)
+
 
 
 def register_agent():

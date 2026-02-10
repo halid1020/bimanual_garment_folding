@@ -13,7 +13,7 @@ LOG_DIR="tmp"
 
 if [ "$MODE" == "f" ]; then
     echo "--- Running in FOREGROUND ---"
-    python -u tool/hydra_train.py --config-name "run_exp/$CONFIG_NAME"
+    python -u tool/hydra_train.py --config-name "sim_exp/$CONFIG_NAME"
 else
     mkdir -p "$LOG_DIR"
     echo "--- Running in BACKGROUND ---"
@@ -22,7 +22,7 @@ else
     # We launch a background task that captures its own PID to name the file
     (
         # Launch python in background inside this subshell
-        python -u tool/hydra_eval.py --config-name "run_exp/$CONFIG_NAME" &
+        python -u tool/hydra_eval.py --config-name "sim_exp/$CONFIG_NAME" &
         PYTHON_PID=$!
         
         # Create a symlink or move the output to a file named with the PID

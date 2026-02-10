@@ -92,7 +92,7 @@ cd /users/hcv530/project/bimanual_garment_folding
 source ./setup.sh
 
 echo "Starting evaluation at \$(date)"
-python ./tool/hydra_train.py --config-name run_exp/${EXP_NAME}
+python ./tool/hydra_train.py --config-name sim_exp/${EXP_NAME}
 echo "Job completed at \$(date)"
 EOF
 

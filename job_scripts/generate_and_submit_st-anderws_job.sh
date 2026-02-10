@@ -3,8 +3,8 @@
 # 1. Check if an experiment name was provided (Required)
 if [ -z "$1" ]; then
     echo "Error: No experiment name provided."
-    echo "Usage: ./run_exp.sh <exp_name> [cpus] [time_limit]"
-    echo "Example: ./run_exp.sh my_test 4 1-00:00:00"
+    echo "Usage: ./generate_and_submit_st-anderws_job.sh <exp_name> [cpus] [time_limit]"
+    echo "Example: ./generate_and_submit_st-anderws_job.sh my_test 4 1-00:00:00"
     exit 1
 fi
 
@@ -49,7 +49,7 @@ source ./setup.sh
 echo "Starting training at \$(date)"
 
 python ./tool/hydra_train.py \\
-    --config-name run_exp/${EXP_NAME}
+    --config-name sim_exp/${EXP_NAME}
 
 echo "Job completed at \$(date)"
 EOF

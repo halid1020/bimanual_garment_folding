@@ -14,7 +14,7 @@ from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
 from env.dm_control.dmc_arena import DMC_Arena
 from real_robot.robot.dual_arm_arena import DualArmArena
 
-def register_arena():
+def register_arenas():
     ag_ar.register_arena('single-garment-fixed-init-env', SingleGarmentFixedInitialEnv)
     ag_ar.register_arena('single-garment-vectorised-fold-prim-env', SingleGarmentVectorisedFoldPrimEnv)
     ag_ar.register_arena('single-garment-subgoal-init-vectorised-fold-prim-env', SingleGarmentSubgoalInitVectorisedFoldPrimEnv)

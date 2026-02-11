@@ -88,6 +88,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.obs_deque = {}
         self.collect_on_success = self.config.get('collect_on_success', True)
         self.measure_time = config.get('measure_time', False)
+        self.debug = config.get('debug', False)
 
         self.primitive_integration = self.config.primitive_integration
         if self.primitive_integration != 'none':
@@ -781,7 +782,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 mask = torch.stack([x['mask'] for x in self.obs_deque[info['arena_id']]])
                 sample_state['mask'] = mask
 
-            
+            if self.debug:
+                from .draw_utils import plot_rgb_workspace_mask_goal_features
+                plot_rgb_workspace_mask_goal_features(image)
+
             obs_features = self.nets['vision_encoder'](image)
             # print('obs features shape', obs_features.shape)
 

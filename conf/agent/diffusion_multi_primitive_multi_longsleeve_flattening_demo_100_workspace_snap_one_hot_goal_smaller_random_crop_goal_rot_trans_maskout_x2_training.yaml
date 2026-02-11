@@ -24,7 +24,7 @@ demo_policy: "human-multi-primitive"
 validation_interval: 1000
 total_update_steps: 100000
 eval_checkpoint: -1
-debug: False
+debug: True
 add_all_demos: True
 
 dataset_mode: "general"

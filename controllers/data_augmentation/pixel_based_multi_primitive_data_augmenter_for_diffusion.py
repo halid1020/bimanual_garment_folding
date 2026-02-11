@@ -389,7 +389,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         #   RANDOM CHANNEL PERMUTATION
         # =========================
-        if self.random_channel_permutation:
+        if self.random_channel_permutation and train:
             # Generate ONE permutation for the whole batch
             perm = torch.randperm(3, device=obs.device)
             obs = obs[:, perm, :, :]

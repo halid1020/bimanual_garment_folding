@@ -1,10 +1,14 @@
 import math
+import threading
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation as R
 from real_robot.utils.transform_utils \
     import point_on_table_base, GRIPPER_OFFSET_UR5e, \
         GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, MOVE_ACC, MOVE_SPEED
+from .utils import move_until_contact
+
+from real_robot.utils.thread_utils import ThreadWithResult
 
 # --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
 def segment_distance(p1, p2, p3, p4):
@@ -234,19 +238,29 @@ class PickAndPlaceSkill:
             print("[PickAndPlace] No active arms. Skipping execution.")
 
     def _execute_single_arm(self, robot, pick_pt, place_pt, rot):
+        # 1. Approach High
         approach_pick = np.concatenate([pick_pt + [0,0,APPROACH_DIST], rot])
-        grasp_pick    = np.concatenate([pick_pt, rot])
-        lift_pick     = np.concatenate([pick_pt + [0,0,LIFT_DIST], rot])
-        approach_place= np.concatenate([place_pt + [0,0,APPROACH_DIST], rot])
-        place_pose    = np.concatenate([place_pt + [0,0,0.02], rot]) 
-
         robot.movel(approach_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
-        robot.movel(grasp_pick, speed=0.1, acceleration=0.1, blocking=True) 
         
+        # 2. Descend until contact
+        # Note: We ignore the Z in `pick_pt` for the final depth, relying on force instead
+        grasp_pose = move_until_contact(robot, approach_pick, APPROACH_DIST+0.1)
+        
+        # 3. Close Gripper
         robot.close_gripper()
         time.sleep(0.8)
 
+        # 4. Lift
+        # We lift relative to where we actually grasped (grasp_pose), not the theoretical pick_pt
+        lift_height = grasp_pose[:3] + [0, 0, LIFT_DIST]
+        lift_pick = np.concatenate([lift_height, rot])
+        
         robot.movel(lift_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+
+        # 5. Place
+        approach_place = np.concatenate([place_pt + [0,0,APPROACH_DIST], rot])
+        place_pose = np.concatenate([place_pt + [0,0,0.02], rot]) 
+        
         robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
         robot.movel(place_pose, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
 
@@ -255,26 +269,72 @@ class PickAndPlaceSkill:
 
         robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
 
-    def _execute_dual_arm(self, p0_pick, p0_place, rot0, p1_pick, p1_place, rot1):
-        app_pick_0 = np.concatenate([p0_pick + [0,0,APPROACH_DIST], rot0])
-        pick_0     = np.concatenate([p0_pick, rot0])
-        lift_0     = np.concatenate([p0_pick + [0,0,LIFT_DIST], rot0])
-        app_place_0= np.concatenate([p0_place + [0,0,APPROACH_DIST], rot0])
-        place_0    = np.concatenate([p0_place + [0,0,0.02], rot0])
+    # def _execute_single_arm(self, robot, pick_pt, place_pt, rot):
+    #     approach_pick = np.concatenate([pick_pt + [0,0,APPROACH_DIST], rot])
+    #     grasp_pick    = np.concatenate([pick_pt, rot])
+    #     lift_pick     = np.concatenate([pick_pt + [0,0,LIFT_DIST], rot])
+    #     approach_place= np.concatenate([place_pt + [0,0,APPROACH_DIST], rot])
+    #     place_pose    = np.concatenate([place_pt + [0,0,0.02], rot]) 
 
-        app_pick_1 = np.concatenate([p1_pick + [0,0,APPROACH_DIST], rot1])
-        pick_1     = np.concatenate([p1_pick, rot1])
-        lift_1     = np.concatenate([p1_pick + [0,0,LIFT_DIST], rot1])
-        app_place_1= np.concatenate([p1_place + [0,0,APPROACH_DIST], rot1])
-        place_1    = np.concatenate([p1_place + [0,0,0.02], rot1])
-
-        self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
-        self.scene.both_movel(pick_0, pick_1, speed=0.1, acc=0.1, blocking=True)
+    #     robot.movel(approach_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+    #     robot.movel(grasp_pick, speed=0.1, acceleration=0.1, blocking=True) 
         
+    #     robot.close_gripper()
+    #     time.sleep(0.8)
+
+    #     robot.movel(lift_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+    #     robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+    #     robot.movel(place_pose, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+
+    #     robot.open_gripper()
+    #     time.sleep(0.5)
+
+    #     robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+
+    
+    def _execute_dual_arm(self, p0_pick, p0_place, rot0, p1_pick, p1_place, rot1):
+        # 1. Move Both to Approach (High)
+        app_pick_0 = np.concatenate([p0_pick + [0,0,APPROACH_DIST], rot0])
+        app_pick_1 = np.concatenate([p1_pick + [0,0,APPROACH_DIST], rot1])
+        
+        self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+
+        # 2. Parallel Force Detection
+        # Since move_until_contact is a blocking loop, we must thread it for simultaneous execution
+        results = [None, None]
+
+        def run_contact(robot, start_pose, index):
+            res_pose = move_until_contact(robot, start_pose, APPROACH_DIST+0.01)
+            results[index] = res_pose
+
+     
+        t0 = ThreadWithResult(target=run_contact, args=(self.scene.ur5e, app_pick_0, 0))
+        t1 = ThreadWithResult(target=run_contact, args=(self.scene.ur16e, app_pick_1, 1))
+        t0.start(); t1.start()
+        t0.join(); t1.join()
+        #results = (t1.result, t1.result)
+        
+        
+        final_pose_0 = results[0]
+        final_pose_1 = results[1]
+
+        # 3. Close Both Grippers
         self.scene.both_close_gripper()
         time.sleep(0.8)
 
+        # 4. Lift Both (Relative to their specific contact heights)
+        lift_0 = np.concatenate([final_pose_0[:3] + [0,0,LIFT_DIST], rot0])
+        lift_1 = np.concatenate([final_pose_1[:3] + [0,0,LIFT_DIST], rot1])
+        
         self.scene.both_movel(lift_0, lift_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+
+        # 5. Place Sequence
+        app_place_0 = np.concatenate([p0_place + [0,0,APPROACH_DIST], rot0])
+        place_0     = np.concatenate([p0_place + [0,0,0.02], rot0])
+
+        app_place_1 = np.concatenate([p1_place + [0,0,APPROACH_DIST], rot1])
+        place_1     = np.concatenate([p1_place + [0,0,0.02], rot1])
+
         self.scene.both_movel(app_place_0, app_place_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
         self.scene.both_movel(place_0, place_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
 
@@ -285,3 +345,34 @@ class PickAndPlaceSkill:
         
         if HOME_AFTER:
             self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+
+    # def _execute_dual_arm(self, p0_pick, p0_place, rot0, p1_pick, p1_place, rot1):
+    #     app_pick_0 = np.concatenate([p0_pick + [0,0,APPROACH_DIST], rot0])
+    #     pick_0     = np.concatenate([p0_pick, rot0])
+    #     lift_0     = np.concatenate([p0_pick + [0,0,LIFT_DIST], rot0])
+    #     app_place_0= np.concatenate([p0_place + [0,0,APPROACH_DIST], rot0])
+    #     place_0    = np.concatenate([p0_place + [0,0,0.02], rot0])
+
+    #     app_pick_1 = np.concatenate([p1_pick + [0,0,APPROACH_DIST], rot1])
+    #     pick_1     = np.concatenate([p1_pick, rot1])
+    #     lift_1     = np.concatenate([p1_pick + [0,0,LIFT_DIST], rot1])
+    #     app_place_1= np.concatenate([p1_place + [0,0,APPROACH_DIST], rot1])
+    #     place_1    = np.concatenate([p1_place + [0,0,0.02], rot1])
+
+    #     self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+    #     self.scene.both_movel(pick_0, pick_1, speed=0.1, acc=0.1, blocking=True)
+        
+    #     self.scene.both_close_gripper()
+    #     time.sleep(0.8)
+
+    #     self.scene.both_movel(lift_0, lift_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+    #     self.scene.both_movel(app_place_0, app_place_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+    #     self.scene.both_movel(place_0, place_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+
+    #     self.scene.both_open_gripper()
+    #     time.sleep(0.5)
+
+    #     self.scene.both_movel(app_place_0, app_place_1, speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+        
+    #     if HOME_AFTER:
+    #         self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)

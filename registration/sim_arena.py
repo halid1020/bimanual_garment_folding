@@ -12,7 +12,6 @@ from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_en
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
 from env.robosuite_env.robosuite_skill_arena import RoboSuiteSkillArena
 from env.dm_control.dmc_arena import DMC_Arena
-from real_robot.robot.dual_arm_arena import DualArmArena
 
 def register_arenas():
     ag_ar.register_arena('single-garment-fixed-init-env', SingleGarmentFixedInitialEnv)
@@ -25,4 +24,3 @@ def register_arenas():
     ag_ar.register_arena('robosuite-env', RoboSuiteArena)
     ag_ar.register_arena('robosuite-skill-env', RoboSuiteSkillArena)
     ag_ar.register_arena('dm_control',  DMC_Arena)
-    ag_ar.register_arena('real-world-dual-arm-multi-primitive', DualArmArena)

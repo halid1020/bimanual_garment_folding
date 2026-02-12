@@ -6,6 +6,7 @@ from statistics import mean
 from real_robot.utils.mask_utils import get_max_IoU
 
 from .utils import *
+from real_robot.utils.save_utils import *
 
 SUCCESS_TRESHOLD = 0.05
 IOU_TRESHOLDS = [0.8, 0.8, 0.82]
@@ -114,12 +115,23 @@ class RealWorldGarmentFoldingTask():
 
                 for step_idx, subgoal in enumerate(goal_obs):
                     # Save RGB
-                    plt.imsave(os.path.join(goal_path, f"rgb_step_{step_idx}.png"), 
-                               subgoal['observation']['rgb']/255.0)
+                    # plt.imsave(os.path.join(goal_path, f"rgb_step_{step_idx}.png"), 
+                    #            subgoal['observation']['rgb']/255.0)
                     
-                    # Save Action (step-wise)
+                    save_colour(subgoal['observation']['rgb'], 
+                                f"rgb_step_{step_idx}",
+                                goal_path)
+                    save_depth(subgoal['observation']['depth'], 
+                                f"depth_step_{step_idx}",
+                                goal_path)
+                    
+                    save_mask(subgoal['observation']['mask'], 
+                                f"masks_step_{step_idx}",
+                                goal_path)
+                    
                     if step_idx < len(actions):
-                        np.save(os.path.join(goal_path, f"action_step_{step_idx}.npy"), actions[step_idx])
+                        # Save as JSON (preferred per TODO)
+                        save_action_json(actions[step_idx], f"action_step_{step_idx}", goal_path)
 
                 # Construct return object
                 current_goal = []
@@ -140,22 +152,27 @@ class RealWorldGarmentFoldingTask():
                 goal = []
                 step_idx = 0
                 while True:
-                    rgb_p = os.path.join(goal_path, f"rgb_step_{step_idx}.png")
-                    act_p = os.path.join(goal_path, f"action_step_{step_idx}.npy")
-
-                    if not os.path.exists(rgb_p):
+                    rgb_filename = f"rgb_step_{step_idx}"
+                    if not os.path.exists(os.path.join(goal_path, rgb_filename + ".png")):
                         break
 
-                    # Load Data
-                    rgb = (plt.imread(rgb_p)*255).astype(np.uint8)
-                    
+                    # Load Images
+                    rgb = load_colour(rgb_filename, goal_path)
+                    depth = load_depth(f"depth_step_{step_idx}", goal_path)
+                    mask = load_mask(f"mask_step_{step_idx}", goal_path)
+
+                    # --- RESOLVED: Load Action (JSON with fallback to NPY) ---
                     action = None
-                    if os.path.exists(act_p):
-                        action = np.load(act_p, allow_pickle=True)
+                    action_filename = f"action_step_{step_idx}"
+                    
+                    # Try loading JSON first
+                    action = load_action_json(action_filename, goal_path)
 
                     subgoal = {
                         'observation': {
                             'rgb': rgb[:, :, :3],
+                            'depth': depth,
+                            'mask': mask
                         },
                         'action': action
                     }

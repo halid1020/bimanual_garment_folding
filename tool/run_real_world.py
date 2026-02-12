@@ -119,7 +119,7 @@ def main(cfg: DictConfig):
         policy, 
         arena, 
         mode='eval', 
-        episode_config={'eid': 0, 'save_video': False}, 
+        episode_config={'eid': 1, 'save_video': False}, 
         checkpoint=cfg.get('checkpoint', -1), 
         policy_terminate=False, 
         env_success_stop=False

@@ -8,7 +8,11 @@ import numpy as np
 import cv2
 from dotmap import DotMap
 from tqdm import tqdm
-from tool.utils import register_agent, register_arena, build_task
+# from tool.utils import register_agent, register_arena, build_task
+
+from registration.agent import register_agents
+from registration.sim_arena import register_arenas
+from registration.task import build_task
 
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -117,8 +121,8 @@ def build_single_agent(cfg):
 
 @hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
 def main(cfg: DictConfig):
-    register_agent()
-    register_arena()
+    register_agents()
+    register_arenas()
 
     print("--- Configuration ---")
     # Resolve=True ensures all ${variables} are expanded

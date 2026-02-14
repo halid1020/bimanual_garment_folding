@@ -8,7 +8,6 @@ import numpy as np
 import cv2
 from dotmap import DotMap
 from tqdm import tqdm
-from tool.utils import register_agent, register_arena, build_task
 
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -17,7 +16,12 @@ import actoris_harena as ag_ar
 from actoris_harena.utilities.perform_parallel \
     import setup_arenas_with_class, step_arenas
 from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-from tool.lagarnet_utils import obs_config, action_config, reward_names, evaluation_names
+
+from registration.agent import register_agents
+from registration.sim_arena import register_arenas
+from registration.task import build_task
+from tool.lagarnet_utils import * 
+
 
 def get_actions(agents, arena_ids, ready_infos, actions):
     """
@@ -28,7 +32,7 @@ def get_actions(agents, arena_ids, ready_infos, actions):
         # Map the info back to the correct agent index using the arena_id
         idx = arena_ids.index(info['arena_id'])
         # Agents act based on the observation
-        ready_actions.append(agents[idx].act([info], update=True)[0]) 
+        ready_actions.append(agents[idx].act([info], updates=[True])[0]) 
     
     # Store actions in the buffer
     for info, a in zip(ready_infos, ready_actions):
@@ -59,6 +63,9 @@ def update_observations(observations, idx, info):
     observations[idx]['goal-rgb'].append(goal_rgb)
     observations[idx]['goal-depth'].append(goal_depth)
     observations[idx]['goal-mask'].append(goal_mask)
+
+    is_success = info.get('success', False)
+    observations[idx]['success'].append(is_success)
     
     for key in reward_names:
         if key in info['reward']:
@@ -77,29 +84,12 @@ def build_single_agent(cfg):
     agent_name = cfg.agent.name
 
     print(f"Building Agent: {agent_name}...")
-
-    # # 2. Configure Agent
-    # if 'oracle' not in agent_name:
-    #     # Retrieve config path details from Hydra, defaulting if missing
-    #     agent_config_name = cfg.agent.get('config_name', 'default')
-    #     # Some agents need the arena name they were trained on
-    #     agent_trained_arena = cfg.agent.get('trained_arena_name', 'default')
-        
-    #     agent_config = ag_ar.retrieve_config(
-    #         agent_name, 
-    #         agent_trained_arena, 
-    #         agent_config_name,
-    #         config_dir='../configuration'
-    #     )
-    # else:
-    #     # Oracles usually just need a flag
-    #     agent_config = DotMap({'oracle': True})
     
     # 3. Build & Setup Logging
     save_dir = os.path.join(cfg.agent_save_root, cfg.agent_exp_name)
     agent = ag_ar.build_agent(
         agent_name, 
-        config=cfg, 
+        config=cfg.agent, 
         save_dir=save_dir)
     
     # Save logs to the experiment directory
@@ -107,7 +97,7 @@ def build_single_agent(cfg):
     
     # 4. Load Checkpoint (if not Oracle)
     if isinstance(agent, ag_ar.TrainableAgent):
-        agent.load()
+        agent.load_best()
             
     return agent
 
@@ -117,8 +107,8 @@ def build_single_agent(cfg):
 
 @hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
 def main(cfg: DictConfig):
-    register_agent()
-    register_arena()
+    register_agents()
+    register_arenas()
 
     print("--- Configuration ---")
     # Resolve=True ensures all ${variables} are expanded
@@ -135,7 +125,6 @@ def main(cfg: DictConfig):
     # But usually it expects a string ID like "softgym|domain:..."
     
     arena_class = ag_ar.get_arena_class(cfg.arena.name)
-    print('arena class', arena_class)
     arenas = setup_arenas_with_class(
         arena_class, cfg.arena,
         num_processes=cfg.parallel_processes)

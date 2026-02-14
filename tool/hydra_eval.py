@@ -4,14 +4,17 @@ import os
 import socket
 import actoris_harena.api as ag_ar
 
-from tool.utils import register_agent, register_arena, build_task
+from registration.agent import register_agents
+from registration.sim_arena import register_arenas
+from registration.task import build_task
+
 
 # 1. Update config_path to point to the root 'conf' directory
 @hydra.main(config_path="../conf", version_base=None)
 def main(cfg: DictConfig):
-    register_agent()
-    register_arena()
-
+    
+    register_agents()
+    register_arenas()
 
     # --- Automatic save_root detection ---
     hostname = socket.gethostname()

@@ -49,7 +49,10 @@ class DualArmArena(Arena):
         self.snap_to_cloth_mask = config.get("snap_to_cloth_mask", False)
         self.init_from = config.get("init_from", "crumpled")
         self.maskout_background = config.get("maskout_background", False)
-
+        self.use_sim_workspace = config.get("use_sim_workspace", False)
+        self.asset_dir = f"{os.environ['MP_FOLD_PATH']}/assets"
+        
+    
         self.current_episode = None
         self.frames = []
         self.all_infos = []
@@ -180,6 +183,31 @@ class DualArmArena(Arena):
         
         self.resized_workspace_mask_0 = cv2.resize(crop_workspace_mask_0, self.resolution, interpolation=cv2.INTER_NEAREST)
         self.resized_workspace_mask_1 = cv2.resize(crop_workspace_mask_1, self.resolution, interpolation=cv2.INTER_NEAREST)
+        
+        input_mask_0 = self.resized_workspace_mask_1.astype(np.bool_)
+        input_mask_1 = self.resized_workspace_mask_0.astype(np.bool_)
+        
+
+        if self.use_sim_workspace:
+            mask_dir = f"{self.asset_dir}/sim_masks/"
+            r0_path = os.path.join(mask_dir, "robot0_mask.png")
+            r1_path = os.path.join(mask_dir, "robot1_mask.png")
+
+            # 1. Load masks
+            raw_mask_0 = cv2.imread(r0_path, cv2.IMREAD_GRAYSCALE)
+            raw_mask_1 = cv2.imread(r1_path, cv2.IMREAD_GRAYSCALE)
+
+            # 2. Resize with LINEAR interpolation to smooth edges (avoids blockiness)
+            # Note: Do not use INTER_NEAREST here if you want smooth curves.
+            resized_0 = cv2.resize(raw_mask_0, self.resolution, interpolation=cv2.INTER_LINEAR)
+            resized_1 = cv2.resize(raw_mask_1, self.resolution, interpolation=cv2.INTER_LINEAR)
+
+            # 3. Threshold to convert back to boolean (0 or 1)
+            # Since Linear interpolation introduces gray values at edges, > 127 cleans it up.
+            input_mask_0 = resized_0 > 127
+            input_mask_1 = resized_1 > 127
+        
+        #print('input mask shape', input_mask_0.shape)
 
         info.update({
             'observation': {
@@ -188,8 +216,8 @@ class DualArmArena(Arena):
                 "mask": resized_mask.astype(np.bool_),
                 "raw_rgb": raw_rgb,
                 "action_step": self.action_step,
-                "robot0_mask": self.resized_workspace_mask_0.astype(np.bool_),
-                "robot1_mask": self.resized_workspace_mask_1.astype(np.bool_),
+                "robot0_mask": input_mask_0,
+                "robot1_mask": input_mask_1 
             },
             
             "eid": self.eid,
@@ -221,6 +249,11 @@ class DualArmArena(Arena):
                 goal = goals[0]
                 info['goal'] = {}
                 for k, v in goal[-1]['observation'].items():
+                    if k == 'rgb' and self.maskout_background and ('mask' in  goal[-1]['observation']):
+                        # apply resized_mask on resized_rgb and resized_depeth.
+                        is_background = goal[-1]['observation']['mask'] == 0
+                        v[is_background] = 0
+
                     info['goal'][k] = v
                     info['observation'][f'goal_{k}'] = v
         
@@ -266,8 +299,8 @@ class DualArmArena(Arena):
                             "mask": mask,
                             "raw_rgb": raw_rgb,
                             "action_step": meta_info.get("action_step", 0),
-                            "robot0_mask": r0_mask,
-                            "robot1_mask": r1_mask,
+                            "robot0_mask": r1_mask,
+                            "robot1_mask": r0_mask,
                         },
                         "eid": meta_info.get("eid", 0),
                         "arena_id": 0,

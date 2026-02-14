@@ -383,8 +383,28 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #     COLOR JITTER (GLOBAL)
         # =========================
         
+        # if self.color_jitter and train:
+        #     obs = self.color_aug(obs)
+
+        
         if self.color_jitter and train:
-            obs = self.color_aug(obs)
+            if self.use_goal:
+                # 1. Store the original batch size of obs
+                N_obs = obs.shape[0]
+                
+                # 2. Concatenate obs and goal along the batch dimension
+                # This treats them as one large batch so they share the augmentation state
+                combined = torch.cat([obs, goal_obs], dim=0)
+                
+                # 3. Apply augmentation
+                combined = self.color_aug(combined)
+                
+                # 4. Split back into obs and goal
+                obs = combined[:N_obs]
+                goal_obs = combined[N_obs:]
+            else:
+                # Standard behavior if no goal is used
+                obs = self.color_aug(obs)
         
         # =========================
         #   RANDOM CHANNEL PERMUTATION
@@ -393,6 +413,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             # Generate ONE permutation for the whole batch
             perm = torch.randperm(3, device=obs.device)
             obs = obs[:, perm, :, :]
+            if self.use_goal:
+                goal_obs = goal_obs[:, perm, :, :]
 
         # =========================
         #       RGB NOISE

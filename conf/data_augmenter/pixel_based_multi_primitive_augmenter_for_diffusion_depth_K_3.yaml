@@ -1,0 +1,28 @@
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: true
+rotation_degree: 1
+vertical_flip: true
+debug: true
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: true
+K: 3
+use_workspace: false
+
+
+depth_clip: True
+depth_clip_min: 1.8 #
+depth_clip_max: 2.0 #0.66
+depth_min: 1.8
+depth_max: 2.0 ### soft min max. in the result the cloth will occpise all range of the values.
+depth_map: True
+depth_map_range: [0, 1]
+depth_blur: True
+depth_flip: True
+depth_blur_kernel_size: 2
+depth_noise_var: 0.01
+maskout: True
+bg_value: 0
+min_max_norm: True
+process_depth_for_eval: True

@@ -51,7 +51,7 @@ case $JOB_TYPE in
 esac
 
 # Define paths
-OUT_DIR="/data/ah390/exp_logs"
+OUT_DIR="$HOME/exp_logs"
 SUBMIT_SCRIPT="${OUT_DIR}/submit_${JOB_TYPE}_${EXP_NAME}.sh"
 mkdir -p "$OUT_DIR"
 

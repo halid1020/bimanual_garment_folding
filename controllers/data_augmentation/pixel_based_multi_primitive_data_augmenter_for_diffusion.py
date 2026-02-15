@@ -9,7 +9,6 @@ import kornia.augmentation as K
 from actoris_harena.torch_utils import np_to_ts, ts_to_np
 from .utils import randomize_primitive_encoding, gaussian_kernel 
 
-
 def rotate_points_torch(points, R):
     return points @ R.T
 
@@ -81,30 +80,140 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
     def _unflatten_bt(self, x, B, T):
         return x.reshape(B, T, *x.shape[1:])
 
-    def _save_debug_image(self, img, pts, prefix, step):
+    # ... _process_depth and postprocess remain unchanged ...
+    def _process_depth(self, depth, mask=None, train=False):
+        # (Same as original code)
+        B, T, C, H, W = depth.shape
+        if self.config.get('depth_clip', False):
+            depth = depth.clip(self.config.depth_clip_min, self.config.depth_clip_max)
+        
+        if self.config.get('z_norm', False):
+            depth = (depth - self.config.z_norm_mean) / self.config.z_norm_std
+        elif self.config.get('min_max_norm', False):
+            depth_flat = depth.reshape(B, T, -1)
+            depth_min = depth_flat.min(dim=2, keepdim=True).values
+            depth_max = depth_flat.max(dim=2, keepdim=True).values
+
+            if self.config.get('depth_hard_interval', False):
+                depth_min[:] = self.config.depth_min
+                depth_max[:] = self.config.depth_max
+            else:
+                cfg_min = torch.tensor(self.config.depth_min, device=depth.device).view(1, 1, 1)
+                cfg_max = torch.tensor(self.config.depth_max, device=depth.device).view(1, 1, 1)
+                depth_min = torch.max(depth_min, cfg_min)
+                depth_max = torch.min(depth_max, cfg_max)
+
+            depth_min = depth_min.view(B, T, 1, 1, 1)
+            depth_max = depth_max.view(B, T, 1, 1, 1)
+            depth = (depth - depth_min) / (depth_max - depth_min + 1e-6)
+            
+            if self.depth_flip:
+                depth = 1 - depth
+        
+        depth_noise = torch.randn(depth.shape, device=depth.device) * \
+                      (self.depth_noise_var if train else 0)
+
+        if self.depth_blur and train:
+            if self.kernel.device != depth.device:
+                self.kernel = self.kernel.to(depth.device)
+            depth_reshaped = depth.view(B * T, C, H, W)
+            blurred_depth = F.conv2d(depth_reshaped, self.kernel, padding=self.padding, groups=C)
+            blurred_depth = blurred_depth[:, :, :H, :W]
+            depth = blurred_depth.reshape(B, T, C, H, W)
+            
+            depth_flat = depth.reshape(B, T, -1)
+            depth_min = depth_flat.min(dim=2, keepdim=True).values.view(B, T, 1, 1, 1)
+            depth_max = depth_flat.max(dim=2, keepdim=True).values.view(B, T, 1, 1, 1)
+            depth = (depth - depth_min) / (depth_max - depth_min + 1e-6)
+
+        if self.apply_depth_noise_on_mask and (mask is not None) and train:
+            depth_noise *= mask
+            
+        depth += depth_noise
+        depth = depth.clip(0, 1)
+        
+        if self.config.get('depth_map', False):
+            map_diff = self.config.depth_map_range[1] - self.config.depth_map_range[0]
+            depth = depth * map_diff + self.config.depth_map_range[0]
+        
+        return depth
+    
+    def postprocess(self, sample):
+        res = {}
+        for k, v in sample.items():
+            if isinstance(v, torch.Tensor):
+                res[k] = ts_to_np(v)
+            else:
+                res[k] = v
+        if 'rgb' in res:
+            res['rgb'] = (res['rgb'].clip(0, 1) * 255).astype(np.int8)
+        if 'action' in res:
+            res['action'] = res['action'].clip(-1, 1)
+        return res
+
+    
+    def _save_debug_image(self, img, pts, orients=None, prefix="", step=0):
         """
-        img: (H,W,C) float (cpu numpy). Can be 1 channel (depth) or 3 channel (rgb)
-        pts: (N,2) in [-1,1]
+        img: (H,W,C) float (cpu numpy). 
+        pts: (N, 4) -> [pick_y, pick_x, place_y, place_x]  OR (N, 2)
+        orients: (N, 1) -> normalized angle [-1, 1] (optional)
         """
         save_dir = "./tmp/augment_debug"
         os.makedirs(save_dir, exist_ok=True)
 
         H, W, C = img.shape
-        pts = pts.reshape(-1, 2)
-
-        xs = (pts[:, 1] + 1) * W / 2
-        ys = (pts[:, 0] + 1) * H / 2
-
+        # Ensure pts is 2D array
+        pts = pts.reshape(-1, pts.shape[-1])
+        
         plt.figure(figsize=(4, 4))
         
         if C == 1:
-            # Depth image: squeeze channel and use colormap
             plt.imshow(img.squeeze(-1), cmap='viridis')
         else:
-            # RGB image
             plt.imshow(img)
             
-        plt.scatter(xs, ys, c='red', s=12)
+        # Helper to denormalize
+        def to_pix(y_norm, x_norm):
+            x = (x_norm + 1) * W / 2
+            y = (y_norm + 1) * H / 2
+            return x, y
+
+        # Logic for Pick (Green) + Place (Red) + Orientation (Line)
+        if pts.shape[1] == 4:
+            # We have [y1, x1, y2, x2]
+            pick_y, pick_x = pts[:, 0], pts[:, 1]
+            place_y, place_x = pts[:, 2], pts[:, 3]
+            
+            px_start, py_start = to_pix(pick_y, pick_x)
+            px_end, py_end = to_pix(place_y, place_x)
+            
+            # Plot Pick
+            plt.scatter(px_start, py_start, c='lime', s=25, edgecolors='black', label='Pick')
+            # Plot Place
+            plt.scatter(px_end, py_end, c='red', s=25, edgecolors='black', label='Place')
+            
+            # Plot Orientation Arrow on Place Point
+            if orients is not None:
+                # orients is normalized [-1, 1] -> [-pi, pi]
+                thetas = orients.flatten() * np.pi
+                
+                arrow_len = min(H, W) * 0.1 # Arrow length is 10% of image size
+                
+                for i in range(len(px_end)):
+                    # Calculate arrow tip
+                    # Note: In image coords, Y is down. Standard trig assumes Y up.
+                    # Usually cos/sin works fine relative to the image grid unless coord system is flipped.
+                    dx = arrow_len * np.cos(thetas[i])
+                    dy = arrow_len * np.sin(thetas[i])
+                    
+                    plt.plot([px_end[i], px_end[i] + dx], 
+                             [py_end[i], py_end[i] + dy], 
+                             color='cyan', linewidth=2)
+        else:
+            # Fallback for simple (N, 2) points
+            xs, ys = to_pix(pts[:, 0], pts[:, 1])
+            plt.scatter(xs, ys, c='red', s=12)
+
         plt.axis('off')
         plt.savefig(f"{save_dir}/{prefix}_step{step}.png", bbox_inches='tight', pad_inches=0)
         plt.close()
@@ -118,7 +227,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             else:
                 sample[k] = v.to(device)
 
-        # 2. Extract combined keys (Workspace/Goal/Masks)
+        # 2. Extract combined keys
         if self.use_workspace and 'rgb-workspace-mask' in sample:
             sample['rgb'] = sample['rgb-workspace-mask'][:, :, :, :, :3]
             sample['robot0_mask'] = sample['rgb-workspace-mask'][:, :, :, :, 3:4]
@@ -134,45 +243,28 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
         
-        # if "rgb" not in sample:
-        #     raise KeyError("sample must contain 'rgb'")
-        
         if train and "action" not in sample:
             raise KeyError("sample must contain 'action'")
         
-        # --- Prepare batch info ---
-        # We need B and T early to unflatten depth for processing
-  
         # =========================
-        #    DEPTH PROCESSING (Intensity) - DONE FIRST
+        #    DEPTH PROCESSING
         # =========================
         do_process_depth = train or self.process_depth_for_eval
-        
         
         use_depth = 'depth' in sample
         if use_depth:
             depth_t = sample['depth'].float()
-            if depth_t.ndim == 4: # B,T,H,W -> B,T,H,W,1
+            if depth_t.ndim == 4: 
                 depth_t = depth_t.unsqueeze(-1)
-            #print('depth_t shape', depth_t.shape)
             B, T, H, W, C  = depth_t.shape
             
-            # Apply processing (Norm, Noise, Blur) BEFORE flattening/geometric augs
-            # Expected input to _process_depth is (B, T, C, H, W)
+            # Permute for process_depth expected input
+            depth_t = depth_t.permute(0, 1, 4, 2, 3) 
             mask_reshaped = None 
-            # Note: depth_t is already (B, T, H, W, 1) or (B, T, H, W). 
-            # We need to ensure channel dim is correct for internal logic if it expects (B,T,C,H,W)
-            # The current _process_depth implementation expects (B, T, C, H, W).
-            # So we permute:
-            depth_t = depth_t.permute(0, 1, 4, 2, 3) # (B, T, 1, H, W)
-            
             processed_depth = self._process_depth(depth_t, mask=mask_reshaped, train=do_process_depth)
             
-            # Permute back to (B, T, H, W, 1) to match the rest of the flattening logic below
             processed_depth = processed_depth.permute(0, 1, 3, 4, 2)
-            
-            # Flatten for geometric pipeline
-            depth_obs, BB, TT = self._flatten_bt(processed_depth) # (B*T, H, W, 1)
+            depth_obs, BB, TT = self._flatten_bt(processed_depth) 
         
         use_goal_depth = 'goal-depth' in sample
         if use_goal_depth and self.use_goal:
@@ -180,8 +272,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             if goal_depth_t.ndim == 4:
                 goal_depth_t = goal_depth_t.unsqueeze(-1)
                 
-            # Process Goal Depth
-            goal_depth_t = goal_depth_t.permute(0, 1, 4, 2, 3) # (B, T, 1, H, W)
+            goal_depth_t = goal_depth_t.permute(0, 1, 4, 2, 3) 
             goal_mask_reshaped = None
             processed_goal_depth = self._process_depth(goal_depth_t, mask=goal_mask_reshaped, train=do_process_depth)
             
@@ -193,7 +284,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if use_rgb:
             rgb_obs = sample["rgb"].float() / 255.0 
             rgb_obs, BB, TT = self._flatten_bt(rgb_obs) 
-            #B = rgb_obs.shape[0]
             B, H, W, _ = rgb_obs.shape
         
         if self.use_goal and 'goal_rgb' in sample:
@@ -206,36 +296,41 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             robot0_mask, _, _ = self._flatten_bt(robot0_mask)
             robot1_mask, _, _ = self._flatten_bt(robot1_mask)
 
+        # ------------------------------------------------------------------
+        # NEW: Handle Action Extraction
+        # ------------------------------------------------------------------
         if train:
             action = sample["action"]
             act, _, _ = self._flatten_bt(action)
-            pixel_actions = act[:, 1:] if self.K != 0 else act
+            
+            # Detect 5D action case: [PickY, PickX, PlaceY, PlaceX, Orientation]
+            self.has_orientation = (self.K == 0 and act.shape[-1] == 5)
+            
+            if self.has_orientation:
+                # Split spatial coordinates from orientation
+                pixel_actions = act[:, :4]  # (B, 4) -> [y1, x1, y2, x2]
+                orient_actions = act[:, 4:] # (B, 1) -> [theta] in [-1, 1]
+            else:
+                pixel_actions = act[:, 1:] if self.K != 0 else act
+                orient_actions = None
 
         # --- DEBUG: Plot Before (Geometric) Augmentation ---
-        # Note: Depth is already normalized [0, 1] here due to processing above
         if self.debug:
             n_show = min(4, B)
             for b in range(n_show):
-                pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,2))
-                # RGB
+                pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
+                
+                # Extract orientation for debug if it exists
+                oa_cpu = orient_actions[b].cpu().numpy() if (train and self.has_orientation) else None
+                
                 if use_rgb:
-                   
                     cpu_img = (rgb_obs[b].cpu().numpy()).astype(np.float32)
-                    
-                    self._save_debug_image(cpu_img, pa_cpu, prefix="aug_before_rgb", step=b)
-                    
-                # Depth
-                if use_depth:
-                    d_img = depth_obs[b].cpu().numpy().astype(np.float32)
-                    # Depth is already [0, 1], so we don't need complex clipping for visualization
-                    # Just ensure it's valid for imshow
-                    self._save_debug_image(d_img, pa_cpu, prefix="aug_before_depth", step=b)
+                    self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, prefix="aug_before_rgb", step=b)
 
         # =========================
         #       RANDOM CROP
         # =========================
         if self.random_crop and train:
-            
             scale = random.uniform(self.crop_scale[0], self.crop_scale[1])
             new_h = int(H * scale)
             new_w = int(W * scale)
@@ -247,20 +342,17 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
             if use_rgb:
                 rgb_obs = rgb_obs[:, top:top+new_h, left:left+new_w, :]
-                
             if self.use_goal and 'goal_rgb' in sample: 
                 goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
-            
             if self.use_workspace:
                 robot0_mask = robot0_mask[:, top:top+new_h, left:left+new_w, :]
                 robot1_mask = robot1_mask[:, top:top+new_h, left:left+new_w, :]
-            
             if use_depth:
                 depth_obs = depth_obs[:, top:top+new_h, left:left+new_w, :]
             if use_goal_depth and self.use_goal:
                 goal_depth_obs = goal_depth_obs[:, top:top+new_h, left:left+new_w, :]
 
-            # Adjust Actions
+            # Adjust Actions (Spatial Only)
             B_act, A_act = pixel_actions.shape
             pixel_actions = pixel_actions.reshape(-1, 2)
             act_y_pixel = (pixel_actions[:, 0] + 1.0) * (H / 2.0)
@@ -276,7 +368,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         def resize_tensor(t, mode='bilinear'):
             t = t.permute(0, 3, 1, 2).contiguous()
-            # FIX: align_corners must be None if mode is 'nearest'
             align = False if mode != 'nearest' else None
             return F.interpolate(t, size=tuple(self.config.img_dim), mode=mode, align_corners=align)
         
@@ -297,7 +388,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             degree = self.config.rotation_degree * torch.randint(
                 int(360 / self.config.rotation_degree), size=(1,)
             )
-            thetas = torch.deg2rad(degree)
+            thetas = torch.deg2rad(degree) # Scalar tensor
             cos_theta = torch.cos(thetas)
             sin_theta = torch.sin(thetas)
 
@@ -306,12 +397,29 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             ], dim=0).to(device)
             rot_inv = rot.transpose(-1, -2)
 
+            # Spatial Rotation
             B_act, A_act = pixel_actions.shape
-            pixel_actions_ = pixel_actions.reshape(-1, 1, 2)
-            rotation_matrices_tensor = rot_inv.expand(pixel_actions_.shape[0], 2, 2).reshape(-1, 2, 2)
+            pixel_actions_ = pixel_actions.reshape(-1, 1, 2).float()
+            rotation_matrices_tensor = rot_inv.expand(pixel_actions_.shape[0], 2, 2).reshape(-1, 2, 2).float()
             rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B_act, A_act)
             rotated_action = rotated_action.clip(-1+1e-6, 1-1e-6)
             
+            # --- Orientation Rotation ---
+            if self.has_orientation:
+                # Convert normalized [-1, 1] to radians [-pi, pi]
+                angle_rad = orient_actions * np.pi
+                
+                # Update angle
+                rotation_rad = thetas.to(device)
+                angle_rad = angle_rad - rotation_rad
+                
+                # Wrap to [-pi, pi]
+                angle_rad = (angle_rad + np.pi) % (2 * np.pi) - np.pi
+                
+                # Convert back to normalized [-1, 1]
+                orient_actions = angle_rad / np.pi
+            # ----------------------------
+
             if use_rgb:
                 B_img, C, H, W = rgb_obs.shape
                 affine_matrix = torch.zeros(B_img, 2, 3, device=device)
@@ -333,6 +441,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #      VERTICAL FLIP
         # =========================
         if self.vertical_flip and (random.random() < 0.5) and train:
+            # Flip Images
             if use_rgb: rgb_obs = torch.flip(rgb_obs, [2])
             if self.use_workspace:
                 robot0_mask = torch.flip(robot0_mask, [2])
@@ -340,9 +449,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             if use_depth:
                 depth_obs = torch.flip(depth_obs, [2])
 
+            # Flip Spatial Actions (Invert Y)
             pixel_actions = pixel_actions.reshape(-1, 2)
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(BB*(TT-1), -1)
+            
+            # --- Flip Orientation ---
+            if self.has_orientation:
+                orient_actions = -orient_actions
+            # ------------------------
 
         # =========================
         #   GOAL TRANSFORMATIONS
@@ -403,16 +518,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if self.debug:
             n_show = min(4, B)
             for b in range(n_show):
-                # RGB
+                # Extract orientation for debug if it exists
+                oa_cpu = orient_actions[b].cpu().numpy() if (train and self.has_orientation) else None
+                
                 if use_rgb:
-                    cpu_img = rgb_obs[b].permute(1, 2, 0).cpu().numpy() # H,W,3
-                    pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,2))
-                    self._save_debug_image(cpu_img, pa_cpu, prefix="aug_after_rgb", step=b)
-                    
-                # Depth (Note: depth_obs is B*T, C, H, W. Permute to H,W,C)
-                if use_depth:
-                    d_img = depth_obs[b].permute(1, 2, 0).cpu().numpy().astype(np.float32)
-                    self._save_debug_image(d_img, pa_cpu, prefix="aug_after_depth", step=b)
+                    cpu_img = rgb_obs[b].permute(1, 2, 0).cpu().numpy() 
+                    pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
+                    self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, prefix="aug_after_rgb", step=b)
 
         # =========================
         #      RESHAPE BACK
@@ -446,7 +558,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)
-            if self.K != 0:
+            
+            # --- Recombine Spatial + Orientation ---
+            if self.has_orientation:
+                orient_actions = self._unflatten_bt(orient_actions, BB, TT-1)
+                full_action = torch.cat([pixel_actions, orient_actions], dim=-1)
+            elif self.K != 0:
                 prim_acts = action[..., :1]
                 if self.randomise_prim_acts:            
                     prim_acts = randomize_primitive_encoding(
@@ -455,78 +572,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 full_action = torch.cat([prim_acts, pixel_actions], dim=-1)
             else:
                 full_action = pixel_actions
+                
             sample["action"] = full_action.to(device)
 
         return sample
-
-    def _process_depth(self, depth, mask=None, train=False):
-        # Implementation same as provided previously...
-        # depth shape expected here: (B, T, C, H, W)
-        B, T, C, H, W = depth.shape
-        if self.config.get('depth_clip', False):
-            depth = depth.clip(self.config.depth_clip_min, self.config.depth_clip_max)
-        
-        if self.config.get('z_norm', False):
-            depth = (depth - self.config.z_norm_mean) / self.config.z_norm_std
-        elif self.config.get('min_max_norm', False):
-            depth_flat = depth.reshape(B, T, -1)
-            depth_min = depth_flat.min(dim=2, keepdim=True).values
-            depth_max = depth_flat.max(dim=2, keepdim=True).values
-
-            if self.config.get('depth_hard_interval', False):
-                depth_min[:] = self.config.depth_min
-                depth_max[:] = self.config.depth_max
-            else:
-                cfg_min = torch.tensor(self.config.depth_min, device=depth.device).view(1, 1, 1)
-                cfg_max = torch.tensor(self.config.depth_max, device=depth.device).view(1, 1, 1)
-                depth_min = torch.max(depth_min, cfg_min)
-                depth_max = torch.min(depth_max, cfg_max)
-
-            depth_min = depth_min.view(B, T, 1, 1, 1)
-            depth_max = depth_max.view(B, T, 1, 1, 1)
-            depth = (depth - depth_min) / (depth_max - depth_min + 1e-6)
-            
-            if self.depth_flip:
-                depth = 1 - depth
-        
-        depth_noise = torch.randn(depth.shape, device=depth.device) * \
-                      (self.depth_noise_var if train else 0)
-
-        if self.depth_blur and train:
-            if self.kernel.device != depth.device:
-                self.kernel = self.kernel.to(depth.device)
-            depth_reshaped = depth.view(B * T, C, H, W)
-            blurred_depth = F.conv2d(depth_reshaped, self.kernel, padding=self.padding, groups=C)
-            blurred_depth = blurred_depth[:, :, :H, :W]
-            depth = blurred_depth.reshape(B, T, C, H, W)
-            
-            # Renormalize after blur
-            depth_flat = depth.reshape(B, T, -1)
-            depth_min = depth_flat.min(dim=2, keepdim=True).values.view(B, T, 1, 1, 1)
-            depth_max = depth_flat.max(dim=2, keepdim=True).values.view(B, T, 1, 1, 1)
-            depth = (depth - depth_min) / (depth_max - depth_min + 1e-6)
-
-        if self.apply_depth_noise_on_mask and (mask is not None) and train:
-            depth_noise *= mask
-            
-        depth += depth_noise
-        depth = depth.clip(0, 1)
-        
-        if self.config.get('depth_map', False):
-            map_diff = self.config.depth_map_range[1] - self.config.depth_map_range[0]
-            depth = depth * map_diff + self.config.depth_map_range[0]
-        
-        return depth
-    
-    def postprocess(self, sample):
-        res = {}
-        for k, v in sample.items():
-            if isinstance(v, torch.Tensor):
-                res[k] = ts_to_np(v)
-            else:
-                res[k] = v
-        if 'rgb' in res:
-            res['rgb'] = (res['rgb'].clip(0, 1) * 255).astype(np.int8)
-        if 'action' in res:
-            res['action'] = res['action'].clip(-1, 1)
-        return res

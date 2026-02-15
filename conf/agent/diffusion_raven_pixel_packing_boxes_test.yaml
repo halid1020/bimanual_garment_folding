@@ -10,7 +10,7 @@ input_obs: 'rgb'
 use_mask: False
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 10
+num_demos: 2
 batch_size: 64
 disable_updown: True
 collect_on_success: False # This is important!
@@ -27,7 +27,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "raven_pixel_packing_boxes_oracle_demo_lower_camera"
+  data_path: "raven_pixel_packing_boxes_oracle_test"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
@@ -66,4 +66,4 @@ dataset_config:
 
 primitive_integration: 'none'
 
-data_augmenter: multi_primitive_augmenter_for_diffusion_K_0
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_K_0_debug

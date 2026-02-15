@@ -9,4 +9,4 @@ add_final_goal_to_obs: True
 snap_to_mask: True
 camera_height: 0.8
 maskout_background: True
-debug: false
+debug: true

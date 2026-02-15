@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 from dotmap import DotMap
 from tqdm import tqdm
+import copy
 
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -64,15 +65,19 @@ def update_observations(observations, idx, info):
     observations[idx]['goal-depth'].append(goal_depth)
     observations[idx]['goal-mask'].append(goal_mask)
 
-    is_success = info.get('success', False)
-    observations[idx]['success'].append(is_success)
+    # --- UPDATED LOGIC ---
+    # Only append success if the key exists in the observation buffer
+    if 'success' in observations[idx]:
+        is_success = info.get('success', False)
+        observations[idx]['success'].append(is_success)
+    # ---------------------
     
     for key in reward_names:
-        if key in info['reward']:
+        if key in info['reward'] and key in observations[idx]:
             observations[idx][key].append(info['reward'][key])
             
     for key in evaluation_names:
-        if key in info['evaluation']:
+        if key in info['evaluation'] and key in observations[idx]:
             observations[idx][key].append(info['evaluation'][key])
 
 def build_single_agent(cfg):
@@ -104,26 +109,35 @@ def build_single_agent(cfg):
 # -------------------------------------------------------------------------
 # Main Execution
 # -------------------------------------------------------------------------
-
 @hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
 def main(cfg: DictConfig):
     register_agents()
     register_arenas()
 
     print("--- Configuration ---")
-    # Resolve=True ensures all ${variables} are expanded
     print(OmegaConf.to_yaml(cfg, resolve=True))
     print("---------------------")
 
     ray.init(ignore_reinit_error=True)
 
+    # --- NEW: Modify obs_config based on config name ---
+    # Create a local copy to avoid modifying the global import
+    local_obs_config = copy.deepcopy(obs_config)
+    
+    # Attempt to retrieve the Hydra config name
+    try:
+        hydra_conf_name = HydraConfig.get().job.config_name
+    except:
+        hydra_conf_name = ""
+
+    # Check config name OR data_path for 'mask-biased'
+    if 'mask-biased' in hydra_conf_name or 'mask-biased' in cfg.get('data_path', ''):
+        print("!!! 'mask-biased' detected: Removing 'success' from observation config !!!")
+        if 'success' in local_obs_config:
+            del local_obs_config['success']
+    # ---------------------------------------------------
+
     # 1. Setup Arenas
-    # IMPORTANT: setup_arenas usually expects a String ID or a Config Dict depending on implementation.
-    # We pass cfg.arena.name (the registry string) if available, otherwise we might pass the dict.
-    
-    # Note: If setup_arenas expects the Hydra DictConfig, you might need: setup_arenas(cfg.arena, ...)
-    # But usually it expects a string ID like "softgym|domain:..."
-    
     arena_class = ag_ar.get_arena_class(cfg.arena.name)
     arenas = setup_arenas_with_class(
         arena_class, cfg.arena,
@@ -133,23 +147,19 @@ def main(cfg: DictConfig):
 
     process = []
     for i, arena in enumerate(arenas):
-        # Assuming arena is a Ray actor
         arena_id = arena._actor_id.hex()
         print(f"Actor {i} Ray ID: {arena_id}")
         process.append(arena.set_id.remote(arena_id))
         process.append(arena.set_train.remote())
     
-    # Wait for initialization
     ray.get(process)
 
     # Get IDs for mapping
     arena_ids = ray.get([e.get_id.remote() for e in arenas])
     
     # 2. Setup Agents
-    # We rebuild the agent for every process to ensure they are independent
     if cfg.single_agent:
         print('--- Single Agent Mode ---')
-        # Build one agent and share it (not recommended for stateful agents in parallel)
         agent = build_single_agent(cfg)
         agents = [agent for _ in range(len(arenas))]
         agent.reset(arena_ids)
@@ -160,16 +170,16 @@ def main(cfg: DictConfig):
             agent.reset([arena_ids[i]])
     
     # 3. Initialize Buffers
-    observations = [{k: [] for k in obs_config.keys()} for _ in range(len(arenas))]
+    # Use local_obs_config here so the buffer doesn't have the 'success' key if removed
+    observations = [{k: [] for k in local_obs_config.keys()} for _ in range(len(arenas))]
     actions = [{'norm-pixel-pick-and-place': []} for _ in range(len(arenas))]
 
     # 4. Dataset Setup
-    #os.makedirs(cfg.data_dir, exist_ok=True) # TODO: this need to be in the TrajectoryDataset class
     dataset = TrajectoryDataset(
         data_path=cfg.data_path,
         data_dir=cfg.data_dir,
         io_mode='a',
-        obs_config=obs_config,
+        obs_config=local_obs_config, # Pass the modified config
         act_config=action_config,
         whole_trajectory=True
     )
@@ -183,9 +193,7 @@ def main(cfg: DictConfig):
     existing_trajs = dataset.num_trajectories()
     print(f'Starting with {existing_trajs} existing trajectories.')
     
-    # Progress bar tracks NEW trajectories
     pbar = tqdm(total=cfg.trials, desc='Collecting Trajectories')
-    # If you want to include existing count in bar: pbar.update(existing_trajs)
     
     while dataset.num_trajectories() < cfg.trials:
         
@@ -211,22 +219,18 @@ def main(cfg: DictConfig):
                 dataset.add_trajectory(observations[idx], actions[idx])
                 pbar.update(1)
                 
-                # Reset Buffers
-                observations[idx] = {k: [] for k in obs_config.keys()}
+                # Reset Buffers (using local_obs_config keys)
+                observations[idx] = {k: [] for k in local_obs_config.keys()}
                 actions[idx] = {'norm-pixel-pick-and-place': []}
                 
-                # Remove from ready list so it doesn't get stepped immediately
                 ready_arenas.remove(arenas[idx])
                 
-                # Reset Agent Logic
                 if cfg.single_agent:
                     agents[idx].reset([arena_id])
                 else:
-                    # Rebuild/Reset agent to clear internal state
                     agents[idx] = build_single_agent(cfg)
                     agents[idx].reset([arena_id])
                 
-                # Queue Environment Reset
                 waiting_infos.append(arenas[idx].reset.remote())
             else:
                 new_ready_infos.append(info)

@@ -8,6 +8,7 @@ import actoris_harena.api as ag_ar
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
 from registration.task import build_task
+from tool.utils import resolve_save_root
 
 from env.parallel import Parallel
 
@@ -16,17 +17,8 @@ def main(cfg: DictConfig):
     register_agents()
     register_arenas()
 
-    # --- Automatic save_root detection ---
-    hostname = socket.gethostname()
-    
-    if "pc282" in hostname:
-        new_save_root = '/media/hcv530/T7/garment_folding_data'
-    elif "thanos" in hostname:
-        new_save_root = '/data/ah390/bimanual_garment_folding'
-    elif "viking" in hostname:
-        new_save_root = '/mnt/scratch/users/hcv530/garment_folding_data'
-    else:
-        new_save_root = cfg.save_root # Fallback to config default
+    new_save_root = resolve_save_root(cfg.save_root)
+    print(f"[tool.hydra_train] Using Save Root: {cfg.save_root}")
 
     # Update the config object (must unset 'struct' to modify)
     OmegaConf.set_struct(cfg, False)
@@ -34,11 +26,9 @@ def main(cfg: DictConfig):
     OmegaConf.set_struct(cfg, True)
     # -------------------------------------
 
-    print("--- Configuration ---")
+    print("[tool.hydra_train] --- Configuration ---")
     print(OmegaConf.to_yaml(cfg, resolve=True))
-    print(f"Detected Host: {hostname}")
-    print(f"Using Save Root: {cfg.save_root}")
-    print("---------------------")
+    print("[tool.hydra_train] ---------------------")
 
     save_dir = os.path.join(cfg.save_root, cfg.exp_name)
 

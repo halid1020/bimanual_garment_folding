@@ -917,7 +917,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
     def _process_info(self, info):
         #print('[Diffions, _process info]', info['observation'].keys())
         if 'depth' in info['observation'].keys():
-            depth = info['observation']['depth'][0] #get the view from first camera.
+            depth = info['observation']['depth'] #get the view from first camera.
 
             if len(depth.shape) == 2:
                 depth = np.expand_dims(depth, axis=-1)

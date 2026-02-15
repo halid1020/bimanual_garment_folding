@@ -134,26 +134,28 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
         
-        if "rgb" not in sample:
-            raise KeyError("sample must contain 'rgb'")
+        # if "rgb" not in sample:
+        #     raise KeyError("sample must contain 'rgb'")
         
         if train and "action" not in sample:
             raise KeyError("sample must contain 'action'")
         
         # --- Prepare batch info ---
         # We need B and T early to unflatten depth for processing
-        B, T = sample['rgb'].shape[:2]
-        
+  
         # =========================
         #    DEPTH PROCESSING (Intensity) - DONE FIRST
         # =========================
         do_process_depth = train or self.process_depth_for_eval
+        
         
         use_depth = 'depth' in sample
         if use_depth:
             depth_t = sample['depth'].float()
             if depth_t.ndim == 4: # B,T,H,W -> B,T,H,W,1
                 depth_t = depth_t.unsqueeze(-1)
+            print('depth_t shape', depth_t.shape)
+            B, T, H, W, C  = depth_t.shape
             
             # Apply processing (Norm, Noise, Blur) BEFORE flattening/geometric augs
             # Expected input to _process_depth is (B, T, C, H, W)
@@ -170,7 +172,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             processed_depth = processed_depth.permute(0, 1, 3, 4, 2)
             
             # Flatten for geometric pipeline
-            depth_obs, _, _ = self._flatten_bt(processed_depth) # (B*T, H, W, 1)
+            depth_obs, BB, TT = self._flatten_bt(processed_depth) # (B*T, H, W, 1)
         
         use_goal_depth = 'goal-depth' in sample
         if use_goal_depth and self.use_goal:
@@ -187,8 +189,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             goal_depth_obs, _, _ = self._flatten_bt(processed_goal_depth)
 
         # 3. Flatten and basic prep for RGB
-        observation = sample["rgb"].float() / 255.0 
-        obs, BB, TT = self._flatten_bt(observation) 
+        use_rgb = 'rgb' in sample
+        if use_rgb:
+            rgb_obs = sample["rgb"].float() / 255.0 
+            rgb_obs, BB, TT = self._flatten_bt(rgb_obs) 
+            #B = rgb_obs.shape[0]
+            B, H, W, _ = rgb_obs.shape
         
         if self.use_goal and 'goal_rgb' in sample:
             goal_obs = sample['goal_rgb'].float() / 255.0
@@ -208,13 +214,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # --- DEBUG: Plot Before (Geometric) Augmentation ---
         # Note: Depth is already normalized [0, 1] here due to processing above
         if self.debug:
-            n_show = min(4, obs.shape[0])
+            n_show = min(4, B)
             for b in range(n_show):
-                # RGB
-                cpu_img = (obs[b].cpu().numpy()).astype(np.float32)
                 pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,2))
-                self._save_debug_image(cpu_img, pa_cpu, prefix="aug_before_rgb", step=b)
-                
+                # RGB
+                if use_rgb:
+                   
+                    cpu_img = (rgb_obs[b].cpu().numpy()).astype(np.float32)
+                    
+                    self._save_debug_image(cpu_img, pa_cpu, prefix="aug_before_rgb", step=b)
+                    
                 # Depth
                 if use_depth:
                     d_img = depth_obs[b].cpu().numpy().astype(np.float32)
@@ -226,7 +235,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #       RANDOM CROP
         # =========================
         if self.random_crop and train:
-            _, H, W, _ = obs.shape
+            
             scale = random.uniform(self.crop_scale[0], self.crop_scale[1])
             new_h = int(H * scale)
             new_w = int(W * scale)
@@ -236,8 +245,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             top = random.randint(0, H - new_h)
             left = random.randint(0, W - new_w)
 
-            obs = obs[:, top:top+new_h, left:left+new_w, :]
-            
+            if use_rgb:
+                rgb_obs = rgb_obs[:, top:top+new_h, left:left+new_w, :]
+                
             if self.use_goal and 'goal_rgb' in sample: 
                 goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
             
@@ -269,8 +279,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             # FIX: align_corners must be None if mode is 'nearest'
             align = False if mode != 'nearest' else None
             return F.interpolate(t, size=tuple(self.config.img_dim), mode=mode, align_corners=align)
-
-        obs = resize_tensor(obs)
+        
+        if use_rgb: rgb_obs = resize_tensor(rgb_obs)
         if self.use_goal and 'goal_rgb' in sample: goal_obs = resize_tensor(goal_obs)
         if self.use_workspace:
             robot0_mask = resize_tensor(robot0_mask, mode='nearest')
@@ -302,15 +312,18 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             rotated_action = torch.bmm(pixel_actions_, rotation_matrices_tensor).reshape(B_act, A_act)
             rotated_action = rotated_action.clip(-1+1e-6, 1-1e-6)
             
-            B_img, C, H, W = obs.shape
-            affine_matrix = torch.zeros(B_img, 2, 3, device=device)
-            affine_matrix[:, :2, :2] = rot.expand(B_img, 2, 2)
-            grid = F.affine_grid(affine_matrix[:, :2], (B_img, C, H, W), align_corners=True)
+            if use_rgb:
+                B_img, C, H, W = rgb_obs.shape
+                affine_matrix = torch.zeros(B_img, 2, 3, device=device)
+                affine_matrix[:, :2, :2] = rot.expand(B_img, 2, 2)
+                grid = F.affine_grid(affine_matrix[:, :2], (B_img, C, H, W), align_corners=True)
+                
+                rgb_obs = F.grid_sample(rgb_obs, grid, align_corners=True)
             
-            obs = F.grid_sample(obs, grid, align_corners=True)
             if self.use_workspace:
                 robot0_mask = F.grid_sample(robot0_mask, grid, mode='nearest', align_corners=True)
                 robot1_mask = F.grid_sample(robot1_mask, grid, mode='nearest', align_corners=True)
+            
             if use_depth:
                 depth_obs = F.grid_sample(depth_obs, grid, mode='nearest', align_corners=True)
             
@@ -320,7 +333,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #      VERTICAL FLIP
         # =========================
         if self.vertical_flip and (random.random() < 0.5) and train:
-            obs = torch.flip(obs, [2])
+            if use_rgb: rgb_obs = torch.flip(rgb_obs, [2])
             if self.use_workspace:
                 robot0_mask = torch.flip(robot0_mask, [2])
                 robot1_mask = torch.flip(robot1_mask, [2])
@@ -366,35 +379,36 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         if self.color_jitter and train:
             if self.use_goal and 'goal_rgb' in sample:
-                N_obs = obs.shape[0]
-                combined = torch.cat([obs, goal_obs], dim=0)
+                N_obs = rgb_obs.shape[0]
+                combined = torch.cat([rgb_obs, goal_obs], dim=0)
                 combined = self.color_aug(combined)
-                obs = combined[:N_obs]
+                rgb_obs = combined[:N_obs]
                 goal_obs = combined[N_obs:]
-            else:
-                obs = self.color_aug(obs)
+            elif use_rgb:
+                rgb_obs = self.color_aug(rgb_obs)
 
         if self.random_channel_permutation and train:
-            perm = torch.randperm(3, device=obs.device)
-            obs = obs[:, perm, :, :]
+            perm = torch.randperm(3, device=rgb_obs.device)
+            if use_rgb: rgb_obs = rgb_obs[:, perm, :, :]
             if self.use_goal and 'goal_rgb' in sample: goal_obs = goal_obs[:, perm, :, :]
 
-        if self.rgb_noise_factor > 0 and train:
-            noise = torch.randn_like(obs) * self.rgb_noise_factor
-            obs = torch.clamp(obs + noise, 0, 1)
+        if use_rgb and self.rgb_noise_factor > 0 and train:
+            noise = torch.randn_like(rgb_obs) * self.rgb_noise_factor
+            rgb_obs = torch.clamp(rgb_obs + noise, 0, 1)
             if self.use_goal and 'goal_rgb' in sample:
                 noise_g = torch.randn_like(goal_obs) * self.rgb_noise_factor
                 goal_obs = torch.clamp(goal_obs + noise_g, 0, 1)
 
         # --- DEBUG: Plot After Augmentation ---
         if self.debug:
-            n_show = min(4, obs.shape[0])
+            n_show = min(4, B)
             for b in range(n_show):
                 # RGB
-                cpu_img = obs[b].permute(1, 2, 0).cpu().numpy() # H,W,3
-                pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,2))
-                self._save_debug_image(cpu_img, pa_cpu, prefix="aug_after_rgb", step=b)
-                
+                if use_rgb:
+                    cpu_img = rgb_obs[b].permute(1, 2, 0).cpu().numpy() # H,W,3
+                    pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,2))
+                    self._save_debug_image(cpu_img, pa_cpu, prefix="aug_after_rgb", step=b)
+                    
                 # Depth (Note: depth_obs is B*T, C, H, W. Permute to H,W,C)
                 if use_depth:
                     d_img = depth_obs[b].permute(1, 2, 0).cpu().numpy().astype(np.float32)
@@ -403,8 +417,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         #      RESHAPE BACK
         # =========================
-        obs = self._unflatten_bt(obs, BB, TT)
-        sample["rgb"] = obs
+        if use_rgb:
+            rgb_obs = self._unflatten_bt(rgb_obs, BB, TT)
+            sample["rgb"] = rgb_obs
 
         if use_depth:
             sample['depth'] = self._unflatten_bt(depth_obs, BB, TT)
@@ -418,16 +433,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['robot0_mask'] = robot0_mask
             sample['robot1_mask'] = robot1_mask
             if 'rgb-workspace-mask' in sample:
-                sample['rgb-workspace-mask'] = torch.cat([obs, robot0_mask, robot1_mask], dim=2)
+                sample['rgb-workspace-mask'] = torch.cat([rgb_obs, robot0_mask, robot1_mask], dim=2)
 
         if self.use_goal:
             if 'goal_rgb' in sample:
                 goal_obs = self._unflatten_bt(goal_obs, BB, TT)
                 sample['goal_rgb'] = goal_obs
                 if 'rgb-goal' in sample:
-                    sample['rgb-goal'] = torch.cat([obs, goal_obs], dim=2)
+                    sample['rgb-goal'] = torch.cat([rgb_obs, goal_obs], dim=2)
                 if 'rgb-workspace-mask-goal' in sample:
-                    sample['rgb-workspace-mask-goal'] = torch.cat([obs, robot0_mask, robot1_mask, goal_obs], dim=2)
+                    sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)

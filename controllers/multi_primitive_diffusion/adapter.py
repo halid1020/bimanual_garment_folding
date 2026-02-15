@@ -22,6 +22,7 @@ from .utils \
 from .networks import ConditionalUnet1D, MLPClassifier
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from ..data_augmentation.register_augmeters import build_data_augmenter
+from .contrain_action_functions import name2func
 
 class DiffusionTransform():
 
@@ -89,6 +90,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.collect_on_success = self.config.get('collect_on_success', True)
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
+        self.contrain_action = name2func[config.get('contrain_action', 'identity')]
 
         self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
@@ -809,12 +811,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
             else:
                 obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
-            #print('[MultiPrimitiveDiffusion, single_act] obs cond', obs_cond.shape)
+            
+
             naction = self.eval_action_sampler.sample(
                 state=sample_state, 
                 horizon=self.config.pred_horizon, 
                 action_dim=self.network_action_dim
             ).to(self.device)
+            naction = self.contrain_action(naction, info)
 
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
@@ -838,9 +842,39 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     sample=naction
                 ).prev_sample
 
+                naction = self.contrain_action(naction, info)
+
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
-            
+            # ---  Call Debug GIF Function ---
+            if self.debug:
+                from .contrain_action_functions import save_denoising_gif
+                
+                # Extract image and masks from the deque/buffer
+                # Taking the last observation (current state)
+                last_obs = self.obs_deque[info['arena_id']][-1]
+                
+                # Get Image (Assuming 'rgb' is available and primary)
+                # Adjust key if you use 'rgb-workspace-mask' etc.
+                # Assuming input_obs usually stores the visual tensor
+                img_vis = last_obs[self.config.input_obs]
+                
+                # If input_obs has channels first/stacked, take just the RGB part
+                if img_vis.shape[0] in [3, 4, 5, 6, 8]: 
+                    img_vis = img_vis[:3] # Take first 3 channels (RGB)
+                
+                masks = [None, None]
+                if 'robot0_mask' in last_obs: masks[0] = last_obs['robot0_mask']
+                if 'robot1_mask' in last_obs: masks[1] = last_obs['robot1_mask']
+                
+                step_idx = info.get('step', 0) # Or self.internal_states step count
+                
+                save_denoising_gif(
+                    image=img_vis, 
+                    masks=masks, 
+                    noise_actions_history=noise_actions, 
+                    step_idx=step_idx
+                )
 
             action_pred = self.data_augmenter.postprocess(
                 {'action': ts_to_np(naction)})['action'][0]
@@ -851,13 +885,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         action = self.buffer_actions[info['arena_id']]\
             .popleft().reshape(self.network_action_dim)
-        #print('res action', action)
-        
-        # ## covert self.config.action_output to dict and copy it
-        # ret_action = self.config.action_output.copy() #.toDict()
-        # if isinstance(ret_action, (DictConfig, ListConfig)):
-        #     ret_action = omegaconf_to_plain_dict(ret_action)
-
+       
         action = action.flatten()
 
         ## recursively goes down the dictionary tree, when encounter list of integer number
@@ -990,20 +1018,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             input_data['vector_state'] = info['observation']['vector_state']\
                 .reshape(1, 1, *info['observation']['vector_state'].shape)
         
-        # print('input data keys', input_data.keys())
-        #print('image shape', input_data['rgb'].shape)
+
         input_data = self.data_augmenter(input_data, train=False, device=self.device) 
                                     #sim2real=info['sim2real'] if 'sim2real' in info else False)
         
         vis = input_data[self.config.input_obs].squeeze(0).squeeze(0)
-        #print('vis shape', vis.shape)
+
         obs = {
             self.config.input_obs: vis,  
         }
 
-        # vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
-
-        #plt.imsave('tmp/input_obs.png', vis_to_save)
 
         if 'use_mask' in self.config and self.config.use_mask:
             mask = input_data['mask'].squeeze(0).squeeze(0)

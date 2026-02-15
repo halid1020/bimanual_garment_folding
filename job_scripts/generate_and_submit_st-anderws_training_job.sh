@@ -65,7 +65,7 @@ cat << EOF > "$SUBMIT_SCRIPT"
 #SBATCH --mem=${MEMORY}
 #SBATCH --time=${TIME_LIMIT}
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=your-username@st-andrews.ac.uk
+#SBATCH --mail-user=ah390@st-andrews.ac.uk
 #SBATCH --output=${OUT_DIR}/%x-%j.log
 #SBATCH --error=${OUT_DIR}/%x-%j.err
 #SBATCH --partition=labruja

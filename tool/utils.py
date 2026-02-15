@@ -1,101 +1,22 @@
-import actoris_harena as ag_ar
-from dotmap import DotMap
+import socket
 
-from dotmap import DotMap
-import actoris_harena as ag_ar
-
-
-
-
-
-from controllers.rl.primitive_encoding_sac \
-    import PrimitiveEncodingSAC
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
-    import CentreSleeveFoldingStochasticPolicy
-from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
-    import WaistLegFoldingStochasticPolicy
-from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
-    import WaistHemAlignmentFoldingStochasticPolicy
-
-from controllers.rl.vanilla_image_sac import VanillaImageSAC
-from controllers.rl.vanilla_sac import VanillaSAC
-from controllers.rl.image2state_sac import Image2State_SAC
-from controllers.rl.primitive2vector_sac \
-    import Primitive2VectorSAC
-from controllers.rl.demo_sac \
-    import DemoSAC
-from controllers.rl.maple \
-    import MAPLE
-from controllers.rl.image2state_multi_primitive_sac \
-    import Image2StateMultiPrimitiveSAC
-from controllers.gpt_fabric.adapter import GPTFabricAdapter
-from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
-from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
-from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
-from controllers.human.human_multi_primitive import HumanMultiPrimitive
-
-from controllers.random.random_multi_primitive import RandomMultiPrimitive
-from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
-from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
-from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
-from controllers.rl.lagarnet.gc_rssm import GC_RSSM
-
-
-
-
-
-def register_agent():
-    ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
-    ag_ar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
-    ag_ar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
-    ag_ar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
-    ag_ar.register_agent('vanilla-image-sac', VanillaImageSAC)
-    ag_ar.register_agent('vanilla-sac', VanillaSAC)
-    ag_ar.register_agent('image2state-sac', Image2State_SAC)
-    ag_ar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
-    ag_ar.register_agent('demo-sac', DemoSAC)
-    ag_ar.register_agent('maple', MAPLE)
-    ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
-    ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)
-    ag_ar.register_agent('dreamerV3', DreamerV3Adapter)
-    ag_ar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
-    ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
-    ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
-    ag_ar.register_agent('real-world-human', RealWordHumanPolicy)
-    ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
-    ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
-    ag_ar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
-    ag_ar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
-    ag_ar.register_agent('lagarnet', GC_RSSM)
-
-def build_task(task_cfg):
-    # task
-    if task_cfg.task_name == 'centre-sleeve-folding':
-        demonstrator = HumanMultiPrimitive({"debug": False})
-        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
-       
-    elif task_cfg.task_name == 'waist-leg-alignment-folding':
-        from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
-            import WaistLegFoldingStochasticPolicy
-        demonstrator = WaistLegFoldingStochasticPolicy({"debug": False})
-        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
-       
-    elif task_cfg.task_name == 'waist-hem-alignment-folding':
-        from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
-            import WaistHemAlignmentFoldingStochasticPolicy
-        demonstrator = WaistHemAlignmentFoldingStochasticPolicy({"debug": False})
-        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
-        
-    elif task_cfg.task_name == 'flattening':
-        task = GarmentFlatteningTask(task_cfg)
-       
-    elif task_cfg.task_name == 'dummy':
-        task = None
-    elif task_cfg.task_name == 'real-world-garment-flattening':
-        task = RealWorldGarmentFlatteningTask(task_cfg)
-    elif task_cfg.task_name == 'real-world-garment-folding':
-        task = RealWorldGarmentFoldingTask(task_cfg)
+# utils.py
+def resolve_save_root(default_root):
+    """
+    Returns the machine-specific save root based on the hostname.
+    Falls back to default_root if the host is not recognized.
+    """
+    hostname = socket.gethostname()
+    print(f"[tool.utils, resolve_save_root] Detected Host: {socket.gethostname()}")
+    if "pc282" in hostname:
+        return '/media/hcv530/T7/garment_folding_data'
+    elif "thanos" in hostname:
+        return '/data/ah390/bimanual_garment_folding'
+    elif "viking" in hostname:
+        return '/mnt/scratch/users/hcv530/garment_folding_data'
+    elif "labruja" in hostname:
+        return '/data/ah390/bimanual_garment_folding'
     else:
-        raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
-    return task
-
+        raise ValueError
+    
+    return default_root

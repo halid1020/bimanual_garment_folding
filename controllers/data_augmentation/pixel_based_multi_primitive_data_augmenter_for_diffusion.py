@@ -13,7 +13,6 @@ from .utils import randomize_primitive_encoding, gaussian_kernel
 def rotate_points_torch(points, R):
     return points @ R.T
 
-
 # --------------------
 # Augmenter class (torch)
 # --------------------
@@ -34,6 +33,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.use_goal = self.config.get('use_goal', False)
         self.random_crop = self.config.get('random_crop', False)
         self.rgb_noise_factor = self.config.get('rgb_noise_factor', 0.0)
+        self.depth_noise_var = self.config.get('depth_noise_var', 0.1)
 
         if self.use_goal:
             self.goal_rotation = self.config.get('goal_rotation', False)
@@ -154,7 +154,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             depth_t = sample['depth'].float()
             if depth_t.ndim == 4: # B,T,H,W -> B,T,H,W,1
                 depth_t = depth_t.unsqueeze(-1)
-            print('depth_t shape', depth_t.shape)
+            #print('depth_t shape', depth_t.shape)
             B, T, H, W, C  = depth_t.shape
             
             # Apply processing (Norm, Noise, Blur) BEFORE flattening/geometric augs
@@ -490,7 +490,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 depth = 1 - depth
         
         depth_noise = torch.randn(depth.shape, device=depth.device) * \
-                      (self.config.depth_noise_var if train else 0)
+                      (self.depth_noise_var if train else 0)
 
         if self.depth_blur and train:
             if self.kernel.device != depth.device:

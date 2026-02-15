@@ -6,11 +6,11 @@ obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'depth'
+input_obs: 'rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 200
+num_demos: 300
 demo_horizon: 10
 batch_size: 64
 disable_updown: True
@@ -29,7 +29,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_folding_from_random_flattened_horizon_10_human_demo_100_workspace"
+  data_path: "combined_folding_and_flattening_no_goal"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
@@ -77,4 +77,4 @@ primitives:
     dim: 0
 mask_out_irrelavent_action_dim: false
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_depth_K_3
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3

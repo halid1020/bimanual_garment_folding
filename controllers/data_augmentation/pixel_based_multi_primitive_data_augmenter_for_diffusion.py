@@ -211,7 +211,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                              color='cyan', linewidth=2)
         else:
             # Fallback for simple (N, 2) points
+            pts = pts.reshape(-1, 2)
             xs, ys = to_pix(pts[:, 0], pts[:, 1])
+            print('len xs', len(xs))
             plt.scatter(xs, ys, c='red', s=12)
 
         plt.axis('off')
@@ -319,6 +321,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             n_show = min(4, B)
             for b in range(n_show):
                 pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
+                print('[augmenter, debug] action', pa_cpu)
                 
                 # Extract orientation for debug if it exists
                 oa_cpu = orient_actions[b].cpu().numpy() if (train and self.has_orientation) else None

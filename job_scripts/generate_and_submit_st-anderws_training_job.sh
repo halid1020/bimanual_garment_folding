@@ -75,6 +75,8 @@ echo "Job ID: \$SLURM_JOB_ID"
 echo "Job Type: ${JOB_TYPE}"
 echo "CPUs: ${CPUS}, Mem: ${MEMORY}, Time: ${TIME_LIMIT}"
 
+source $HOME/anaconda3/etc/profile.d/conda.sh
+
 cd \$HOME/project/bimanual_garment_folding
 source ./setup.sh
 

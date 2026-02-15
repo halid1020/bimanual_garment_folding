@@ -83,7 +83,7 @@ source ./setup.sh
 echo "Starting ${JOB_TYPE}..."
 
 # Using the dynamic script name and config directory
-python ./tool/${SCRIPT_NAME} --config_name ${CONFIG_DIR}/${EXP_NAME}
+python ./tool/${SCRIPT_NAME} --config-name ${CONFIG_DIR}/${EXP_NAME}
 
 echo "Job completed at \$(date)"
 EOF

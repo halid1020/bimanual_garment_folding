@@ -2,9 +2,10 @@ name: "real-world-dual-arm-multi-primitive"
 ur5e_ip: "192.168.1.10"
 ur16e_ip": "192.168.1.102"
 dry_run": False
-action_horizon: 20
+action_horizon: 3
 debug": True
 measure_time: True
 snap_to_cloth_mask: True
 maskout_background: True
-use_sim_workspace: True
+use_sim_workspace: False
+track_trajectory: True

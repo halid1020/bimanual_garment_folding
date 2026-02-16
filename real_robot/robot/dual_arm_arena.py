@@ -12,7 +12,7 @@ from real_robot.utils.transform_utils import MOVE_ACC, MOVE_SPEED
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
 from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
-
+from real_robot.robot.pixel_based_primitive_env_imp_logger import PixelBasedPrimitiveImpEnvLogger
 from actoris_harena import Arena
 
 class DualArmArena(Arena):
@@ -37,7 +37,7 @@ class DualArmArena(Arena):
 
         self.pick_and_place_skill = PickAndPlaceSkill(self.dual_arm)
         self.pick_and_fling_skill = PickAndFlingSkill(self.dual_arm)
-        self.logger = PixelBasedPrimitiveEnvLogger()
+        self.logger = PixelBasedPrimitiveImpEnvLogger()
 
         self.mask_generator = get_mask_generator()
 
@@ -51,7 +51,7 @@ class DualArmArena(Arena):
         self.maskout_background = config.get("maskout_background", False)
         self.use_sim_workspace = config.get("use_sim_workspace", False)
         self.asset_dir = f"{os.environ['MP_FOLD_PATH']}/assets"
-        
+        self.track_trajectory = config.get("track_trajectory", False)
     
         self.current_episode = None
         self.frames = []
@@ -536,7 +536,7 @@ class DualArmArena(Arena):
             self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
-            traj = self.pick_and_fling_skill.step(full_action, record_debug=self.debug)
+            traj = self.pick_and_fling_skill.step(full_action, record_debug=self.track_trajectory)
             self.info['debug_trajectory'] = traj
         elif action_type == 'no-operation':
             print('no operation!!!')

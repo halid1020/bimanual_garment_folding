@@ -44,7 +44,7 @@ class DualArmScene:
         if not dry_run:
             self.ur5e = UR_RTDE(ur5e_robot_ip, self.gripper_type)
             self.ur16e = UR_RTDE(ur16e_robot_ip, self.gripper_type)
-            self.camera = RealsenseCamera()
+            self.camera = RealsenseCamera(debug=True)
             self.intr = self.camera.get_intrinsic()
             self.both_open_gripper()
             self.both_home()
@@ -224,7 +224,11 @@ class DualArmScene:
         self.both_out_scene()
     
     def take_rgbd(self):
+        print('[DualArmScene] Take RGBD!!!')
         return self.camera.take_rgbd()
+    
+    def restart_camera(self):
+        self.camera.restart()
     
     def get_workspace_masks(self):
         return self.ur5e_mask, self.ur16e_mask

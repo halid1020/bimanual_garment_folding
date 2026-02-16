@@ -7,5 +7,4 @@ debug": True
 measure_time: True
 snap_to_cloth_mask: True
 maskout_background: True
-use_sim_workspace: False
-track_trajectory: True
+use_sim_workspace: True

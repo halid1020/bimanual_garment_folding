@@ -79,6 +79,7 @@ class DualArmArena(Arena):
         print(f"[Arena] Resetting episode {self.eid}")
 
         # Ensure we have the flattened observation (loaded or captured) before starting
+        self.flattened_obs = None
         self.get_flattened_obs()
         
         self.last_info = None
@@ -138,6 +139,9 @@ class DualArmArena(Arena):
         self.dual_arm.both_open_gripper()
         self.dual_arm.both_home(MOVE_SPEED, MOVE_ACC)
         self.dual_arm.both_out_scene(MOVE_SPEED, MOVE_ACC)
+
+        # ADD THIS: Brief pause to let robot settle and camera clear
+        time.sleep(1.0)
 
         raw_rgb, raw_depth = self.dual_arm.take_rgbd()
         
@@ -416,7 +420,6 @@ class DualArmArena(Arena):
         return angle
 
     def step(self, action):
-        print('!!! step')
         if self.measure_time:
             start_time = time.time()
 
@@ -428,7 +431,6 @@ class DualArmArena(Arena):
             points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
             if self.snap_to_cloth_mask:
                 mask = self.cloth_mask
-                print('mask resolution', mask.shape)
                 kernel = np.ones((3, 3), np.uint8) 
                 eroded_mask = cv2.erode(mask, kernel, iterations=10)
                 
@@ -531,13 +533,14 @@ class DualArmArena(Arena):
             start_time = time.time()
 
         self.info = {}
-
+        print(f'action step {self.action_step}')
         if action_type == 'norm-pixel-pick-and-place':
             self.pick_and_place_skill.reset()
             self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
             traj = self.pick_and_fling_skill.step(full_action, record_debug=self.track_trajectory)
+            print('!!!len trj', len(traj))
             self.info['debug_trajectory'] = traj
         elif action_type == 'no-operation':
             print('no operation!!!')
@@ -546,6 +549,9 @@ class DualArmArena(Arena):
             raise ValueError
         
         self.action_step += 1
+
+        if self.action_step % 5 == 0:
+            self.dual_arm.restart_camera()
         
         self.all_infos.append(self.info)
 

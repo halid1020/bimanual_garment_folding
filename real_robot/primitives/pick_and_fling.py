@@ -9,15 +9,16 @@ from real_robot.utils.transform_utils import (
     GRIPPER_OFFSET_UR5e, GRIPPER_OFFSET_UR16e, SURFACE_HEIGHT, FLING_LIFT_DIST,
     MOVE_ACC, MOVE_SPEED
 )
-from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path, move_until_contact
+from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path
 from real_robot.utils.thread_utils import ThreadWithResult
+from .utils import move_until_contact, CONTACT_FORCE_THRESH_UR16e, CONTACT_FORCE_THRESH_UR5e
 
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        
 LIFT_DIST = 0.12            
 FLING_SPEED = 3.0
-FLING_ACC = 2
+FLING_ACC = 5
 HANG_HEIGHT = 0.35
 HOME_AFTER = True
 MIN_STRETCH_DIST = 0.3
@@ -168,13 +169,13 @@ class PickAndFlingSkill:
 
         results = [None, None]
 
-        def run_contact(robot, start_pose, index):
-            res_pose = move_until_contact(robot, start_pose, APPROACH_DIST+0.01)
+        def run_contact(robot, start_pose, index, force_threshold):
+            res_pose = move_until_contact(robot, start_pose, APPROACH_DIST+0.01, force_threshold)
             results[index] = res_pose
 
      
-        t0 = ThreadWithResult(target=run_contact, args=(self.scene.ur5e, app_pick_0, 0))
-        t1 = ThreadWithResult(target=run_contact, args=(self.scene.ur16e, app_pick_1, 1))
+        t0 = ThreadWithResult(target=run_contact, args=(self.scene.ur5e, app_pick_0, 0, CONTACT_FORCE_THRESH_UR5e))
+        t1 = ThreadWithResult(target=run_contact, args=(self.scene.ur16e, app_pick_1, 1, CONTACT_FORCE_THRESH_UR16e))
         t0.start(); t1.start()
         t0.join(); t1.join()
         #results = (t1.result, t1.result)

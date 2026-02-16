@@ -428,8 +428,9 @@ class DualArmArena(Arena):
             points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
             if self.snap_to_cloth_mask:
                 mask = self.cloth_mask
+                print('mask resolution', mask.shape)
                 kernel = np.ones((3, 3), np.uint8) 
-                eroded_mask = cv2.erode(mask, kernel, iterations=6)
+                eroded_mask = cv2.erode(mask, kernel, iterations=10)
                 
                 if np.sum(eroded_mask) == 0:
                     print("[Warning] Erosion removed entire mask. Using original mask.")

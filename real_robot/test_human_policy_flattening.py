@@ -1,6 +1,6 @@
 # main.py
 from robot.dual_arm_arena import DualArmArena
-from bimanual_garment_folding.controllers.human.real_world_human_policy import HumanPolicy
+from controllers.human.real_world_human_policy import RealWordHumanPolicy
 
 from dotmap import DotMap
 import time
@@ -45,7 +45,7 @@ def main():
 
     save_dir = './tmp'
     
-    policy = HumanPolicy(DotMap(agent_config))
+    policy = RealWordHumanPolicy(DotMap(agent_config))
     policy.set_log_dir(save_dir, project_name, exp_name)
     policy.reset([0])
 

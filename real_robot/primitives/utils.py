@@ -10,7 +10,8 @@ RETRACT_OFFSET = 0.00
 DESCEND_STEP = 0.002
 DESCEND_SPEED = 0.5
 MAX_DESCEND_DIST = 0.1
-CONTACT_FORCE_THRESH = 10
+CONTACT_FORCE_THRESH_UR16e = 15
+CONTACT_FORCE_THRESH_UR5e = 5
 
 # --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
 def segment_distance(p1, p2, p3, p4):
@@ -118,7 +119,7 @@ def points_to_fling_path(
     left_path_w = transform_pose(tx_world_fling_base, left_path)
     return right_path_w, left_path_w
 
-def move_until_contact(robot, start_pose, max_dist=0.10):
+def move_until_contact(robot, start_pose, max_dist=0.10, force_threshold=CONTACT_FORCE_THRESH_UR16e):
     """
     Moves downwards continuously until contact is detected, then stops immediately.
     """
@@ -156,7 +157,7 @@ def move_until_contact(robot, start_pose, max_dist=0.10):
         delta = abs(current_z - baseline_z)
         
         # Check Force
-        if delta > CONTACT_FORCE_THRESH:
+        if delta > force_threshold:
             robot.rtde_c.stopL(10.0) # Stop immediately
             contact_detected = True
             print(f"Contact! Delta: {delta:.2f}N")

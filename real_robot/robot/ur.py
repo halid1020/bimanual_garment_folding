@@ -93,7 +93,13 @@ class UR_RTDE:
     def movej(self, q, speed=1.5, acceleration=1, blocking=True):
         return self.rtde_c.moveJ(q, speed, acceleration, not blocking)
     
-    def movel(self, p, speed=1.5, acceleration=1, blocking=True, avoid_singularity=False):
+    def movel(self, p, speed=1.5, acceleration=1, blocking=True, avoid_singularity=False, blend_radius=0.02):
+        """
+        Moves the robot linearly. 
+        Args:
+            p: Single pose or List of poses (trajectory)
+            blend_radius: Radius (in meters) to smooth corners. Default 0.02 (2cm).
+        """
         # nomralize input format to 2D numpy array
         if not isinstance(p, np.ndarray):
             p = np.array(p)
@@ -108,12 +114,17 @@ class UR_RTDE:
             p = new_path[1:]
 
         if p.shape[0] == 1:
+            # Single point move: No blend (0) implies stop at target.
             return self.rtde_c.moveL(p[0].tolist(), speed, acceleration, not blocking)
         else:
-            p = p.tolist()
-            for x in p:
-                x.extend([speed, acceleration, 0])
-            return self.rtde_c.moveL(p, not blocking)
+            # Trajectory: Apply blend radius to all intermediate points
+            p_list = p.tolist()
+            for i, x in enumerate(p_list):
+                # If it's the LAST point, radius must be 0 to stop effectively. 
+                # Otherwise, use the specified blend_radius.
+                r = 0.0 if i == len(p_list) - 1 else blend_radius
+                x.extend([speed, acceleration, r])
+            return self.rtde_c.moveL(p_list, not blocking)
     
     def movej_ik(self, p, speed=1.5, acceleration=1, blocking=True):
         return self.rtde_c.moveJ_IK(p, speed, acceleration, not blocking)

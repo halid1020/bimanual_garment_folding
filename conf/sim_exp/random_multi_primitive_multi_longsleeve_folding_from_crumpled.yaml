@@ -2,7 +2,7 @@
 defaults:
   - /agent@agent: random_multi_primitive_multi_longsleeve_folding_from_crumpled
   - /arena@arena: multi_longsleeve_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128
-  - .task@task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
+  - /task@task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
 
 
 exp_name: random_multi_primitive_multi_longsleeve_folding_from_crumpled

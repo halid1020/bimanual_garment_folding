@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: random_single_picker_single_primitive_multi_skirt_flattening_ray
+  - /agent@agent: random_mask_biased_pick_and_place
   - /arena@arena: multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
   - _self_

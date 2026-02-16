@@ -36,7 +36,7 @@ cd <path-to-bimanual_garment_folding>
 . ./setup.sh 
 
 # Run the evaluation script
-python train/hydra_eval.py --config-name run_exp/random_multi_primitive_multi_longsleeve_folding_from_crumpled
+python tool/hydra_eval.py --config-name sim_exp/random_multi_primitive_multi_longsleeve_folding_from_crumpled
 
 ```
 

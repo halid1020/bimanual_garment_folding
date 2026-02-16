@@ -90,7 +90,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
 
-        self.primitive_integration = self.config.primitive_integration
+        self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
             
             self.primitives = config.primitives
@@ -768,9 +768,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             last_action = self.last_actions[info['arena_id']]
             
             if last_action is not None:
-                self.update(info, last_action)
+                self.update([info], [last_action])
             else:
-                self.init(info)
+                #print('[Diffusion] info', info.keys())
+                self.init([info])
 
         if len(self.buffer_actions[info['arena_id']]) == 0:
             image = torch.stack([x[self.config.input_obs] \
@@ -914,7 +915,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return self.internal_states
 
     def _process_info(self, info):
-
+        #print('[Diffions, _process info]', info['observation'].keys())
         if 'depth' in info['observation'].keys():
             depth = info['observation']['depth'][0] #get the view from first camera.
 

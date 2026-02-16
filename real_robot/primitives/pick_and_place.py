@@ -30,7 +30,7 @@ class PickAndPlaceSkill:
         self.trajectory_mode = config.get('trajectory_mode', 'arc') 
         
         # FIX 1: Lower the max height (15cm is usually plenty for cloth)
-        self.target_arc_height = config.get('target_arc_height', 0.25) 
+        self.target_arc_height = config.get('target_arc_height', 0.2) 
         
         # FIX 2: Reduce resolution. 
         # Fewer points = fewer stops. 6 is enough for a simple arc.
@@ -50,10 +50,13 @@ class PickAndPlaceSkill:
         # FIX 3: Dynamic Height Adjustment (Shallower Arc)
         # Use 30% of distance as height, instead of 80%.
         # Example: 30cm move -> 9cm height. 10cm move -> 3cm height.
-        adjusted_height = min(self.target_arc_height, dist * 0.3)
+        adjusted_height = min(self.target_arc_height, dist * 0.4)
+        
         
         # Ensure minimum clearance of 2cm so we don't drag
         adjusted_height = max(0.02, adjusted_height)
+
+        print('adjusted height!', adjusted_height)
 
         path = []
         for i in range(num_points):

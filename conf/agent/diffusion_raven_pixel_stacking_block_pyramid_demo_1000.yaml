@@ -27,7 +27,7 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "raven_pixel_packing_boxes_oracle_demo_lower_camera"
+  data_path: "raven_pixel_stacking_block_pyramid_oracle_demo_lower_camera"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"

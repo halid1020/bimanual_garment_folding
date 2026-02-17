@@ -3,9 +3,9 @@ random_rotation: true
 rotation_degree: 1
 vertical_flip: true
 debug: false
-color_jitter: true
+color_jitter: false
 img_dim: [96, 96]
 randomise_prim_acts: false
-random_channel_permutation: true
-K: 3
-use_workspace: false
+random_channel_permutation: false
+K: 0
+rgb_noise_factor: 0.01

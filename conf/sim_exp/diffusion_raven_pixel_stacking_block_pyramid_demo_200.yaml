@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent@agent: diffusion_raven_pixel_stacking_block_pyramid_demo_200
-  - /arena@arena: raven_pixel_stacking_block_pyramid
+  - /arena@arena: raven_pixel_stacking_block_pyramid_lower_camera
   - /task@task: dummy
 
 exp_name: diffusion_raven_pixel_stacking_block_pyramid_demo_200

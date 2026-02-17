@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent@agent: diffusion_raven_pixel_packing_boxes_demo_200
-  - /arena@arena: raven_pixel_packing_boxes
+  - /arena@arena: raven_pixel_packing_boxes_lower_camera
   - /task@task: dummy
 
 exp_name: diffusion_raven_pixel_packing_boxes_demo_200

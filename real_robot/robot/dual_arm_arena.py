@@ -7,12 +7,12 @@ import json
 import shutil
 
 from real_robot.robot.dual_arm_scene import DualArmScene
+from real_robot.robot.utils import get_grasp_rotation, snap_to_mask, process_depth
 from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
 from real_robot.utils.transform_utils import MOVE_ACC, MOVE_SPEED
 from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
-from real_robot.robot.pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
-from real_robot.robot.pixel_based_primitive_env_imp_logger import PixelBasedPrimitiveImpEnvLogger
+from real_robot.loggers.pixel_based_primitive_env_imp_logger import PixelBasedPrimitiveImpEnvLogger
 from actoris_harena import Arena
 
 class DualArmArena(Arena):
@@ -103,37 +103,7 @@ class DualArmArena(Arena):
         self.all_infos = [self.info]
         return self.info
 
-    def _process_depth(self, raw_depth):
-        """
-        Process raw depth image:
-        1. Convert to meters
-        2. Estimate table height (95th percentile)
-        3. Clip to range [table - 0.1m, table + 0.1m]
-        4. Normalize (0 = Deepest/Background, 1 = Shallowest/Closest)
-        """
-        # 1. Convert to Meters (RealSense is usually uint16 mm)
-        if raw_depth.dtype == np.uint16:
-            depth_m = raw_depth.astype(np.float32) / 1000.0
-        else:
-            depth_m = raw_depth.astype(np.float32)
-
-        # 2. Estimate Camera Height (Distance to Table)
-        # 95th percentile is robust against sensor noise (dropouts)
-        camera_height = np.percentile(depth_m, 95)
-        
-        # 3. Define Clipping Range (+- 0.1m around table)
-        # Objects on table will be closer (smaller value) than camera_height
-        min_dist = camera_height - 0.1
-        max_dist = camera_height + 0.1
-        
-        clipped_depth = np.clip(depth_m, min_dist, max_dist)
-        
-        # 4. Min-Max Normalization (Inverted)
-        # 0 = Deepest point (max_dist), 1 = Shallowest point (min_dist)
-        # Formula: (max - value) / (max - min)
-        norm_depth = (max_dist - clipped_depth) / (max_dist - min_dist)
-        
-        return norm_depth
+    
     
     def _process_info(self, info, task_related=True, flattened_obs=True):
         self.dual_arm.both_open_gripper()
@@ -168,7 +138,7 @@ class DualArmArena(Arena):
             self.init_coverage = self.coverage
         crop_depth = raw_depth[y1:y2, x1:x2]
 
-        crop_depth = self._process_depth(crop_depth)
+        crop_depth = process_depth(crop_depth)
         
         crop_workspace_mask_0 = workspace_mask_0[y1:y2, x1:x2]
         crop_workspace_mask_1 = workspace_mask_1[y1:y2, x1:x2]
@@ -307,7 +277,7 @@ class DualArmArena(Arena):
                             "robot1_mask": r0_mask,
                         },
                         "eid": meta_info.get("eid", 0),
-                        "arena_id": 0,
+                        "arena_id": self.id,
                         "arena": self
                     }
                     
@@ -357,67 +327,8 @@ class DualArmArena(Arena):
         
         return self.flattened_obs
 
-    def _snap_to_mask(self, point, mask):
-        point = np.array(point, dtype=int)
-        h, w = mask.shape
-        x, y = np.clip(point[0], 0, w - 1), np.clip(point[1], 0, h - 1)
-
-        if mask[y, x] > 0:
-            return np.array([x, y])
-
-        valid_indices = np.argwhere(mask > 0)
-        
-        if len(valid_indices) == 0:
-            print("[Warning] Workspace mask is empty! Cannot snap point.")
-            return np.array([x, y])
-
-        current_pos_yx = np.array([y, x])
-        distances = np.sum((valid_indices - current_pos_yx) ** 2, axis=1)
-        
-        nearest_idx = np.argmin(distances)
-        nearest_yx = valid_indices[nearest_idx]
-        
-        return np.array([nearest_yx[1], nearest_yx[0]])
-
-    def _get_grasp_rotation(self, mask, point):
-        """
-        Calculates rotation angle by finding the strongest edge in the neighborhood.
-        """
-        x, y = int(point[0]), int(point[1])
-        h, w = mask.shape
-
-        r = 15
-        x1, y1 = max(0, x - r), max(0, y - r)
-        x2, y2 = min(w, x + r + 1), min(h, y + r + 1)
-        
-        roi = mask[y1:y2, x1:x2].astype(np.float32)
-        
-        if np.min(roi) == np.max(roi):
-            return 0.0
-
-        roi = cv2.GaussianBlur(roi, (7, 7), 1.0)
-
-        gx = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=5)
-        gy = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=5)
-        
-        magnitude = np.sqrt(gx**2 + gy**2)
-        max_idx = np.unravel_index(np.argmax(magnitude), magnitude.shape)
-        
-        if magnitude[max_idx] < 1e-3:
-            return 0.0
-            
-        best_gx = gx[max_idx]
-        best_gy = gy[max_idx]
-        
-        angle = np.arctan2(best_gy, best_gx)
-        angle += np.pi / 2 
-        
-        while angle > np.pi / 2:
-            angle -= np.pi
-        while angle < -np.pi / 2:
-            angle += np.pi
-            
-        return angle
+    
+    
 
     def step(self, action):
         if self.measure_time:
@@ -443,7 +354,7 @@ class DualArmArena(Arena):
                 snapped_points = []
                 for i, pt in enumerate(points_crop):
                     if i < 2:
-                        snapped_points.append(self._snap_to_mask(pt, target_mask))
+                        snapped_points.append(snap_to_mask(pt, target_mask))
                     else:
                         snapped_points.append(pt)
                 points_crop = np.array(snapped_points)
@@ -475,11 +386,11 @@ class DualArmArena(Arena):
                 if pair_a[0][0] < pair_b[0][0]:
                     pair_a, pair_b = pair_b, pair_a
                 
-                final_pick_0 = self._snap_to_mask(pair_a[0], full_mask_0)
-                final_place_0 = self._snap_to_mask(pair_a[1], full_mask_0)
+                final_pick_0 = snap_to_mask(pair_a[0], full_mask_0)
+                final_place_0 = snap_to_mask(pair_a[1], full_mask_0)
                 
-                final_pick_1 = self._snap_to_mask(pair_b[0], full_mask_1)
-                final_place_1 = self._snap_to_mask(pair_b[1], full_mask_1)
+                final_pick_1 = snap_to_mask(pair_b[0], full_mask_1)
+                final_place_1 = snap_to_mask(pair_b[1], full_mask_1)
 
                 points_executed = np.concatenate([
                     final_pick_0, final_pick_1, 
@@ -490,8 +401,8 @@ class DualArmArena(Arena):
                 pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
                 pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
                 
-                angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
-                angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+                angle_0 = get_grasp_rotation(self.cloth_mask, pt0_crop)
+                angle_1 = get_grasp_rotation(self.cloth_mask, pt1_crop)
                 pick_angles = [angle_0, angle_1]
 
                 # Validity: check mask at the crop coordinates
@@ -505,15 +416,15 @@ class DualArmArena(Arena):
                 if p0_orig[0] < p1_orig[0]:
                     p0_orig, p1_orig = p1_orig, p0_orig
                 
-                final_pick_0 = self._snap_to_mask(p0_orig, full_mask_0)
-                final_pick_1 = self._snap_to_mask(p1_orig, full_mask_1)
+                final_pick_0 = snap_to_mask(p0_orig, full_mask_0)
+                final_pick_1 = snap_to_mask(p1_orig, full_mask_1)
                 points_executed = np.concatenate([final_pick_0, final_pick_1])
                 
                 pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
                 pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
                 
-                angle_0 = self._get_grasp_rotation(self.cloth_mask, pt0_crop)
-                angle_1 = self._get_grasp_rotation(self.cloth_mask, pt1_crop)
+                angle_0 = get_grasp_rotation(self.cloth_mask, pt0_crop)
+                angle_1 = get_grasp_rotation(self.cloth_mask, pt1_crop)
                 pick_angles = [angle_0, angle_1]
 
                 valid_0 = check_validity(pt0_crop)
@@ -549,16 +460,15 @@ class DualArmArena(Arena):
             raise ValueError
         
         self.action_step += 1
+        
+        if self.measure_time:
+            self.primitive_time.append(time.time() - start_time)
+            start_time = time.time()
 
         if self.action_step % 5 == 0:
             self.dual_arm.restart_camera()
         
         self.all_infos.append(self.info)
-
-        if self.measure_time:
-            self.primitive_time.append(time.time() - start_time)
-            start_time = time.time()
-
         self.info = self._process_info(self.info)
 
         if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:

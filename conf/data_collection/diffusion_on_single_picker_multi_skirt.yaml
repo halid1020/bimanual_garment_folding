@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - /agent@agent: diffusion_single_picker_single_primitive_multi_skirt_flattening_demo_200
+  - /arena@arena: multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
+  - /task@task: flattening_overstretch_penalty_1_no_big_bonus
+  - _self_
+
+parallel_processes: 4
+trials: 10000
+single_agent: True
+agent_save_root: '/media/hcv530/T7/garment_folding_data'
+agent_exp_name: diffusion_single_picker_single_primitive_multi_skirt_flattening_demo_200
+data_path: diffusion_on_multi_skirt_with_single_picker_pick_and_place
+data_dir: /home/hcv530/project/bimanual_garment_folding/data/datasets

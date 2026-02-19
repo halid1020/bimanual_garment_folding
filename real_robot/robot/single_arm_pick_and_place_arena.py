@@ -137,7 +137,7 @@ class SingleArmPickAndPlaceArena(Arena):
                     }
                     
                     self.flatten_coverage = np.sum(mask)
-                    print("[Arena] Successfully loaded flattened state from PNGs/JSON.")
+                    print(f"[Arena] Successfully loaded flattened state from PNGs/JSON, flatten coverage {self.flatten_coverage}.")
 
                 except Exception as e:
                     print(f"[Arena] Error loading data: {e}. Will recapture manually.")
@@ -154,7 +154,7 @@ class SingleArmPickAndPlaceArena(Arena):
                 self.flatten_coverage = self.coverage
                 
                 obs = self.flattened_obs['observation']
-                print(f"[Arena] Saving human-readable observation to {save_dir}...")
+                print(f"[Arena] Saving human-readable observation to {save_dir}..., flatten coverage {self.flatten_coverage}")
                 os.makedirs(save_dir, exist_ok=True)
                 
                 try:
@@ -376,8 +376,8 @@ class SingleArmPickAndPlaceArena(Arena):
         crop_mask_0 = rot_mask_0[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
         
         self.cloth_mask = crop_cloth_mask
-        self.coverage = np.sum(self.cloth_mask)
-        if self.init_coverage is None: self.init_coverage = self.coverage
+        
+        
 
         # Debug Visualizations with Workspace Mask Shading
         if self.debug:
@@ -424,6 +424,9 @@ class SingleArmPickAndPlaceArena(Arena):
             "arena": self,
             "arena_id": getattr(self, 'id', 0),
         })
+
+        self.coverage = np.sum(resized_mask)
+        if self.init_coverage is None: self.init_coverage = self.coverage
 
         if flattened_obs:
             info['flattened_obs'] = self.get_flattened_obs()

@@ -109,7 +109,7 @@ class SingleArmPickAndPlaceSkill:
         time.sleep(0.2)
         
         retract_pt = np.concatenate([p_place + [0, 0, self.approach_dist], target_rot])
-        self.scene.movel(retract_pt, speed=MOVE_SPEED, acc=MOVE_ACC)
+        self.scene.movel(retract_pt, speed=self.move_speed, acc=self.move_acc)
 
         if self.home_after:
             self.scene.home(speed=MOVE_SPEED, acc=MOVE_ACC)

@@ -105,7 +105,8 @@ def main(cfg: DictConfig):
         arena,
         checkpoint=-2, # Load best checkpoint
         policy_terminate=False,
-        env_success_stop=False
+        env_success_stop=False,
+        save_internal_states=True
     )
 
 if __name__ == "__main__":

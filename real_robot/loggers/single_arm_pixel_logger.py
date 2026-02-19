@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import json
 import matplotlib.pyplot as plt
+import csv
 
 from real_robot.robot.video_logger import VideoLogger
 from real_robot.utils.save_utils import (
@@ -154,3 +155,27 @@ class SingleArmPixelLogger(VideoLogger):
         save_path = os.path.join(viz_dir, f"episode_{eid}_trajectory.png")
         plt.savefig(save_path, dpi=200)
         plt.close(fig)
+
+        arena = info = result["information"][0]['arena']
+
+        if arena.measure_time:
+            perception_time =  getattr(arena, 'perception_time', [])
+            process_action_time = getattr(arena, 'process_action_time', [])
+            primitive_time = getattr(arena, 'primitive_time', [])
+            inference_time = result['internal_states'][-1].get('inference_time', [])
+            csv_path = os.path.join(episode_data_dir, 'timing_report.csv')
+            with open(csv_path, mode='w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["Metric", "Mean (s)", "Std (s)", "Samples (N)"])
+                def write_stat(name, data):
+                    if not data:
+                        writer.writerow([name, "N/A", "N/A", 0])
+                    elif isinstance(data, (int, float)):
+                        writer.writerow([name, f"{data:.4f}", "0.0000", 1])
+                    else:
+                        writer.writerow([name, f"{np.mean(data):.4f}", f"{np.std(data):.4f}", len(data)])
+
+                write_stat("Policy Inference / Step", inference_time)
+                write_stat("Perception / Step", perception_time)
+                write_stat("Process Action / Step", process_action_time)
+                write_stat("Primitives Exec / Step", primitive_time)

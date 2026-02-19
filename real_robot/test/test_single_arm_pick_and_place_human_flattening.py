@@ -32,6 +32,10 @@ def main():
         "debug": debug,
         'measure_time': measure_time,
         "snap_to_cloth_mask": True,
+        "roi_x_min": 781, # Right Half
+        "roi_x_max": 1130,
+        "roi_y_min": 50,
+        "roi_y_max": 670
     }
     
     task_config = {

@@ -181,7 +181,6 @@ class SingleArmPickAndPlaceArena(Arena):
         
         return self.flattened_obs
     
-    
     def _raw_to_crop(self, pt_raw):
         """Maps a point from raw robot coordinates back to the final square crop."""
         pt_rect = pt_raw - np.array([self.roi_x_min, self.roi_y_min])
@@ -222,7 +221,6 @@ class SingleArmPickAndPlaceArena(Arena):
         # 4. Snap to Robot Workspace in RAW space
         full_mask_0 = self.single_arm.get_workspace_mask()
         
-        # We print a warning if snapping moves the point violently
         pre_snap_pick = points_orig[0].copy()
         final_pick = snap_to_mask(points_orig[0], full_mask_0)
         final_place = snap_to_mask(points_orig[1], full_mask_0)
@@ -237,6 +235,8 @@ class SingleArmPickAndPlaceArena(Arena):
 
         # Subtract 90 degrees to undo the image rotation for the physical robot frame
         pick_angle = pick_angle_crop - (np.pi / 2)
+        if pick_angle < -np.pi:
+            pick_angle += np.pi
         
         # Construct Single Arm Action [px, py, lx, ly, rot]
         skill_action = np.concatenate([final_pick, final_place, [pick_angle]])
@@ -246,35 +246,28 @@ class SingleArmPickAndPlaceArena(Arena):
         # ---------------------------------------------------------------------
         if self.debug:
             try:
-                # Grab the raw RGB we saved in info in the last step
                 debug_raw = self.info['observation']['raw_rgb'].copy()
                 debug_raw = cv2.cvtColor(debug_raw, cv2.COLOR_RGB2BGR)
                 
-                # Draw Original Clicked Point (Yellow)
                 ox, oy = int(pre_snap_pick[0]), int(pre_snap_pick[1])
                 cv2.circle(debug_raw, (ox, oy), 6, (0, 255, 255), -1) 
                 
-                # Draw Final PICK point (Red)
                 px, py = int(final_pick[0]), int(final_pick[1])
                 cv2.circle(debug_raw, (px, py), 6, (0, 0, 255), -1) 
                 cv2.putText(debug_raw, "PICK", (px+10, py-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
                 
-                # Draw Final PLACE point (Blue)
                 lx, ly = int(final_place[0]), int(final_place[1])
                 cv2.circle(debug_raw, (lx, ly), 6, (255, 0, 0), -1) 
                 cv2.putText(debug_raw, "PLACE", (lx+10, ly-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
                 
-                # Draw the ROI boundary for reference (Green Box)
                 cv2.rectangle(debug_raw, (self.roi_x_min, self.roi_y_min), (self.roi_x_max, self.roi_y_max), (0, 255, 0), 2)
 
                 os.makedirs('./tmp', exist_ok=True)
                 cv2.imwrite('./tmp/debug_mapped_action.png', debug_raw)
-                print(f"[DEBUG] Wrote mapped action coordinates to ./tmp/debug_mapped_action.png")
             except Exception as e:
                 print(f"[DEBUG] Failed to write debug image: {e}")
         # ---------------------------------------------------------------------
 
-        
         if self.measure_time:
             self.process_action_time.append(time.time() - start_time)
             start_time = time.time()
@@ -282,7 +275,6 @@ class SingleArmPickAndPlaceArena(Arena):
         self.info = {}
         self.pick_and_place_skill.reset()
         
-        # Execute Action
         self.pick_and_place_skill.step(skill_action)
         
         executed_points = np.concatenate([final_pick, final_place])
@@ -326,7 +318,7 @@ class SingleArmPickAndPlaceArena(Arena):
 
         h, w = raw_rgb.shape[:2]
         
-        # 1. Define Rectangular ROI (defaulting to right half)
+        # 1. Define Rectangular ROI
         self.roi_x_min = self.config.get("roi_x_min", w // 2)
         self.roi_x_max = self.config.get("roi_x_max", w)
         self.roi_y_min = self.config.get("roi_y_min", 0)
@@ -345,14 +337,47 @@ class SingleArmPickAndPlaceArena(Arena):
         
         rot_h, rot_w = rot_rgb.shape[:2]
 
-        # 3. Center square crop from rotated ROI
+        # 3. Default Center square crop
         self.crop_size = min(rot_h, rot_w)
         self.cx1 = rot_w // 2 - self.crop_size // 2
         self.cy1 = rot_h // 2 - self.crop_size // 2
 
         crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
+        crop_cloth_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
+
+        # ---------------------------------------------------------------------
+        # --- HEURISTIC WORKSPACE SAMPLING ---
+        # ---------------------------------------------------------------------
+        if np.sum(crop_cloth_mask) < 50:
+            print("[Arena] Heuristic: Central window is empty. Searching for cloth in full ROI...")
+            full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=False)
+            
+            if np.sum(full_rot_mask) > 50:
+                # Find center of mass of the cloth
+                ys, xs = np.where(full_rot_mask > 0)
+                cy_cloth = int(np.mean(ys))
+                cx_cloth = int(np.mean(xs))
+                
+                # Shift cx1, cy1 to perfectly center the cloth, clamped to edges
+                self.cx1 = np.clip(cx_cloth - self.crop_size // 2, 0, rot_w - self.crop_size)
+                self.cy1 = np.clip(cy_cloth - self.crop_size // 2, 0, rot_h - self.crop_size)
+                
+                print(f"[Arena] Heuristic: Shifted window to ({self.cx1}, {self.cy1}).")
+                
+                # Re-crop everything with the new centered coordinates
+                crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
+                crop_cloth_mask = full_rot_mask[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
+            else:
+                print("[Arena] Warning: Cloth not found in the entire ROI.")
+        # ---------------------------------------------------------------------
+
+        # Proceed with depth and mask mapping using the (potentially shifted) cx1, cy1
         crop_depth = rot_depth[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
         crop_mask_0 = rot_mask_0[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
+        
+        self.cloth_mask = crop_cloth_mask
+        self.coverage = np.sum(self.cloth_mask)
+        if self.init_coverage is None: self.init_coverage = self.coverage
 
         # Debug Visualizations with Workspace Mask Shading
         if self.debug:
@@ -363,11 +388,8 @@ class SingleArmPickAndPlaceArena(Arena):
                 shaded = img_bgr.astype(np.float32)
                 valid = mask > 0
                 
-                # Tint the valid workspace slightly green
                 tint = np.array([0, 200, 0], dtype=np.float32)
                 shaded[valid] = shaded[valid] * 0.8 + tint * 0.2
-                
-                # Dim the invalid area significantly
                 shaded[~valid] = shaded[~valid] * 0.3
                 
                 return shaded.astype(np.uint8)
@@ -376,11 +398,6 @@ class SingleArmPickAndPlaceArena(Arena):
             cv2.imwrite('./tmp/debug_02_rect_roi.png', apply_shade_bgr(rect_rgb, rect_mask_0))
             cv2.imwrite('./tmp/debug_03_rotated.png', apply_shade_bgr(rot_rgb, rot_mask_0))
             cv2.imwrite('./tmp/debug_04_final_crop.png', apply_shade_bgr(crop_rgb, crop_mask_0))
-
-        crop_cloth_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
-        self.cloth_mask = crop_cloth_mask
-        self.coverage = np.sum(self.cloth_mask)
-        if self.init_coverage is None: self.init_coverage = self.coverage
 
         norm_depth = process_depth(crop_depth)
 
@@ -458,7 +475,7 @@ class SingleArmPickAndPlaceArena(Arena):
         return np.zeros(4, dtype=np.float32)
 
 if __name__ == "__main__":
-    print("Testing Rotation, Cropping, & Shading Pipeline...")
+    print("Testing Rotation, Cropping, Shading & Heuristic Pipeline...")
     
     test_config = {
         "debug": True,
@@ -474,21 +491,35 @@ if __name__ == "__main__":
     
     # Create Mock RGB Data
     dummy_rgb = np.ones((720, 1280, 3), dtype=np.uint8) * 150
-    cv2.rectangle(dummy_rgb, (1100, 100), (1200, 200), (255, 0, 0), -1) 
+    
+    # Add a visual reference (red square) EXTREMELY HIGH in the ROI
+    # This ensures the standard center crop misses it, triggering the heuristic!
+    cv2.rectangle(dummy_rgb, (800, 60), (900, 160), (255, 0, 0), -1) 
     
     dummy_depth = np.random.rand(720, 1280).astype(np.float32)
     
     # Create a dummy workspace mask
     dummy_mask = np.zeros((720, 1280), dtype=np.uint8)
-    cv2.circle(dummy_mask, (1000, 360), 300, 1, -1)
+    cv2.circle(dummy_mask, (950, 360), 300, 1, -1)
     
     # Inject Mock Handlers
     arena.single_arm.take_rgbd = lambda: (dummy_rgb, dummy_depth)
     arena.single_arm.get_workspace_mask = lambda: dummy_mask
     arena.get_flattened_obs = lambda: {"test_obs": 1}
     
+    # Mock the get_mask_v2 to simply isolate the Red channel (simulating cloth detection)
+    def mock_get_mask(generator, img, debug=False):
+        # Return True where the Red channel is strong (finding our red square)
+        return (img[:,:,2] > 200).astype(np.uint8) * 255
+    
+    arena.mask_generator = "dummy_generator"
+    # Override global function locally for testing
+    get_mask_v2 = mock_get_mask
+    
     # Execute image pipeline
     test_info = {}
     arena._process_info(test_info, task_related=False, flattened_obs=False)
     
-    print("\n[SUCCESS] Pipeline executed. Check the './tmp' directory to verify the 4 debug images.")
+    print("\n[SUCCESS] Pipeline executed.")
+    print("You should see '[Arena] Heuristic: Central window is empty.' in the logs above.")
+    print("Check './tmp/debug_04_final_crop.png' - the red square should be perfectly centered!")

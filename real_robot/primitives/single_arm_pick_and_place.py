@@ -77,7 +77,7 @@ class SingleArmPickAndPlaceSkill:
 
         # A. Approach Pick
         approach_pick = np.concatenate([p_pick + [0, 0, self.approach_dist], target_rot])
-        self.scene.movel(approach_pick, speed=self.move_speed, acc=self.move_acc)
+        self.scene.movel(approach_pick, speed=MOVE_SPEED, acc=MOVE_ACC)
         self.scene.open_gripper()
 
         # B. Move to Contact (Grasp)
@@ -109,7 +109,7 @@ class SingleArmPickAndPlaceSkill:
         time.sleep(0.2)
         
         retract_pt = np.concatenate([p_place + [0, 0, self.approach_dist], target_rot])
-        self.scene.movel(retract_pt, speed=self.move_speed, acc=self.move_acc)
+        self.scene.movel(retract_pt, speed=MOVE_SPEED, acc=MOVE_ACC)
 
         if self.home_after:
-            self.scene.home(speed=self.move_speed, acc=self.move_acc)
+            self.scene.home(speed=MOVE_SPEED, acc=MOVE_ACC)

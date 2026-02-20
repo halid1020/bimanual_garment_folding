@@ -25,7 +25,7 @@ def get_mask_v2(mask_generator, rgb,
                 min_saturation=30,         # NEW: Filter out white/grey things
                 white_value_threshold=210, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
-                max_variance=5000,
+                max_variance=6000,
                 debug=False,
                 save_dir="./tmp"):
     """
@@ -46,8 +46,13 @@ def get_mask_v2(mask_generator, rgb,
         mask = result['segmentation'].astype(np.uint8)
         mask_region_size = np.sum(mask) # Sum is faster for binary masks
 
+        if debug:
+            save_name = os.path.join(save_dir, f"candidate_{idx}.png")
+            cv2.imwrite(save_name, (mask * 255))
+
         # --- A. Size Filter ---
         if mask_region_size < mask_threshold_min or mask_region_size > mask_threshold_max:
+            if debug: print(f"ID {idx}: Filtered (Mask region {mask_region_size} outof threshold)")
             continue
 
         # --- B. Border Filter (Crucial for removing Background) ---
@@ -100,9 +105,7 @@ def get_mask_v2(mask_generator, rgb,
             'score': score
         })
 
-        if debug:
-            save_name = os.path.join(save_dir, f"candidate_{idx}_sat{int(avg_saturation)}.png")
-            cv2.imwrite(save_name, (mask * 255))
+        
 
     if len(mask_data) == 0:
         print("No suitable masks found after filtering.")

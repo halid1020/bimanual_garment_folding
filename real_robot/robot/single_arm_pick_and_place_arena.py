@@ -9,6 +9,7 @@ import shutil
 from real_robot.robot.single_arm_scene import SingleArmScene
 from real_robot.robot.utils import get_grasp_rotation, snap_to_mask, process_depth
 from real_robot.utils.mask_utils import get_mask_generator, get_mask_v2
+from real_robot.utils.save_utils import *
 from real_robot.utils.transform_utils import MOVE_ACC, MOVE_SPEED
 from real_robot.primitives.single_arm_pick_and_place import SingleArmPickAndPlaceSkill
 from real_robot.loggers.single_arm_pixel_logger import SingleArmPixelLogger
@@ -30,7 +31,8 @@ class SingleArmPickAndPlaceArena(Arena):
         
         self.single_arm = SingleArmScene(
             ur5e_robot_ip=config.get("ur5e_ip", "192.168.1.10"),
-            dry_run=dry_run
+            dry_run=dry_run,
+            radius=config.get('radius', [0.24, 0.54])
         )
         
         # Use the new Single Arm Skill
@@ -102,23 +104,17 @@ class SingleArmPickAndPlaceArena(Arena):
             base_asset_dir = f"{os.environ.get('MP_FOLD_PATH', '.')}/assets"
             save_dir = os.path.join(base_asset_dir, 'real_garments', self.garment_id)
             
-            fn_rgb = os.path.join(save_dir, "rgb.png")
-            fn_raw_rgb = os.path.join(save_dir, "raw_rgb.png")
-            fn_depth = os.path.join(save_dir, "depth.png")
-            fn_mask = os.path.join(save_dir, "mask.png")
-            fn_r0_mask = os.path.join(save_dir, "robot0_mask.png")
-            fn_r1_mask = os.path.join(save_dir, "robot1_mask.png")
+            
             fn_info = os.path.join(save_dir, "info.json")
 
             if os.path.exists(save_dir) and os.path.exists(fn_info):
                 print(f"[Arena] Found cached observation folder for '{self.garment_id}'. Loading images...")
                 try:
-                    rgb = cv2.cvtColor(cv2.imread(fn_rgb), cv2.COLOR_BGR2RGB)
-                    raw_rgb = cv2.cvtColor(cv2.imread(fn_raw_rgb), cv2.COLOR_BGR2RGB)
-                    depth = cv2.imread(fn_depth, cv2.IMREAD_UNCHANGED)
-                    mask_img = cv2.imread(fn_mask, cv2.IMREAD_GRAYSCALE)
-                    mask = (mask_img > 127).astype(np.bool_)
-                    r0_mask = (cv2.imread(fn_r0_mask, cv2.IMREAD_GRAYSCALE) > 127).astype(np.bool_)
+                    rgb = load_colour("rgb", save_dir)
+                    raw_rgb = load_colour("raw_rgb", save_dir)
+                    depth = load_depth("depth", save_dir)
+                    mask = load_mask("mask", save_dir)
+                    r0_mask = load_mask("robot_0_mask", save_dir)
 
                     with open(fn_info, 'r') as f:
                         meta_info = json.load(f)
@@ -159,11 +155,13 @@ class SingleArmPickAndPlaceArena(Arena):
                 os.makedirs(save_dir, exist_ok=True)
                 
                 try:
-                    cv2.imwrite(fn_rgb, cv2.cvtColor(obs['rgb'], cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(fn_raw_rgb, cv2.cvtColor(obs['raw_rgb'], cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(fn_depth, obs['depth'])
-                    cv2.imwrite(fn_mask, (obs['mask'] * 255).astype(np.uint8))
-                    cv2.imwrite(fn_r0_mask, (obs['robot0_mask'] * 255).astype(np.uint8))
+
+                    save_colour(obs['rgb'], "rgb", save_dir)
+                    save_colour(obs['raw_rgb'], "raw_rgb", save_dir)
+                    save_depth(obs['depth'], "depth", save_dir)
+                    save_mask(obs['mask'], "mask", save_dir)
+                    save_mask(obs['robot0_mask'], "robot0_mask", save_dir)
+
                     
                     meta_info = {
                         "eid": int(self.flattened_obs.get("eid", 0)),
@@ -344,7 +342,7 @@ class SingleArmPickAndPlaceArena(Arena):
         self.cy1 = rot_h // 2 - self.crop_size // 2
 
         crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
-        crop_cloth_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
+        crop_cloth_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug, mask_threshold_min=3000)
 
         # ---------------------------------------------------------------------
         # --- HEURISTIC WORKSPACE SAMPLING ---
@@ -460,6 +458,7 @@ class SingleArmPickAndPlaceArena(Arena):
 
                         info['goal'][k] = v
                         info['observation'][f'goal_{k}'] = v
+                        info['observation'][f'goal-{k}'] = v
 
         self.last_info = info
         self.single_arm.home(MOVE_SPEED, MOVE_ACC)

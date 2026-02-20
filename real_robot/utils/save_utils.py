@@ -54,7 +54,7 @@ def save_action_json(action, filename, directory="."):
 
 # --- NEW: Corresponding Load Functions ---
 
-def load_colour(filename, directory=".", bgr2rgb=True):
+def load_colour(filename, directory=".", bgr2rgb=False):
     path = f'{directory}/{filename}.png'
     if not os.path.exists(path):
         return None

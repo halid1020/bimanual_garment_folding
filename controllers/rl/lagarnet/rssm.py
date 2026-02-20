@@ -533,6 +533,7 @@ class RSSM(RLAgent):
             return 0
         
         self._load_from_model_dir(model_dir)
+        print('[LaGarNet, load_best] Successfully loaded the best model in directory {}'.format(model_dir))
         self.loaded = True
         return -2
         

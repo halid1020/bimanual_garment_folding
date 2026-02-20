@@ -32,6 +32,7 @@ class PickAndPlaceTransformerV1:
         self.depth_flip = self.config.get('depth_flip', False)
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
+        self.img_dim = (self.config.img_dim[0], self.config.img_dim[1])
         if self.all_goal_rotate:
             self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.config.get('rotation_degree', 360))
         #self.maskout = self.config.get('maskout', False)
@@ -113,13 +114,14 @@ class PickAndPlaceTransformerV1:
                 #print('obs', obs)
                 if sample[obs].shape[-1] <= 10:
                     sample[obs] = sample[obs].permute(0, 3, 1, 2)
-                #print('obs', obs, sample[obs].shape)
+                # print('obs', obs, sample[obs].shape)
+                # print(' img dim', self.img_dim)
                 T, C, H, W = sample[obs].shape
-                if (H, W) != tuple(self.config.img_dim):
+                if (H, W) != self.img_dim:
                     sample[obs] = F.interpolate(
                         sample[obs],
-                        size=self.config.img_dim, mode='bilinear', align_corners=False)\
-                            .view(T, C, *self.config.img_dim)
+                        size=self.img_dim, mode='bilinear', align_corners=False)\
+                            .view(T, C, *self.img_dim)
 
                     if obs == 'mask':
                         sample[obs] = (sample[obs] > 0.5).float()

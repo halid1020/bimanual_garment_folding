@@ -54,7 +54,7 @@ def _visualize_constraint(mask, original_act, constrained_act, robot_name, step_
         u, v = uv_coords[:, 0], uv_coords[:, 1]
         x = (u + 1) * W / 2
         y = (v + 1) * H / 2
-        return x, y
+        return y, x
 
     # 2. Plot Pick (First 2 coords)
     orig_px, orig_py = to_pix(original_act[:, 0:2])
@@ -82,46 +82,40 @@ def _visualize_constraint(mask, original_act, constrained_act, robot_name, step_
     
     # Save with robot name and a counter/random ID to prevent overwrite
     import random
-    rand_id = random.randint(0, 10000)
-    plt.savefig(f"{save_dir}/step_{step_idx}_{robot_name}_{rand_id}.png", bbox_inches='tight', pad_inches=0)
+    plt.savefig(f"{save_dir}/deniose_step_{step_idx}_{robot_name}.png", bbox_inches='tight', pad_inches=0)
     plt.close()
 
 # -----------------------------------------------------------------------------
 # Main Constraint Functions
 # -----------------------------------------------------------------------------
 
-def identity(action, info):
+def identity(action, info, t, debug=False):
     return action
 
-def constrain_bimanual_mask(action, info):
+def constrain_bimanual_mask(action, info, t, debug=False):
     """
     Constrains Pick/Place coordinates to specific robot masks.
     Expects action shape: (Batch, Horizon, ActionDim)
     """
-    
-    # --- Config: Action Indices ---
-    # Robot 0: Pick [0,1], Place [2,3]
-    r0_idx = [0, 1, 2, 3] 
-    # Robot 1: Pick [7,8], Place [9,10]
-    r1_idx = [7, 8, 9, 10]
 
+    if debug:
+        print(f'[constrain_bimanual_mask] noise action {t} dim {action.shape}, values {action}')
+        
+    # --- Config: Action Indices ---
+    r0_idx = [0, 1, 4, 5] 
+    r1_idx = [2, 3, 6, 7]
+
+    original_action = action.clone()
     device = action.device
     obs = info.get('observation', {})
-    
-    # Debugging Setup
-    debug = info.get('debug', False)
-    if debug:
-        # Clone original action for comparison later
-        # We perform operations on 'action' in-place, so we need a copy.
-        original_action = action.clone()
 
     # --- 1. Robot 0 Constraint ---
     if 'robot0_mask' in obs:
         mask = obs['robot0_mask']
-        if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
+        # if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
         if mask.ndim == 3: mask = mask.squeeze(-1)
         
-        ys, xs = np.where(mask > 0)
+        xs, ys = np.where(mask > 0)
         
         if len(xs) > 0:
             H, W = mask.shape
@@ -138,10 +132,10 @@ def constrain_bimanual_mask(action, info):
     # --- 2. Robot 1 Constraint ---
     if 'robot1_mask' in obs:
         mask = obs['robot1_mask']
-        if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
+        # if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
         if mask.ndim == 3: mask = mask.squeeze(-1)
         
-        ys, xs = np.where(mask > 0)
+        xs, ys = np.where(mask > 0)
         
         if len(xs) > 0:
             H, W = mask.shape
@@ -158,28 +152,28 @@ def constrain_bimanual_mask(action, info):
     if debug:
         # We visualize only the first item in the batch (Batch index 0)
         batch_idx = 0
-        step_idx = info.get('step', 0) # Attempt to get step count if available
-        
+        step_idx = t
+
         # Robot 0 Vis
         if 'robot0_mask' in obs:
             mask0 = obs['robot0_mask']
-            if hasattr(mask0, 'cpu'): mask0 = mask0.cpu().numpy()
+            if hasattr(mask0, 'cpu'): mask0 = mask0.detach().cpu().numpy()
             if mask0.ndim == 3: mask0 = mask0.squeeze(-1)
             
             # Get coords for Robot 0 (Pick U,V, Place U,V)
-            orig_act_r0 = original_action[batch_idx, :, r0_idx].cpu().numpy()
-            new_act_r0 = action[batch_idx, :, r0_idx].cpu().numpy()
+            orig_act_r0 = original_action[batch_idx, :, r0_idx].detach().cpu().numpy()
+            new_act_r0 = action[batch_idx, :, r0_idx].detach().cpu().numpy()
             
             _visualize_constraint(mask0, orig_act_r0, new_act_r0, "Robot0", step_idx)
 
         # Robot 1 Vis
         if 'robot1_mask' in obs:
             mask1 = obs['robot1_mask']
-            if hasattr(mask1, 'cpu'): mask1 = mask1.cpu().numpy()
+            if hasattr(mask1, 'cpu'): mask1 = mask1.detach().cpu().numpy()
             if mask1.ndim == 3: mask1 = mask1.squeeze(-1)
             
-            orig_act_r1 = original_action[batch_idx, :, r1_idx].cpu().numpy()
-            new_act_r1 = action[batch_idx, :, r1_idx].cpu().numpy()
+            orig_act_r1 = original_action[batch_idx, :, r1_idx].detach().cpu().numpy()
+            new_act_r1 = action[batch_idx, :, r1_idx].detach().cpu().numpy()
             
             _visualize_constraint(mask1, orig_act_r1, new_act_r1, "Robot1", step_idx)
 

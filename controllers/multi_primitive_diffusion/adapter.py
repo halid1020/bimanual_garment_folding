@@ -22,7 +22,7 @@ from .utils \
 from .networks import ConditionalUnet1D, MLPClassifier
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from ..data_augmentation.register_augmeters import build_data_augmenter
-from .contrain_action_functions import name2func
+from .constrain_action_functions import name2func
 
 class DiffusionTransform():
 
@@ -90,7 +90,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.collect_on_success = self.config.get('collect_on_success', True)
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
-        self.contrain_action = name2func[config.get('contrain_action', 'identity')]
+        self.constrain_action = name2func[config.get('constrain_action', 'identity')]
 
         self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
@@ -785,7 +785,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 mask = torch.stack([x['mask'] for x in self.obs_deque[info['arena_id']]])
                 sample_state['mask'] = mask
 
-            if self.debug:
+            if self.debug and self.config.input_obs == 'rgb-workspace-mask-goal':
                 from .draw_utils import plot_rgb_workspace_mask_goal_features
                 plot_rgb_workspace_mask_goal_features(image)
 
@@ -818,7 +818,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 horizon=self.config.pred_horizon, 
                 action_dim=self.network_action_dim
             ).to(self.device)
-            naction = self.contrain_action(naction, info)
+            
+            if self.primitive_integration == 'one-hot-encoding':
+                naction = self.constrain_action(naction, info, t=-1, debug=self.debug)
 
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
@@ -841,14 +843,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     timestep=k,
                     sample=naction
                 ).prev_sample
-
-                naction = self.contrain_action(naction, info)
+                
+                if self.primitive_integration == 'one-hot-encoding':
+                    naction = self.constrain_action(naction, info, t=k, debug=self.debug)
 
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
             # ---  Call Debug GIF Function ---
-            if self.debug:
-                from .contrain_action_functions import save_denoising_gif
+            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.config.constrain_action == 'bimanual_mask':
+                print('!!!!!! Contrain Debug!!!!!')
+                from .constrain_action_functions import save_denoising_gif
                 
                 # Extract image and masks from the deque/buffer
                 # Taking the last observation (current state)

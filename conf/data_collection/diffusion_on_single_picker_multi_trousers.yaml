@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: random_single_picker_single_primitive_multi_trousers_flattening_ray
+  - /agent@agent: diffusion_single_picker_single_primitive_multi_trousers_flattening_demo_200
   - /arena@arena: multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
   - _self_
@@ -8,8 +8,8 @@ defaults:
 parallel_processes: 4
 trials: 10000
 single_agent: True
-agent_save_root: 'tmp'
-agent_exp_name: 'data-collection-test'
-data_path: 'mask_biased_random_on_multi_trousers_with_single_picker_pick_and_place'
+agent_save_root: '/data/ah390/garment_folding_data'
+agent_exp_name: diffusion_single_picker_single_primitive_multi_trousers_flattening_demo_200
+data_path: diffusion_on_multi_trousers_with_single_picker_pick_and_place
 data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
 # collected in thanos

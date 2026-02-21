@@ -89,4 +89,4 @@ primitives:
     dim: 0
 mask_out_irrelavent_action_dim: false
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_workspace
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3

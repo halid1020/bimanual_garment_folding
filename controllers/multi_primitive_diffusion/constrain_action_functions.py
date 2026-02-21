@@ -97,7 +97,9 @@ def constrain_bimanual_mask(action, info, t, debug=False):
     Constrains Pick/Place coordinates to specific robot masks.
     Expects action shape: (Batch, Horizon, ActionDim)
     """
-
+    if t > 20:
+        return action
+        
     if debug:
         print(f'[constrain_bimanual_mask] noise action {t} dim {action.shape}, values {action}')
         

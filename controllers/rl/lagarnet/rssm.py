@@ -155,7 +155,7 @@ class RSSM(RLAgent):
     
     def single_act(self, info, update=False):
 
-        action =  self.planning_algo.act([info])[0].flatten()
+        action =  self.planning_algo.act([info], updates=[False])[0].flatten()
         plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
         
         for k, v in plan_internal_state.items():

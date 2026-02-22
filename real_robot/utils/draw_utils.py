@@ -167,8 +167,8 @@ def draw_pick_and_place(img, action):
 
     draw_colored_line(
         img,
-        swap(left_pick),
-        swap(left_place),
+        left_pick,
+        left_place,
         cmap_left,
         thickness=8,
         num_samples=20
@@ -177,8 +177,8 @@ def draw_pick_and_place(img, action):
     if len(action) > 4:
         draw_colored_line(
             img,
-            swap(right_pick),
-            swap(right_place),
+            right_pick,
+            right_place,
             cmap_right,
             thickness=8,
             num_samples=20
@@ -194,10 +194,10 @@ def draw_pick_and_place(img, action):
     )[0, 0].tolist()
     
     # ----- Hollow circles -----
-    cv2.circle(img, swap(left_pick),  10, BLUE, 3)
+    cv2.circle(img, left_pick,  10, BLUE, 3)
 
     if len(action) > 4:
-        cv2.circle(img, swap(right_pick), 10, RED,  3)
+        cv2.circle(img, right_pick, 10, RED,  3)
 
     return img
 

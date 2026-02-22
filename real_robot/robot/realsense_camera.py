@@ -134,7 +134,8 @@ class RealsenseCamera():
         if self.debug:
             save_depth(depth_image, filename='post_depth', directory='./tmp', colour=True)
             save_colour(color_image, filename='color', directory='./tmp', rgb2bgr=False)
-            
+        color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
+
         return color_image, depth_image
 
     def get_intrinsic(self):

@@ -200,15 +200,42 @@ class SingleArmPickAndPlaceArena(Arena):
         if self.measure_time: start_time = time.time()
 
         norm_pixels = action.reshape(-1, 2)
+        norm_pixels[:, [0, 1]] = norm_pixels[:, [1, 0]]
+        #norm_pixels[:, 0], norm_pixels[:, 1] = norm_pixels[:, 1], norm_pixels[:, 0]
 
+        
         # 1. Denormalize to crop space
         points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.float32)
         
+        if self.debug:
+            try:
+                debug_raw = self.info['observation']['rgb'].copy()
+                points_resize = ((norm_pixels + 1) / 2 * debug_raw.shape[0]).astype(np.float32)
+        
+                debug_raw = cv2.cvtColor(debug_raw, cv2.COLOR_RGB2BGR)
+                
+                
+                px, py = int(points_resize[0, 0]), int(points_resize[0, 1])
+
+                cv2.circle(debug_raw, (px, py), 6, (0, 0, 255), -1) 
+                cv2.putText(debug_raw, "PICK", (px+10, py-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+                
+                lx, ly = int(points_resize[1, 0]), int(points_resize[1, 1])
+                cv2.circle(debug_raw, (lx, ly), 6, (255, 0, 0), -1) 
+                cv2.putText(debug_raw, "PLACE", (lx+10, ly-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
+                
+                cv2.rectangle(debug_raw, (self.roi_x_min, self.roi_y_min), (self.roi_x_max, self.roi_y_max), (0, 255, 0), 2)
+
+                os.makedirs('./tmp', exist_ok=True)
+                cv2.imwrite('./tmp/debug_rgb_action.png', debug_raw)
+            except Exception as e:
+                print(f"[DEBUG] Failed to write debug image: {e}")
+
         # 2. Snap to Cloth Mask (in crop space)
         if self.snap_to_cloth_mask:
             mask = self.cloth_mask
             kernel = np.ones((3, 3), np.uint8) 
-            eroded_mask = cv2.erode(mask, kernel, iterations=10)
+            eroded_mask = cv2.erode(mask, kernel, iterations=5)
             target_mask = mask if np.sum(eroded_mask) == 0 else eroded_mask
             
             # Snap both points
@@ -294,6 +321,7 @@ class SingleArmPickAndPlaceArena(Arena):
         # Normalize applied actions correctly using crop coordinates
         executed_crop_pts = np.array([self._raw_to_crop(pt) for pt in executed_points.reshape(-1, 2)])
         applied_action = (executed_crop_pts / self.crop_size) * 2.0 - 1.0
+        applied_action[:, [0,1]] = applied_action[:,[1,0]]
         self.info['applied_action'] = applied_action.flatten()
             
         if self.measure_time:
@@ -342,14 +370,17 @@ class SingleArmPickAndPlaceArena(Arena):
         self.cy1 = rot_h // 2 - self.crop_size // 2
 
         crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
-        crop_cloth_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug, mask_threshold_min=3000)
+        crop_cloth_mask = get_mask_v2(
+            self.mask_generator, crop_rgb, debug=self.debug, 
+            mask_threshold_min=3000, mask_threshold_max=30000)
 
         # ---------------------------------------------------------------------
         # --- HEURISTIC WORKSPACE SAMPLING ---
         # ---------------------------------------------------------------------
         if np.sum(crop_cloth_mask) < 50:
             print("[Arena] Heuristic: Central window is empty. Searching for cloth in full ROI...")
-            full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=False)
+            full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=False, 
+            mask_threshold_min=3000, mask_threshold_max=30000)
             
             if np.sum(full_rot_mask) > 50:
                 # Find center of mass of the cloth
@@ -418,6 +449,8 @@ class SingleArmPickAndPlaceArena(Arena):
                 "raw_rgb": raw_rgb,
                 "action_step": self.action_step,
                 "robot0_mask": resized_r0_mask.astype(np.bool_),
+                "cloth-workspace-mask": np.logical_and(resized_mask, resized_r0_mask)
+
             },
             "eid": getattr(self, 'eid', 0),
             "arena": self,

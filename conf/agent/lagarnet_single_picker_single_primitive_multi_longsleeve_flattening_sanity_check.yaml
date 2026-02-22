@@ -159,7 +159,7 @@ datasets:
     
 
 policy:
-  name: 'rect_fabric_cloth_mask_mpc'
+  name: 'cloth_mask_workspace_pick_and_place_mpc'
   params:
     candidates: 5000
     planning_horizon: 1
@@ -167,7 +167,7 @@ policy:
     clip: True
     swap_action: False
     cloth_mask: "from_env"
-
+    debug: True
     cost_fn: 'from_model'
 
 

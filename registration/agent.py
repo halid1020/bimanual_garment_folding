@@ -32,6 +32,7 @@ from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusio
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
 from controllers.rl.lagarnet.gc_rssm import GC_RSSM
+from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
 
 import actoris_harena as ag_ar
 
@@ -59,3 +60,4 @@ def register_agents():
     ag_ar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
     ag_ar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
     ag_ar.register_agent('lagarnet', GC_RSSM)
+    ag_ar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)

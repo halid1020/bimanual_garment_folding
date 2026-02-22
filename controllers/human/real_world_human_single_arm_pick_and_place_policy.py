@@ -58,7 +58,7 @@ class RealWorldSingleArmHumanPickAndPlacePolicy(Agent):
 
         # Normalize to [-1, 1]
         def norm_xy(pt):
-            x, y = pt
+            y, x= pt
             return ((x / w) * 2 - 1, (y / h) * 2 - 1)
 
         pick_norm = norm_xy(pick_pt)

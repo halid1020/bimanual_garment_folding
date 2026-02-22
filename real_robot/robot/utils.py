@@ -76,9 +76,13 @@ def get_grasp_rotation(mask, point):
 
 def snap_to_mask(point, mask):
     point = np.array(point, dtype=int)
-    h, w = mask.shape
+    
+    # Extract only the first two dimensions to handle both 2D and 3D masks safely
+    h, w = mask.shape[:2]
+    
     x, y = np.clip(point[0], 0, w - 1), np.clip(point[1], 0, h - 1)
 
+    # Fast path: Check if the clipped coordinate lands on a valid mask pixel
     if mask[y, x] > 0:
         return np.array([x, y])
 
@@ -88,7 +92,8 @@ def snap_to_mask(point, mask):
         print("[Warning] Workspace mask is empty! Cannot snap point.")
         return np.array([x, y])
 
-    current_pos_yx = np.array([y, x])
+    # Calculate distance geometrically from the ORIGINAL unclipped point
+    current_pos_yx = np.array([point[1], point[0]])
     distances = np.sum((valid_indices - current_pos_yx) ** 2, axis=1)
     
     nearest_idx = np.argmin(distances)

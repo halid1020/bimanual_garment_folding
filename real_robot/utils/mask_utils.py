@@ -25,7 +25,7 @@ def get_mask_v2(mask_generator, rgb,
                 min_saturation=30,         # NEW: Filter out white/grey things
                 white_value_threshold=210, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
-                max_variance=6000,
+                max_variance=7000,
                 debug=False,
                 save_dir="./tmp"):
     """
@@ -60,7 +60,7 @@ def get_mask_v2(mask_generator, rgb,
         h, w = mask.shape
         border_pixels = np.sum(mask[0, :]) + np.sum(mask[-1, :]) + np.sum(mask[:, 0]) + np.sum(mask[:, -1])
         # If it touches more than 10% of the perimeter, kill it
-        if border_pixels > (2 * (h + w)) * 0.10: 
+        if border_pixels > (2 * (h + w)) * 0.30: 
             if debug: print(f"ID {idx}: Filtered (Touching Borders)")
             continue
 

@@ -10,7 +10,7 @@ use_sim_workspace: False
 track_trajectory: False
 radius: [0.2, 0.7]
 
-roi_x_min: 750 # 400
+roi_x_min: 700 # 450
 roi_x_max: 1150
 roi_y_min: 10 #710
 roi_y_max: 720

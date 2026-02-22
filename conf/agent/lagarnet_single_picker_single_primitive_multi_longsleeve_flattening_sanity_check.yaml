@@ -1,6 +1,6 @@
 name: lagarnet
 device: 'cuda:0'
-debug: False
+debug: True
 train_mode: 'offline'
 
 input_obs: "rgb"

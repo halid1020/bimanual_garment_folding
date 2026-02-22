@@ -12,3 +12,4 @@ agent_save_root: '/data/ah390/garment_folding_data'
 agent_exp_name: diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_200
 data_path: diffusion_on_multi_longsleeve_with_single_picker_pick_and_place
 data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
+# collected in thanos

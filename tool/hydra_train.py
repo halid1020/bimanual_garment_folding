@@ -60,6 +60,8 @@ def main(cfg: DictConfig):
             cfg.agent.total_update_steps,
             eval_last_check=True,
             eval_best_check=True,
+            policy_terminate=False,
+            env_success_stop=False
             #eval_checkpoint=-2, # evaluate best model.
         )
 

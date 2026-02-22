@@ -1,7 +1,8 @@
+# @package _global_
 defaults:
-  - agent: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot_goal
-  - arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_with_workspace
-  - task: flattening_overstretch_penalty_1_no_big_bonus
+  - /agent@agent: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot_goal
+  - /arena@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_with_workspace
+  - /task@task: flattening_overstretch_penalty_1_no_big_bonus
   # - data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3 # enable colour jitting, channel permuatation, rotation, action clip.
 
 

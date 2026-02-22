@@ -117,7 +117,8 @@ class RSSM(RLAgent):
         import actoris_harena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
-            config=planning_config)
+            config=planning_config,
+            disable_wandb=True)
         
         self.data_sampler = self.config.get('data_sampler', 'uniform')
         self.internal_states = {}
@@ -138,8 +139,8 @@ class RSSM(RLAgent):
             embedding_layers=self.config.trans_layers
         ).to(self.config.device)
 
-    def set_log_dir(self, logdir, project_name, exp_name):
-        super().set_log_dir(logdir, project_name, exp_name)
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
         # self.logger = TrainWriter(self.save_dir)
     

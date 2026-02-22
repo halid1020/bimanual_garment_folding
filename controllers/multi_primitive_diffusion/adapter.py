@@ -691,8 +691,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         return masks
 
-    def set_log_dir(self, logdir, project_name, exp_name):
-        super().set_log_dir(logdir, project_name, exp_name)
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
 
         

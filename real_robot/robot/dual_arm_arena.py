@@ -335,6 +335,7 @@ class DualArmArena(Arena):
             start_time = time.time()
 
         norm_pixels = np.array(list(action.values())[0]).reshape(-1, 2)
+        norm_pixels[:, [0, 1]] = norm_pixels[:, [1, 0]]
         action_type = list(action.keys())[0]
 
         if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
@@ -473,6 +474,7 @@ class DualArmArena(Arena):
 
         if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
             applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
+            applied_action[:, [0, 1]] = applied_action[:, [1, 0]]
             self.info['applied_action'] = {
                 action_type: applied_action.flatten()
             }

@@ -32,6 +32,7 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
+  num_trj: 100
   obs_config:
     mask: 
       shape: [128, 128, 1]

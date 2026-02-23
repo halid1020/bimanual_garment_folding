@@ -79,8 +79,33 @@ class HumanDualPickersPickAndPlace(Agent):
                 alpha=0.2
             )
 
+        img = rgb.copy()
 
-        # Overlay success + IoU info BEFORE concatenation
+        # 2. Append the goal images side-by-side (same as your original code)
+        if 'goals' in state.keys():
+            goals = state['goals']
+            rgbs = []
+            for goal in goals[:4]:  
+                g = goal['observation']['rgb']
+                if g.shape[-1] == 3:
+                    g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
+                g = cv2.resize(g, (256, 256))
+                rgbs.append(g)
+
+            while len(rgbs) < 4:
+                rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
+
+            top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
+            bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
+            goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
+            img = np.concatenate([img, goal_rgb], axis=1)
+
+        # 3. Draw vertical white line between the two images
+        line_x = rgb.shape[1]
+        cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
+
+        # 4. Generate the Text Header
+        text_lines = []
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
@@ -91,49 +116,78 @@ class HumanDualPickersPickAndPlace(Agent):
                 (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
                 (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
             ]
-
             if 'max_IoU' in state['evaluation'].keys():
                 max_iou_goal = state['evaluation']['max_IoU']
                 text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
+        
+        # Calculate header height dynamically based on the number of text lines
+        header_height = 10 + len(text_lines) * 25 if text_lines else 0
+        
+        # Create a black header and add the text to it
+        if header_height > 0:
+            header = np.zeros((header_height, img.shape[1], 3), dtype=np.uint8)
+            y_offset = 20
+            for text, color in text_lines:
+                cv2.putText(header, text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                y_offset += 25
             
-            draw_text_top_right(rgb, text_lines)
-        
-        
-        # Create a copy of the image to draw on
-        img = rgb.copy()
+            # Concatenate the header on top of the image
+            img = np.concatenate([header, img], axis=0)
 
-        # put img and goal_img side by side
-        # if 'goal' in state.keys():
-        #     goal_rgb = state['goal']['rgb']
-        #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
-        #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
+        # # Overlay success + IoU info BEFORE concatenation
+        # if 'evaluation' in state.keys() and state['evaluation'] != {}:
+        #     success = state['success']
+        #     max_iou_flat = state['evaluation']['max_IoU_to_flattened']
+        #     canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
+            
+        #     text_lines = [
+        #         (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
+        #         (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
+        #         (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
+        #     ]
+
+        #     if 'max_IoU' in state['evaluation'].keys():
+        #         max_iou_goal = state['evaluation']['max_IoU']
+        #         text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
+            
+        #     draw_text_top_right(rgb, text_lines)
+        
+        
+        # # Create a copy of the image to draw on
+        # img = rgb.copy()
+
+        # # put img and goal_img side by side
+        # # if 'goal' in state.keys():
+        # #     goal_rgb = state['goal']['rgb']
+        # #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
+        # #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
+        # #     img = np.concatenate([img, goal_rgb], axis=1)
+
+        # if 'goals' in state.keys():
+        #     goals = state['goals']  # list of goal infos
+
+        #     # Extract goal RGBs
+        #     rgbs = []
+        #     for goal in goals[:4]:  # max 4 for 2x2 grid
+        #         g = goal['observation']['rgb']
+
+        #         # Ensure RGB
+        #         if g.shape[-1] == 3:
+        #             g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
+
+        #         # Resize to half-size (for 2x2 grid)
+        #         g = cv2.resize(g, (256, 256))
+        #         rgbs.append(g)
+
+        #     # Pad with black images if fewer than 4
+        #     while len(rgbs) < 4:
+        #         rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
+
+        #     # Arrange into 2x2 grid
+        #     top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
+        #     bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
+        #     goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
         #     img = np.concatenate([img, goal_rgb], axis=1)
-
-        if 'goals' in state.keys():
-            goals = state['goals']  # list of goal infos
-
-            # Extract goal RGBs
-            rgbs = []
-            for goal in goals[:4]:  # max 4 for 2x2 grid
-                g = goal['observation']['rgb']
-
-                # Ensure RGB
-                if g.shape[-1] == 3:
-                    g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
-
-                # Resize to half-size (for 2x2 grid)
-                g = cv2.resize(g, (256, 256))
-                rgbs.append(g)
-
-            # Pad with black images if fewer than 4
-            while len(rgbs) < 4:
-                rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
-
-            # Arrange into 2x2 grid
-            top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
-            bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
-            goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
-            img = np.concatenate([img, goal_rgb], axis=1)
 
         # Draw vertical white line between the two images
         line_x = rgb.shape[1]   # x-position = width of left image (512)
@@ -196,10 +250,10 @@ class HumanDualPickersPickAndPlace(Agent):
 
         # Normalize the coordinates to [-1, 1]
         height, width = rgb.shape[:2]
-        pick1_y, pick1_x = clicks[0]
-        place1_y, place1_x = clicks[1]
-        pick2_y, pick2_x = clicks[2]
-        place2_y, place2_x = clicks[3]
+        pick1_y, pick1_x = clicks[0][0], clicks[0][1] - header_height
+        place1_y, place1_x = clicks[1][0], clicks[1][1] - header_height
+        pick2_y, pick2_x = clicks[2][0], clicks[2][1] - header_height
+        place2_y, place2_x = clicks[3][0], clicks[3][1] - header_height
         
         normalized_action1 = [
             (pick1_x / width) * 2 - 1,

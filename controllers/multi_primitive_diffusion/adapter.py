@@ -7,6 +7,7 @@ import numpy as np
 from collections import deque
 import torch
 import cv2
+from dotmap import DotMap
 import torch.nn as nn
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
@@ -186,7 +187,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         dataset = TrajectoryDataset(**config)
 
         import actoris_harena as ag_ar
-        policy = ag_ar.build_agent(self.config.demo_policy)
+        policy = ag_ar.build_agent(
+            self.config.demo_policy, 
+            self.config.get('demo_policy_config', DotMap({})),
+            disable_wandb=True)
 
         qbar = tqdm(total=self.config.num_demos, 
                     desc='Collecting data from policy ...')

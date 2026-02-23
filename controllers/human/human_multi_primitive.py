@@ -23,6 +23,8 @@ class HumanMultiPrimitive(Agent):
             "norm-pixel-pick-and-place",
             "no-operation"
         ]
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
         self.primitive_instances = [
             PixelHumanFling(config),
             # PixelHumanTwoPicker(config),
@@ -64,6 +66,16 @@ class HumanMultiPrimitive(Agent):
         
 
         rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+
+        if self.overlay_goal_contour:
+            goal_mask = state['goal']['mask']
+
+            goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+
+            contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            rgb = cv2.drawContours(rgb, contours, -1, (0, 255, 255), 1)
+
         rgb = cv2.resize(rgb, (512, 512))
         H, W = rgb.shape[:2]
 
@@ -106,10 +118,12 @@ class HumanMultiPrimitive(Agent):
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
+            canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
             
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
-                (f"IoU(flat): {max_iou_flat:.3f}", (255, 255, 255))
+                (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
+                (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
             ]
 
             if 'max_IoU' in state['evaluation'].keys():

@@ -14,6 +14,7 @@ from real_robot.primitives.pick_and_place import PickAndPlaceSkill
 from real_robot.primitives.pick_and_fling import PickAndFlingSkill
 from real_robot.loggers.pixel_based_primitive_env_imp_logger import PixelBasedPrimitiveImpEnvLogger
 from actoris_harena import Arena
+from real_robot.utils.save_utils import *
 
 class DualArmArena(Arena):
     """
@@ -94,8 +95,8 @@ class DualArmArena(Arena):
         self.info = {}
         self.all_infos = [self.info]
         self.info = self._process_info(self.info)
-        
         self.init_coverage = self.coverage
+
         self.clear_frames()
         self.primitive_time = []
         self.perception_time = []
@@ -131,11 +132,11 @@ class DualArmArena(Arena):
         self.crop_size = crop_size
 
         crop_rgb = raw_rgb[y1:y2, x1:x2]
-        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
+        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, 
+                                debug=self.debug, mask_threshold_max=180000)
         self.cloth_mask = crop_mask
-        self.coverage = np.sum(self.cloth_mask)
-        if self.init_coverage == None:
-            self.init_coverage = self.coverage
+        
+        
         crop_depth = raw_depth[y1:y2, x1:x2]
 
         crop_depth = process_depth(crop_depth)
@@ -183,6 +184,10 @@ class DualArmArena(Arena):
         
         #print('input mask shape', input_mask_0.shape)
 
+        self.coverage = np.sum(resized_mask)
+        print(f'Current Coverage {self.coverage}')
+        if self.init_coverage is None: self.init_coverage = self.coverage
+
         info.update({
             'observation': {
                 "rgb": resized_rgb,
@@ -198,6 +203,9 @@ class DualArmArena(Arena):
             "arena_id": 0,
             "arena": self,
         })
+
+       
+
 
         if flattened_obs:
             info['flattened_obs'] = self.get_flattened_obs()
@@ -244,24 +252,17 @@ class DualArmArena(Arena):
             base_asset_dir = f"{os.environ.get('MP_FOLD_PATH', '.')}/assets"
             save_dir = os.path.join(base_asset_dir, 'real_garments', self.garment_id)
             
-            fn_rgb = os.path.join(save_dir, "rgb.png")
-            fn_raw_rgb = os.path.join(save_dir, "raw_rgb.png")
-            fn_depth = os.path.join(save_dir, "depth.png")
-            fn_mask = os.path.join(save_dir, "mask.png")
-            fn_r0_mask = os.path.join(save_dir, "robot0_mask.png")
-            fn_r1_mask = os.path.join(save_dir, "robot1_mask.png")
+            
             fn_info = os.path.join(save_dir, "info.json")
 
             if os.path.exists(save_dir) and os.path.exists(fn_info):
                 print(f"[Arena] Found cached observation folder for '{self.garment_id}'. Loading images...")
                 try:
-                    rgb = cv2.cvtColor(cv2.imread(fn_rgb), cv2.COLOR_BGR2RGB)
-                    raw_rgb = cv2.cvtColor(cv2.imread(fn_raw_rgb), cv2.COLOR_BGR2RGB)
-                    depth = cv2.imread(fn_depth, cv2.IMREAD_UNCHANGED)
-                    mask_img = cv2.imread(fn_mask, cv2.IMREAD_GRAYSCALE)
-                    mask = (mask_img > 127).astype(np.bool_)
-                    r0_mask = (cv2.imread(fn_r0_mask, cv2.IMREAD_GRAYSCALE) > 127).astype(np.bool_)
-                    r1_mask = (cv2.imread(fn_r1_mask, cv2.IMREAD_GRAYSCALE) > 127).astype(np.bool_)
+                    rgb = load_colour("rgb", save_dir)
+                    raw_rgb = load_colour("raw_rgb", save_dir)
+                    depth = load_depth("depth", save_dir)
+                    mask = load_mask("mask", save_dir)
+                    r0_mask = load_mask("robot_0_mask", save_dir)
 
                     with open(fn_info, 'r') as f:
                         meta_info = json.load(f)
@@ -273,16 +274,15 @@ class DualArmArena(Arena):
                             "mask": mask,
                             "raw_rgb": raw_rgb,
                             "action_step": meta_info.get("action_step", 0),
-                            "robot0_mask": r1_mask,
-                            "robot1_mask": r0_mask,
+                            "robot0_mask": r0_mask,
                         },
                         "eid": meta_info.get("eid", 0),
-                        "arena_id": self.id,
+                        "arena_id": 0,
                         "arena": self
                     }
                     
                     self.flatten_coverage = np.sum(mask)
-                    print("[Arena] Successfully loaded flattened state from PNGs/JSON.")
+                    print(f"[Arena] Successfully loaded flattened state from PNGs/JSON, flatten coverage {self.flatten_coverage}.")
 
                 except Exception as e:
                     print(f"[Arena] Error loading data: {e}. Will recapture manually.")
@@ -299,16 +299,17 @@ class DualArmArena(Arena):
                 self.flatten_coverage = self.coverage
                 
                 obs = self.flattened_obs['observation']
-                print(f"[Arena] Saving human-readable observation to {save_dir}...")
+                print(f"[Arena] Saving human-readable observation to {save_dir}..., flatten coverage {self.flatten_coverage}")
                 os.makedirs(save_dir, exist_ok=True)
                 
                 try:
-                    cv2.imwrite(fn_rgb, cv2.cvtColor(obs['rgb'], cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(fn_raw_rgb, cv2.cvtColor(obs['raw_rgb'], cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(fn_depth, obs['depth'])
-                    cv2.imwrite(fn_mask, (obs['mask'] * 255).astype(np.uint8))
-                    cv2.imwrite(fn_r0_mask, (obs['robot0_mask'] * 255).astype(np.uint8))
-                    cv2.imwrite(fn_r1_mask, (obs['robot1_mask'] * 255).astype(np.uint8))
+
+                    save_colour(obs['rgb'], "rgb", save_dir)
+                    save_colour(obs['raw_rgb'], "raw_rgb", save_dir)
+                    save_depth(obs['depth'], "depth", save_dir)
+                    save_mask(obs['mask'], "mask", save_dir)
+                    save_mask(obs['robot0_mask'], "robot0_mask", save_dir)
+
                     
                     meta_info = {
                         "eid": int(self.flattened_obs.get("eid", 0)),
@@ -469,6 +470,7 @@ class DualArmArena(Arena):
         if self.action_step % 5 == 0:
             self.dual_arm.restart_camera()
         
+        
         self.all_infos.append(self.info)
         self.info = self._process_info(self.info)
 
@@ -509,8 +511,7 @@ class DualArmArena(Arena):
         return self.action_horizon
     
     def evaluate(self):
-        if (self.evaluate_result is None) or (self.action_step == 0):
-            self.evaluate_result = self.task.evaluate(self)
+        self.evaluate_result = self.task.evaluate(self)
         return self.evaluate_result
 
     def set_task(self, task):

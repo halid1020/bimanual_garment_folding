@@ -158,8 +158,7 @@ class PickAndFlingSkill:
         self.scene.both_movel(
             app_pick_0,
             app_pick_1,
-            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
-        )
+            speed=self.move_speed, acc=self.move_acc, blocking=True)
 
         # self.scene.both_movel(
         #     np.concatenate([grasp_pick_0, rot_0]),

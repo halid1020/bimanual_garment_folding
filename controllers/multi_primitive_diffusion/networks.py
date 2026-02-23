@@ -4,6 +4,38 @@ import torch.nn.functional as F
 import math
 from typing import Union
 
+class ResNetDecoder(nn.Module):
+    def __init__(self, input_dim=512, output_channel=3):
+        super().__init__()
+        # Map the 512-dim vector to a spatial tensor of 6x6
+        self.fc = nn.Linear(input_dim, 256 * 6 * 6)
+        
+        # Upsample 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(32, output_channel, kernel_size=4, stride=2, padding=1),
+            # Assuming your normalized image inputs are in [0, 1] range based on your transform
+            nn.Sigmoid() 
+        )
+
+    def forward(self, x):
+        # x shape: (Batch, 512)
+        x = self.fc(x)
+        x = x.view(-1, 256, 6, 6)
+        x = self.decoder(x)
+        return x
+    
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
         super().__init__()

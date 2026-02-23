@@ -19,7 +19,7 @@ from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
-from .networks import ConditionalUnet1D, MLPClassifier
+from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from ..data_augmentation.register_augmeters import build_data_augmenter
 from .constrain_action_functions import name2func
@@ -341,6 +341,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
 
+        
+            
+        
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
             self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
@@ -379,12 +382,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             prediction_type='epsilon'
         )
 
+        self.rep_learn = self.config.get('rep_learn', 'none')
+
         self.nets = nn.ModuleDict({
             'vision_encoder': self.vision_encoder,
             'noise_pred_net': self.noise_pred_net
         })
+
         if self.primitive_integration == 'one-hot-encoding':
             self.nets['prim_class_head'] = self.prim_class_head
+
+        if self.rep_learn == 'auto-encoder':
+            self.nets['vision_decoder'] = ResNetDecoder(
+                input_dim=512, 
+                output_channel=self.input_channel
+            )
 
         self._test_network()
 
@@ -521,6 +533,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 input_obs)
             obs_features = image_features.reshape(
                 B, self.config.obs_horizon, -1)
+
+            recon_loss = torch.tensor(0.0, device=self.device)
+            if self.rep_learn == 'auto-encoder':
+                # image_features shape: (B * obs_horizon, 512)
+                # input_obs shape: (B * obs_horizon, C, 96, 96)
+                reconstructed_obs = self.nets['vision_decoder'](image_features)
+                recon_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+
             # (B,obs_horizon,D)
 
             # concatenate vision feature and low-dim obs
@@ -638,6 +658,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
             total_loss = actor_noise_loss + prim_loss #co-update the encoder
+            if self.rep_learn == 'auto-encoder':
+                #print('loss!')
+                total_loss += recon_loss * self.config.get('recon_weight', 0.1)
             # optimize
             total_loss.backward()
             self.optimizer.step()
@@ -651,6 +674,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             ## write loss value to tqdm progress bar
             pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
+            if self.rep_learn == 'auto-encoder':
+                self.logger.log({'train/recon_loss': recon_loss.item()}, step=self.update_step)
             self.logger.log({'train/actor_noise_loss': actor_noise_loss.item()}, step=self.update_step)
             self.logger.log({'train/total_loss': total_loss.item()}, step=self.update_step)
             if self.primitive_integration == 'one-hot-encoding':

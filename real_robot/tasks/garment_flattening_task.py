@@ -65,6 +65,7 @@ class RealWorldGarmentFlatteningTask():
         return eval_dict
 
     def _get_normalised_coverage(self, arena):
+        print(f'_get_normlised_coverage {arena.coverage}/{arena.flatten_coverage}')
         res = arena.coverage / arena.flatten_coverage
         
         # clip between 0 and 1

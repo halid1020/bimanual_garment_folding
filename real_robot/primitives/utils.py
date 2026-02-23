@@ -4,6 +4,14 @@ from scipy.spatial.transform import Rotation as R
 from real_robot.utils.transform_utils import (
     points_to_action_frame, get_base_fling_poses, transform_pose,
 )
+import time
+
+RETRACT_OFFSET = 0.00
+DESCEND_STEP = 0.002
+DESCEND_SPEED = 0.5
+MAX_DESCEND_DIST = 0.1
+CONTACT_FORCE_THRESH_UR16e = 5
+CONTACT_FORCE_THRESH_UR5e = 5
 
 # --- HELPER FUNCTIONS FOR COLLISION CHECKING ---
 def segment_distance(p1, p2, p3, p4):
@@ -110,3 +118,72 @@ def points_to_fling_path(
     right_path_w = transform_pose(tx_world_fling_base, right_path)
     left_path_w = transform_pose(tx_world_fling_base, left_path)
     return right_path_w, left_path_w
+
+def move_until_contact(robot, start_pose, max_dist=0.10, force_threshold=CONTACT_FORCE_THRESH_UR16e):
+    """
+    Moves downwards continuously until contact is detected, then stops immediately.
+    """
+    # 1. Zero the sensor
+    robot.rtde_c.zeroFtSensor()
+    time.sleep(0.1)
+    
+    # 2. Get Baseline Z force
+    baseline_z = robot.get_tcp_force()[2]
+    
+    # 3. Define the full target pose (bottom of the search)
+    target_pose = np.array(start_pose)
+    target_pose[2] -= max_dist
+    
+    # 4. Start a NON-BLOCKING move
+    # Note: We use a moderate speed for safety
+    search_speed = 0.05 
+    search_acc = 0.5
+    
+    # Send the async move command
+    # In standard RTDE, passing async=True is usually done by simply NOT waiting.
+    # If your wrapper's movel doesn't support async, we use the raw rtde_c.moveL with async=True
+    robot.rtde_c.moveL(target_pose.tolist(), search_speed, search_acc, True) 
+    
+    contact_detected = False
+    t_start = time.time()
+    
+    # 5. Monitor force while moving
+    # We loop until we either hit force, or we estimate the move should be done
+    # (max_dist / speed) + buffer gives us a timeout
+    timeout = (max_dist / search_speed) * 1.5 
+    
+    while (time.time() - t_start) < timeout:
+        current_z = robot.get_tcp_force()[2]
+        delta = abs(current_z - baseline_z)
+        
+        # Check Force
+        if delta > force_threshold:
+            robot.rtde_c.stopL(10.0) # Stop immediately
+            contact_detected = True
+            print(f"Contact! Delta: {delta:.2f}N")
+            break
+            
+        # Check if robot has actually reached the target (meaning no contact found)
+        # We check simply if we are close to the target Z
+        curr_pose = robot.get_tcp_pose()
+        if abs(curr_pose[2] - target_pose[2]) < 0.005:
+            print("Reached target depth without contact.")
+            break
+        
+        time.sleep(0.002) # 500Hz check
+        
+    # 6. Handle Post-Contact
+    # Wait briefly for the stop to settle
+    time.sleep(0.1)
+    final_pose = robot.get_tcp_pose()
+    
+    if contact_detected:
+        # Apply the retract offset to not crush the object
+        final_pose[2] += RETRACT_OFFSET
+        robot.movel(final_pose, speed=0.1, acceleration=0.5, blocking=True)
+    else:
+        # If we didn't hit contact, we are likely at the bottom. 
+        # You might want to just return this pose or retract slightly.
+        pass
+        
+    return final_pose

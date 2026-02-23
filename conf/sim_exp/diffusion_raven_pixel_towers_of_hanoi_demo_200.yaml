@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent@agent: diffusion_raven_pixel_towers_of_hanoi_demo_200
-  - /arena@arena: raven_pixel_towers_of_hanoi
+  - /arena@arena: raven_pixel_towers_of_hanoi_lower_camera
   - /task@task: dummy
 
 exp_name: diffusion_raven_pixel_towers_of_hanoi_demo_200

@@ -9,6 +9,8 @@ class PixelHumanFling(Agent):
         def __init__(self, config):
             #self.config = config
             self.name = "human-pixel-pick-and-fling"
+            self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
 
         def act(self, info_list, update=False):
             """
@@ -28,7 +30,16 @@ class PixelHumanFling(Agent):
         
             ## make it bgr to rgb using cv2
             rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
-            
+            rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+
+            if self.overlay_goal_contour:
+                goal_mask = state['goal']['mask']
+
+                goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+
+                contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                cv2.drawContours(rgb, contours, -1, (0, 255, 255), 2)
 
             ## resize
             rgb = cv2.resize(rgb, (512, 512))

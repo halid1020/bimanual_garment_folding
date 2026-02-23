@@ -167,8 +167,8 @@ def draw_pick_and_place(img, action):
 
     draw_colored_line(
         img,
-        swap(left_pick),
-        swap(left_place),
+        left_pick,
+        left_place,
         cmap_left,
         thickness=8,
         num_samples=20
@@ -177,8 +177,8 @@ def draw_pick_and_place(img, action):
     if len(action) > 4:
         draw_colored_line(
             img,
-            swap(right_pick),
-            swap(right_place),
+            right_pick,
+            right_place,
             cmap_right,
             thickness=8,
             num_samples=20
@@ -194,10 +194,10 @@ def draw_pick_and_place(img, action):
     )[0, 0].tolist()
     
     # ----- Hollow circles -----
-    cv2.circle(img, swap(left_pick),  10, BLUE, 3)
+    cv2.circle(img, left_pick,  10, BLUE, 3)
 
     if len(action) > 4:
-        cv2.circle(img, swap(right_pick), 10, RED,  3)
+        cv2.circle(img, right_pick, 10, RED,  3)
 
     return img
 
@@ -266,8 +266,8 @@ def draw_pick_and_fling(img, action, traj_0=None, traj_1=None):
     H, W = img.shape[:2]
     
     # 1. Parse Pick Points (norm_to_px returns x,y)
-    pick_0 = norm_to_px(action[:2], W, H, swap=True)
-    pick_1 = norm_to_px(action[2:4], W, H, swap=True)
+    pick_0 = norm_to_px(action[:2], W, H, swap=False)
+    pick_1 = norm_to_px(action[2:4], W, H, swap=False)
 
     # 2. Sort Left/Right by X-coordinate to ensure consistent coloring (Blue=Left, Red=Right)
     picks_data = [(pick_0, traj_0), (pick_1, traj_1)]

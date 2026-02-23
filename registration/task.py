@@ -5,6 +5,7 @@ from controllers.human.real_world_human_policy import RealWordHumanPolicy
 
 from env.softgym_garment.tasks.garment_folding import GarmentFoldingTask
 from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
+from env.softgym_garment.tasks.canonicalisation_alignment import CanonicalisationAlignmentTask
 from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
 from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
 
@@ -28,7 +29,10 @@ def build_task(task_cfg):
         
     elif task_cfg.task_name == 'flattening':
         task = GarmentFlatteningTask(task_cfg)
-       
+    
+    elif task_cfg.task_name == 'canonicalisation-alignment':
+        task = CanonicalisationAlignmentTask(task_cfg)
+
     elif task_cfg.task_name == 'dummy':
         task = None
     elif task_cfg.task_name == 'real-world-garment-flattening':

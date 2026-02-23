@@ -117,7 +117,8 @@ class RSSM(RLAgent):
         import actoris_harena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
-            config=planning_config)
+            config=planning_config,
+            disable_wandb=True)
         
         self.data_sampler = self.config.get('data_sampler', 'uniform')
         self.internal_states = {}
@@ -138,8 +139,8 @@ class RSSM(RLAgent):
             embedding_layers=self.config.trans_layers
         ).to(self.config.device)
 
-    def set_log_dir(self, logdir, project_name, exp_name):
-        super().set_log_dir(logdir, project_name, exp_name)
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
         # self.logger = TrainWriter(self.save_dir)
     
@@ -154,7 +155,7 @@ class RSSM(RLAgent):
     
     def single_act(self, info, update=False):
 
-        action =  self.planning_algo.act([info])[0].flatten()
+        action =  self.planning_algo.act([info], updates=[False])[0].flatten()
         plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
         
         for k, v in plan_internal_state.items():
@@ -533,6 +534,7 @@ class RSSM(RLAgent):
             return 0
         
         self._load_from_model_dir(model_dir)
+        print('[LaGarNet, load_best] Successfully loaded the best model in directory {}'.format(model_dir))
         self.loaded = True
         return -2
         

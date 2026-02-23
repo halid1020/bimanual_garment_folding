@@ -1,6 +1,6 @@
 # main.py
 from robot.dual_arm_arena import DualArmArena
-from bimanual_garment_folding.controllers.human.real_world_human_policy import HumanPolicy
+from controllers.human.real_world_human_policy import RealWordHumanPolicy
 
 from dotmap import DotMap
 import time
@@ -30,10 +30,11 @@ def main():
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'action_horizon': 20,
+        'action_horizon': 5,
         "debug": debug,
         'measure_time': measure_time,
-        "snap_to_cloth_mask": True
+        "snap_to_cloth_mask": True,
+        "track_trajectory": True
     }
     task_config = {
         'debug': debug
@@ -45,8 +46,8 @@ def main():
 
     save_dir = './tmp'
     
-    policy = HumanPolicy(DotMap(agent_config))
-    policy.set_log_dir(save_dir, project_name, exp_name)
+    policy = RealWordHumanPolicy(DotMap(agent_config))
+    policy.set_log_dir(save_dir, project_name, exp_name, disable_wandb=True)
     policy.reset([0])
 
     arena = DualArmArena(DotMap(anrea_config))

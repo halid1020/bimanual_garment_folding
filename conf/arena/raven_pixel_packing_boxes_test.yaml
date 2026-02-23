@@ -1,0 +1,12 @@
+name: 'raven-pixel'
+task: 'packing-boxes'
+view_mode: 'top_down'
+img_res: 128
+action_horizon: 3
+num_val_trials: 2
+goal_dir: './assets'
+add_final_goal_to_obs: True
+snap_to_mask: True
+camera_height: 0.8
+maskout_background: True
+debug: true

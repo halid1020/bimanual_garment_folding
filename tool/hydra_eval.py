@@ -45,7 +45,8 @@ def main(cfg: DictConfig):
         cfg.agent,
         project_name=cfg.project_name,
         exp_name=cfg.exp_name,
-        save_dir=save_dir
+        save_dir=save_dir,
+        disable_wandb=True
     )
     
     # 4. Build Arena

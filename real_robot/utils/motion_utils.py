@@ -36,3 +36,5 @@ def safe_out_scene(robot, speed=1.5, acc=1.0, blocking=True, dry_run=False):
         time.sleep(0.2)
         return True
     return robot.out_scene(speed, acc, blocking)
+
+

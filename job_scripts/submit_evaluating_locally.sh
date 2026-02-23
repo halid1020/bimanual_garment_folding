@@ -13,7 +13,7 @@ LOG_DIR="tmp"
 
 if [ "$MODE" == "f" ]; then
     echo "--- Running in FOREGROUND ---"
-    python -u tool/hydra_train.py --config-name "sim_exp/$CONFIG_NAME"
+    python -u tool/hydra_eval.py --config-name "sim_exp/$CONFIG_NAME"
 else
     mkdir -p "$LOG_DIR"
     echo "--- Running in BACKGROUND ---"

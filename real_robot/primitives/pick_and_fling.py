@@ -10,12 +10,15 @@ from real_robot.utils.transform_utils import (
     MOVE_ACC, MOVE_SPEED
 )
 from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path
+from real_robot.utils.thread_utils import ThreadWithResult
+from .utils import move_until_contact, CONTACT_FORCE_THRESH_UR16e, CONTACT_FORCE_THRESH_UR5e
+
 
 MIN_Z = 0.015
 APPROACH_DIST = 0.08        
 LIFT_DIST = 0.12            
 FLING_SPEED = 3.0
-FLING_ACC = 1.5
+FLING_ACC = 7
 HANG_HEIGHT = 0.35
 HOME_AFTER = True
 MIN_STRETCH_DIST = 0.3
@@ -137,30 +140,48 @@ class PickAndFlingSkill:
 
         # Compose poses
         approach_pick_0 = p_base_pick_0 + np.array([0.0, 0.0, APPROACH_DIST])
-        grasp_pick_0 = p_base_pick_0
-        lift_after_0 = grasp_pick_0.copy()
-        lift_after_0[2] += FLING_LIFT_DIST
+        # grasp_pick_0 = p_base_pick_0
+        # lift_after_0 = grasp_pick_0.copy()
+        # lift_after_0[2] += FLING_LIFT_DIST
         
         approach_pick_1 = p_base_pick_1 + np.array([0.0, 0.0, APPROACH_DIST])
-        grasp_pick_1 = p_base_pick_1
-        lift_after_1 = grasp_pick_1.copy()
-        lift_after_1[2] += FLING_LIFT_DIST
+        # grasp_pick_1 = p_base_pick_1
+        # lift_after_1 = grasp_pick_1.copy()
+        # lift_after_1[2] += FLING_LIFT_DIST
         
         # Motion sequence
         self.scene.both_open_gripper()
         self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
 
+        app_pick_0 = np.concatenate([approach_pick_0, rot_0])
+        app_pick_1 = np.concatenate([approach_pick_1, rot_1])
         self.scene.both_movel(
-            np.concatenate([approach_pick_0, rot_0]),
-            np.concatenate([approach_pick_1, rot_1]),
-            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
-        )
+            app_pick_0,
+            app_pick_1,
+            speed=self.move_speed, acc=self.move_acc, blocking=True)
 
-        self.scene.both_movel(
-            np.concatenate([grasp_pick_0, rot_0]),
-            np.concatenate([grasp_pick_1, rot_1]),
-            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
-        )
+        # self.scene.both_movel(
+        #     np.concatenate([grasp_pick_0, rot_0]),
+        #     np.concatenate([grasp_pick_1, rot_1]),
+        #     speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True
+        # )
+
+        results = [None, None]
+
+        def run_contact(robot, start_pose, index, force_threshold):
+            res_pose = move_until_contact(robot, start_pose, APPROACH_DIST+0.01, force_threshold)
+            results[index] = res_pose
+
+     
+        t0 = ThreadWithResult(target=run_contact, args=(self.scene.ur5e, app_pick_0, 0, CONTACT_FORCE_THRESH_UR5e))
+        t1 = ThreadWithResult(target=run_contact, args=(self.scene.ur16e, app_pick_1, 1, CONTACT_FORCE_THRESH_UR16e))
+        t0.start(); t1.start()
+        t0.join(); t1.join()
+        #results = (t1.result, t1.result)
+        
+        
+        final_pose_0 = results[0]
+        final_pose_1 = results[1]
 
         # --- GRASP ---
         self.scene.both_close_gripper()
@@ -168,14 +189,19 @@ class PickAndFlingSkill:
 
         # --- RECORDING START ---
         
-        # 1. Lift
+        lift_0 = final_pose_0[:3] + [0,0,LIFT_DIST]
+        lift_1 = final_pose_1[:3] + [0,0,LIFT_DIST]
+        
         self.scene.both_movel(
-            np.concatenate([lift_after_0, rot_0]),
-            np.concatenate([lift_after_1, rot_1]),
+            np.concatenate([lift_0, rot_0]),
+            np.concatenate([lift_1, rot_1]),
             speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True,
             record=record_debug 
         )
         if record_debug: self._append_scene_trajectory(full_trajectory)
+
+        lift_after_0 = final_pose_0[:3] + [0,0,FLING_LIFT_DIST]
+        lift_after_1 = final_pose_1[:3] + [0,0,FLING_LIFT_DIST]
 
         # 2. Centering & Aligning
         print("Centering and Aligning grippers between robots...")

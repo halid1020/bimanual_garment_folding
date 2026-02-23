@@ -271,29 +271,23 @@ class GarmentEnv(Arena):
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
         self.init_state_params = init_state_params
 
-        
-        #print('set scene done')
-        #print('pciker initial pos', self.picker_initial_pos)
+    
         self.pickers.reset(self.picker_initial_pos)
-        #print('picker reset done')
-
-        self.init_coverae = self._get_coverage()
-        self.flattened_obs = None
-        self.get_flattened_obs()
-        #self.flatten_coverage = init_state_params['flatten_area']
-        
         self.info = {}
         self.last_info = None
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
-        
+           
         self.last_flattened_step = -100
+        self.flattened_obs = None
+        self.get_flattened_obs()
         self.task.reset(self)
         self.action_step = 0
 
         self.evaluate_result = None
         
         self._initialise_trajectory()
+        self.init_coverae = self._get_coverage()
 
         self.info = self._process_info()
         self.clear_frames()
@@ -302,6 +296,47 @@ class GarmentEnv(Arena):
 
         self.all_infos = [self.info]
         
+        return self.info
+
+    def set_to_flatten(self, re_process_info=False):
+        pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
+        self.wait_until_stable()
+
+        self._get_particle_distance_matrix()
+
+        self.info = self._process_info({}, task_related=False, flatten_obs=False)
+        if re_process_info:
+            self.info = self._process_info({}, task_related=True, flatten_obs=False)
+        return self.info
+
+    def set_to_random_flatten(self, re_process_info=False):
+        self.set_to_flatten()
+        goal_particles = self.get_mesh_particles_positions()
+
+        rng = np.random.RandomState(self.eid)
+        theta = rng.uniform(0, 2 * np.pi)  # random angle in radians
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+        
+        goal_particles = goal_particles @ rotation_matrix.T  # rotate
+
+        # Random displacement within ±0.5 range per axis
+        displacement = rng.uniform(-0.3, 0.3, size=3)
+        displacement[2] = 0
+        goal_particles += displacement
+
+        self.set_mesh_particles_positions(goal_particles)
+        self.wait_until_stable()
+
+        self.info = self._process_info({}, task_related=False, flatten_obs=False)
+        if re_process_info:
+            self.info = self._process_info({}, task_related=True, flatten_obs=False)
         return self.info
     
     def _initialise_trajecotry(self):
@@ -481,17 +516,9 @@ class GarmentEnv(Arena):
 
         #return self.particle_dist_matrix
 
-    def set_to_flatten(self, re_process_info=False):
-        pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
-        self.wait_until_stable()
-
-        self._get_particle_distance_matrix()
-
-        self.info = self._process_info({}, task_related=False, flatten_obs=False)
-        if re_process_info:
-            self.info = self._process_info({}, task_related=True, flatten_obs=False)
-        return self.info
     
+
+
     def get_flattened_obs(self):
         
         if self.flattened_obs == None:
@@ -506,6 +533,20 @@ class GarmentEnv(Arena):
         
         return self.flattened_obs
     
+    def get_random_flattened_obs(self):
+        
+        if self.flattened_obs == None:
+            current_particl_pos = pyflex.get_positions()
+            # pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
+            # self.wait_until_stable()
+            self.flattened_obs = self.set_to_random_flatten()
+            self.flatten_coverage = self._get_coverage()
+            #print('flatten coverage', self._get_coverage())
+            pyflex.set_positions(current_particl_pos)
+            self.wait_until_stable()
+        
+        return self.flattened_obs
+
     def get_no_op(self):
         return self.action_tool.get_no_op()
     

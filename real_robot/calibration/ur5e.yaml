@@ -4,10 +4,10 @@ robot:
 
 # ChArUco Board Settings (Optional: you can keep using CLI args if you prefer)
 board:
-  squares_x: 3
-  squares_y: 5
-  square_length: 0.038   # meters
-  marker_length: 0.028  # meters
+  squares_x: 5
+  squares_y: 7
+  square_length: 0.0398   # meters
+  marker_length: 0.030  # meters
 
 
 # =============================================================================

@@ -1,0 +1,16 @@
+name: "real-world-single-arm-pick-and-place"
+ur5e_ip: "192.168.1.10"
+dry_run": False
+action_horizon: 20
+debug: True
+measure_time: True
+snap_to_cloth_mask: True
+maskout_background: True
+use_sim_workspace: False
+track_trajectory: False
+radius: [0.2, 0.7]
+
+roi_x_min: 700 # 450
+roi_x_max: 1150
+roi_y_min: 10 #710
+roi_y_max: 720

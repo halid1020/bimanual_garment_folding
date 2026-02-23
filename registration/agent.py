@@ -9,6 +9,8 @@ from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
 from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
     import WaistHemAlignmentFoldingStochasticPolicy
 from controllers.human.real_world_human_policy import RealWordHumanPolicy
+from controllers.human.real_world_human_single_arm_pick_and_place_policy \
+    import RealWorldSingleArmHumanPickAndPlacePolicy
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
 from controllers.rl.vanilla_sac import VanillaSAC
 from controllers.rl.image2state_sac import Image2State_SAC
@@ -30,6 +32,7 @@ from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusio
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
 from controllers.rl.lagarnet.gc_rssm import GC_RSSM
+from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
 
 import actoris_harena as ag_ar
 
@@ -51,8 +54,10 @@ def register_agents():
     ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
     ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
     ag_ar.register_agent('real-world-human', RealWordHumanPolicy)
+    ag_ar.register_agent('real-world-human-single-arm-pick-and-place', RealWorldSingleArmHumanPickAndPlacePolicy)
     ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
     ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
     ag_ar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
     ag_ar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
     ag_ar.register_agent('lagarnet', GC_RSSM)
+    ag_ar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)

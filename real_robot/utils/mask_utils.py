@@ -22,7 +22,7 @@ def get_mask_generator():
 def get_mask_v2(mask_generator, rgb, 
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
-                min_saturation=30,         # NEW: Filter out white/grey things
+                min_saturation=40,         # NEW: Filter out white/grey things
                 white_value_threshold=210, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
                 max_variance=7000,

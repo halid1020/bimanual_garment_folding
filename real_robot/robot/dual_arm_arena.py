@@ -94,8 +94,8 @@ class DualArmArena(Arena):
         self.info = {}
         self.all_infos = [self.info]
         self.info = self._process_info(self.info)
-        
         self.init_coverage = self.coverage
+
         self.clear_frames()
         self.primitive_time = []
         self.perception_time = []
@@ -131,11 +131,11 @@ class DualArmArena(Arena):
         self.crop_size = crop_size
 
         crop_rgb = raw_rgb[y1:y2, x1:x2]
-        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, debug=self.debug)
+        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, 
+                                debug=self.debug, mask_threshold_max=180000)
         self.cloth_mask = crop_mask
-        self.coverage = np.sum(self.cloth_mask)
-        if self.init_coverage == None:
-            self.init_coverage = self.coverage
+        
+        
         crop_depth = raw_depth[y1:y2, x1:x2]
 
         crop_depth = process_depth(crop_depth)
@@ -198,6 +198,10 @@ class DualArmArena(Arena):
             "arena_id": 0,
             "arena": self,
         })
+
+        self.coverage = np.sum(resized_mask)
+        if self.init_coverage is None: self.init_coverage = self.coverage
+
 
         if flattened_obs:
             info['flattened_obs'] = self.get_flattened_obs()

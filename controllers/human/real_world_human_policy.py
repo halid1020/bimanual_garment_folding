@@ -69,7 +69,7 @@ class RealWordHumanPolicy(Agent):
 
             # Normalize pixel coordinates to [-1, 1]
             def norm_xy(pt):
-                x, y = pt
+                y, x = pt
                 return ((x / w) * 2 - 1, (y / h) * 2 - 1)
 
             pick_0_norm = norm_xy(pick_0)
@@ -92,7 +92,7 @@ class RealWordHumanPolicy(Agent):
             pick_0, pick_1 = clicks
 
             def norm_xy(pt):
-                x, y = pt
+                y, x = pt
                 return ((x / w) * 2 - 1, (y / h) * 2 - 1)
 
             pick_0_norm = norm_xy(pick_0)

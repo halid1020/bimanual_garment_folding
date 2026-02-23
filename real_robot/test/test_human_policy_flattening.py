@@ -30,10 +30,11 @@ def main():
         "ur5e_ip": "192.168.1.10",
         "ur16e_ip": "192.168.1.102",
         "dry_run": False,
-        'action_horizon': 20,
+        'action_horizon': 5,
         "debug": debug,
         'measure_time': measure_time,
-        "snap_to_cloth_mask": True
+        "snap_to_cloth_mask": True,
+        "track_trajectory": True
     }
     task_config = {
         'debug': debug
@@ -46,7 +47,7 @@ def main():
     save_dir = './tmp'
     
     policy = RealWordHumanPolicy(DotMap(agent_config))
-    policy.set_log_dir(save_dir, project_name, exp_name)
+    policy.set_log_dir(save_dir, project_name, exp_name, disable_wandb=True)
     policy.reset([0])
 
     arena = DualArmArena(DotMap(anrea_config))

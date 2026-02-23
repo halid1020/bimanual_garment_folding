@@ -266,8 +266,8 @@ def draw_pick_and_fling(img, action, traj_0=None, traj_1=None):
     H, W = img.shape[:2]
     
     # 1. Parse Pick Points (norm_to_px returns x,y)
-    pick_0 = norm_to_px(action[:2], W, H, swap=True)
-    pick_1 = norm_to_px(action[2:4], W, H, swap=True)
+    pick_0 = norm_to_px(action[:2], W, H, swap=False)
+    pick_1 = norm_to_px(action[2:4], W, H, swap=False)
 
     # 2. Sort Left/Right by X-coordinate to ensure consistent coloring (Blue=Left, Red=Right)
     picks_data = [(pick_0, traj_0), (pick_1, traj_1)]

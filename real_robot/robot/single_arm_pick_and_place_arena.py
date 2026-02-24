@@ -372,7 +372,7 @@ class SingleArmPickAndPlaceArena(Arena):
         crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
         crop_cloth_mask = get_mask_v2(
             self.mask_generator, crop_rgb, debug=self.debug, 
-            mask_threshold_min=3000, mask_threshold_max=30000)
+            mask_threshold_min=3000, mask_threshold_max=100000)
 
         # ---------------------------------------------------------------------
         # --- HEURISTIC WORKSPACE SAMPLING ---
@@ -380,7 +380,7 @@ class SingleArmPickAndPlaceArena(Arena):
         if np.sum(crop_cloth_mask) < 50:
             print("[Arena] Heuristic: Central window is empty. Searching for cloth in full ROI...")
             full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=False, 
-            mask_threshold_min=3000, mask_threshold_max=30000)
+            mask_threshold_min=3000, mask_threshold_max=100000)
             
             if np.sum(full_rot_mask) > 50:
                 # Find center of mass of the cloth

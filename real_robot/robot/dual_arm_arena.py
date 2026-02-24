@@ -186,7 +186,7 @@ class DualArmArena(Arena):
 
         self.coverage = np.sum(resized_mask)
         print(f'Current Coverage {self.coverage}')
-        if self.init_coverage is None: self.init_coverage = self.coverage
+        #if self.init_coverage is None: self.init_coverage = self.coverage
 
         info.update({
             'observation': {

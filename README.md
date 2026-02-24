@@ -71,3 +71,35 @@ pip install pycurl
 pip install segment_anything #1.0
 
 download sam_vit_h_4b8939.pth and put it under sam_vit
+
+
+# 5. Demo day command line
+
+```
+sudo ip addr add 192.168.1.20/24 dev enp45s0
+```
+
+dual arm diffusion flattening
+
+```
+python tool/eval_real_world.py --config-name real_world_exp/diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_snap_one_hot_2xtraining_constrain_inference
+```
+
+dual arm human flattening
+
+```
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_flattening
+```
+
+dual arm human folding
+
+```
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_folding
+```
+
+single arm lagarnet flattening
+
+```
+python tool/eval_real_world.py --config-name real_world_exp/lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check
+```
+

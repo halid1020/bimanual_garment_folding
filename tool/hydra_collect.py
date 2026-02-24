@@ -86,7 +86,8 @@ def build_single_agent(cfg):
     agent = ag_ar.build_agent(
         agent_name, 
         config=cfg.agent, 
-        save_dir=save_dir)
+        save_dir=save_dir,
+        disable_wandb=True)
     
     if isinstance(agent, ag_ar.TrainableAgent):
         agent.load_best()
@@ -134,7 +135,6 @@ def main(cfg: DictConfig):
     ray.get(process)
 
     arena_ids = ray.get([e.get_id.remote() for e in arenas])
-    
     if cfg.single_agent:
         print('--- Single Agent Mode ---')
         agent = build_single_agent(cfg)

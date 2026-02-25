@@ -3,6 +3,7 @@ defaults:
   - /agent@agent: random_mask_biased_pick_and_place
   - /arena@arena: multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
+  - dataset: single_arm_pick_and_place_garments_no_success
   - _self_
 
 parallel_processes: 4
@@ -12,4 +13,4 @@ agent_save_root: 'tmp'
 agent_exp_name: 'data-collection-test'
 data_path: 'mask_biased_random_on_multi_dress_with_single_picker_pick_and_place'
 data_dir: /data/ah390/datasets
-# collected in labruja
+# collected in labruja, transfered to pc282

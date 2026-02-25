@@ -134,10 +134,11 @@ def main(cfg: DictConfig):
                 action = np.zeros_like(actions[0]) # No action taken at terminal state
             
             # Draw action if it's not a dummy/zero action
-            if not np.all(action == 0.0):
-                img_with_action = draw_action_on_image(img, action, img_size)
-            else:
-                img_with_action = img.copy()
+            # if not np.all(action == 0.0):
+            #     img_with_action = draw_action_on_image(img, action, img_size)
+            # else:
+            
+            img_with_action = img.copy()
 
             fig_panels.append(img_with_action)
             titles.append(f"Step {step}: RGB + Action")

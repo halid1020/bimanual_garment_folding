@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: raven-mask-biased-random
+  - /agent@agent: raven_pixel_mask_biased
   - /arena@arena: raven_pixel_packing_boxes_lower_camera_ray
   - /task@task: dummy
   - dataset: single_arm_pick_and_place_raven
@@ -15,4 +15,4 @@ agent_exp_name: raven_pixel_noisy_oracle
 
 data_path: mask_biased_random_raven_pixel_packing_boxes
 data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
-# collected in thanos
+# collecting in thanos

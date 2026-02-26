@@ -15,4 +15,4 @@ agent_exp_name: raven_pixel_noisy_oracle
 
 data_path: noisy_oracle_raven_pixel_packing_boxes
 data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
-# collected in thanos
+# will collect in thanos

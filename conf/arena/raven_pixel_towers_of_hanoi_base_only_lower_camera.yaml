@@ -1,5 +1,5 @@
 name: 'raven-pixel'
-task: 'packing-boxes'
+task: 'towers-of-hanoi-base-only'
 view_mode: 'top_down'
 img_res: 128
 action_horizon: 20

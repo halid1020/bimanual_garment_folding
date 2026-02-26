@@ -1,25 +1,24 @@
 name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
-action_dim: 4
+action_dim: 5
 obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
 input_obs: 'rgb'
-use_mask: True
+use_mask: False
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 100
+num_demos: 1000
 batch_size: 64
 disable_updown: True
-# action_shape: [8]
 collect_on_success: False # This is important!
 data_obs: 'image'
 data_state: 'agent_pos'
 data_action: 'action'
 train_mode: 'from_policy'
-demo_policy: "human-single-picker-pick-and-place"
+demo_policy:  "raven-pixel-oracle"
 validation_interval: 1000
 total_update_steps: 50000
 eval_checkpoint: -1
@@ -28,13 +27,13 @@ add_all_demos: True
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_single_picker_single_primitive_flattening_human"
+  data_path: "raven_pixel_towers_of_hanoi_oracle_demo_lower_camera"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
-  num_trj: 100
   cache_in_memory: True
   obs_config:
+    
     mask: 
       shape: [128, 128, 1]
       output_key: 'mask'
@@ -59,18 +58,12 @@ dataset_config:
       shape: [128, 128, 1]
       output_key: 'goal_mask'
 
+
   act_config:
     default: 
-      shape: [4]
+      shape: [5]
       output_key: 'default'
 
 primitive_integration: 'none'
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_K_0
-# primitives:
-#   - name: norm-pixel-fold
-#     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
-# mask_out_irrelavent_action_dim: true
-
-# exp_name: ${exp_name}
-# project_name: ${project_name}
+data_augmenter: pixel_based_pick_and_place_for_diffusion_K_0

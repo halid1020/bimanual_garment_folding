@@ -12,7 +12,7 @@ import torch.nn as nn
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-
+from dotmap import DotMap
 
 from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
@@ -1071,6 +1071,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             obs['vector_state'] = vector_state
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
+        # print('self.internal_states', self.internal_states)
+        # print('info[arena_id]', info['arena_id'])
         self.internal_states[info['arena_id']].update(
             {'input_obs': input_obs.transpose(1,2,0),
              'input_type': self.config.input_obs}

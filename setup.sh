@@ -1,5 +1,5 @@
 source ~/anaconda3/bin/activate
-conda activate mp-fold
+conda activate mp-fold-old
 if [ -d "../softgym" ]; then
   cd ../softgym
   . ./setup.sh

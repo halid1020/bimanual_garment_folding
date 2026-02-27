@@ -28,15 +28,13 @@ def main(cfg: DictConfig):
     # agent.set_data_augmenter(augmenter)
 
     # logging
-    print("       Hey it's Tom! I'm here to evaluate your agent in the arena. Let's see how it performs!       ")
-
     
     arena = registered_arena[cfg.arena.name](cfg.arena) #We want to bulid this with agent arena.
     task = build_task(cfg.task)
     arena.set_task(task)
     arena.set_log_dir(save_dir, cfg.project_name, cfg.exp_name)
     
-    print("       Hey it's Booby! I'm here to evaluate your agent in the arena. Let's see how it performs!       ")
+    
 
     # training
     ag_ar.evaluate(

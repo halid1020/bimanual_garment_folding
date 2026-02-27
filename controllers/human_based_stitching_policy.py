@@ -1,17 +1,19 @@
+import datetime
 import json
 from agent_arena import Agent
 import os
-import cv2
 import torch
 from hydra import compose
 from .garment_phase_classifier import GarmentPhaseClassifier
-from .online_garment_phase_classifier import OnlineGarmentPhaseClassifier
+from PIL import ImageTk, Image
+from pathlib import Path
 
-class VLMBasedStitchingPolicy(Agent):
+
+class HumanBasedStitchingPolicy(Agent):
 
     def __init__(self, config):
         super().__init__(config)
-        self.name = 'vlm_based_stitching_policy'
+        self.name = 'human_based_stitching_policy'
         self.config = config # Store config for use_reasoning, etc.
 
         # ... (Your existing policy loading code) ...
@@ -41,19 +43,11 @@ class VLMBasedStitchingPolicy(Agent):
         self.folding_policy.load_best()
 
         # 🔹 VLM phase classifier initialized with config flags
-        if config.use_online_classifier:
-            print('[VLMBasedStitchingPolicy] Using OnlineGarmentPhaseClassifier')
-            self.phase_classifier = OnlineGarmentPhaseClassifier(config)
-        else:
-            self.phase_classifier = GarmentPhaseClassifier(config)
-
-
-        self.config.use_human_reasoning_skill = config.get("use_human_reasoning_skill", True)
+        self.phase_classifier = GarmentPhaseClassifier(config)
         
         # Buffers to store context for the VLM
         self.history_buffer = [] 
         self.demo_images = []
-        self.human_reasoning_buffer_images, self.human_reasoning_buffer_phases, self.human_reasoning_buffer_reasoning = self._fetch_human_reasoning("controllers/human/human_reasoning_skill") #if self.config.use_human_reasoning_skill else None
         self.max_history_len = config.get("max_history_len", 3)
 
     def reset(self, arena_ids):
@@ -69,8 +63,8 @@ class VLMBasedStitchingPolicy(Agent):
         # Assuming the arena provides demo images in the 'info' during init
         if self.config.use_demo and "goals" in infos[0]:
             self.demo_images = [goal['observation']['rgb'] for goal in infos[0]['goals']]
-            print('[VLMBasedStitchingPolicy] len demo images', len(self.demo_images))
-            print('[VLMBasedStitchingPolicy] shape demo image', self.demo_images[0].shape)
+            print('[HumanBasedStitchingPolicy] len demo images', len(self.demo_images))
+            print('[HumanBasedStitchingPolicy] shape demo image', self.demo_images[0].shape)
             
         self.flattening_policy.init(infos)
         self.folding_policy.init(infos)
@@ -92,46 +86,6 @@ class VLMBasedStitchingPolicy(Agent):
 
     def act(self, info_list, update=False):
         return [self.single_act(info) for info in info_list]
-    
-
-    def _load_json_metadata(self, data_dir):
-        """
-        Load JSON metadata files from the specified directory.
-        Returns a list of dictionaries containing the metadata.
-        """
-        metadata = []
-        for file_name in os.listdir(data_dir):
-            if file_name.endswith('.json'):
-                with open(os.path.join(data_dir, file_name), 'r') as f:
-                    data = json.load(f)
-                    metadata.append(data)
-        return metadata
-    
-
-    def _fetch_human_reasoning(self, data_dir="human/human_reasoning_skill"):
-        """
-        Placeholder for fetching human reasoning input.
-        In a real implementation, this could be a UI prompt or an API call.
-        For now, it returns None or a dummy reasoning string.
-        """
-        if self.config.use_human_reasoning_skill:
-            # In practice, replace this with actual human input mechanism
-            ref_images = [cv2.imread(os.path.join(data_dir, img_name)) for img_name in os.listdir(data_dir) if img_name.endswith(('.png', '.jpg', '.jpeg'))]
-            
-            metadata = self._load_json_metadata(data_dir)
-            ref_phases = [x["phase"] for x in metadata]
-            ref_reasoning = [x['reasoning'] for x in metadata]
-
-
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_images)} reference images and their reasoning from {data_dir}')
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_phases)} reference images and their reasoning from {data_dir}')
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_reasoning)} reference images and their reasoning from {data_dir}')
-
-
-
-            return ref_images, ref_phases, ref_reasoning
-        else:
-            return None
 
     def _should_folding(self, state):
         """
@@ -141,22 +95,28 @@ class VLMBasedStitchingPolicy(Agent):
         
         # Call the multimodal predict_phase
         # Note: If reasoning is enabled, it returns (phase, reasoning)
-        result = self.phase_classifier.predict_phase(
+        result = self.phase_classifier.let_human_reason_and_decide(
             current_rgb=rgb,
             history_images=self.history_buffer if self.config.use_history else None,
-            demo_images=self.demo_images if self.config.use_demo else None,
-            human_reasoning_images=self.human_reasoning_buffer_images if self.config.use_human_reasoning_skill else None,
-            human_reasoning_phases=self.human_reasoning_buffer_phases if self.config.use_human_reasoning_skill else None,
-            human_reasoning_reasoning=self.human_reasoning_buffer_reasoning if self.config.use_human_reasoning_skill else None
+            demo_images=self.demo_images if self.config.use_demo else None
         )
 
+        reasoning = None
         if self.config.use_reasoning:
             phase, reasoning = result
-            print(f"[VLMBasedStitchingPolicy] VLM Reason: {reasoning}")
+            print(f"[HumanBasedStitchingPolicy] Human Reason: {reasoning}")
         else:
             phase = result
 
-        print(f"[VLMBasedStitchingPolicy] Predicted Phase: {phase}")
+
+        self.save_image_data(
+            save_dir=self.config.save_data,
+            image=rgb,
+            phase=phase,
+            reasoning=reasoning,
+        )
+
+        print(f"[HumanBasedStitchingPolicy] Human decided Phase: {phase}")
         return phase == "folding"
 
     def single_act(self, state, update=False):
@@ -164,3 +124,39 @@ class VLMBasedStitchingPolicy(Agent):
             return self.folding_policy.single_act(state)
         else:
             return self.flattening_policy.single_act(state)
+        
+    
+
+    def save_image_data(
+        self,
+        save_dir: str,
+        image,
+        phase: str,
+        reasoning: str = None,
+    ) -> None:
+        """
+        Saves an image and a linked JSON file containing text metadata.
+
+        Files produced:
+            base_name.png
+            base_name.json
+        """
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        basename = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+        # --- Save image ---
+        image_path = save_dir / f"image_{basename}.png"
+        Image.fromarray(image).save(image_path)
+
+        # --- Save linked metadata ---
+        metadata = {
+            "image_file": image_path.name,
+            "phase": phase,
+            "reasoning": reasoning,
+        }
+
+
+        metadata_path = save_dir / f"metadata_{basename}.json"
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)

@@ -1,24 +1,15 @@
-name: vlm-based-stitching-policy
+name: human-based-stitching-policy
 flattening_policy: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot
 flattening_policy_log_dir: ./tmp/garment_folding_data
 folding_policy: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_workspace
 folding_policy_log_dir: ./tmp/garment_folding_data
 
-
-model_id: qwen3-vl-32b-instruct
-base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1/
-api_key: sk-6c168e53ee0f410590ef3ea1f4878fb3
 max_history_len: 5
 use_history: True
 use_demo: True
 use_definitions: True
 use_reasoning: True
-use_online_classifier: True
-
-
-use_goal_hints: False
-use_how_hints: True
-use_human_reasoning_skill: True
-
+use_goal_hints: True
+save_data: "./tmp/garment_folding_data/images/human_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_flattened_workspace_id2/"
 # exp_name: ${exp_name}
 # project_name: ${project_name}

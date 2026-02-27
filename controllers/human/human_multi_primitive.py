@@ -23,6 +23,7 @@ class HumanMultiPrimitive(Agent):
             "norm-pixel-pick-and-place",
             "no-operation"
         ]
+        print(f'XXXXXXXXXXXXXXXXXX [human-multi-primitive] Available config: {self.config}')
         self.primitive_instances = [
             PixelHumanFling(config),
             # PixelHumanTwoPicker(config),

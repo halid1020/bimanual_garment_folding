@@ -1,40 +1,14 @@
-import datetime
-import cv2
 import torch
 import re
-import base64
-from transformers import AutoProcessor, Gemma3nForConditionalGeneration, Gemma3ForConditionalGeneration, Qwen3VLForConditionalGeneration, AutoModelForImageTextToText
-
-
-
-def load_image_array_to_url(image_array):
-
-    _, buffer = cv2.imencode('.png', cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
-    b64_str = base64.b64encode(buffer).decode('utf-8')
-    return f"data:image/png;base64,{b64_str}"
-
-
+from transformers import AutoProcessor, Gemma3ForConditionalGeneration, Qwen3VLForConditionalGeneration
 
 class GarmentPhaseClassifier:
     def __init__(self, config):
         self.device = config.get('device', "cpu")
         self.model_id = config.get('model_id', "Qwen/Qwen3-VL-8B-Instruct")
-        if "gemma-3n" in self.model_id.lower():
-            self.model = Gemma3nForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        elif "gemma" in self.model_id.lower():
-            self.model = Gemma3ForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        elif "qwen" in self.model_id.lower():
-            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        else:
-            self.model = AutoModelForImageTextToText.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
+        self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+            self.model_id, device_map=self.device
+        ).eval()
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.config = config
 
@@ -44,19 +18,13 @@ class GarmentPhaseClassifier:
             "- Observation Space: Top-down RGB camera.\n"
         )
 
-        self.how_hints_text = (
-            "HOW:\n"
-            "- If wrinkles, crumblled, perform Flattening.\n" 
-            "- If the cloth is either flat or in the folding procedure, perform Folding\n" 
-        )
-
         self.goal_hints_text = (
             "GOALS:\n"
             "- Flattening: Success when the garment is fully spread with no wrinkles.\n" 
             "- Folding: Success when the garment is folded into the demonstrated configuration from a flattened state.\n" 
         )
 
-    def _build_prompt_content(self, current_rgb, history_images, demo_images, human_reasoning_images_urls=None, human_reasoning_phases=None, human_reasoning_reasoning=None   ):
+    def _build_prompt_content(self, history_images, demo_images):
         """
         Dynamically builds a multimodal message content list.
         Order: Demo (Reference) -> History (Context) -> Current (Target)
@@ -70,50 +38,26 @@ class GarmentPhaseClassifier:
             instruction += f"\n\n{self.definitions_text}"
         if self.config.use_goal_hints:
             instruction += f"\n{self.goal_hints_text}"
-        if self.config.use_how_hints:
-            instruction += f"\n{self.how_hints_text}"
 
         content.append({"type": "text", "text": instruction})
 
         # 2. Add Reference Demo Images (TODO: Fixed)
         if self.config.use_demo and demo_images:
             content.append({"type": "text", "text": "\nREFERENCE DEMO SEQUENCE (Success path):"})
-            for id, demo_image in enumerate(demo_images):
-                # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
-                # print(type(demo_image))
-                # print(demo_image)
-                # cv2.imwrite(f"DemoImage_{id}.png", demo_image)
-                # content.append({"type": "image", "image": load_image_array_to_url(demo_image)})
+            for _ in demo_images:
                 content.append({"type": "image"})
-        
-        # 3. Add Reference Human reasoning Images (TODO: Fixed)
-        if self.config.use_human_reasoning_skill and human_reasoning_images_urls and human_reasoning_phases and human_reasoning_reasoning:
-            
-            for id, human_reasoning_image_url in enumerate(human_reasoning_images_urls):
-                human_reasoning_phase = human_reasoning_phases[id] if id < len(human_reasoning_phases) else "N/A"
-                human_reasoning_explanation = human_reasoning_reasoning[id] if id < len(human_reasoning_reasoning) else "N/A"
-                
-                content.append({"type": "text", "text": f"\nDemonstration {id + 1}\nObserved action: {human_reasoning_phase.upper()}\nExplanation: {human_reasoning_explanation}"})
-                # content.append({"type": "image", "image": human_reasoning_image_url})
-                content.append({"type": "image"})
-                
 
-
-        # 4. Add Trajectory History Images (TODO: Fixed)
+        # 3. Add Trajectory History Images (TODO: Fixed)
         if self.config.use_history and history_images:
             content.append({"type": "text", "text": "\nPAST TRAJECTORY IMAGES (Previous states):"})
-            for hist in history_images:
-                # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
-                # print(type(hist))
-                # content.append({"type": "image", "image": load_image_array_to_url(hist)})
+            for _ in history_images:
                 content.append({"type": "image"})
-                # pass
-        # 5. Add Current Observation
+
+        # 4. Add Current Observation
         content.append({"type": "text", "text": "\nCURRENT OBSERVATION (Classify this):"})
-        # content.append({"type": "image", "image": load_image_array_to_url(current_rgb)})
         content.append({"type": "image"})
-    
-        # 6. Output Formatting
+
+        # 5. Output Formatting
         if self.config.use_reasoning:
             format_instruction = (
                 "\n\nFirst, explain your reasoning based on the visual evidence, history, and demo reference."
@@ -128,14 +72,7 @@ class GarmentPhaseClassifier:
         return content
 
     @torch.no_grad()
-    def predict_phase(
-        self, 
-        current_rgb, 
-        history_images=None, 
-        demo_images=None, 
-        human_reasoning_images=None, 
-        human_reasoning_phases=None, 
-        human_reasoning_reasoning=None):
+    def predict_phase(self, current_rgb, history_images=None, demo_images=None):
         """
         Args:
             current_rgb: PIL.Image or np.array (The latest state)
@@ -144,16 +81,11 @@ class GarmentPhaseClassifier:
         """
         history_images = history_images or []
         demo_images = demo_images or []
-        human_reasoning_images_urls = None
-        if human_reasoning_images is not None:
-            human_reasoning_images_urls = [load_image_array_to_url(img) for img in human_reasoning_images]
 
         # 1. Assemble the list of all images in the order they appear in the prompt
         all_images = []
         if self.config.use_demo:
             all_images.extend(demo_images)
-        if self.config.use_human_reasoning_skill:
-            all_images.extend(human_reasoning_images)
         if self.config.use_history:
             all_images.extend(history_images)
         all_images.append(current_rgb)
@@ -161,36 +93,8 @@ class GarmentPhaseClassifier:
         # 2. Build the prompt structure
         messages = [{
             "role": "user", 
-            "content": self._build_prompt_content(current_rgb, history_images, demo_images, human_reasoning_images_urls, human_reasoning_phases, human_reasoning_reasoning)
+            "content": self._build_prompt_content(history_images, demo_images)
         }]
-
-        import json
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_path = f"messages_{timestamp}.json"
-
-        # Save messages
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(messages, f, indent=2, ensure_ascii=False)
-
-
-
-        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
-        print("                                                    ")
-        print("                                                    ")
-        print("                                                    ")
-        print("                                                    ")
-
-        print(f"[GarmentPhaseClassifier] messages are this \n\n{messages}")
-
-        print("fglfkhlfhklfgklfglkfg ", type(history_images), history_images[0].shape if history_images else None)
-        print("                                                    ")
-        print("                                                    ")
-        print("                                                    ")
-        print("                                                    ")
-        print("                                                    ")
-
-        
 
         prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 

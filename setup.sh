@@ -1,3 +1,4 @@
+source ~/anaconda3/bin/activate
 conda activate mp-fold
 if [ -d "../softgym" ]; then
   cd ../softgym

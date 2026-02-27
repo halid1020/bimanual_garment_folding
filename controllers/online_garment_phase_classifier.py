@@ -2,6 +2,7 @@ import base64
 import io
 import re
 from PIL import Image
+import cv2
 from openai import OpenAI
 
 
@@ -17,11 +18,15 @@ class OnlineGarmentPhaseClassifier:
           - use_history
           - use_reasoning
         """
-        self.config = config
+        
+        # print(f'xxxxxxxxxxxxxxxx\n\n[OnlineGarmentPhaseClassifier] Initialized with config: {type(config)} {config}')
         self.model_id = config.get("model_id", "gpt-4.1-mini")
         self.base_url = config.get("base_url", "https://api.openai.com/v1/")
 
-        self.client = OpenAI(api_key=config.get("api_key"))
+        # print(f'xxxxxxxxxxxxxxxx\n\n[OnlineGarmentPhaseClassifier] Initialized with config: {self.model_id} {self.base_url}')
+
+
+        self.client = OpenAI(api_key=config.get("api_key"), base_url=self.base_url)
 
         self.definitions_text = (
             "CONTEXT:\n"
@@ -35,6 +40,8 @@ class OnlineGarmentPhaseClassifier:
             "- Folding: garment folded into demonstrated configuration.\n"
         )
 
+        self.config = config
+
     # -----------------------------
     # Utilities
     # -----------------------------
@@ -47,12 +54,20 @@ class OnlineGarmentPhaseClassifier:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    
+
+    def _load_image_array_to_url(self, image_array):
+
+        _, buffer = cv2.imencode('.png', cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
+        b64_str = base64.b64encode(buffer).decode('utf-8')
+        return f"data:image/png;base64,{b64_str}"
+
 
     # -----------------------------
     # Prompt construction
     # -----------------------------
 
-    def _build_message_content(self, current_rgb, history_images, demo_images):
+    def _build_message_content(self, current_rgb, history_images, demo_images,human_reasoning_images_urls=None, human_reasoning_phases=None, human_reasoning_reasoning=None   ):
         """
         EXACT port of HF prompt logic.
         No text rewritten.
@@ -73,24 +88,41 @@ class OnlineGarmentPhaseClassifier:
             content.append({"type": "text", "text": "\nREFERENCE DEMO SEQUENCE (Success path):"})
             for img in demo_images:
                 content.append({
-                    "type": "input_image",
-                    "image_base64": self._image_to_base64(img)
+                    "type": "image_url",
+                    "image_url": {"url": self._load_image_array_to_url(img)}
                 })
+                # pass
+
+
+        # 3. Add Reference Human reasoning Images (TODO: Fixed)
+        if self.config.use_human_reasoning_skill and human_reasoning_images_urls and human_reasoning_phases and human_reasoning_reasoning:
+            
+            for id, human_reasoning_image_url in enumerate(human_reasoning_images_urls):
+                human_reasoning_phase = human_reasoning_phases[id] if id < len(human_reasoning_phases) else "N/A"
+                human_reasoning_explanation = human_reasoning_reasoning[id] if id < len(human_reasoning_reasoning) else "N/A"
+                
+                content.append({"type": "text", "text": f"\nDemonstration {id + 1}\nObserved action: {human_reasoning_phase.upper()}\nExplanation: {human_reasoning_explanation}"})
+                content.append({"type": "image_url", "image_url": {"url": human_reasoning_image_url}})
+                # content.append({"type": "image"})
+                # print("\n\n\n")
+                # print(human_reasoning_image_url)
+                # print("\n\n\n")
 
         # History
         if self.config.use_history and history_images:
             content.append({"type": "text", "text": "\nPAST TRAJECTORY IMAGES (Previous states):"})
             for img in history_images:
                 content.append({
-                    "type": "input_image",
-                    "image_base64": self._image_to_base64(img)
+                    "type": "image_url",
+                    "image_url": {"url": self._load_image_array_to_url(img)}
                 })
+                # pass
 
         # Current
         content.append({"type": "text", "text": "\nCURRENT OBSERVATION (Classify this):"})
         content.append({
-            "type": "input_image",
-            "image_base64": self._image_to_base64(current_rgb)
+            "type": "image_url",
+            "image_url": {"url": self._load_image_array_to_url(current_rgb)}
         })
 
         # Output formatting
@@ -112,20 +144,28 @@ class OnlineGarmentPhaseClassifier:
     # Inference
     # -----------------------------
 
-    def predict_phase(self, current_rgb, history_images=None, demo_images=None):
+    def predict_phase(
+            self, 
+            current_rgb, 
+            history_images=None, 
+            demo_images=None,
+            human_reasoning_images=None, 
+            human_reasoning_phases=None, 
+            human_reasoning_reasoning=None
+        ):
         history_images = history_images or []
         demo_images = demo_images or []
+        history_images = history_images or []
+        demo_images = demo_images or []
+        human_reasoning_images_urls = None
+        if human_reasoning_images is not None:
+            human_reasoning_images_urls = [self._load_image_array_to_url(img) for img in human_reasoning_images]
 
-        
 
-        messages = [
-            {
-                "role": "user",
-                "content": self._build_message_content(
-                    current_rgb, history_images, demo_images
-                )
-            }
-        ]
+        messages = [{
+            "role": "user", 
+            "content": self._build_message_content(current_rgb, history_images, demo_images, human_reasoning_images_urls, human_reasoning_phases, human_reasoning_reasoning)
+        }]
 
         response = self.client.chat.completions.create(
             model=self.model_id,
@@ -134,7 +174,12 @@ class OnlineGarmentPhaseClassifier:
             # max_output_tokens=200 if self.config.get("use_reasoning") else 20,
         )
 
-        output_text = response.output_text.strip()
+        print(response.model_dump_json())
+        output_text = response.choices[0].message.content.strip()
+
+
+
+        # output_text = response.output_text.strip()
         return self._parse_output(output_text)
 
     # -----------------------------

@@ -1,7 +1,5 @@
-import json
 from agent_arena import Agent
 import os
-import cv2
 import torch
 from hydra import compose
 from .garment_phase_classifier import GarmentPhaseClassifier
@@ -46,14 +44,10 @@ class VLMBasedStitchingPolicy(Agent):
             self.phase_classifier = OnlineGarmentPhaseClassifier(config)
         else:
             self.phase_classifier = GarmentPhaseClassifier(config)
-
-
-        self.config.use_human_reasoning_skill = config.get("use_human_reasoning_skill", True)
         
         # Buffers to store context for the VLM
         self.history_buffer = [] 
         self.demo_images = []
-        self.human_reasoning_buffer_images, self.human_reasoning_buffer_phases, self.human_reasoning_buffer_reasoning = self._fetch_human_reasoning("controllers/human/human_reasoning_skill") #if self.config.use_human_reasoning_skill else None
         self.max_history_len = config.get("max_history_len", 3)
 
     def reset(self, arena_ids):
@@ -92,46 +86,6 @@ class VLMBasedStitchingPolicy(Agent):
 
     def act(self, info_list, update=False):
         return [self.single_act(info) for info in info_list]
-    
-
-    def _load_json_metadata(self, data_dir):
-        """
-        Load JSON metadata files from the specified directory.
-        Returns a list of dictionaries containing the metadata.
-        """
-        metadata = []
-        for file_name in os.listdir(data_dir):
-            if file_name.endswith('.json'):
-                with open(os.path.join(data_dir, file_name), 'r') as f:
-                    data = json.load(f)
-                    metadata.append(data)
-        return metadata
-    
-
-    def _fetch_human_reasoning(self, data_dir="human/human_reasoning_skill"):
-        """
-        Placeholder for fetching human reasoning input.
-        In a real implementation, this could be a UI prompt or an API call.
-        For now, it returns None or a dummy reasoning string.
-        """
-        if self.config.use_human_reasoning_skill:
-            # In practice, replace this with actual human input mechanism
-            ref_images = [cv2.imread(os.path.join(data_dir, img_name)) for img_name in os.listdir(data_dir) if img_name.endswith(('.png', '.jpg', '.jpeg'))]
-            
-            metadata = self._load_json_metadata(data_dir)
-            ref_phases = [x["phase"] for x in metadata]
-            ref_reasoning = [x['reasoning'] for x in metadata]
-
-
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_images)} reference images and their reasoning from {data_dir}')
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_phases)} reference images and their reasoning from {data_dir}')
-            print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_reasoning)} reference images and their reasoning from {data_dir}')
-
-
-
-            return ref_images, ref_phases, ref_reasoning
-        else:
-            return None
 
     def _should_folding(self, state):
         """
@@ -144,10 +98,7 @@ class VLMBasedStitchingPolicy(Agent):
         result = self.phase_classifier.predict_phase(
             current_rgb=rgb,
             history_images=self.history_buffer if self.config.use_history else None,
-            demo_images=self.demo_images if self.config.use_demo else None,
-            human_reasoning_images=self.human_reasoning_buffer_images if self.config.use_human_reasoning_skill else None,
-            human_reasoning_phases=self.human_reasoning_buffer_phases if self.config.use_human_reasoning_skill else None,
-            human_reasoning_reasoning=self.human_reasoning_buffer_reasoning if self.config.use_human_reasoning_skill else None
+            demo_images=self.demo_images if self.config.use_demo else None
         )
 
         if self.config.use_reasoning:

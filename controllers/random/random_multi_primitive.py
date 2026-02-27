@@ -1,4 +1,4 @@
-from agent_arena import Agent
+from actoris_harena import Agent
 import random
 
 from .random_pick_and_fling import RandomPickAndFling

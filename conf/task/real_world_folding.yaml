@@ -1,0 +1,5 @@
+task_name: "real-world-garment-folding"
+debug: False
+goal_steps: 2
+num_goals: 1
+fold_name: 'centre_sleeve_folding'

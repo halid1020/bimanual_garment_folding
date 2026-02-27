@@ -4,7 +4,7 @@ from dotmap import DotMap
 import cv2
 import os
 
-from agent_arena import Agent
+from actoris_harena import Agent
 
 
 class CentreSleeveFoldingPolicy(Agent):

@@ -1,0 +1,69 @@
+name: multi-primitive-diffusion
+oracle: False # TODO: fix this, I need to add this because of build_agent function
+obs_dim: 512
+action_dim: 5
+obs_horizon: 1
+pred_horizon: 1
+num_diffusion_iters: 100
+action_horizon: 1
+input_obs: 'rgb'
+use_mask: False
+eval_action_sampler: 'normal'
+include_state: False
+num_demos: 1000
+batch_size: 64
+disable_updown: True
+collect_on_success: False # This is important!
+data_obs: 'image'
+data_state: 'agent_pos'
+data_action: 'action'
+train_mode: 'from_policy'
+demo_policy:  "raven-pixel-oracle"
+validation_interval: 1000
+total_update_steps: 50000
+eval_checkpoint: -1
+debug: False
+add_all_demos: True
+
+dataset_mode: "general"
+dataset_config:
+  data_path: "raven_pixel_stacking_block_pyramid_oracle_demo_lower_camera"
+  data_dir: "./data/datasets"
+  seq_length: 1
+  io_mode: "w"
+  cache_in_memory: True
+  obs_config:
+    
+    mask: 
+      shape: [128, 128, 1]
+      output_key: 'mask'
+    
+    depth: 
+      shape: [128, 128, 1]
+      output_key: 'depth'
+    
+    rgb: 
+      shape: [128, 128, 3]
+      output_key: 'rgb'
+
+    goal_rgb: 
+      shape: [128, 128, 3]
+      output_key: 'goal_rgb'
+    
+    goal_depth: 
+      shape: [128, 128, 1]
+      output_key: 'goal_depth'
+    
+    goal_mask: 
+      shape: [128, 128, 1]
+      output_key: 'goal_mask'
+
+
+  act_config:
+    default: 
+      shape: [5]
+      output_key: 'default'
+
+primitive_integration: 'none'
+
+data_augmenter: pixel_based_pick_and_place_for_diffusion_K_0

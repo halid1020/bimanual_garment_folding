@@ -5,6 +5,11 @@ from typing import Callable
 from omegaconf import DictConfig, ListConfig, OmegaConf
 import numpy as np
 
+import numpy as np
+import matplotlib.pyplot as plt
+import imageio
+import os
+
 def omegaconf_to_plain_dict(cfg):
     if isinstance(cfg, (DictConfig, ListConfig)):
         return OmegaConf.to_container(cfg, resolve=True)  # nested dict/list
@@ -153,3 +158,89 @@ def replace_bn_with_gn(
             num_channels=x.num_features)
     )
     return root_module
+
+def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='tmp/denoising_evolution'):
+    """
+    Generates a GIF showing the evolution of the action prediction during diffusion.
+    
+    Args:
+        image: (C, H, W) or (H, W, C) numpy array, normalized or uint8.
+        masks: List of two (H, W) numpy arrays [mask_left, mask_right].
+        noise_actions_history: List of (T, D) numpy arrays. Each element is the trajectory at a diffusion step.
+        step_idx: Integer, current simulation step for filename uniqueness.
+        save_dir: Directory to save the GIF.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 1. Prepare Background Image (RGB + Masks)
+    # Ensure image is H,W,C and uint8
+    if image.shape[0] in [1, 3]: image = np.transpose(image, (1, 2, 0))
+    if image.max() <= 1.0: image = (image * 255).astype(np.uint8)
+    
+    H, W = image.shape[:2]
+    
+    # Create figure once to reuse settings
+    fig, ax = plt.subplots(figsize=(5, 5))
+    
+    # Function to render a single frame
+    def render_frame(action_traj, frame_idx):
+        ax.clear()
+        
+        # A. Plot Image
+        ax.imshow(image)
+        
+        # B. Overlay Masks (Left=Blue tint, Right=Red tint)
+        # We create a colored overlay where mask is active
+        if masks[0] is not None:
+            # Create blue overlay
+            blue_mask = np.zeros((H, W, 4))
+            blue_mask[..., 2] = 1.0 # Blue channel
+            blue_mask[..., 3] = masks[0] * 0.2 # Alpha
+            ax.imshow(blue_mask)
+            
+        if masks[1] is not None:
+            # Create red overlay
+            red_mask = np.zeros((H, W, 4))
+            red_mask[..., 0] = 1.0 # Red channel
+            red_mask[..., 3] = masks[1] * 0.2 # Alpha
+            ax.imshow(red_mask)
+            
+        # C. Plot Action Trajectories
+        # Robot 0 (Left) -> Indices [0,1] -> Light Blue ('cyan')
+        r0_traj = action_traj[:, :2]
+        # Denormalize [-1, 1] -> [0, W]
+        r0_x = (r0_traj[:, 0] + 1) * W / 2
+        r0_y = (r0_traj[:, 1] + 1) * H / 2
+        
+        ax.plot(r0_x, r0_y, c='cyan', linewidth=2, label='Left (R0)')
+        ax.scatter(r0_x[0], r0_y[0], c='cyan', s=30, marker='o') # Start
+        ax.scatter(r0_x[-1], r0_y[-1], c='cyan', s=30, marker='x') # End
+        
+        # Robot 1 (Right) -> Indices [7,8] -> Warm Red ('tomato')
+        r1_traj = action_traj[:, 7:9]
+        r1_x = (r1_traj[:, 0] + 1) * W / 2
+        r1_y = (r1_traj[:, 1] + 1) * H / 2
+        
+        ax.plot(r1_x, r1_y, c='tomato', linewidth=2, label='Right (R1)')
+        ax.scatter(r1_x[0], r1_y[0], c='tomato', s=30, marker='o')
+        ax.scatter(r1_x[-1], r1_y[-1], c='tomato', s=30, marker='x')
+        
+        ax.set_title(f"Diffusion Step: {frame_idx}/{len(noise_actions_history)}")
+        ax.axis('off')
+        
+        # Draw canvas to numpy array
+        fig.canvas.draw()
+        frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+        frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        return frame
+
+    # 2. Generate Frames
+    frames = []
+    # Reverse history so it goes from Noisy -> Clean
+    for i, act in enumerate(reversed(noise_actions_history)):
+        frames.append(render_frame(act, i))
+        
+    # 3. Save GIF
+    filename = os.path.join(save_dir, f'step_{step_idx}_evolution.gif')
+    imageio.mimsave(filename, frames, fps=10)
+    plt.close(fig)

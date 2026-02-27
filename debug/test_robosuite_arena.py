@@ -2,8 +2,8 @@ import os
 import cv2
 import numpy as np
 from dotmap import DotMap
-from agent_arena.utilities.visual_utils import save_video as sv
-from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
+from actoris_harena.utilities.visual_utils import save_video as sv
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
 
 from env.robosuite_env.robosuite_arena import RoboSuiteArena  # adjust this import path
 

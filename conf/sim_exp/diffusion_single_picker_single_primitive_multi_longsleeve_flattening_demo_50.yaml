@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent::  diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_50
+  - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+  - /task@task:  flattening_overstretch_penalty_1_no_big_bonus
+
+exp_name: diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_50
+project_name: bimanual_garment_folding
+save_root: /mnt/scratch/users/hcv530/garment_folding_data
+train_and_eval: train_and_evaluate_single

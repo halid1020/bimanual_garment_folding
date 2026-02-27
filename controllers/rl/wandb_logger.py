@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from agent_arena.utilities.logger.logger_interface import Logger
+from actoris_harena.utilities.logger.logger_interface import Logger
 import wandb
 
 class WandbLogger(Logger):

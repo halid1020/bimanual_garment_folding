@@ -1,4 +1,4 @@
-from agent_arena import Agent
+from actoris_harena import Agent
 import os
 from hydra import compose
 
@@ -18,7 +18,7 @@ class IoUBasedStitchingPolicy(Agent):
         )
         
 
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         print(f'[iou_based_stitching_policy] Building flattening agent from {config.flattening_policy}')
         self.flattening_policy = ag_ar.build_agent(
             flattening_policy_config.agent.name, 
@@ -36,8 +36,17 @@ class IoUBasedStitchingPolicy(Agent):
             save_dir= os.path.join(folding_policy_config.save_root, config.folding_policy))
         
         
-        self.flattening_policy.load_best()
-        self.folding_policy.load_best()
+        if config.get('flattening_checkpoint', 'best') == 'best':
+            self.flattening_policy.load_best()
+        else:
+            self.flattening_policy.load_checkpoint(config.flattening_checkpoint)
+        
+        if config.get('folding_checkpoint', 'best') == 'best':
+            self.folding_policy.load_best()
+        else:
+            self.folding_policy.load_checkpoint(config.folding_checkpoint)
+
+        # self.folding_policy.load_best()
     
     # def set_data_augmenter(self, data_augmenter):
     #     self.flattening_policy.set_data_augmenter(data_augmenter)

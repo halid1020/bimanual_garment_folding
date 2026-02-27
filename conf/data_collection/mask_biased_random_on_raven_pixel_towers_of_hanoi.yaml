@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - /agent@agent: raven_pixel_noisy_oracle
+  - /arena@arena: raven_pixel_towers_of_hanoi_lower_camera_ray
+  - /task@task: dummy
+  - dataset: single_arm_pick_and_place_raven
+  - _self_
+
+parallel_processes: 4
+trials: 10000
+single_agent: True
+
+agent_save_root: '/data/ah390/garment_folding_data'
+agent_exp_name: raven_pixel_noisy_oracle
+
+data_path: mask_biased_random_raven_pixel_towers_of_hanoi
+data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
+# will collect in thanos

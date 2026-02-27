@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import random
 
-from agent_arena.torch_utils import np_to_ts, ts_to_np
+from actoris_harena.torch_utils import np_to_ts, ts_to_np
 from .utils import preprocess_rgb, postprocess_rgb, gaussian_kernel
 
 
@@ -32,9 +32,9 @@ class PickAndPlaceTransformerV1:
         self.depth_flip = self.config.get('depth_flip', False)
         self.apply_depth_noise_on_mask = self.config.get('apply_depth_noise_on_mask', False)
         self.depth_blur = self.config.get('depth_blur', False)
+        self.img_dim = (self.config.img_dim[0], self.config.img_dim[1])
         if self.all_goal_rotate:
-            self.rotation_degree = self.config.get('rotation_degree', 360)
-            self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.rotation_degree)
+            self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.config.get('rotation_degree', 360))
         #self.maskout = self.config.get('maskout', False)
 
         if self.depth_blur:
@@ -69,7 +69,7 @@ class PickAndPlaceTransformerV1:
                     sample['action'] = sample_in['action']['norm-pixel-pick-and-place']
             ## flatten the last two dimension
             sample['action'] = sample['action'].reshape(sample['action'].shape[0], -1)
-            print('sample action', sample['action'].shape)
+            #print('sample action', sample['action'].shape)
 
         for k, v in sample.items():
             #print(k, v.shape)
@@ -83,7 +83,7 @@ class PickAndPlaceTransformerV1:
 
         # plot pre process action on image
         # if True:
-        #     from agent_arena.utilities.visual_utils import draw_pick_and_place
+        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
         #     import cv2
         #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy()
         #     print('rgb shape', rgb.shape)
@@ -114,13 +114,14 @@ class PickAndPlaceTransformerV1:
                 #print('obs', obs)
                 if sample[obs].shape[-1] <= 10:
                     sample[obs] = sample[obs].permute(0, 3, 1, 2)
-                #print('obs', obs, sample[obs].shape)
+                # print('obs', obs, sample[obs].shape)
+                # print(' img dim', self.img_dim)
                 T, C, H, W = sample[obs].shape
-                if (H, W) != tuple(self.config.img_dim):
+                if (H, W) != self.img_dim:
                     sample[obs] = F.interpolate(
                         sample[obs],
-                        size=self.config.img_dim, mode='bilinear', align_corners=False)\
-                            .view(T, C, *self.config.img_dim)
+                        size=self.img_dim, mode='bilinear', align_corners=False)\
+                            .view(T, C, *self.img_dim)
 
                     if obs == 'mask':
                         sample[obs] = (sample[obs] > 0.5).float()
@@ -238,16 +239,6 @@ class PickAndPlaceTransformerV1:
                 sample[obs] = rotated_images[:, start_idx:end_idx]
                 start_idx = end_idx
 
-            # for obs in ['goal-rgb', 'goal-depth', 'goal-mask']:
-            #     if obs in sample:
-            #         new_obs = sample[obs].reshape(T, -1, H, W)
-            #         #print('new_obs', new_obs.shape)
-            #         grid = F.affine_grid(affine_matrix.reshape(T, 2, 3), new_obs.size(), align_corners=True)
-            #         rotated_images = F.grid_sample(new_obs, grid, align_corners=True)
-            #         sample[obs] = rotated_images.reshape(T, -1, H, W)
-                    #print('rotated_images', rotated_images.shape)
-        
-        
     
         # Random Rotation
         if self.random_rotation and train:
@@ -412,7 +403,7 @@ class PickAndPlaceTransformerV1:
         
         ## plot pre process action on image
         # if True:
-        #     from agent_arena.utilities.visual_utils import draw_pick_and_place
+        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
         #     import cv2
         #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy().transpose(1, 2, 0)
         #     rgb = (rgb * 255).astype(np.uint8)

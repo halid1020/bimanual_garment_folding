@@ -1,5 +1,4 @@
-import json
-from agent_arena import Agent
+from actoris_harena import Agent
 import os
 import cv2
 import torch
@@ -15,7 +14,7 @@ class VLMBasedStitchingPolicy(Agent):
         self.config = config # Store config for use_reasoning, etc.
 
         # ... (Your existing policy loading code) ...
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         
         # Load sub-policies
         flattening_policy_config = compose(config_name=config.flattening_policy)

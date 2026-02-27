@@ -1,0 +1,9 @@
+defaults:
+  - agent: oracle_raven_stacking_block_pyramid
+  - arena: raven_stacking_block_pyramid
+  - task: dummy
+
+exp_name: oracle_raven_stacking_block_pyramid
+project_name: bimanual_garment_folding
+save_root: /media/hcv530/T7/garment_folding_data
+train_and_eval: train_and_evaluate_single

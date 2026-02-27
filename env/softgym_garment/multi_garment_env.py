@@ -11,9 +11,8 @@ from .garment_env import GarmentEnv
 
 global ENV_NUM
 ENV_NUM = 0
-# self.all_garment_types = ['longsleeve', 'trousers', 'skirt', 'dress']
 
-# @ray.remote
+
 class MultiGarmentEnv(GarmentEnv):
     
     def __init__(self, config):
@@ -123,9 +122,6 @@ class MultiGarmentEnv(GarmentEnv):
 
         self._initialise_trajecotry()
         
-        # if self.init_mode == 'flattened':
-        #     #print('init_mode')
-        #     self.set_to_flatten()
         
         self.last_info = None
         self.sim_step = 0

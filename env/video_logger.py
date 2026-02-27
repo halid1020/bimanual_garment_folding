@@ -2,14 +2,14 @@ import os
 import numpy as np
 import pandas as pd
 
-from agent_arena.utilities.logger.logger_interface import Logger
-from agent_arena.utilities.visual_utils import save_video as sv
-from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
-from agent_arena.utilities.visual_utils import plot_pick_and_place_trajectory as pt
+from actoris_harena.utilities.logger.logger_interface import Logger
+from actoris_harena.utilities.visual_utils import save_video as sv
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
+from actoris_harena.utilities.visual_utils import plot_pick_and_place_trajectory as pt
 
 class VideoLogger(Logger):
     
-    def __call__(self, episode_config, result, filename=None):
+    def __call__(self, episode_config, result, filename=None, wandb_logger=None):
 
         eid, save_video = episode_config['eid'], episode_config['save_video']
         if not os.path.exists(self.log_dir):

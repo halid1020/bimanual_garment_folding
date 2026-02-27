@@ -1,6 +1,6 @@
 import numpy as np
 import gym
-from agent_arena import Arena  # your abstract base
+from actoris_harena import Arena  # your abstract base
 from omegaconf import OmegaConf
 from ..video_logger import VideoLogger
 from statistics import mean

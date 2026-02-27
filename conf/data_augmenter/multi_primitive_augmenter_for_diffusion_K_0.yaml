@@ -1,0 +1,9 @@
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: false
+vertical_flip: false
+debug: false
+color_jitter: false
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: false
+K: 0

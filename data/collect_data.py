@@ -8,13 +8,13 @@ import argparse
 import cv2
 import os
 from dotmap import DotMap
-import agent_arena as ag_ar
-from agent_arena.utilities.perform_parallel \
+import actoris_harena as ag_ar
+from actoris_harena.utilities.perform_parallel \
     import setup_arenas
-from agent_arena.utilities.perform_parallel \
+from actoris_harena.utilities.perform_parallel \
     import step_arenas
 
-from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 from lagarnet.utils import obs_config, action_config, reward_names, evaluation_names
 from tqdm import tqdm
 

@@ -14,14 +14,11 @@ from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
 from omegaconf import OmegaConf
 
-from agent_arena.torch_utils import *
-from agent_arena.registration.dataset import *
-from agent_arena.agent.oracle.builder import OracleBuilder
-from agent_arena.utilities.utils import TrainWriter
-# from agent_arena.utilities.transform.register import DATA_TRANSFORMER
-from agent_arena import RLAgent
+from actoris_harena.torch_utils import *
+from actoris_harena.registration.dataset import *
+from actoris_harena.agent.oracle.builder import OracleBuilder
+from actoris_harena import RLAgent
 from dotmap import DotMap
-# from agent_arena.utilities.logger.logger_interface import Logger
 
 from .networks import ImageEncoder, ImageDecoder
 from .memory import ExperienceReplay
@@ -117,10 +114,11 @@ class RSSM(RLAgent):
         planning_config["no_op"] = self.no_op
         planning_config = DotMap(planning_config)
                 
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         self.planning_algo = ag_ar.build_agent(
             self.config.policy.name,
-            config=planning_config)
+            config=planning_config,
+            disable_wandb=True)
         
         self.data_sampler = self.config.get('data_sampler', 'uniform')
         self.internal_states = {}
@@ -141,8 +139,8 @@ class RSSM(RLAgent):
             embedding_layers=self.config.trans_layers
         ).to(self.config.device)
 
-    def set_log_dir(self, logdir, project_name, exp_name):
-        super().set_log_dir(logdir, project_name, exp_name)
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
         # self.logger = TrainWriter(self.save_dir)
     
@@ -157,28 +155,11 @@ class RSSM(RLAgent):
     
     def single_act(self, info, update=False):
 
-        action =  self.planning_algo.act([info])[0].flatten()
+        action =  self.planning_algo.act([info], updates=[False])[0].flatten()
         plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
         
         for k, v in plan_internal_state.items():
             self.internal_states[info['arena_id']][k] = v
-        
-        # ## covert self.config.action_output to dict and copy it
-        # ret_action = self.config.action_output.copy().toDict()
-        # action = action.flatten()
-
-        # ## recursively goes down the dictionary tree, when encounter list of integer number
-        # ## replace list with corresponding indexed values in `action`
-
-        # def replace_action(action, ret_action):
-        #     for k, v in ret_action.items():
-        #         if isinstance(v, dict):
-        #             replace_action(action, v)
-        #         elif isinstance(v, list):
-        #             #print('v', v)
-        #             ret_action[k] = action[v]
-
-        # replace_action(action, ret_action)
 
         return action
 
@@ -194,8 +175,6 @@ class RSSM(RLAgent):
     def get_name(self):
         return "RSSM PlaNet"
     
-    # def set_reward_processor(self, reward_processing):
-    #     self.rewad_processing = reward_processing
     
     def train(self, update_steps, arena) -> bool:
         torch.backends.cudnn.benchmark = True
@@ -224,7 +203,7 @@ class RSSM(RLAgent):
 
                 for key, dataset in datasets.items():
                     if self.apply_transform_in_dataset:
-                        dataset.set_transform(self.transform)
+                        dataset.set_transform(self.data_augmenter)
                 self.datasets = datasets
                 
             self._train_offline(self.datasets, update_steps)
@@ -284,7 +263,7 @@ class RSSM(RLAgent):
             to_trans_dict['goal-mask'] = np.expand_dims(goal_mask, axis=(0))
             
 
-        image = self.transform(
+        image = self.data_augmenter(
             to_trans_dict, 
             train=False)[self.config.input_obs].to(self.config.device)
        
@@ -446,9 +425,33 @@ class RSSM(RLAgent):
             os.path.join(path, 'checkpoints', f'metrics_{self.update_step}.pth')
         )
 
-        if self.config.checkpoint_experience:
+        if self.config.get('checkpoint_experience', False):
             dst = os.path.join(path, 'checkpoints', 'experience.pkl')
             self.memory.save(dst)
+    
+    def save_best(self):
+        model_dict = {
+            'transition_model': self.model['transition_model'].state_dict(),
+            'observation_model': self.model['observation_model'].state_dict(),
+            'reward_model': self.model['reward_model'].state_dict(),
+            'encoder': self.model['encoder'].state_dict(),
+            'optimiser': self.optimiser.state_dict()
+        }
+        
+        path = self.save_dir
+        
+        os.makedirs(os.path.join(path, 'checkpoints'), exist_ok=True)
+    
+        torch.save(
+            model_dict, 
+            os.path.join(path, 'checkpoints', f'model_best.pth')
+        )
+
+        torch.save(
+            self.metrics,
+            os.path.join(path, 'checkpoints', f'metrics_best.pth')
+        )
+
 
     def _load_from_model_dir(self, model_dir):
         checkpoint = torch.load(model_dir)
@@ -470,24 +473,70 @@ class RSSM(RLAgent):
 
         ## find the latest checkpoint
         if not os.path.exists(checkpoint_dir):
-            print('No checkpoint found in directory {}'.format(checkpoint_dir))
+            print('[RSSM.load] No checkpoint found in directory {}'.format(checkpoint_dir))
             return 0
         
-        checkpoints = os.listdir(checkpoint_dir)
-        checkpoints = [int(c.split('_')[1].split('.')[0]) for c in checkpoints]
+        # Get all items in directory
+        raw_items = os.listdir(checkpoint_dir)
+        
+        # Filter: only keep items that start with 'model_' and end with '.pth'
+        # This automatically ignores 'best', 'checkpoint.txt', and other subdirectories
+        checkpoints = []
+        for c in raw_items:
+            if c.startswith('model_') and c.endswith('.pth'):
+                try:
+                    # Extract number from 'model_100.pth' -> 100
+                    checkpoint_id = int(c.split('_')[1].split('.')[0])
+                    checkpoints.append(checkpoint_id)
+                except (ValueError, IndexError):
+                    continue # Skip anything that doesn't fit the pattern
+
+        if not checkpoints:
+            print(f'[RSSM, load] No valid numbered checkpoints found in {checkpoint_dir}')
+            return 0
+            
         checkpoints.sort()
         checkpoint = checkpoints[-1]
+
         model_dir = os.path.join(checkpoint_dir, f'model_{checkpoint}.pth')
 
         
         if not os.path.exists(model_dir):
-            print('No model found for loading in directory {}'.format(model_dir))
+            print('[RSSM, load] No model found for loading in directory {}'.format(model_dir))
             return 0
         
         self._load_from_model_dir(model_dir)
-        print('Loaded checkpoint {}'.format(checkpoint))
+        print('[RSSM, load] Loaded checkpoint {}'.format(checkpoint))
         self.loaded = True
         return checkpoint
+
+    
+    def load_best(self):
+
+        path = self.save_dir
+        
+        checkpoint_dir = os.path.join(path, 'checkpoints')
+
+        ## find the latest checkpoint
+        if not os.path.exists(checkpoint_dir):
+            print('No checkpoint found in directory {}'.format(checkpoint_dir))
+            return 0
+        
+        # checkpoints = os.listdir(checkpoint_dir)
+        # checkpoints = [int(c.split('_')[1].split('.')[0]) for c in checkpoints]
+        # checkpoints.sort()
+        # checkpoint = checkpoints[-1]
+        model_dir = os.path.join(checkpoint_dir, f'model_best.pth')
+
+        
+        if not os.path.exists(model_dir):
+            print('[lagarnet, load_best] No model found for loading in directory {}'.format(model_dir))
+            return 0
+        
+        self._load_from_model_dir(model_dir)
+        print('[LaGarNet, load_best] Successfully loaded the best model in directory {}'.format(model_dir))
+        self.loaded = True
+        return -2
         
     def load_checkpoint(self, checkpoint: int) -> bool:
         checkpoint_dir = os.path.join(self.save_dir, 'checkpoints')
@@ -496,7 +545,7 @@ class RSSM(RLAgent):
             print('No model found for loading in directory {}'.format(model_dir))
             return False
         self._load_from_model_dir(model_dir)
-        print('Loaded checkpoint {}'.format(checkpoint))
+        print('[lagarnet, load_checkpoint] Loaded checkpoint {}'.format(checkpoint))
         return True
     
     def _load_metrics(self, path=None):
@@ -548,7 +597,7 @@ class RSSM(RLAgent):
             if single and not self.apply_transform_in_dataset:
                 for k, v in data.items():
                     data[k] = np.expand_dims(v, 0)
-            data = self.transform(data, train=train)
+            data =  self.data_augmenter(data, train=train)
             if self.apply_transform_in_dataset:
                 for k, v in data.items():
                     data[k] = v.unsqueeze(0)
@@ -862,14 +911,16 @@ class RSSM(RLAgent):
             self.optimiser.step()
 
             # Collect Losses
+            wandb_metrics = {}
             for kk, vv in losses.items():
                 #print('kk', kk)
                 if kk in losses_dict.keys():
                     losses_dict[kk].append(vv.detach().cpu().item())
                 else:
                     losses_dict[kk] = [vv.detach().cpu().item()]
-                
-                self.logger.add_scalar(kk, vv.detach().cpu().item(), u)
+                wandb_metrics[kk] = vv.detach().cpu().item()
+            
+            self.logger.log(wandb_metrics, u)
 
             updates.append(u)
 
@@ -881,7 +932,7 @@ class RSSM(RLAgent):
 
                 # Save Losses
                 losses_dict.update({'update_step': updates})
-                loss_logger(losses_dict, self.save_dir)
+                #loss_logger(losses_dict, self.save_dir)
                 losses_dict = {}
                 updates = []
 
@@ -891,12 +942,15 @@ class RSSM(RLAgent):
                 results = {'test_{}'.format(k): v for k, v in test_results.items()}
                 results.update({'train_{}'.format(k): v for k, v in train_results.items()})
 
+                wandb_metrics = {}
                 for k, v in results.items():
-                    self.logger.add_scalar(k, v, u)
+                    wandb_metrics[k] = v
+
+                self.logger.log(wandb_metrics, step=u)
 
                 results['update_step'] = [u]
 
-                eval_logger(results, self.save_dir)
+                #eval_logger(results, self.save_dir)
                 #break # Change here
                 
                 
@@ -908,16 +962,16 @@ class RSSM(RLAgent):
                 self.set_train()
         
         # Visualised, Evaluate & Save
-        if self.config.visusalise:
-            self.visualise(datasets)
+        # if self.config.get('visusalise', False):
+        #     self.visualise(datasets)
         
-        if self.config.end_training_evaluate:
-            test_results = self.evaluate(test_dataset)
-            train_results = self.evaluate(train_dataset)
-            results = {'test_{}'.format(k): v for k, v in test_results.items()}
-            results.update({'train_{}'.format(k): v for k, v in train_results.items()})
-            results['update_step'] = [self.config.total_update_steps-1]
-            eval_logger(results, self.config)
+        # if self.config.get('end_training_evaluate', False):
+        #     test_results = self.evaluate(test_dataset)
+        #     train_results = self.evaluate(train_dataset)
+        #     results = {'test_{}'.format(k): v for k, v in test_results.items()}
+        #     results.update({'train_{}'.format(k): v for k, v in train_results.items()})
+        #     results['update_step'] = [self.config.total_update_steps-1]
+            #eval_logger(results, self.config)
         
     def evaluate(self, dataset, train=False):
 
@@ -1019,77 +1073,6 @@ class RSSM(RLAgent):
                         reduction='none').mean((1, 2, 3)).flatten().detach().cpu().tolist())
 
             
-        #     # T*30
-        #     for horizon in self.config.test_horizons:
-        #         print('horizon', horizon)
-        #         horizon_actions = [actions[j + 2: j+horizon+2] for j in range(eval_action_horizon-horizon-1)]
-        #         horizon_actions = torch.swapaxes(torch.stack(horizon_actions), 0, 1)
-                
-        #         B = horizon_actions.shape[1]
-        #         init_post = posteriors['sample'][1:B+1].squeeze(1)
-
-        #         imagin_beliefs, imagin_priors = self._unroll_action(
-        #             horizon_actions, 
-        #             beliefs[1:B+1].squeeze(1), init_post) # horizon*B
-
-                
-        #         imagin_reward =  bottle(self.model['reward_model'], 
-        #                                 (imagin_beliefs, imagin_priors['sample'])).transpose(0, 1)
-        #         imagin_observation = bottle(self.model['observation_model'], 
-        #                                     (imagin_beliefs, imagin_priors['sample'])).transpose(0, 1)
-                
-        #         true_reward = torch.stack(
-        #             [episode['reward'][j+1: j+horizon+1] for j in range(eval_action_horizon-horizon-1)])\
-        #                 .reshape(-1, horizon)
-        #         true_image = torch.stack(
-        #             [output_obs[j+2: j+horizon+2] for j in range(eval_action_horizon-horizon-1)])
-
-
-        #         reward_rmses[horizon].extend((F.mse_loss(
-        #                 symexp(imagin_reward, self.symlog), 
-        #                 symexp(true_reward, self.symlog),
-        #                 reduction='none')**0.5).flatten().detach().cpu().tolist())
-                
-        #         observation_mses[horizon].extend(F.mse_loss(
-        #                 symexp(imagin_observation, self.symlog) , 
-        #                 symexp(true_image, self.symlog),
-        #                 reduction='none').mean((2, 3, 4)).flatten().detach().cpu().tolist())
-                
-        #         imagin_post = {k: torch.stack([posteriors[k][j+2:j+2+horizon, 0] \
-        #                                        for j in range(eval_action_horizon-horizon-1)]) 
-        #                                        for k in posteriors.keys()}
-
-
-        #         imagin_post_dist = ContDist(td.independent.Independent(
-        #         td.normal.Normal(imagin_post['mean'].transpose(0, 1), imagin_post['std'].transpose(0, 1)), 1))._dist
-                
-                
-                
-        #         imagin_prior_dist = ContDist(td.independent.Independent(
-        #         td.normal.Normal(imagin_priors['mean'], imagin_priors['std']), 1))._dist
-                
-                
-
-        #         kls_post_to_prior[horizon].extend(
-        #             td.kl.kl_divergence(imagin_post_dist, imagin_prior_dist)\
-        #                 .flatten().detach().cpu().tolist())
-        #         kls_prior_to_post[horizon].extend(
-        #             td.kl.kl_divergence(imagin_prior_dist, imagin_post_dist)\
-        #                 .flatten().detach().cpu().tolist())
-
-                
-
-        #         prior_entropies[horizon].extend(
-        #             imagin_prior_dist.entropy().mean(dim=-1)\
-        #                 .flatten().detach().cpu().tolist())
-                
-        
-        # results = {
-        #     'img_prior_reward_rmse': {h:reward_rmses[h] for h in self.config.test_horizons},
-        #     'img_prior_img_observation_mse': {h:observation_mses[h] for h in self.config.test_horizons},
-        #     'kl_divergence_between_posterior_and_img_prior': {h:kls_post_to_prior[h] for h in self.config.test_horizons},
-        #     'img_prior_entropy':  {h:prior_entropies[h] for h in self.config.test_horizons}
-        # }
 
         res = {
             'posterior_img_observation_mse_mean': np.mean(posterior_recon_mses),
@@ -1100,126 +1083,7 @@ class RSSM(RLAgent):
             'posterior_entropy_std': np.std(posterior_entropies)
         }
         
-        # for k, v in results.items():
-        #     for h in self.config.test_horizons:
-        #         res['{}_horizon_{}_mean'.format(k, h)] = np.mean(v[h])
-        #         res['{}_horizon_{}_std'.format(k, h)] = np.std(v[h])
-        
-
         return res
-    
-    # def visualise(self, datasets):
-    #     self._visualise(datasets['train'], train=True)
-    #     self._visualise(datasets['test'], train=False)
-
-    # def _visualise(self, dataset, train=False):
-    #     train_str = 'Train' if train else 'Eval'
-        
-    #     for e in range(5):
-    #         org_gt = dataset.get_episode(e)
-    #         input_obs = self.config.input_obs
-    #         if self.config.input_obs == 'rgbd':
-    #             input_obs = 'rgb'
-    #         # org_gt = dataset.transform.post_transform(data)
-
-    #         plot_pick_and_place_trajectory(
-    #             org_gt[input_obs][6:16].transpose(0, 2 ,3, 1),
-    #             org_gt['action'][6:16],
-    #             title='{} Ground Truth Episode {}'.format(train_str, e),
-    #             # rewards=data['reward'][5:15], 
-    #             save_png = True, 
-    #             save_path=os.path.join(self.save_dir, 'visualisations'))
-            
-    #         data = {}
-    #         for k, v in org_gt.items():
-    #             data[k] = np.expand_dims(v, 0)
-    #         data = self._preprocess(data, train=False, apply_transform=True)
-    #         for k, v in data.items():
-    #             data[k] = torch.swapaxes(v, 0, 1).squeeze(0)
-
-    #         recon_image = []
-
-    #         init_belief = torch.zeros(1, self.config.deterministic_latent_dim).to(self.config.device)
-    #         init_state = torch.zeros(1, self.config.stochastic_latent_dim).to(self.config.device)
-
-
-    #         no_op_ts = np_to_ts(self.no_op, self.config.device).unsqueeze(0)
-    #         actions = np_to_ts(data['action'], self.config.device)
-    #         actions = torch.cat([no_op_ts, actions])
-
-    #         observations = np_to_ts(data['input_obs'], self.config.device)
-    #         rewards = np_to_ts(data['reward'], self.config.device)
-
-    #         beliefs, posteriors, priors, _ = self._unroll_state_action(
-    #             observations.unsqueeze(1), actions.unsqueeze(1), 
-    #             init_belief, init_state, None)
-
-    #         posterior_observations = bottle(self.model['observation_model'], (beliefs, posteriors['sample'])).squeeze(1)
-    #         posterior_observations = symexp(posterior_observations, self.symlog)
-    #         if self.config.output_obs == 'input_obs':
-    #             post_process_obs = self.transform.post_transform({self.config.input_obs: posterior_observations})[self.config.input_obs]
-    #         else:
-    #             # post_process_obs = posterior_observations.detach().cpu().numpy()
-    #             post_process_obs = self.transform.post_transform({self.config.output_obs: posterior_observations})[self.config.output_obs]
-
-            
-            
-    #         posterior_rewards = bottle(self.model['reward_model'], (beliefs, posteriors['sample'])).squeeze(1)
-    #         posterior_rewards = symexp(posterior_rewards, self.symlog)
-    #         posterior_rewards = posterior_rewards.detach().cpu().numpy()
-
-           
-
-    #         plot_pick_and_place_trajectory(
-    #             post_process_obs[6:16].transpose(0, 2 ,3, 1),
-    #             # rewards=posterior_rewards[6:16], 
-    #             title='{} Posterior Trajectory Episode {}'.format(train_str, e), 
-    #             save_png = True,
-    #             save_path=os.path.join(self.save_dir, 'visualisations'))
-            
-    #         recon_image.append(post_process_obs[6:11].transpose(0, 2 ,3, 1))
-
-            
-    #         # T*30
-    #         horizon = 5
-    #         horizon_actions = [actions[j + 1: j+horizon+1] for j in range(dataset.eval_action_horizon-horizon)]
-    #         horizon_actions = torch.swapaxes(torch.stack(horizon_actions), 0, 1) # 4*64*1 
-
-    #         B = horizon_actions.shape[1]
-
-    #         imagin_beliefs, imagin_priors = self._unroll_action(
-    #             horizon_actions, 
-    #             beliefs[:B].squeeze(1), posteriors['sample'][:B].squeeze(1)) # horizon*B
-            
-    #         prior_observations = bottle(self.model['observation_model'], (imagin_beliefs, imagin_priors['sample']))
-    #         prior_observations = symexp(prior_observations, self.symlog)
-
-    #         prior_rewards = bottle(self.model['reward_model'], (imagin_beliefs, imagin_priors['sample'])) 
-    #         prior_rewards = symexp(prior_rewards, self.symlog)
-    #         prior_rewards = prior_rewards.detach().cpu().numpy()
-
-
-    #         for i in range(horizon):
-    #             if self.config.output_obs == 'input_obs':
-    #                 post_process_img_obs = self.transform.post_transform({self.config.input_obs: prior_observations[i]})[self.config.input_obs]
-    #             else:
-    #                 post_process_img_obs = self.transform.post_transform({self.config.output_obs: prior_observations[i]})[self.config.output_obs]
-
-    #             plot_pick_and_place_trajectory(
-    #                 post_process_img_obs[5-i:15-i].transpose(0, 2 ,3, 1),
-    #                 # rewards=prior_rewards[i][5-i:15-i], 
-    #                 title='{}-Step {} Prior Trajectory Episode {}'.format(i, train_str, e), 
-    #                 save_png = True,
-    #                 save_path=os.path.join(self.save_dir, 'visualisations'))
-    #             recon_image.append(post_process_img_obs[5+5:6+5].transpose(0, 2 ,3, 1))
-
-    #         recon_image = np.concatenate(recon_image, axis=0)
-    #         plot_pick_and_place_trajectory(
-    #                 recon_image,
-    #                 # rewards=posterior_rewards[6:16], 
-    #                 title='{} Recon Trajectory Episode {}'.format(train_str, e), 
-    #                 save_png = True,
-    #                 save_path=os.path.join(self.save_dir, 'visualisations'))
     
 
     def _unroll_state_action(self, data, horizon=None, batch_size=None):
@@ -1552,9 +1416,9 @@ class RSSM(RLAgent):
             "reward_overshooting_loss": reward_overshooting_loss
         }
 
-        if self.config.data_sampler == 'prioritised':
-            res['batch_reward_losses'] = batch_reward_loss
-            res['batch_observation_losses'] = batch_observation_loss
+        # if self.config.data_sampler == 'prioritised':
+        #     res['batch_reward_losses'] = batch_reward_loss
+        #     res['batch_observation_losses'] = batch_observation_loss
         
         if self.config.encoder_mode == 'contrastive':
             

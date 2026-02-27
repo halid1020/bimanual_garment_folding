@@ -8,3 +8,4 @@ img_dim: [96, 96]
 randomise_prim_acts: false
 random_channel_permutation: true
 K: 3
+use_workspace: false

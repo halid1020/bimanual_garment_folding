@@ -12,14 +12,14 @@ import cv2
 from collections import deque
 from tqdm import tqdm
 
-from agent_arena import TrainableAgent
+from actoris_harena import TrainableAgent
 
 from dotmap import DotMap
 from .replay_buffer import ReplayBuffer
 
 from .wandb_logger import WandbLogger
 
-from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 
 
 class DemoSAC(VanillaSAC):

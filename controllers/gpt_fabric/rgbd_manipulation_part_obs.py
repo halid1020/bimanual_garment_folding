@@ -5,7 +5,7 @@ import re
 import requests
 import time
 from .manipulation import RGB_manipulation, encode_image
-from agent_arena.utilities.save_utils import save_mask, save_colour, save_depth
+from actoris_harena.utilities.save_utils import save_mask, save_colour, save_depth
 
 from transformers import AutoProcessor, Gemma3ForConditionalGeneration
 import torch

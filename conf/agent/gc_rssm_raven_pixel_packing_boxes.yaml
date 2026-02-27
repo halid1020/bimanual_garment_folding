@@ -82,7 +82,7 @@ datasets:
 
     name: 'default'
     params:
-      data_path: 'noisy_oracle_raven_pixel_packing_boxes' #'diffusion_policy_on_softgym|domain:cloth-funnel-real2sim-longsleeve,task:flattening,horizon:20'
+      data_path: 'raven_pixel_packing_boxes_mix' #'diffusion_policy_on_softgym|domain:cloth-funnel-real2sim-longsleeve,task:flattening,horizon:20'
       data_dir: './data/datasets/'
       seq_length: 50
       cross_trajectory: True
@@ -92,16 +92,16 @@ datasets:
       sample_mode: 'train'
       obs_config: 
         mask: 
-          shape: [128, 128, 1]
+          shape: [64, 64, 1]
           output_key: 'mask'
         rgb:
-          shape: [128, 128, 3]
+          shape: [64, 64, 3]
           output_key: 'rgb'
         goal-mask: 
-          shape: [128, 128, 1]
+          shape: [64, 64, 1]
           output_key: 'goal-mask'
         goal-rgb:
-          shape: [128, 128, 3]
+          shape: [64, 64, 3]
           output_key: 'goal-rgb'
         default:
           shape: [1]
@@ -117,7 +117,7 @@ datasets:
 
     name: 'default'
     params:
-      data_path: 'noisy_oracle_raven_pixel_packing_boxes'
+      data_path: 'raven_pixel_packing_boxes_mix'
       data_dir: './data/datasets/'
       seq_length: 20
       cross_trajectory: False
@@ -127,16 +127,16 @@ datasets:
       sample_terminal: True
       obs_config: 
         mask: 
-          shape: [128, 128, 1]
+          shape: [64, 64, 1]
           output_key: 'mask'
         rgb:
-          shape: [128, 128, 3]
+          shape: [64, 64, 3]
           output_key: 'rgb'
         goal-mask: 
-          shape: [128, 128, 1]
+          shape: [64, 64, 1]
           output_key: 'goal-mask'
         goal-rgb:
-          shape: [128, 128, 3]
+          shape: [64, 64, 3]
           output_key: 'goal-rgb'
         default:
           shape: [1]

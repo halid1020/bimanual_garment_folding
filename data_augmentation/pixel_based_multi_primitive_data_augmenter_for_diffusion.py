@@ -241,6 +241,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
         
         if self.use_goal and 'rgb-goal' in sample:
+            #print('sample rgb-goal shape', sample['rgb-goal'].shape)
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
         

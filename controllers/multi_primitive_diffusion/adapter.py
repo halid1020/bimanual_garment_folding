@@ -990,7 +990,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         if self.config.input_obs == 'rgb-goal':
             info['observation']['rgb-goal'] = np.concatenate(
-                [info['observation']['rgb'][0].astype(np.float32), info['observation']['goal_rgb'][0].astype(np.float32)], axis=-1)
+                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]

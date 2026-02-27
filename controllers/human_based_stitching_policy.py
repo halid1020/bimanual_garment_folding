@@ -1,6 +1,6 @@
 import datetime
 import json
-from agent_arena import Agent
+from actoris_harena import Agent
 import os
 import torch
 from hydra import compose
@@ -17,7 +17,7 @@ class HumanBasedStitchingPolicy(Agent):
         self.config = config # Store config for use_reasoning, etc.
 
         # ... (Your existing policy loading code) ...
-        import agent_arena.api as ag_ar
+        import actoris_harena.api as ag_ar
         
         # Load sub-policies
         flattening_policy_config = compose(config_name=config.flattening_policy)
@@ -28,7 +28,8 @@ class HumanBasedStitchingPolicy(Agent):
             flattening_policy_config.agent,
             project_name=flattening_policy_config.project_name,
             exp_name=config.flattening_policy,
-            save_dir=os.path.join(flattening_policy_config.save_root, config.flattening_policy)
+            save_dir=os.path.join(flattening_policy_config.save_root, config.flattening_policy),
+            disable_wandb=True, # Disable wandb for sub-policies to avoid clutter
         )
 
         self.folding_policy = ag_ar.build_agent(
@@ -36,7 +37,8 @@ class HumanBasedStitchingPolicy(Agent):
             folding_policy_config.agent,
             project_name=folding_policy_config.project_name,
             exp_name=config.folding_policy,
-            save_dir=os.path.join(folding_policy_config.save_root, config.folding_policy)
+            save_dir=os.path.join(folding_policy_config.save_root, config.folding_policy),
+            disable_wandb=True # Disable wandb for sub-policies to avoid clutter
         )
 
         self.flattening_policy.load_best()

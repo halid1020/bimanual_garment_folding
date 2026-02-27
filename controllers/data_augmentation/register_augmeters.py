@@ -8,11 +8,12 @@ from .pixel_based_fold_data_augmenter import PixelBasedFoldDataAugmenter
 from .pixel_based_multi_primitive_data_augmenter_for_dreamer import PixelBasedMultiPrimitiveDataAugmenterForDreamer
 from .pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
 from .pick_and_place_transformer_v1 import PickAndPlaceTransformerV1
+from .dummy import Dummy
 
 def build_data_augmenter(cfg_str):
 
     # load config from cfg_str
-    config_path = os.path.join("conf", "data_augmenter", f"{cfg_str}.yaml")
+    config_path = os.path.join(os.environ['MP_FOLD_PATH'], "conf", "data_augmenter", f"{cfg_str}.yaml")
     cfg = flattening_policy_config = OmegaConf.load(config_path)
 
     name = cfg.name
@@ -36,7 +37,7 @@ def build_data_augmenter(cfg_str):
         return PickAndPlaceTransformerV1(cfg)
 
     elif name == 'identity':
-        return lambda x: x
+        return Dummy(cfg)
 
     else:
         raise NotImplementedError(f"Data augmenter {name} not supported")

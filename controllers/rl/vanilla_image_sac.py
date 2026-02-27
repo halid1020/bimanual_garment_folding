@@ -10,8 +10,8 @@ from collections import deque
 from tqdm import tqdm
 import math
 
-from agent_arena import TrainableAgent
-from agent_arena.utilities.logger.logger_interface import Logger
+from actoris_harena import TrainableAgent
+from actoris_harena.utilities.logger.logger_interface import Logger
 from dotmap import DotMap
 
 

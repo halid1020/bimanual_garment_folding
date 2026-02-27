@@ -1,6 +1,6 @@
 import argparse
-import agent_arena.api as ag_ar
-from agent_arena.utilities.perform_single import perform_single
+import actoris_harena.api as ag_ar
+from actoris_harena.utilities.perform_single import perform_single
 import matplotlib.pyplot as plt
 import numpy as np
 from dotmap import DotMap

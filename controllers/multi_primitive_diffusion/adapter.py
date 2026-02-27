@@ -11,17 +11,18 @@ import torch.nn as nn
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from dotmap import DotMap
 
-
-from agent_arena import TrainableAgent
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
-from agent_arena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena import TrainableAgent
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
 from .networks import ConditionalUnet1D, MLPClassifier
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from ..data_augmentation.register_augmeters import build_data_augmenter
+from .constrain_action_functions import name2func
 
 class DiffusionTransform():
 
@@ -87,8 +88,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.last_actions = {}
         self.obs_deque = {}
         self.collect_on_success = self.config.get('collect_on_success', True)
+        self.measure_time = config.get('measure_time', False)
+        self.debug = config.get('debug', False)
+        self.constrain_action = name2func[config.get('constrain_action', 'identity')]
 
-        self.primitive_integration = self.config.primitive_integration
+        self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
             
             self.primitives = config.primitives
@@ -99,12 +103,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.network_action_dim = max(self.action_dims)
             if self.primitive_integration == 'bin_as_output':
                 self.network_action_dim += 1
+            self.data_save_action_dim = self.network_action_dim
+            if self.primitive_integration == 'one-hot-encoding':
+                self.data_save_action_dim += 1
+            
             self.primitive_action_masks = self._build_primitive_action_masks()
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
             
             
         else:
             self.network_action_dim = config.action_dim
+            self.data_save_action_dim = config.action_dim
 
         self._init_networks()
 
@@ -136,7 +145,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             )
             self.stats = dataset.stats
         elif self.config.dataset_mode == 'general':
-            from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
             config = self.config.dataset_config.toDict()
             #print('config', config)
@@ -169,15 +178,18 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         arena = arenas[0] # assume only one arena
         org_horizon = arena.action_horizon
         arena.action_horizon = self.config.get('demo_horizon', org_horizon)
-        from agent_arena.utilities.trajectory_dataset import TrajectoryDataset
+        from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             # convert dotmap to dict
         config = self.config.dataset_config #.toDict()
         config['io_mode'] = 'a'
         #print('config', config)
         dataset = TrajectoryDataset(**config)
 
-        import agent_arena as ag_ar
-        policy = ag_ar.build_agent(self.config.demo_policy)
+        import actoris_harena as ag_ar
+        policy = ag_ar.build_agent(
+            self.config.demo_policy, 
+            self.config.get('demo_policy_config', DotMap({})),
+            disable_wandb=True)
 
         qbar = tqdm(total=self.config.num_demos, 
                     desc='Collecting data from policy ...')
@@ -194,14 +206,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             policy.reset([arena.id])
             print('[multi-primitive diffusion] reset episode id', episode_id)
             info = arena.reset(train_configs[episode_id])
-            policy.init(info)
+            policy.init([info])
             info['reward'] = 0
             done = info['done']
             #print('done', done)
             while not done:
                 action = policy.single_act(info)
-                #print('demo action', action)
-
+                
                 if action is None:
                     break
                 
@@ -209,6 +220,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     #print('k', k)
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                            #print('k ', k, 'v', v)
                             v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
                         elif k in ['mask', 'goal_mask']:
@@ -219,12 +231,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                             observations[k].append(v_)
                 
                 add_action = action
-                if self.config.primitive_integration == 'bin_as_output': # Unused dimenstions are zeros
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
+                    # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.prim_name2id[action_name]
                     prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
-                    add_action = np.zeros(self.network_action_dim)
+                    add_action = np.zeros(self.data_save_action_dim)
+                    print('add action dim', add_action.shape)
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                     #add_action = np.concatenate([prim_act, action_param])
@@ -239,13 +253,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actions['default'].append(add_action)  
               
                 info = arena.step(action)
-                print('[diffusion] demo reward', info['reward'])
+                # print('[diffusion] demo reward', info['reward'])
                 policy.update(info, add_action)
                 info['reward'] = 0
                 done = info['done']
                 if (self.collect_on_success and info['success']):
                     break
-                
+            # print('[debug] keys', info['observation'].keys())
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -271,6 +285,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
+                    # print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
@@ -280,6 +295,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     qbar.update(1)
                 
             episode_id += 1
+            print('[multi-primitive-diffusion] arena.get_num_episodes', arena.get_num_episodes() )
             episode_id %= arena.get_num_episodes()
 
         arena.action_horizon = org_horizon
@@ -494,8 +510,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             B = nbatch[self.config.input_obs].shape[0]
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon]\
-                .flatten(end_dim=1)
+                .flatten(end_dim=1).float()
 
+            if 'action' in nbatch:
+                nbatch['action'] = nbatch['action'].float()
+            
+            if 'vector_state' in nbatch:
+                 nbatch['vector_state'] = nbatch['vector_state'].float()
           
             # encoder vision features
             #print('[diffusion] input obs shape', input_obs.shape)
@@ -673,8 +694,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         return masks
 
-    def set_log_dir(self, logdir, project_name, exp_name):
-        super().set_log_dir(logdir, project_name, exp_name)
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
 
         
@@ -713,7 +734,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         ckpt_files = sorted(ckpt_files, key=lambda x: int(x.split('_')[1].split('.')[0]))
         
         if len(ckpt_files) == 0:
-            print('No checkpoint found')
+            print('[MultiPrimitiveDiffusion, load] No checkpoint found')
             return 0
         ckpt_file = ckpt_files[-1]
         ckpt_path = os.path.join(ckpt_path, ckpt_file)
@@ -730,24 +751,32 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         # Check if the file exists before trying to load
         if not os.path.exists(ckpt_path):
-            print(f"[Warning] Checkpoint not found at: {ckpt_path}")
+            print(f"[MultiPrimitiveDiffusion, load_best] Checkpoint not found at: {ckpt_path}")
             return 0 # Return None or a generic error code (like -1) to indicate failure
         
         # Load the state dictionary
         self.nets.load_state_dict(torch.load(ckpt_path))
 
         self.loaded = True
+        print(f"[MultiPrimitiveDiffusion, load_best] Best checkpoint is loaded")
         return -2
 
     def single_act(self, info, update=False):
+        
+        if self.measure_time:
+            start_time = time.time()
+            arena_id = info['arena_id']
+
+   
 
         if update == True:
             last_action = self.last_actions[info['arena_id']]
             
             if last_action is not None:
-                self.update(info, last_action)
+                self.update([info], [last_action])
             else:
-                self.init(info)
+                #print('[Diffusion] info', info.keys())
+                self.init([info])
 
         if len(self.buffer_actions[info['arena_id']]) == 0:
             image = torch.stack([x[self.config.input_obs] \
@@ -759,7 +788,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 mask = torch.stack([x['mask'] for x in self.obs_deque[info['arena_id']]])
                 sample_state['mask'] = mask
 
-            
+            if self.debug and self.config.input_obs == 'rgb-workspace-mask-goal':
+                from .draw_utils import plot_rgb_workspace_mask_goal_features
+                plot_rgb_workspace_mask_goal_features(image)
+
             obs_features = self.nets['vision_encoder'](image)
             # print('obs features shape', obs_features.shape)
 
@@ -782,12 +814,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
             else:
                 obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
-            #print('[MultiPrimitiveDiffusion, single_act] obs cond', obs_cond.shape)
+            
+
             naction = self.eval_action_sampler.sample(
                 state=sample_state, 
                 horizon=self.config.pred_horizon, 
                 action_dim=self.network_action_dim
             ).to(self.device)
+            
+            if self.primitive_integration == 'one-hot-encoding':
+                naction = self.constrain_action(naction, info, t=-1, debug=self.debug)
 
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
@@ -810,10 +846,42 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     timestep=k,
                     sample=naction
                 ).prev_sample
+                
+                if self.primitive_integration == 'one-hot-encoding':
+                    naction = self.constrain_action(naction, info, t=k, debug=self.debug)
 
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
-            
+            # ---  Call Debug GIF Function ---
+            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.config.constrain_action == 'bimanual_mask':
+                print('!!!!!! Contrain Debug!!!!!')
+                from .constrain_action_functions import save_denoising_gif
+                
+                # Extract image and masks from the deque/buffer
+                # Taking the last observation (current state)
+                last_obs = self.obs_deque[info['arena_id']][-1]
+                
+                # Get Image (Assuming 'rgb' is available and primary)
+                # Adjust key if you use 'rgb-workspace-mask' etc.
+                # Assuming input_obs usually stores the visual tensor
+                img_vis = last_obs[self.config.input_obs]
+                
+                # If input_obs has channels first/stacked, take just the RGB part
+                if img_vis.shape[0] in [3, 4, 5, 6, 8]: 
+                    img_vis = img_vis[:3] # Take first 3 channels (RGB)
+                
+                masks = [None, None]
+                if 'robot0_mask' in last_obs: masks[0] = last_obs['robot0_mask']
+                if 'robot1_mask' in last_obs: masks[1] = last_obs['robot1_mask']
+                
+                step_idx = info.get('step', 0) # Or self.internal_states step count
+                
+                save_denoising_gif(
+                    image=img_vis, 
+                    masks=masks, 
+                    noise_actions_history=noise_actions, 
+                    step_idx=step_idx
+                )
 
             action_pred = self.data_augmenter.postprocess(
                 {'action': ts_to_np(naction)})['action'][0]
@@ -824,13 +892,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         action = self.buffer_actions[info['arena_id']]\
             .popleft().reshape(self.network_action_dim)
-        #print('res action', action)
-        
-        # ## covert self.config.action_output to dict and copy it
-        # ret_action = self.config.action_output.copy() #.toDict()
-        # if isinstance(ret_action, (DictConfig, ListConfig)):
-        #     ret_action = omegaconf_to_plain_dict(ret_action)
-
+       
         action = action.flatten()
 
         ## recursively goes down the dictionary tree, when encounter list of integer number
@@ -851,6 +913,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             raise NotImplementedError
 
         self.last_actions[info['arena_id']] = action
+
+        if self.measure_time:
+            self.internal_states[[info['arena_id']]]['inference_time'].append(time.time() - start_time)
+        
 
         return out_action
 
@@ -884,20 +950,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return self.internal_states
 
     def _process_info(self, info):
-
+        #print('[Diffions, _process info]', info['observation'].keys())
         if 'depth' in info['observation'].keys():
-            depth = info['observation']['depth']
+            depth = info['observation']['depth'] #get the view from first camera.
+
             if len(depth.shape) == 2:
-                    depth = np.expand_dims(depth, axis=-1)
-                    info['observation']['depth'] = depth
+                depth = np.expand_dims(depth, axis=-1)
+                info['observation']['depth'] = depth
 
         if self.config.input_obs == 'rgbd':
             info['observation']['rgbd'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), depth], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
         
         if self.config.input_obs == 'rgb-goal':
             info['observation']['rgb-goal'] = np.concatenate(
-                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+                [info['observation']['rgb'][0].astype(np.float32), info['observation']['goal_rgb'][0].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]
@@ -909,7 +976,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 if mask.ndim == 3:
                     mask = mask[..., 0]
 
-                # 🔴 CRITICAL: cast dtype
+                # CRITICAL: cast dtype
                 if mask.dtype != np.uint8 and mask.dtype != np.float32:
                     mask = mask.astype(np.float32)
 
@@ -958,20 +1025,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             input_data['vector_state'] = info['observation']['vector_state']\
                 .reshape(1, 1, *info['observation']['vector_state'].shape)
         
-        # print('input data keys', input_data.keys())
-        #print('image shape', input_data['rgb'].shape)
+
         input_data = self.data_augmenter(input_data, train=False, device=self.device) 
                                     #sim2real=info['sim2real'] if 'sim2real' in info else False)
         
         vis = input_data[self.config.input_obs].squeeze(0).squeeze(0)
-        #print('vis shape', vis.shape)
+
         obs = {
             self.config.input_obs: vis,  
         }
 
-        vis_to_save = vis.cpu().numpy().transpose(1, 2, 0).repeat(3, axis=-1)
-
-        #plt.imsave('tmp/input_obs.png', vis_to_save)
 
         if 'use_mask' in self.config and self.config.use_mask:
             mask = input_data['mask'].squeeze(0).squeeze(0)
@@ -982,6 +1045,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             obs['vector_state'] = vector_state
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
+        # print('self.internal_states', self.internal_states)
+        # print('info[arena_id]', info['arena_id'])
         self.internal_states[info['arena_id']].update(
             {'input_obs': input_obs.transpose(1,2,0),
              'input_type': self.config.input_obs}

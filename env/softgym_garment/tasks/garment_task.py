@@ -3,7 +3,7 @@ import json
 import numpy as np
 import cv2
 
-from agent_arena import Task
+from actoris_harena import Task
 
 from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
     simple_rigid_align, chamfer_alignment_with_rotation

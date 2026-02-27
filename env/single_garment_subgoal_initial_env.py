@@ -7,7 +7,7 @@ import json
 from softgym.action_space.action_space import Picker
 from softgym.utils.env_utils import get_coverage
 import pyflex
-from agent_arena import Arena
+from actoris_harena import Arena
 from tqdm import tqdm
 
 

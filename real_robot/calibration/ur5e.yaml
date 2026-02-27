@@ -1,0 +1,100 @@
+robot:
+  ip: "192.168.1.10"
+  gripper: "rg2"
+
+# ChArUco Board Settings (Optional: you can keep using CLI args if you prefer)
+board:
+  squares_x: 5
+  squares_y: 7
+  square_length: 0.0398   # meters
+  marker_length: 0.030  # meters
+
+
+# =============================================================================
+# CALIBRATION POSES
+# =============================================================================
+# Format: [Base, Shoulder, Elbow, Wrist1, Wrist2, Wrist3] (Degrees)
+# Total Poses: 23
+poses:
+  # ---------------------------------------------------------------------------
+  # GROUP 1: REFERENCE (Center)
+  # ---------------------------------------------------------------------------
+  # Standard home position. Used as the baseline.
+  - [89.99, -66.28, 86.69, -105.49, -167.5, 6.67]   # Home
+
+  # ---------------------------------------------------------------------------
+  # GROUP 2: SCALE (Z-Axis Variation)
+  # ---------------------------------------------------------------------------
+  # Moving the board vertically helps the solver determine focal length.
+  - [89.99, -50.0, 70.0, -105.0, -167.5, 6.67]      # Height: High
+  - [89.99, -60.0, 80.0, -105.0, -167.5, 6.67]      # Height: Mid-High
+  - [89.99, -80.0, 100.0, -105.0, -167.5, 6.67]     # Height: Mid-Low
+  - [89.99, -95.0, 110.0, -105.0, -167.5, 6.67]     # Height: Low
+
+  # ---------------------------------------------------------------------------
+  # GROUP 3: GENTLE PITCH (Wrist 1 Tilt)
+  # ---------------------------------------------------------------------------
+  # Small forward/backward tilts (~15 deg) for initial orientation.
+  - [89.99, -66.28, 86.69, -90.0, -167.5, 6.67]     # Tilt Forward (Soft)
+  - [89.99, -66.28, 86.69, -120.0, -167.5, 6.67]    # Tilt Backward (Soft)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 4: GENTLE YAW (Wrist 2 Tilt)
+  # ---------------------------------------------------------------------------
+  # Small left/right tilts (~10 deg). Base rotates slightly to center board.
+  - [95.0, -66.28, 86.69, -105.49, -157.0, 6.67]    # Tilt Left (Soft)
+  - [85.0, -66.28, 86.69, -105.49, -177.0, 6.67]    # Tilt Right (Soft)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 5: GENTLE ROLL (Wrist 3 Rotation)
+  # ---------------------------------------------------------------------------
+  # Small planar rotations (~20 deg).
+  - [90.0, -66.0, 86.0, -105.0, -167.5, 26.0]       # Twist CW (Soft)
+  - [90.0, -66.0, 86.0, -105.0, -167.5, -14.0]      # Twist CCW (Soft)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 6: TRANSLATION (X-Axis)
+  # ---------------------------------------------------------------------------
+  # Checking lens distortion at image periphery.
+  - [100.0, -66.28, 86.69, -105.49, -167.5, 6.67]   # Translate Left
+
+  # ---------------------------------------------------------------------------
+  # GROUP 7: COMPLEX COMBO (Height + Pitch)
+  # ---------------------------------------------------------------------------
+  # Combining depth and angle changes to decouple parameters.
+  - [89.99, -95.0, 110.0, -90.0, -167.5, 6.67]      # Low + Tilt Fwd
+  - [89.99, -50.0, 70.0, -120.0, -167.5, 6.67]      # High + Tilt Back
+
+  # ---------------------------------------------------------------------------
+  # GROUP 8: PROPELLER (Aggressive Roll)
+  # ---------------------------------------------------------------------------
+  - [89.99, -66.28, 86.69, -105.49, -167.5, 40.0]   # Twist CW (Reduced from 51)
+  - [89.99, -66.28, 86.69, -105.49, -167.5, -25.0]  # Twist CCW (Reduced from -38)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 9: DEEP PITCH (Aggressive Wrist 1)
+  # ---------------------------------------------------------------------------
+  # Hard tilts to constrain depth estimation.
+  # FIXED: Reduced Pose 17 angle from -65.0 to -75.0 to fix detection failure.
+  - [89.99, -66.28, 86.69, -75.0, -167.5, 6.67]     # Pitch Forward (Hard)
+  - [89.99, -66.28, 86.69, -145.0, -167.5, 6.67]    # Pitch Backward (Hard)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 10: SWING (Aggressive Yaw)
+  # ---------------------------------------------------------------------------
+  # Hard side-to-side rotation with Base compensation.
+  # GROUP 10: SWING (Adjusted for visibility)
+  - [100.0, -66.28, 86.69, -105.49, -145.0, 6.67]   # Yaw Left (Reduced Base/Wrist)
+  - [80.0, -66.28, 86.69, -105.49, -185.0, 6.67]    # Yaw Right (Reduced Base/Wrist)
+
+  # ---------------------------------------------------------------------------
+  # GROUP 11: MICROSCOPE (Max Resolution)
+  # ---------------------------------------------------------------------------
+  # Closest safe distance to camera + Rotation. 
+  # Maximizes pixel count on markers for precision.
+  # GROUP 11: MICROSCOPE
+  # Keep the center one, it was good
+  - [89.99, -50.0, 60.0, -105.0, -167.5, 6.67]      # Very High Center
+  # Reduce the twist significantly for these close-ups
+  - [89.99, -50.0, 60.0, -105.0, -167.5, 25.0]      # Very High + Soft Twist
+  - [89.99, -50.0, 60.0, -105.0, -167.5, -15.0]     # Very High + Soft Twist

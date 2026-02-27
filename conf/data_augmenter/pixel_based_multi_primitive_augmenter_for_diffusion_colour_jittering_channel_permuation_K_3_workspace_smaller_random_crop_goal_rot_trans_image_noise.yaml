@@ -1,0 +1,18 @@
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: true
+rotation_degree: 1
+vertical_flip: true
+debug: false
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: true
+K: 3
+use_goal: True # No rotatin, flipping and colour jitting, channel permutation.
+goal_rotation: True
+goal_tranlation: True
+goal_trans_range: [0, 0.2]
+use_workspace: true
+random_crop: true
+crop_scale: [0.9, 1.0]
+rgb_noise_factor: 0.01

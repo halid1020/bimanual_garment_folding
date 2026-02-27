@@ -6,8 +6,8 @@ import json
 from tqdm import tqdm
 
 from scipy.spatial.distance import cdist
-from agent_arena import Task
-from agent_arena import save_video
+from actoris_harena import Task
+from actoris_harena import save_video
 from ..utils.garment_utils import KEYPOINT_SEMANTICS, rigid_align, deformable_align, \
     simple_rigid_align, chamfer_alignment_with_rotation
 from ..utils.keypoint_gui import KeypointGUI
@@ -121,7 +121,7 @@ class GarmentFoldingTask(Task):
         for i in range(num_goals):
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
             if not os.path.exists(goal_path):
-                print(f'Generating goal {i} for episode id {arena.eid}')
+                print(f'[GarmentFoldingTask, _load_or_generate_goals] Generating goal {i} for episode id {arena.eid}')
                 goal = self._generate_a_goal(arena)
                 os.makedirs(goal_path, exist_ok=True)
 

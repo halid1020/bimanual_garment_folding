@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot_goal_smaller_random_crop_goal_rot_trans_maskout_x2_training  # Points to conf/agent/human_agent.yaml
+  - /real_world_arena@arena: dual_arm_multi_primitives     # Points to conf/arena/dual_arm.yaml
+  - /task@task: real_world_flattening      # Points to conf/task/folding.yaml
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot_goal_smaller_random_crop_goal_rot_trans_maskout_x2_training
+measure_time: True

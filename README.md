@@ -1,7 +1,7 @@
 ### **Installation & Usage Guide**
 
 **Prerequisites**
-Before proceeding, please ensure you have already installed and tested the corresponding `softgym` and `agent-arena-v0` repositories.
+Before proceeding, please ensure you have already installed and tested the corresponding `softgym` and `actoris_harena` repositories.
 
 ### **1. Installation**
 
@@ -13,8 +13,8 @@ conda activate mp-fold
 ```
 
 
-2. **Install the `agent-arena` package:**
-Navigate to your `agent-arena` directory and install it with the Torch dependencies.
+2. **Install the `actoris_harena` package:**
+Navigate to your `actoris_harena` directory and install it with the Torch dependencies.
 ```bash
 cd <path-to-agent-arena>
 pip install -e ".[torch]"
@@ -36,7 +36,7 @@ cd <path-to-bimanual_garment_folding>
 . ./setup.sh 
 
 # Run the evaluation script
-python train/hydra_eval.py --config-name random_multi_primitive_multi_longsleeve_folding_from_crumpled
+python tool/hydra_eval.py --config-name sim_exp/random_multi_primitive_multi_longsleeve_folding_from_crumpled
 
 ```
 
@@ -47,7 +47,7 @@ The evaluation results will be saved in the `./tmp` folder.
 1. **Create the Controller:**
 Add your new controller script inside the `controllers` folder. Ensure it adheres to the `Agent` or `TrainableAgent` interface defined in the `agent-arena` package. You can refer to existing controllers in that folder for examples.
 2. **Register the Controller:**
-Open `train/utils.py` and add your new agent to the `register_agent_arena` function to make it available to the training script.
+Open `train/utils.py` and add your new agent to the `register_actoris_harena` function to make it available to the training script.
 
 ### **4. Configuring Experiments**
 
@@ -62,3 +62,12 @@ To create a new experiment, create a YAML file directly under the `conf` folder.
 * **`project_name`**: Used for Weights & Biases (WandB) logging. You can leave this as default.
 * **`save_root`**: The directory where logs and experiment data will be stored.
 * **`train_and_eval`**: Specifies which `agent-arena` API function to use for the experiment.
+
+
+
+####
+
+pip install pycurl
+pip install segment_anything #1.0
+
+download sam_vit_h_4b8939.pth and put it under sam_vit

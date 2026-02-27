@@ -12,7 +12,7 @@ import cv2
 from collections import deque
 from tqdm import tqdm
 
-from agent_arena import TrainableAgent
+from actoris_harena import TrainableAgent
 
 from dotmap import DotMap
 from .replay_buffer import ReplayBuffer

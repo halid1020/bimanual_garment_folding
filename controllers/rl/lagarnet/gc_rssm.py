@@ -5,10 +5,10 @@ from torch import nn
 from torch.nn import functional as F
 import matplotlib.pyplot as plt
 
-from agent_arena.torch_utils import *
+from actoris_harena.torch_utils import *
 
 # TODO: make it as follow
-#from agent_arena.torch_utils import *
+#from actoris_harena.torch_utils import *
 
 from .rssm import RSSM
 from .model import bottle, symlog

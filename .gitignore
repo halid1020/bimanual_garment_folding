@@ -1,6 +1,6 @@
 __pycache__
 assets
-*.zip
+assets.zip
 tmp
 wandb
 runs
@@ -8,3 +8,4 @@ datasets
 outputs
 models
 .vscode/
+*.sif

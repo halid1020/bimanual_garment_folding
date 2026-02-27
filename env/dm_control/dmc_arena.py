@@ -2,7 +2,7 @@ import os
 
 import datetime
 from ..video_logger import VideoLogger
-from agent_arena import Arena
+from actoris_harena import Arena
 
 import numpy as np
 import gym

@@ -6,7 +6,7 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 
 
-from agent_arena.utilities.networks.utils import np_to_ts, ts_to_np
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
 
 def gaussian_kernel(kernel_size, sigma):
     x = torch.linspace(-sigma, sigma, kernel_size)

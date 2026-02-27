@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_200_workspace_snap_one_hot_x2_training
+  - /arena@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_from_random_flattened_workspace_train_200
+  - /task@task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus
+
+exp_name: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_200_workspace_snap_one_hot_x2_training
+project_name: bimanual_garment_folding
+save_root: /media/hcv530/T7/garment_folding_data
+train_and_eval: train_and_evaluate_single

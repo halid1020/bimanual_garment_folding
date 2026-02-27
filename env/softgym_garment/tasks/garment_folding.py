@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 from statistics import median
 from statistics import mean
 
-from agent_arena import save_video
-from agent_arena.utilities.visual_utils import save_numpy_as_gif as sg
+from actoris_harena import save_video
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
 
 from .utils import get_max_IoU
 from .folding_rewards import *
@@ -124,7 +124,7 @@ class GarmentFoldingTask(GarmentTask):
         for i in range(num_goals):
             goal_path = os.path.join(self.goal_dir, f"goal_{i}")
             if not os.path.exists(goal_path):
-                print(f'Generating goal {i} for episode id {arena.eid}')
+                print(f'[GarmentFoldingTask, _load_or_generate_goals] Generating goal {i} for episode id {arena.eid}')
                 goal = self._generate_a_goal(arena)
                 os.makedirs(goal_path, exist_ok=True)
 

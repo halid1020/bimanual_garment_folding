@@ -16,7 +16,7 @@ from actoris_harena import TrainableAgent
 import zarr
 from .replay_buffer import ReplayBuffer
 from .replay_buffer_zarr import ReplayBufferZarr
-from ..data_augmentation.register_augmeters import build_data_augmenter
+from data_augmentation.register_augmeters import build_data_augmenter
 
 
 class Critic(nn.Module):

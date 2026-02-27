@@ -13,19 +13,20 @@ import matplotlib.pyplot as plt
 from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
 from omegaconf import OmegaConf
+from dotmap import DotMap
 
 from actoris_harena.torch_utils import *
 from actoris_harena.registration.dataset import *
 from actoris_harena.agent.oracle.builder import OracleBuilder
 from actoris_harena import RLAgent
-from dotmap import DotMap
+
+from data_augmentation.register_augmeters import build_data_augmenter
 
 from .networks import ImageEncoder, ImageDecoder
 from .memory import ExperienceReplay
 # from .logger import *
 from .cost_functions import *
 from .model import *
-from ...data_augmentation.register_augmeters import build_data_augmenter
 
 class RSSM(RLAgent):
 
@@ -1339,7 +1340,8 @@ class RSSM(RLAgent):
         
       
         data['input_obs'] = data['input_obs'][1:] # T * B
-        
+
+        #print('data[input_obs] shape', data['input_obs'].shape) 
        
         rewards = data['reward']
       

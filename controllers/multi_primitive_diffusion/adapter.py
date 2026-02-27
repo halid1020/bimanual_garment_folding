@@ -18,11 +18,12 @@ from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
 from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
+from data_augmentation.register_augmeters import build_data_augmenter
+
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
 from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
-from ..data_augmentation.register_augmeters import build_data_augmenter
 from .constrain_action_functions import name2func
 
 class DiffusionTransform():
@@ -239,7 +240,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     prim_id = self.prim_name2id[action_name]
                     prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
                     add_action = np.zeros(self.data_save_action_dim)
-                    print('add action dim', add_action.shape)
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                     #add_action = np.concatenate([prim_act, action_param])

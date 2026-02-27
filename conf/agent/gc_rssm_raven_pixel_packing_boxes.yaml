@@ -65,9 +65,9 @@ apply_transform_in_dataset: True
 dataloader_workers: 0
 dataloader_prefetch_factor: 1
 
-apply_reward_processor: True
+apply_reward_processor: False
 
-data_augmenter: "identity" #"pick_and_place_transformer_v1_for_lagarnet"
+data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
   
 
 
@@ -92,16 +92,16 @@ datasets:
       sample_mode: 'train'
       obs_config: 
         mask: 
-          shape: [64, 64, 1]
+          shape: [128, 128, 1]
           output_key: 'mask'
         rgb:
-          shape: [64, 64, 3]
+          shape: [128, 128, 3]
           output_key: 'rgb'
         goal-mask: 
-          shape: [64, 64, 1]
+          shape: [128, 128, 1]
           output_key: 'goal-mask'
         goal-rgb:
-          shape: [64, 64, 3]
+          shape: [128, 128, 3]
           output_key: 'goal-rgb'
         default:
           shape: [1]
@@ -127,16 +127,16 @@ datasets:
       sample_terminal: True
       obs_config: 
         mask: 
-          shape: [64, 64, 1]
+          shape: [128, 128, 1]
           output_key: 'mask'
         rgb:
-          shape: [64, 64, 3]
+          shape: [128, 128, 3]
           output_key: 'rgb'
         goal-mask: 
-          shape: [64, 64, 1]
+          shape: [128, 128, 1]
           output_key: 'goal-mask'
         goal-rgb:
-          shape: [64, 64, 3]
+          shape: [128, 128, 3]
           output_key: 'goal-rgb'
         default:
           shape: [1]

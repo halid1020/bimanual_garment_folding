@@ -120,6 +120,7 @@ class GC_RSSM(RSSM):
     def __init__(self, config):
         super().__init__(config)
         self.reward_processor = reward_bonus_and_penalty
+        
 
     def init_transition_model(self):
         self.model['transition_model'] = GoalConditionedTransitionModel(
@@ -298,14 +299,6 @@ class GC_RSSM(RSSM):
         return blfs, posteriors_, priors_, obs_emb
     
     def unroll_state_action(self, state, action):
-
-        ## print all the shapes
-        # print('action shape:', action.shape)
-        # print('state stoch sample shape:', state['stoch']['sample'].shape)
-        # print('state deter shape:', state['deter'].shape)
-        # print('state input obs shape:', state['input_obs'].shape)
-        # print('state goal obs shape:', state['goal_obs'].shape)
-
 
         blfs, prior_states_, prior_means_, prior_std_devs_, posterior_states_, posterior_means_, posterior_std_devs_ = \
             self.model['transition_model'](

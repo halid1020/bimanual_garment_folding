@@ -81,32 +81,6 @@ class PickAndPlaceTransformerV1:
             #sample[k] = sample[k].unsqueeze(0)
             sample[k] = sample[k].float()
 
-        # plot pre process action on image
-        # if True:
-        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
-        #     import cv2
-        #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy()
-        #     print('rgb shape', rgb.shape)
-        #     if rgb.shape[0] == 3:
-        #         rgb = rgb.transpose(1, 2, 0)
-        #     H, W = rgb.shape[:2]
-        #     action = sample['action'][0, 0].cpu().numpy().reshape(1, 4)
-        #     print('action', action)
-        #     pick = (action[:, :2] + 1)/2 * np.array([W, H])
-        #     pick = (int(pick[0, 0]), int(pick[0, 1]))
-        #     place = (action[:, 2:] + 1)/2 * np.array([W, H])
-        #     place = (int(place[0, 0]), int(place[0, 1]))
-        #     pnp_rgb = draw_pick_and_place(
-        #         rgb, pick, place, get_ready=True, swap=False
-        #     )
-        #     cv2.imwrite('tmp/pre_pnp_rgb.png', pnp_rgb)
-
-            # next_rgb = sample['rgb'][0, 1].squeeze(0).cpu().numpy()
-            # print('next_rgb shape', next_rgb.shape)
-            # if next_rgb.shape[0] == 3:
-            #     next_rgb = next_rgb.transpose(1, 2, 0)
-            # cv2.imwrite('tmp/pre_pnp_next_rgb.png', next_rgb)
-       
 
         for obs in ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                     'goal-depth', 'goal-mask', 'gc-depth', 'gc-rgb', 'gc-rgbd']:
@@ -147,15 +121,7 @@ class PickAndPlaceTransformerV1:
             #print('Were!!!!!!!!!!!!!!')
             sample['rgb'] = sample['rgbd'][:, :, :3]
             sample['depth'] = sample['rgbd'][:, :, 3:]
-            # print('rgbd', sample['rgbd'].shape)
-            # print('rgb', sample['rgb'].shape)
-            # print('depth', sample['depth'].shape)
-
-        # if single:
-        #     for k, v in sample.items():
-        #         sample[k] = v.squeeze(0)
-
-        # return sample
+   
         if 'rgb' in sample:
             process_rgb = train and self.process_rgb
             sample['rgb'] = preprocess_rgb(
@@ -189,16 +155,20 @@ class PickAndPlaceTransformerV1:
 
      
             
-        # if self.config.reward_scale and train:
-        #     sample['reward'] *= self.config.reward_scale
-        
-        # we assume the action is in the correct form
-        if 'action' in sample.keys() and (not self.swap_action):
-            sample['action'] = sample['action'][:, [1, 0, 3, 2]]
+        if 'action' in sample.keys():
+            self.has_orientation = sample['action'].shape[-1] > 4
+            
+            if self.has_orientation:
+                # Split spatial coordinates from orientation
+                pixel_actions = sample['action'][:, :4]  # Fixed: act -> sample['action']
+                orient_actions = sample['action'][:, 4:] # (B, 1) -> [theta] in [-1, 1]
+            else:
+                pixel_actions = sample['action'][:, :4]
+                orient_actions = None
 
-            # if 'swap_action' in self.config and self.config.swap_action:
-            # # print('swap action')
-            #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
+            if not self.swap_action:
+                # Swap [y, x, y, x] to [x, y, x, y] for geometric transformations
+                pixel_actions = pixel_actions[:, [1, 0, 3, 2]]
 
         
         if self.all_goal_rotate and train:
@@ -258,16 +228,31 @@ class PickAndPlaceTransformerV1:
 
 
                 # Rotate actions
-                rotation_matrices_tensor = rot.expand((T-1)*2, 2, 2).reshape(-1, 2, 2)
-                rotation_action = sample['action'].reshape(-1, 1, 2)
+                T_act = pixel_actions.shape[0]
+                # Fixed: Use T_act instead of T-1 to match the batch dimension perfectly
+                rotation_matrices_tensor = rot.expand(T_act * 2, 2, 2).reshape(-1, 2, 2)
+                rotation_action = pixel_actions.reshape(-1, 1, 2)
                
                 rotated_action = torch.bmm(rotation_action, rotation_matrices_tensor)\
-                    .reshape(*sample['action'].shape)
+                    .reshape(*pixel_actions.shape)
                 
-                if torch.abs(sample['action']).max() > 1:
-                    #print('max action', torch.abs(sample['action']).max())
+                # Fixed: Check the rotated_action for out-of-bounds, not the original
+                if torch.abs(rotated_action).max() > 1:
                     continue
-                #sample['action'] = rotated_action
+                
+                pixel_actions = rotated_action
+
+                # apply rotation to the orient action
+                if self.has_orientation:
+                    # Map degree to [-1, 1] space (Assuming 1.0 = 180 degrees)
+                    degree_tensor = degree.to(orient_actions.device)
+                    orient_shift = degree_tensor / 180.0
+                    
+                    # The affine grid rotates the image, so we rotate the angle equivalently
+                    orient_actions = orient_actions - orient_shift
+                    
+                    # Wrap the angle strictly back to the [-1, 1] interval
+                    orient_actions = ((orient_actions + 1.0) % 2.0) - 1.0
 
                 # Rotate observations
                 affine_matrix = torch.zeros(T, 2, 3, device=self.config.device)
@@ -291,8 +276,6 @@ class PickAndPlaceTransformerV1:
                     sample[obs] = rotated_images[:, start_idx:end_idx]
                     start_idx = end_idx
     
-               
-                sample['action'] = rotated_action
                 break
                 # if the max absolute value of the action is more than 1, continue
                 
@@ -309,46 +292,26 @@ class PickAndPlaceTransformerV1:
                 sample[obs] = flip_obs_images[:, start_idx:end_idx]
                 start_idx = end_idx
 
-            T, _ = sample['action'].shape
-            new_actions = sample['action'].reshape(-1, 2)
+            T_act = pixel_actions.shape[0]
+            new_actions = pixel_actions.reshape(-1, 2)
             new_actions[:, 1] = -new_actions[:, 1]
-            sample['action'] = new_actions.reshape(T, 4)
-            # sample['action'] = new_actions.reshape(*sample['action'].shape)
-        
-        if 'action' in sample.keys() and (not self.swap_action):
-            # swap action to the correct order
-            sample['action'] = sample['action'][:, [1, 0, 3, 2]]
+            pixel_actions = new_actions.reshape(T_act, 4)
             
-            # if self.swap_action:
-            #     # print('swap action')
-            #     sample['action'] = sample['action'][:, [1, 0, 3, 2]]
+            # apply flipping to the orient action
+            if self.has_orientation:
+                # Vertical flip inverts the Y axis, meaning the angle sign flips
+                orient_actions = -orient_actions
 
-
-
-        # if self.mask_out:
-        #     bg_value = self.config.bg_value \
-        #         if 'bg_value' in self.config else 0
-        #     # print('rgb', sample['rgb'].shape)
-        #     # print('mask', sample['mask'].shape)
-        #     if 'rgb' in sample:
-        #         sample['rgb'] = sample['rgb'] * sample['mask'] + \
-        #             bg_value * (1 - sample['mask'])
-        #     if 'depth' in sample:
-        #         sample['depth'] = sample['depth'] * sample['mask'] + \
-        #             bg_value * (1 - sample['mask'])
+        if 'action' in sample.keys():
+            if not self.swap_action: # Fixed: removed the syntax error ')'
+                # swap action back to the original order [y1, x1, y2, x2]
+                pixel_actions = pixel_actions[:, [1, 0, 3, 2]]
             
-        #     if 'goal-rgb' in sample:
-        #         # make mask three channel
-        #         #print('goal-rgb', sample['goal-rgb'].shape)
-        #         #print('goal-mask', sample['goal-mask'].shape)
-        #         mask_ = sample['goal-mask'].repeat(1, 3, 1, 1)
-        #         #print('mask_', mask_.shape)
-        #         sample['goal-rgb'] = sample['goal-rgb'] * mask_ + \
-        #             bg_value * (1 - mask_)
-            
-        #     if 'goal-depth' in sample:
-        #         sample['goal-depth'] = sample['goal-depth'] * sample['goal-mask'] + \
-        #             bg_value * (1 - sample['goal-mask'])
+            if self.has_orientation: # Fixed: self.has_orient -> self.has_orientation
+                # combine back the pixel actions and orient actions
+                sample['action'] = torch.cat([pixel_actions, orient_actions], dim=-1)
+            else:
+                sample['action'] = pixel_actions
 
         if self.maskout:
            
@@ -389,62 +352,10 @@ class PickAndPlaceTransformerV1:
         if 'gc-rgbd' in sample:
             sample['gc-rgbd'] = torch.cat([sample['rgb'], sample['depth'], 
                                            sample['goal-rgb'], sample['goal-depth']], dim=1)
-        # from matplotlib import pyplot as plt
-        # plt.imshow(sample['goal-depth'][0, 0].squeeze(0).cpu().numpy())
-        # plt.savefig('post-goal-depth.png')
-        
-        # if 'rgbm' in sample:
-        #     sample['rgbm'][:, :3] = sample['rgb']
-        #     sample['rgbm'][:, 3:] = sample['mask']
 
         if self.preserve_goal_mask:
             sample['goal-mask'] = org_goal_mask
         
-        
-        ## plot pre process action on image
-        # if True:
-        #     from actoris_harena.utilities.visual_utils import draw_pick_and_place
-        #     import cv2
-        #     rgb = sample['rgb'][0, 0].squeeze(0).cpu().numpy().transpose(1, 2, 0)
-        #     rgb = (rgb * 255).astype(np.uint8)
-        #     print('rgb shape', rgb.shape)
-        #     H, W = rgb.shape[:2]
-        #     action = sample['action'][0, 0].cpu().numpy().reshape(1, 4)
-        #     print('action', action)
-        #     pick = (action[:, :2] + 1)/2 * np.array([W, H])
-        #     pick = (int(pick[0, 0]), int(pick[0, 1]))
-        #     place = (action[:, 2:] + 1)/2 * np.array([W, H])
-        #     place = (int(place[0, 0]), int(place[0, 1]))
-        #     pnp_rgb = draw_pick_and_place(
-        #         rgb, pick, place, get_ready=True, swap=False
-        #     )
-        #     cv2.imwrite('tmp/post_pnp_rgb.png', pnp_rgb)
-
-        # if True:
-        #     import matplotlib.pyplot as plt
-        #     import cv2
-            ## save rgb, depth, mask
-            # plt.imshow(sample['rgb'][0, 0].squeeze(0).cpu().numpy().transpose(1, 2, 0))
-            # plt.savefig('tmp/process-rgb.png')
-            # # plt.imshow(sample['depth'][0, 0].squeeze(0).cpu().numpy())
-            # # plt.savefig('tmp/process-depth.png')
-            # # plt.imshow(sample['mask'][0, 0].squeeze(0).cpu().numpy())
-            # # plt.savefig('tmp/process-mask.png')
-
-            # # plt.imshow(sample['goal-depth'][0, 0].squeeze(0).cpu().numpy())
-            # # plt.savefig('process-goal-depth.png')
-            # plt.imshow(sample['goal-rgb'][0, 0].squeeze(0).cpu().numpy().transpose(1, 2, 0))
-            # plt.savefig('tmp/process-goal-rgb.png')
-            # plt.imshow(sample['goal-mask'][0, 0].squeeze(0).cpu().numpy())
-            # plt.savefig('process-goal-mask.png')
-            # #exit()
-            # plt.imshow(sample['rgb'][0, 0].squeeze(0).cpu().numpy()\
-            #            .transpose(1, 2, 0))
-            # plt.savefig('process-rgb.png')
-            # from matplotlib import pyplot as plt
-            # plt.imshow(sample['action_heatmap'][0, 0, 0].cpu().numpy())
-            # plt.savefig('process-action-heatmap.png')
-
         
         
         ## check if there is any nan value
@@ -459,17 +370,8 @@ class PickAndPlaceTransformerV1:
             for k, v in sample.items():
                 sample[k] = ts_to_np(v)
         
-        # print all output shape
-        # print('HELLOO')
-        # for k, v in sample.items():
-        #     if isinstance(v, torch.Tensor):
-        #         print(k, v.shape)
-        # exit()
         
         return sample
-    
-    # def apply_mask(self, data, mask):
-    #     return data * mask + self.bg_value * (1 - mask)
     
     def postprocess(self, sample):
         
@@ -523,30 +425,6 @@ class PickAndPlaceTransformerV1:
                 res['depth'] = \
                     res['depth'] * (self.config.depth_max - self.config.depth_min) \
                     + self.config.depth_min
-        
-        # if 'action_heatmap' in res:
-        #     # convert action heatmap to action
-        #     #print('action heatmap shape', res['action_heatmap'].shape)
-        #     B, T, _, H, W = res['action_heatmap'].shape
-        #     action_heatmap = res['action_heatmap'].reshape(B*T, 2, H, W)
-            
-        #     # For pick action
-        #     pick_idx = np.argmax(action_heatmap[:, 0].reshape(B*T, -1), axis=1)
-        #     pick_idx = np.stack([pick_idx // W, pick_idx % W], axis=1).astype(float)
-            
-        #     # For place action
-        #     place_idx = np.argmax(action_heatmap[:, 1].reshape(B*T, -1), axis=1)
-        #     place_idx = np.stack([place_idx // W, place_idx % W], axis=1).astype(float)
-            
-        #     # Combine pick and place actions
-        #     action = np.concatenate([pick_idx, place_idx], axis=1)
-        #     res['action'] = action.reshape(B, T, 4)
-
-        #     res['action'] = res['action'] / np.array([H, W, H, W]) * 2 - 1
-
-        #     res['action'] = res['action'].reshape(B, T, 4)
-
-            #print('action', res['action'])
 
         if 'action' in res:
             res['action'] = res['action'].clip(-1, 1)

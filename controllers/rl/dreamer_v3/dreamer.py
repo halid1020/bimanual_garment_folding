@@ -6,7 +6,7 @@ from torch import nn
 from .exploration import *
 from .models import *
 from .tools import *
-from ...data_augmentation.register_augmeters import build_data_augmenter
+from data_augmentation.register_augmeters import build_data_augmenter
 
 
 

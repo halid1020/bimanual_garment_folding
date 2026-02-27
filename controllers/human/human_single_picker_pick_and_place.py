@@ -9,7 +9,7 @@ class HumanSinglePickerPickAndPlace(Agent):
     def __init__(self, config):
         super().__init__(config)
         self.name = "human-single-picker-pixel-pick-and-place"
-
+        self.place_orien = config.get('place_orien', False)
     def act(self, info_list, update=False):
         """
         Pop up a window shows the RGB image, and user can click on the image to
@@ -35,20 +35,20 @@ class HumanSinglePickerPickAndPlace(Agent):
         rgb = cv2.resize(rgb, (512, 512))
 
         # Overlay success + IoU info BEFORE concatenation
-        if 'evaluation' in state.keys() and state['evaluation'] != {}:
-            success = state['success']
-            max_iou_flat = state['evaluation']['max_IoU_to_flattened']
+        # if 'evaluation' in state.keys() and state['evaluation'] != {}:
+        #     success = state['success']
+        #     max_iou_flat = state['evaluation']['max_IoU_to_flattened']
             
-            text_lines = [
-                (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
-                (f"IoU(flat): {max_iou_flat:.3f}", (255, 255, 255))
-            ]
+        #     text_lines = [
+        #         (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
+        #         (f"IoU(flat): {max_iou_flat:.3f}", (255, 255, 255))
+        #     ]
 
-            if 'max_IoU' in state['evaluation'].keys():
-                max_iou_goal = state['evaluation']['max_IoU']
-                text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
+        #     if 'max_IoU' in state['evaluation'].keys():
+        #         max_iou_goal = state['evaluation']['max_IoU']
+        #         text_lines.append( (f"IoU(fold): {max_iou_goal:.3f}", (255, 255, 255)))
 
-            draw_text_top_right(rgb, text_lines)
+        #     draw_text_top_right(rgb, text_lines)
         
         # Create a copy of the image to draw on
         img = rgb.copy()
@@ -155,7 +155,8 @@ class HumanSinglePickerPickAndPlace(Agent):
             (place1_x / width) * 2 - 1,
             (place1_y / height) * 2 - 1
         ]
-        
+        if self.place_orien:
+            normalized_action1.append(0)
         return np.asarray(normalized_action1)
         
     def init(self, state):

@@ -1,5 +1,3 @@
-
-
 from controllers.rl.primitive_encoding_sac \
     import PrimitiveEncodingSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
@@ -33,31 +31,33 @@ from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
 from controllers.rl.lagarnet.gc_rssm import GC_RSSM
 from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
+from controllers.rl.lagarnet.single_arm_mask_pick_and_place_mpc import SingleArmMaskPickAndPlaceMPC
 
-import actoris_harena as ag_ar
+import actoris_harena as athar
 
 def register_agents():
-    ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
-    ag_ar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
-    ag_ar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
-    ag_ar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
-    ag_ar.register_agent('vanilla-image-sac', VanillaImageSAC)
-    ag_ar.register_agent('vanilla-sac', VanillaSAC)
-    ag_ar.register_agent('image2state-sac', Image2State_SAC)
-    ag_ar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
-    ag_ar.register_agent('demo-sac', DemoSAC)
-    ag_ar.register_agent('maple', MAPLE)
-    ag_ar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
-    ag_ar.register_agent('gpt-fabric', GPTFabricAdapter)
-    ag_ar.register_agent('dreamerV3', DreamerV3Adapter)
-    ag_ar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
-    ag_ar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
-    ag_ar.register_agent('human-multi-primitive', HumanMultiPrimitive)
-    ag_ar.register_agent('real-world-human', RealWordHumanPolicy)
-    ag_ar.register_agent('real-world-human-single-arm-pick-and-place', RealWorldSingleArmHumanPickAndPlacePolicy)
-    ag_ar.register_agent('random-multi-primitive', RandomMultiPrimitive)
-    ag_ar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
-    ag_ar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
-    ag_ar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
-    ag_ar.register_agent('lagarnet', GC_RSSM)
-    ag_ar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)
+    athar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
+    athar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
+    athar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
+    athar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
+    athar.register_agent('vanilla-image-sac', VanillaImageSAC)
+    athar.register_agent('vanilla-sac', VanillaSAC)
+    athar.register_agent('image2state-sac', Image2State_SAC)
+    athar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
+    athar.register_agent('demo-sac', DemoSAC)
+    athar.register_agent('maple', MAPLE)
+    athar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
+    athar.register_agent('gpt-fabric', GPTFabricAdapter)
+    athar.register_agent('dreamerV3', DreamerV3Adapter)
+    athar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)
+    athar.register_agent('human-single-picker-pick-and-place', HumanSinglePickerPickAndPlace)
+    athar.register_agent('human-multi-primitive', HumanMultiPrimitive)
+    athar.register_agent('real-world-human', RealWordHumanPolicy)
+    athar.register_agent('real-world-human-single-arm-pick-and-place', RealWorldSingleArmHumanPickAndPlacePolicy)
+    athar.register_agent('random-multi-primitive', RandomMultiPrimitive)
+    athar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
+    athar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
+    athar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
+    athar.register_agent('lagarnet', GC_RSSM)
+    athar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)
+    athar.register_agent('single_arm_mask_pick_and_place_mpc', SingleArmMaskPickAndPlaceMPC)

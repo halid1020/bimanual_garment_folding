@@ -3,6 +3,7 @@ import numpy as np
 from real_robot.utils.human_utils \
     import click_points_pick_and_place, click_points_pick_and_fling
 from real_robot.utils.save_utils import save_colour, save_mask
+import cv2
 
 from actoris_harena import Agent
 
@@ -13,6 +14,8 @@ class RealWordHumanPolicy(Agent):
         super().__init__(config)
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
 
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
@@ -55,6 +58,14 @@ class RealWordHumanPolicy(Agent):
         
         display_rgb = self.apply_workspace_masks(rgb, workspace_mask_0, workspace_mask_1)
 
+        if self.overlay_goal_contour:
+            goal_mask = info['goal']['mask']
+
+            goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+
+            contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            display_rgb = cv2.drawContours(display_rgb, contours, -1, (0, 255, 255), 1)
             
         h, w = rgb.shape[:2]
 

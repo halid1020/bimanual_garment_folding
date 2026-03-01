@@ -97,7 +97,7 @@ dual arm human folding
 python tool/eval_real_world.py --config-name real_world_exp/real_world_human_folding
 ```
 
-single arm lagarnet flattening
+single arm lagarnet flattenin
 
 ```
 python tool/eval_real_world.py --config-name real_world_exp/lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check

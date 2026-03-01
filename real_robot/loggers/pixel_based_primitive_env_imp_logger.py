@@ -141,6 +141,27 @@ class PixelBasedPrimitiveImpEnvLogger(VideoLogger):
             img = frames[i].copy()
             img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
 
+            if info.get('draw_flatten_contour', False):
+                # Locate the goal mask (checking standard locations based on your Arena)
+                goal_mask = None
+                if 'goal_mask' in obs:
+                    goal_mask = obs['goal_mask']
+                elif 'goal' in info and 'mask' in info['goal']:
+                    goal_mask = info['goal']['mask']
+                elif 'flattened-mask' in obs:
+                    goal_mask = obs['flattened-mask']
+                
+                if goal_mask is not None:
+                    # Convert to uint8 (0-255) for OpenCV contour detection
+                    mask_uint8 = (goal_mask > 0).astype(np.uint8) * 255
+                    mask_resized = cv2.resize(mask_uint8, (W, H), interpolation=cv2.INTER_NEAREST)
+                    
+                    # Find contours (EXTERNAL only to get the outer boundary)
+                    contours, _ = cv2.findContours(mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    # Draw contours in Green (0, 255, 0) with a thickness of 2
+                    cv2.drawContours(img, contours, -1, (0, 255, 0), 2)
+
             if robot0_masks is not None:
                 mask0 = cv2.resize(robot0_masks[i].astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
                 img = apply_workspace_shade(img, mask0, color=(255, 0, 0), alpha=0.2)

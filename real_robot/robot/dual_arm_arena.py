@@ -88,6 +88,7 @@ class DualArmArena(Arena):
         
         # Reset robot to safe state
         self.init_coverage = None
+        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
         self.task.reset(self)
         if self.init_from == 'crumpled':
             input("Press [Enter] to finish resetting cloth state to a crumpled state...")
@@ -123,7 +124,7 @@ class DualArmArena(Arena):
         h, w = raw_rgb.shape[:2]
         crop_size = min(h, w)  
 
-        x1 = w // 2 - crop_size // 2
+        x1 = w // 2 - crop_size // 2 + 70 ## make sure the centre is approximately at the middle of intersection
         y1 = h // 2 - crop_size // 2
         x2, y2 = x1 + crop_size, y1 + crop_size
 
@@ -186,7 +187,7 @@ class DualArmArena(Arena):
 
         self.coverage = np.sum(resized_mask)
         print(f'Current Coverage {self.coverage}')
-        #if self.init_coverage is None: self.init_coverage = self.coverage
+        if self.init_coverage is None: self.init_coverage = self.coverage
 
         info.update({
             'observation': {
@@ -202,6 +203,7 @@ class DualArmArena(Arena):
             "eid": self.eid,
             "arena_id": 0,
             "arena": self,
+            "draw_flatten_contour": self.draw_fatten_contour
         })
 
        
@@ -262,7 +264,8 @@ class DualArmArena(Arena):
                     raw_rgb = load_colour("raw_rgb", save_dir)
                     depth = load_depth("depth", save_dir)
                     mask = load_mask("mask", save_dir)
-                    r0_mask = load_mask("robot_0_mask", save_dir)
+                    r0_mask = load_mask("robot0_mask", save_dir)
+                    r1_mask = load_mask("robot1_mask", save_dir)
 
                     with open(fn_info, 'r') as f:
                         meta_info = json.load(f)
@@ -275,6 +278,7 @@ class DualArmArena(Arena):
                             "raw_rgb": raw_rgb,
                             "action_step": meta_info.get("action_step", 0),
                             "robot0_mask": r0_mask,
+                            "robot1_mask": r1_mask,
                         },
                         "eid": meta_info.get("eid", 0),
                         "arena_id": 0,
@@ -309,6 +313,7 @@ class DualArmArena(Arena):
                     save_depth(obs['depth'], "depth", save_dir)
                     save_mask(obs['mask'], "mask", save_dir)
                     save_mask(obs['robot0_mask'], "robot0_mask", save_dir)
+                    save_mask(obs['robot1_mask'], "robot1_mask", save_dir)
 
                     
                     meta_info = {

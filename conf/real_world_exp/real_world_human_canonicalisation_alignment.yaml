@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent: real_world_human_canon_align  # Points to conf/agent/human_agent.yaml
+  - /real_world_arena@arena: dual_arm_multi_primitives     # Points to conf/arena/dual_arm.yaml
+  - /task@task: real_world_canonicalisation_alignment       # Points to conf/task/folding.yaml
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: real_world_human_canonicalisation_alignment
+measure_time: True

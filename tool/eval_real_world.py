@@ -94,7 +94,7 @@ def main(cfg: DictConfig):
     )
 
     # 5. Build Task
-    print(f"[Building Task]")
+    print(f"[Building Task] {cfg.task.task_name}")
     task = build_task(cfg.task)
     arena.set_task(task)
 

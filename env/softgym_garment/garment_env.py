@@ -73,6 +73,7 @@ class GarmentEnv(Arena):
         super().__init__(config)
         self.config = config
         self.info = {}
+        self.draw_fatten_contour = False
         self.all_infos = []
         self.sim_step = 0
         self.save_video = False
@@ -143,6 +144,7 @@ class GarmentEnv(Arena):
         self.action_horizon = self.config.action_horizon
 
         self.overstretch = 0
+        
 
         
     
@@ -255,7 +257,7 @@ class GarmentEnv(Arena):
         self.eid = episode_config['eid']
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
-
+        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
 
         self.sim_step = 0
         self.video_frames = []
@@ -281,6 +283,7 @@ class GarmentEnv(Arena):
         self.last_flattened_step = -100
         self.flattened_obs = None
         self.get_flattened_obs()
+        
         self.task.reset(self)
         self.action_step = 0
 
@@ -372,8 +375,6 @@ class GarmentEnv(Arena):
     def get_episode_config(self):
         return self.episode_config
     
-   
-
     def get_num_episodes(self):
         if self.mode == 'eval':
             return 1
@@ -402,6 +403,7 @@ class GarmentEnv(Arena):
             'action_space': self.get_action_space(),
             'overstretch': self.overstretch,
             'sim_steps': self.sim_step,
+            'draw_flatten_contour': self.draw_fatten_contour
         })
         
         if self.save_each_action_picker_poses and self.mode != 'train':
@@ -508,16 +510,8 @@ class GarmentEnv(Arena):
     
     def _get_particle_distance_matrix(self):
         mesh_particles = self.get_mesh_particles_positions()
-        # Only use xyz coordinates (ignore mass or extra channels if present)
-        #positions = mesh_particles[:, :3]
 
-        # Compute pairwise Euclidean distances
         self.particle_dist_matrix = cdist(mesh_particles, mesh_particles)
-
-        #return self.particle_dist_matrix
-
-    
-
 
     def get_flattened_obs(self):
         
@@ -567,14 +561,10 @@ class GarmentEnv(Arena):
     def sample_random_action(self):
         return self.action_tool.sample_random_action()
 
-    # TODO: we may need to modify this.
-    
     
     # these funcitons is required by the action_tool
     def get_picker_position(self):
         p = self._get_picker_position()
-        #print('p', p)
-        # swap y and z
         p[:, [1, 2]] = p[:, [2, 1]]
         return p
     
@@ -597,13 +587,6 @@ class GarmentEnv(Arena):
     
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
         wait_steps = self._wait_to_stabalise(max_wait_step=max_wait_step, stable_vel_threshold=stable_vel_threshold)
-        # print('wait steps', wait_steps)
-        # obs = self._get_obs()
-        # return {
-        #     'observation': obs,
-        #     'done': False,
-        #     'wait_steps': wait_steps
-        # }
     
     ## Helper Functions
     def _wait_to_stabalise(self, max_wait_step=300, stable_vel_threshold=0.0006,

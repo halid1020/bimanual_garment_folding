@@ -82,13 +82,6 @@ class PixelHumanFling(Agent):
             # Create a copy of the image to draw on
             img = rgb.copy()
 
-            # put img and goal_img side by side
-            # if 'goal' in state.keys():
-            #     goal_rgb = state['goal']['rgb']
-            #     goal_rgb = cv2.resize(goal_rgb, (512, 512))
-            #     goal_rgb = cv2.cvtColor(goal_rgb, cv2.COLOR_BGR2RGB)
-            #     img = np.concatenate([img, goal_rgb], axis=1)
-
             if 'goals' in state.keys():
                 goals = state['goals']  # list of goal infos
 

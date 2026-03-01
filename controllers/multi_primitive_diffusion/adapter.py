@@ -519,6 +519,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             if self.config.input_obs == 'rgb-goal':
                 nbatch['rgb-goal'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            
+            if self.config.input_obs == 'rgb+goal_mask':
+                nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
 
             
             B = nbatch[self.config.input_obs].shape[0]

@@ -241,9 +241,14 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
         
         if self.use_goal and 'rgb-goal' in sample:
-            #print('sample rgb-goal shape', sample['rgb-goal'].shape)
+            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] sample rgb-goal shape', sample['rgb-goal'].shape)
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
+        
+        if self.use_goal and 'rgb+goal_mask' in sample:
+            #print('sample rgb-goal shape', sample['rgb-goal'].shape)
+            sample['rgb'] = sample['rgb+goal_mask'][:, :, :, :, :3]
+            sample['goal_mask'] = sample['rgb+goal_mask'][:, :, :, :, 3:4]
         
         if train and "action" not in sample:
             raise KeyError("sample must contain 'action'")
@@ -288,9 +293,18 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             rgb_obs, BB, TT = self._flatten_bt(rgb_obs) 
             B, H, W, _ = rgb_obs.shape
         
-        if self.use_goal and 'goal_rgb' in sample:
+        use_goal_rgb = self.use_goal and 'goal_rgb' in sample
+        if use_goal_rgb:
             goal_obs = sample['goal_rgb'].float() / 255.0
             goal_obs, _, _ = self._flatten_bt(goal_obs)
+        
+        use_goal_mask = self.use_goal and 'goal_mask' in sample
+        if use_goal_mask:
+            goal_mask_obs = sample['goal_mask'].float()
+            # Safely normalize to 0.0 - 1.0 if it's currently 0 - 255
+            if goal_mask_obs.max() > 1.0:
+                goal_mask_obs = goal_mask_obs / 255.0
+            goal_mask_obs, _, _ = self._flatten_bt(goal_mask_obs)
 
         if self.use_workspace:
             robot0_mask = sample['robot0_mask'].float()
@@ -330,6 +344,16 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                     cpu_img = (rgb_obs[b].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, prefix="aug_before_rgb", step=b)
 
+                # Save debug image for the goal
+                if self.use_goal and 'goal_rgb' in sample:
+                    cpu_goal_img = (goal_obs[b].cpu().numpy()).astype(np.float32)
+                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, prefix="aug_before_goal", step=b)
+
+                # Save debug image for the goal mask
+                if self.use_goal and 'goal_mask' in sample:
+                    cpu_goal_mask = (goal_mask_obs[b].cpu().numpy()).astype(np.float32)
+                    self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, prefix="aug_before_goal_mask", step=b)
+
         # =========================
         #       RANDOM CROP
         # =========================
@@ -345,7 +369,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
             if use_rgb:
                 rgb_obs = rgb_obs[:, top:top+new_h, left:left+new_w, :]
-            if self.use_goal and 'goal_rgb' in sample: 
+            if use_goal_rgb: 
                 goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
             if self.use_workspace:
                 robot0_mask = robot0_mask[:, top:top+new_h, left:left+new_w, :]
@@ -375,7 +399,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             return F.interpolate(t, size=tuple(self.config.img_dim), mode=mode, align_corners=align)
         
         if use_rgb: rgb_obs = resize_tensor(rgb_obs)
-        if self.use_goal and 'goal_rgb' in sample: goal_obs = resize_tensor(goal_obs)
+        
+        if use_goal_rgb: 
+            goal_obs = resize_tensor(goal_obs)
+        if use_goal_mask:
+            goal_mask_obs = resize_tensor(goal_mask_obs, mode='nearest')
         if self.use_workspace:
             robot0_mask = resize_tensor(robot0_mask, mode='nearest')
             robot1_mask = resize_tensor(robot1_mask, mode='nearest')
@@ -439,11 +467,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 depth_obs = F.grid_sample(depth_obs, grid, mode='nearest', align_corners=True)
 
             if self.use_goal and self.goal_aug == "same_as_obs":
-                if 'goal_rgb' in sample:
+                if use_goal_rgb:
                     goal_obs = F.grid_sample(goal_obs, grid, align_corners=True)
                 if use_goal_depth:
                     goal_depth_obs = F.grid_sample(goal_depth_obs, grid, mode='nearest', align_corners=True)
-            
+                if use_goal_mask:
+                    goal_mask_obs = F.grid_sample(goal_mask_obs, grid, mode='nearest', align_corners=True)
+                
             pixel_actions = rotated_action.reshape(BB*(TT-1), -1)
 
         # =========================
@@ -459,10 +489,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 depth_obs = torch.flip(depth_obs, [2])
             
             if self.use_goal and self.goal_aug == "same_as_obs":
-                if 'goal_rgb' in sample:
+                if use_goal_rgb:
                     goal_obs = torch.flip(goal_obs, [2])
                 if use_goal_depth:
                     goal_depth_obs = torch.flip(goal_depth_obs, [2])
+                if use_goal_mask:
+                    goal_mask_obs = torch.flip(goal_mask_obs, [2])
 
             # Flip Spatial Actions (Invert Y)
             pixel_actions = pixel_actions.reshape(-1, 2)
@@ -541,6 +573,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                     pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
                     self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, prefix="aug_after_rgb", step=b)
 
+                if use_goal_rgb:
+                    cpu_goal_img = goal_obs[b].permute(1, 2, 0).cpu().numpy()
+                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, prefix="aug_after_goal", step=b)
+                
+                if use_goal_mask:
+                    cpu_goal_mask = goal_mask_obs[b].permute(1, 2, 0).cpu().numpy()
+                    self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, prefix="aug_after_goal_mask", step=b)
         # =========================
         #      RESHAPE BACK
         # =========================
@@ -551,25 +590,33 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if use_depth:
             sample['depth'] = self._unflatten_bt(depth_obs, BB, TT)
         
-        if use_goal_depth and self.use_goal:
+        if use_goal_depth:
             sample['goal-depth'] = self._unflatten_bt(goal_depth_obs, BB, TT)
+        
+        if use_goal_mask:
+            sample['goal_mask'] = self._unflatten_bt(goal_mask_obs, BB, TT)
+        
+        if use_goal_rgb:
+            sample['goal_rgb'] = self._unflatten_bt(goal_obs, BB, TT)
 
         if self.use_workspace:
             robot0_mask = self._unflatten_bt(robot0_mask, BB, TT)
             robot1_mask = self._unflatten_bt(robot1_mask, BB, TT)
             sample['robot0_mask'] = robot0_mask
             sample['robot1_mask'] = robot1_mask
-            if 'rgb-workspace-mask' in sample:
-                sample['rgb-workspace-mask'] = torch.cat([rgb_obs, robot0_mask, robot1_mask], dim=2)
+        
+        if 'rgb-workspace-mask' in sample:
+            sample['rgb-workspace-mask'] = torch.cat([rgb_obs, robot0_mask, robot1_mask], dim=2)
 
-        if self.use_goal:
-            if 'goal_rgb' in sample:
-                goal_obs = self._unflatten_bt(goal_obs, BB, TT)
-                sample['goal_rgb'] = goal_obs
-                if 'rgb-goal' in sample:
-                    sample['rgb-goal'] = torch.cat([rgb_obs, goal_obs], dim=2)
-                if 'rgb-workspace-mask-goal' in sample:
-                    sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)
+        if 'rgb-goal' in sample:
+            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] reconcanation after augmentation!!!')
+            sample['rgb-goal'] = torch.cat([rgb_obs, goal_obs], dim=2)
+        
+        if 'rgb-workspace-mask-goal' in sample:
+            sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)
+    
+        if 'rgb+goal_mask' in sample:
+            sample['rgb+goal_mask'] = torch.cat([rgb_obs, goal_mask_obs], dim=2)
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)

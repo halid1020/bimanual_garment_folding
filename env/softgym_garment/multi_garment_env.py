@@ -31,16 +31,10 @@ class MultiGarmentEnv(GarmentEnv):
             self.num_val_trials = len(self.all_garment_types)*3 # 12
         super().__init__(config)
 
-        
-        
-        #print('num val', self.num_val_trials)
-
-        
-        #self.name =f'single-garment-fixed-init-env'
-
-    ## TODO: if eid is out of range, we need to raise an error.   
+ 
     def reset(self, episode_config=None):
-        print('episode_config', episode_config)
+        print('[MultiGarmentEnv] episode_config', episode_config)
+        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
         if episode_config == None:
             episode_config = {
                 'eid': None,
@@ -80,23 +74,17 @@ class MultiGarmentEnv(GarmentEnv):
             config=init_state_params, 
             state=init_state_params)
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
-        print('mesh particles', self.num_mesh_particles)
+        print('[MultiGarmentEnv] mesh particles', self.num_mesh_particles)
         self.init_state_params = init_state_params
 
-        
-        #print('set scene done')
-        #print('pciker initial pos', self.picker_initial_pos)
         self.pickers.reset(self.picker_initial_pos)
-        #print('picker reset done')
-
         
 
         self.init_coverae = self._get_coverage()
         self.flattened_obs = None
         self.save_video = False
         self.get_flattened_obs()
-        #self.flatten_coverage = init_state_params['flatten_area']
-        
+       
         self.info = {}
         self.last_info = None
         self.action_tool.reset(self) # get out of camera view, and open the gripper
@@ -255,9 +243,6 @@ class MultiGarmentEnv(GarmentEnv):
         garment_type = self.config.garment_type
         if self.config.garment_type == 'all':
             garment_type = self.all_garment_types[eid%len(self.all_garment_types)]
-            #eid //=  len(self.all_garment_types)
-            # print('garment_type', garment_type)
-            # print('here')
 
         if self.mode == 'train':
             print('get from train keys')

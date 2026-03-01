@@ -44,23 +44,23 @@ class RealWorldGarmentFlatteningTask():
         eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
-            'normalised_improvement': self._get_normalised_impovement(arena)
+            #'normalised_improvement': self._get_normalised_impovement(arena)
         }
 
         if arena.action_step == len(self.ncs):
             self.ncs.append(eval_dict['normalised_coverage'])
-            self.nis.append(eval_dict['normalised_improvement'])
+            #self.nis.append(eval_dict['normalised_improvement'])
             self.ious.append(eval_dict['max_IoU_to_flattened'])
 
         if arena.action_step < len(self.ncs):
             self.ncs[arena.action_step] = eval_dict['normalised_coverage']
-            self.nis[arena.action_step] = eval_dict['normalised_improvement']
+            #self.nis[arena.action_step] = eval_dict['normalised_improvement']
             self.ious[arena.action_step] = eval_dict['max_IoU_to_flattened']
         
         eval_dict.update({
             'maximum_trdef resetj_max_IoU_to_flattened': max(self.ious),
             'maximum_trj_normalised_coverage': max(self.ncs),
-            'maximum_trj_normalised_improvement': max(self.nis),
+            #'maximum_trj_normalised_improvement': max(self.nis),
         })
         return eval_dict
 

@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent: gc_rssm_raven_pixel_packing_boxes
+  - /arena@arena: raven_pixel_packing_boxes_lower_camera
+  - /task@task: flattening_overstretch_penalty_1_no_big_bonus
+
+exp_name: gc_rssm_raven_pixel_packing_boxes
+project_name: bimanual_garment_folding
+save_root: /media/hcv530/T7/garment_folding_data
+train_and_eval: train_and_evaluate_single

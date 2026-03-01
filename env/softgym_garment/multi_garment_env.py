@@ -122,9 +122,6 @@ class MultiGarmentEnv(GarmentEnv):
 
         self._initialise_trajecotry()
         
-        # if self.init_mode == 'flattened':
-        #     #print('init_mode')
-        #     self.set_to_flatten()
         
         self.last_info = None
         self.sim_step = 0

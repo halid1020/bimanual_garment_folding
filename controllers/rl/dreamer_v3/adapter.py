@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from .dreamer import Dreamer
 from .tools import *
-from ...data_augmentation.register_augmeters import build_data_augmenter
+from data_augmentation.register_augmeters import build_data_augmenter
 
 
 class DreamerV3Adapter(TrainableAgent):

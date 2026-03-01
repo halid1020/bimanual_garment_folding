@@ -46,5 +46,5 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay(MultiGarmentVectorise
     
     def __init__(self, config):
         super().__init__(config)
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Specify GPU ID
-        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Make CUDA calls synchronous
+        # os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Specify GPU ID
+        # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Make CUDA calls synchronous

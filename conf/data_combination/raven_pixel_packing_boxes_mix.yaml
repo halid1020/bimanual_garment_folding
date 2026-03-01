@@ -1,0 +1,17 @@
+# @package _global_
+defaults:
+  - /data_collection/dataset@dataset: single_arm_pick_and_place_raven_for_training
+  - _self_
+
+# Target combined dataset properties
+target_data_path: raven_pixel_packing_boxes_mix
+target_data_dir: /home/hcv530/project/bimanual_garment_folding/data/datasets
+
+# Determine if the final dataset should include the success key
+include_success_key: True 
+
+# List the Hydra configuration names used for data collection
+# Adjust the prefix (e.g., 'data_collection/') based on your folder structure in 'conf/'
+sources:
+  - data_collection/noisy_oracle_on_raven_pixel_packing_boxes
+  - data_collection/mask_biased_random_on_raven_pixel_packing_boxes

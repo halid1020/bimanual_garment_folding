@@ -1,0 +1,47 @@
+obs_config:
+  rgb:
+    shape: [128, 128, 3]
+    output_key: rgb
+  depth:
+    shape: [128, 128, 1]
+    output_key: depth
+  mask:
+    shape: [128, 128, 1]
+    output_key: mask
+  goal-rgb:
+    shape: [128, 128, 3]
+    output_key: goal-rgb
+  goal-depth:
+    shape: [128, 128, 1]
+    output_key: goal-depth
+  goal-mask:
+    shape: [128, 128, 1]
+    output_key: goal-mask
+  success:
+    shape: [1]
+    output_key: success
+
+action_config:
+  norm-pixel-pick-and-place:
+    shape: [2, 2]
+    output_key: norm-pixel-pick-and-place
+
+reward_names:
+  - clothfunnel_default
+  - clothfunnel_tanh_reward
+  - speedFolding_approx
+  - learningToUnfold_approx
+  - planet_clothpick_hueristic
+  - max_IoU_differance
+  - coverage_differance
+  - canon_IoU_differance
+  - coverage_aligment
+
+evaluation_names:
+  - normalised_coverage
+  - normalised_improvement
+  - max_IoU_to_flattened
+  - canon_IoU_to_flattened
+  - canon_l2_distance
+  - deform_l2_distance
+  - rigid_l2_distance

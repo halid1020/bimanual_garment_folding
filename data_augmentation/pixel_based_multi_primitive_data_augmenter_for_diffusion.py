@@ -35,10 +35,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.depth_noise_var = self.config.get('depth_noise_var', 0.1)
 
         if self.use_goal:
+            self.goal_aug = self.config.get('goal_aug', 'none')
             self.goal_rotation = self.config.get('goal_rotation', False)
             self.goal_translation = self.config.get('goal_translation', False)
-            if self.goal_translation:
-                self.goal_trans_range = self.config.get('goal_trans_range', [0, 0.2]) 
 
         if self.random_crop:
             self.crop_scale = self.config.get('crop_scale', [0.8, 1.0])
@@ -242,6 +241,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
         
         if self.use_goal and 'rgb-goal' in sample:
+            #print('sample rgb-goal shape', sample['rgb-goal'].shape)
             sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
         
@@ -437,6 +437,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             
             if use_depth:
                 depth_obs = F.grid_sample(depth_obs, grid, mode='nearest', align_corners=True)
+
+            if self.use_goal and self.goal_aug == "same_as_obs":
+                if 'goal_rgb' in sample:
+                    goal_obs = F.grid_sample(goal_obs, grid, align_corners=True)
+                if use_goal_depth:
+                    goal_depth_obs = F.grid_sample(goal_depth_obs, grid, mode='nearest', align_corners=True)
             
             pixel_actions = rotated_action.reshape(BB*(TT-1), -1)
 
@@ -451,6 +457,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 robot1_mask = torch.flip(robot1_mask, [2])
             if use_depth:
                 depth_obs = torch.flip(depth_obs, [2])
+            
+            if self.use_goal and self.goal_aug == "same_as_obs":
+                if 'goal_rgb' in sample:
+                    goal_obs = torch.flip(goal_obs, [2])
+                if use_goal_depth:
+                    goal_depth_obs = torch.flip(goal_depth_obs, [2])
 
             # Flip Spatial Actions (Invert Y)
             pixel_actions = pixel_actions.reshape(-1, 2)
@@ -465,7 +477,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         #   GOAL TRANSFORMATIONS
         # =========================
-        if self.use_goal and train and (self.goal_rotation or self.goal_translation):
+        if self.use_goal and train and (self.goal_rotation or self.goal_translation) and self.goal_aug != "same_as_obs":
             aff_params = torch.eye(2, 3, device=device).unsqueeze(0)
             if self.goal_rotation:
                 k_rot = torch.randint(int(360 / self.config.rotation_degree), size=(1,), device=device)

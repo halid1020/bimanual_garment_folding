@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-REMOTE = True
+REMOTE = False
 
 if REMOTE:
     CV2_DISPLAY =  "localhost:10.0" 

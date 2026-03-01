@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent@agent: human_raven_pixel
+  - /arena@arena: raven_pixel_packing_boxes_lower_camera_test
+  - /task@task: dummy
+
+exp_name: human_raven_pixel_packing_boxes_test
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

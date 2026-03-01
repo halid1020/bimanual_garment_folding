@@ -7,21 +7,23 @@ import numpy as np
 from collections import deque
 import torch
 import cv2
+from dotmap import DotMap
 import torch.nn as nn
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-
+from dotmap import DotMap
 
 from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
 from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
 
+from data_augmentation.register_augmeters import build_data_augmenter
+
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
-from .networks import ConditionalUnet1D, MLPClassifier
+from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
-from ..data_augmentation.register_augmeters import build_data_augmenter
 from .constrain_action_functions import name2func
 
 class DiffusionTransform():
@@ -186,7 +188,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         dataset = TrajectoryDataset(**config)
 
         import actoris_harena as ag_ar
-        policy = ag_ar.build_agent(self.config.demo_policy)
+        policy = ag_ar.build_agent(
+            self.config.demo_policy, 
+            self.config.get('demo_policy_config', DotMap({})),
+            disable_wandb=True)
 
         qbar = tqdm(total=self.config.num_demos, 
                     desc='Collecting data from policy ...')
@@ -235,7 +240,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     prim_id = self.prim_name2id[action_name]
                     prim_act = (1.0*(prim_id+0.5)/self.K *2 - 1)
                     add_action = np.zeros(self.data_save_action_dim)
-                    print('add action dim', add_action.shape)
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                     #add_action = np.concatenate([prim_act, action_param])
@@ -341,6 +345,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
 
+        
+            
+        
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
             self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
@@ -379,12 +386,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             prediction_type='epsilon'
         )
 
+        self.rep_learn = self.config.get('rep_learn', 'none')
+
         self.nets = nn.ModuleDict({
             'vision_encoder': self.vision_encoder,
             'noise_pred_net': self.noise_pred_net
         })
+
         if self.primitive_integration == 'one-hot-encoding':
             self.nets['prim_class_head'] = self.prim_class_head
+
+        if self.rep_learn == 'auto-encoder':
+            self.nets['vision_decoder'] = ResNetDecoder(
+                input_dim=512, 
+                output_channel=self.input_channel
+            )
 
         self._test_network()
 
@@ -521,6 +537,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 input_obs)
             obs_features = image_features.reshape(
                 B, self.config.obs_horizon, -1)
+
+            recon_loss = torch.tensor(0.0, device=self.device)
+            if self.rep_learn == 'auto-encoder':
+                # image_features shape: (B * obs_horizon, 512)
+                # input_obs shape: (B * obs_horizon, C, 96, 96)
+                reconstructed_obs = self.nets['vision_decoder'](image_features)
+                recon_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+
             # (B,obs_horizon,D)
 
             # concatenate vision feature and low-dim obs
@@ -638,6 +662,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
             total_loss = actor_noise_loss + prim_loss #co-update the encoder
+            if self.rep_learn == 'auto-encoder':
+                #print('loss!')
+                total_loss += recon_loss * self.config.get('recon_weight', 0.1)
             # optimize
             total_loss.backward()
             self.optimizer.step()
@@ -651,6 +678,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             ## write loss value to tqdm progress bar
             pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
+            if self.rep_learn == 'auto-encoder':
+                self.logger.log({'train/recon_loss': recon_loss.item()}, step=self.update_step)
             self.logger.log({'train/actor_noise_loss': actor_noise_loss.item()}, step=self.update_step)
             self.logger.log({'train/total_loss': total_loss.item()}, step=self.update_step)
             if self.primitive_integration == 'one-hot-encoding':
@@ -961,7 +990,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         if self.config.input_obs == 'rgb-goal':
             info['observation']['rgb-goal'] = np.concatenate(
-                [info['observation']['rgb'][0].astype(np.float32), info['observation']['goal_rgb'][0].astype(np.float32)], axis=-1)
+                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
                 H, W = rgb.shape[:2]
@@ -1042,6 +1071,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             obs['vector_state'] = vector_state
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
+        # print('self.internal_states', self.internal_states)
+        # print('info[arena_id]', info['arena_id'])
         self.internal_states[info['arena_id']].update(
             {'input_obs': input_obs.transpose(1,2,0),
              'input_type': self.config.input_obs}

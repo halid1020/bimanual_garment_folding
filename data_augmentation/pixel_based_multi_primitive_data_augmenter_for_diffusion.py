@@ -621,7 +621,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         if 'rgb-goal' in sample:
             if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] reconcanation after augmentation!!!')
-            sample['rgb-goal'] = torch.cat([rgb_obs, goal_obs], dim=2)
+            sample['rgb-goal'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
         
         if 'rgb-workspace-mask-goal' in sample:
             sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)

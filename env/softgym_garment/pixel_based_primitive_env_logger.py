@@ -6,9 +6,6 @@ import matplotlib.pyplot as plt
 
 from .draw_utils import *
 
-
-
-
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
     def __call__(self, episode_config, result, filename=None, wandb_logger=None):

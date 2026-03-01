@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import kornia.augmentation as K
 
 from actoris_harena.torch_utils import np_to_ts, ts_to_np
+from actoris_harena.utilities.save_utils import save_mask
 from .utils import randomize_primitive_encoding, gaussian_kernel 
 
 def rotate_points_torch(points, R):
@@ -159,6 +160,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         """
         save_dir = "./tmp/augment_debug"
         os.makedirs(save_dir, exist_ok=True)
+        print('save !!!')
+        if 'mask' in prefix:
+            print('save mask!!!')
+            save_mask(img, f"{prefix}_step{step}", save_dir)
+            return
 
         H, W, C = img.shape
         # Ensure pts is 2D array
@@ -212,7 +218,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             # Fallback for simple (N, 2) points
             pts = pts.reshape(-1, 2)
             xs, ys = to_pix(pts[:, 0], pts[:, 1])
-            print('len xs', len(xs))
             plt.scatter(xs, ys, c='red', s=12)
 
         plt.axis('off')
@@ -293,6 +298,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             rgb_obs, BB, TT = self._flatten_bt(rgb_obs) 
             B, H, W, _ = rgb_obs.shape
         
+        use_mask = 'mask' in sample
+        if use_mask:
+            mask_obs = sample["mask"].float()
+            mask_obs, BB, TT = self._flatten_bt(mask_obs) 
+            
         use_goal_rgb = self.use_goal and 'goal_rgb' in sample
         if use_goal_rgb:
             goal_obs = sample['goal_rgb'].float() / 255.0
@@ -301,9 +311,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         use_goal_mask = self.use_goal and 'goal_mask' in sample
         if use_goal_mask:
             goal_mask_obs = sample['goal_mask'].float()
-            # Safely normalize to 0.0 - 1.0 if it's currently 0 - 255
-            if goal_mask_obs.max() > 1.0:
-                goal_mask_obs = goal_mask_obs / 255.0
             goal_mask_obs, _, _ = self._flatten_bt(goal_mask_obs)
 
         if self.use_workspace:
@@ -353,6 +360,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 if self.use_goal and 'goal_mask' in sample:
                     cpu_goal_mask = (goal_mask_obs[b].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, prefix="aug_before_goal_mask", step=b)
+                
+                if 'mask' in sample:
+                    cpu_mask = (mask_obs[b].cpu().numpy()).astype(np.float32)
+                    self._save_debug_image(cpu_mask, pa_cpu, orients=oa_cpu, prefix="aug_before_mask", step=b)
 
         # =========================
         #       RANDOM CROP

@@ -14,7 +14,6 @@ import gym
 
 from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-# from ..video_logger import VideoLogger
 from .pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix

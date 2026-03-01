@@ -16,7 +16,6 @@ ENV_NUM = 0
 class MultiGarmentEnv(GarmentEnv):
     
     def __init__(self, config):
-        #config.name = f'multi-garment-{config.object}-env'
         
         self.num_eval_trials = config.get('num_eval_trials', 30)
         self.num_train_trials = config.get('num_train_trials', 100)
@@ -56,7 +55,6 @@ class MultiGarmentEnv(GarmentEnv):
            
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
-        #episode_config['eid'] = episode_config['eid']
         self.eid = episode_config['eid']
 
         timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -254,15 +252,11 @@ class MultiGarmentEnv(GarmentEnv):
         elif self.mode == 'val':
             keys = self.val_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
-        #print('len(keys)', len(keys))
-        print('mode', self.mode)
+        print('[MultiGarmentEnv] mode', self.mode)
         while True:
-            #print('[multi-garment env] eid', eid)
             key = keys[eid]
-            #print('key', key)
+
             with h5py.File(hdf5_path, 'r') as init_states:
-                # print(hdf5_path, key)
-                # Convert group to dict
                 group = init_states[key]
                 episode_params = dict(group.attrs)
 
@@ -272,12 +266,10 @@ class MultiGarmentEnv(GarmentEnv):
                     continue
                 
                 # If there are datasets in the group, add them to the dictionary
-                #print('group keys', group.keys())
                 for dataset_name in group.keys():
                     episode_params[dataset_name] = group[dataset_name][()]
 
                 self.episode_params = episode_params#
             break
-            #print('episode_params', episode_params.keys())
-
+            
         return episode_params

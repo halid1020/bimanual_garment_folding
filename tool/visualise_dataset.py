@@ -55,26 +55,25 @@ def draw_action_on_image(img, action, img_size):
 
     return img_draw
 
-@hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
-def main(cfg: DictConfig):
-    print("--- Loading Configuration for Visualization ---")
-    
-    # Convert Hydra configs to standard dictionaries
-    local_obs_config = OmegaConf.to_container(cfg.dataset.obs_config, resolve=True)
-    action_config = OmegaConf.to_container(cfg.dataset.action_config, resolve=True)
+# ---------------------------------------------------------------------------
+# CORE LOGIC SEPARATED FROM HYDRA
+# ---------------------------------------------------------------------------
+def visualize_data(data_dir, data_path, local_obs_config, action_config):
+    print("--- Starting Visualization ---")
     
     # Dynamically find the action key and image size from config
     act_key = list(action_config.keys())[0]  # e.g., 'norm-pixel-pick-and-place'
     img_size = local_obs_config['rgb']['shape'][0] # e.g., 128
     
-    print(f"Dataset Path: {os.path.join(cfg.data_dir, cfg.data_path)}")
+    full_path = os.path.join(data_dir, data_path)
+    print(f"Dataset Path: {full_path}")
     print(f"Image Size: {img_size}x{img_size}")
     print(f"Action Key: {act_key}")
 
     # Initialize Dataset in Read Mode
     dataset = TrajectoryDataset(
-        data_path=cfg.data_path,
-        data_dir=cfg.data_dir,
+        data_path=data_path,
+        data_dir=data_dir,
         io_mode='r', # Strictly read-only
         obs_config=local_obs_config,
         act_config=action_config,
@@ -89,28 +88,25 @@ def main(cfg: DictConfig):
         return
 
     # Set up save directory
-    save_dir = os.path.join('./tmp', "data_visualizations", cfg.data_path)
+    save_dir = os.path.join('./tmp', "data_visualizations", data_path)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Number of trajectories to visualize (default 1, override via CLI if needed)
+    # Number of trajectories to visualize
     num_to_visualize = min(5, total_trajs)
 
     for traj_idx in range(num_to_visualize):
         print(f"Visualizing Trajectory {traj_idx}...")
         
-        # Adjust based on your dataset API (e.g., dataset[traj_idx] or dataset.get_trajectory(traj_idx))
         if hasattr(dataset, 'get_trajectory'):
             traj_data = dataset.get_trajectory(traj_idx)
         else:
             traj_data = dataset[traj_idx]
             
-        # Handle the return format gracefully
         if isinstance(traj_data, tuple) and len(traj_data) == 2:
             obs_dict, act_dict = traj_data
         elif isinstance(traj_data, dict):
-                # Your dataset uses singular keys 'observation' and 'action'
-                obs_dict = traj_data.get('observation', traj_data)
-                act_dict = traj_data.get('action', traj_data)
+            obs_dict = traj_data.get('observation', traj_data)
+            act_dict = traj_data.get('action', traj_data)
         else:
             raise ValueError(f"Unexpected trajectory data format: {type(traj_data)}")
             
@@ -127,16 +123,10 @@ def main(cfg: DictConfig):
             if img.dtype != np.uint8:
                 img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
             
-            # Safely fetch action, or use a dummy zero action for the terminal state
             if step < len(actions):
                 action = actions[step]
             else:
-                action = np.zeros_like(actions[0]) # No action taken at terminal state
-            
-            # Draw action if it's not a dummy/zero action
-            # if not np.all(action == 0.0):
-            #     img_with_action = draw_action_on_image(img, action, img_size)
-            # else:
+                action = np.zeros_like(actions[0]) 
             
             img_with_action = img.copy()
 
@@ -157,12 +147,11 @@ def main(cfg: DictConfig):
                 fig_panels.append(goal_img)
                 titles.append("Goal RGB")
 
-            # Plotting dynamically based on available panels
             n_panels = len(fig_panels)
             fig, axes = plt.subplots(1, n_panels, figsize=(4 * n_panels, 4))
             
             if n_panels == 1:
-                axes = [axes] # Ensure iterable
+                axes = [axes] 
 
             for ax, panel, title in zip(axes, fig_panels, titles):
                 cmap = 'gray' if len(panel.shape) == 2 else None
@@ -172,7 +161,6 @@ def main(cfg: DictConfig):
             
             plt.tight_layout()
             
-            # Save frame
             traj_dir = os.path.join(save_dir, f"traj_{traj_idx:03d}")
             os.makedirs(traj_dir, exist_ok=True)
             frame_path = os.path.join(traj_dir, f"step_{step:03d}.png")
@@ -181,5 +169,56 @@ def main(cfg: DictConfig):
 
     print(f"\n✅ Visualization complete! Check the frames in: {save_dir}")
 
+
+# ---------------------------------------------------------------------------
+# HYDRA ENTRY POINT
+# ---------------------------------------------------------------------------
+@hydra.main(config_path="../conf", config_name="data_collection/collect_dataset_01", version_base=None)
+def hydra_main(cfg: DictConfig):
+    print("--- Loading Configuration via Hydra ---")
+    local_obs_config = OmegaConf.to_container(cfg.dataset.obs_config, resolve=True)
+    action_config = OmegaConf.to_container(cfg.dataset.action_config, resolve=True)
+    
+    visualize_data(cfg.data_dir, cfg.data_path, local_obs_config, action_config)
+
 if __name__ == "__main__":
-    main()
+    # Intercept direct path usage to bypass Hydra
+    if len(sys.argv) == 2 and '=' not in sys.argv[1]:
+        direct_path = sys.argv[1]
+        
+        # Clean up the path format
+        direct_path = os.path.normpath(os.path.abspath(direct_path))
+        data_dir = os.path.dirname(direct_path)
+        data_path = os.path.basename(direct_path)
+        
+        print(f"--- Direct Path Intercepted: {direct_path} ---")
+        print("--- Bypassing Hydra entirely ---")
+        
+        # 1. Try to load the config that Hydra automatically saves in the dataset folder
+        saved_config_path = os.path.join(direct_path, ".hydra", "config.yaml")
+        
+        if os.path.exists(saved_config_path):
+            print(f"Found saved config at {saved_config_path}")
+            cfg = OmegaConf.load(saved_config_path)
+            local_obs_config = OmegaConf.to_container(cfg.dataset.obs_config, resolve=True)
+            action_config = OmegaConf.to_container(cfg.dataset.action_config, resolve=True)
+        else:
+            # 2. Fallback to manual dictionaries if no saved config exists
+            print("No saved config found. Using manual fallback configurations.")
+            
+            # NOTE: Change '128' if your images are a different size (e.g., 256 or 84)
+            local_obs_config = {
+                'rgb': {'shape': [128, 128, 3], 'output_key': 'rgb'},
+                'mask': {'shape': [128, 128, 1], 'output_key': 'mask'} 
+            }
+            # NOTE: Change the key if your dataset uses a different action name
+            action_config = {
+                'default': {'shape': [9], 'output_key': 'default'}
+            }
+
+        # Run the visualization core logic directly
+        visualize_data(data_dir, data_path, local_obs_config, action_config)
+        
+    else:
+        # Fallback to standard Hydra execution if no direct path is provided
+        hydra_main()

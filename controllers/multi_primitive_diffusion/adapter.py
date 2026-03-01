@@ -341,6 +341,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 8
         elif self.config.input_obs == 'rgb-goal':
             self.input_channel = 6
+        elif self.config.input_obs == 'rgb+goal_mask':
+            self.input_channel = 4
 
         self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
         self.vision_encoder = replace_bn_with_gn(self.vision_encoder)

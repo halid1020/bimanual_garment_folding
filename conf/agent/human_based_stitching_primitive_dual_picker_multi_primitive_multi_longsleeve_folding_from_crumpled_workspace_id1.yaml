@@ -1,4 +1,4 @@
-name: human-based-stitching-policy
+name: human-based-stitching-primitive-policy
 flattening_policy: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot
 flattening_policy_log_dir: ./tmp/garment_folding_data
 folding_policy: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_workspace
@@ -10,8 +10,6 @@ use_demo: True
 use_definitions: True
 use_reasoning: True
 use_goal_hints: True
-save_data: "./tmp/garment_folding_data/images/human_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_id1/"
+save_data: "./tmp/garment_folding_data/images/human_based_stitching_primitive_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_id1/"
 # exp_name: ${exp_name}
-skill_save_root: /home/halid/project/garment_folding_data
-
 # project_name: ${project_name}

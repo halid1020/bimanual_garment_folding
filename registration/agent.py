@@ -7,6 +7,7 @@ from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
 from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
     import WaistHemAlignmentFoldingStochasticPolicy
 from controllers.human.real_world_human_policy import RealWordHumanPolicy
+from controllers.human.real_world_human_stitching_primitive_policy import RealWordHumanStitchingPrimitivePolicy
 from controllers.human.real_world_human_single_arm_pick_and_place_policy \
     import RealWorldSingleArmHumanPickAndPlacePolicy
 from controllers.rl.vanilla_image_sac import VanillaImageSAC
@@ -60,6 +61,7 @@ def register_agents():
     athar.register_agent('iou-based-stitching-policy', IoUBasedStitchingPolicy)
     athar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
     athar.register_agent('human-based-stitching-policy', HumanBasedStitchingPolicy)
+    athar.register_agent('real-world-human-based-stitching-primitive-policy', RealWordHumanStitchingPrimitivePolicy)
     athar.register_agent('lagarnet', GC_RSSM)
     athar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)
     athar.register_agent('single_arm_mask_pick_and_place_mpc', SingleArmMaskPickAndPlaceMPC)

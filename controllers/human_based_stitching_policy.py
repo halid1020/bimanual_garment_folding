@@ -4,7 +4,7 @@ from actoris_harena import Agent
 import os
 import torch
 from hydra import compose
-from .garment_phase_classifier import GarmentPhaseClassifier
+from .gui_garment_phase_classifier import GarmentPhaseClassifier
 from PIL import ImageTk, Image
 from pathlib import Path
 
@@ -20,15 +20,15 @@ class HumanBasedStitchingPolicy(Agent):
         import actoris_harena.api as ag_ar
         
         # Load sub-policies
-        flattening_policy_config = compose(config_name=config.flattening_policy)
-        folding_policy_config = compose(config_name=config.folding_policy)
+        flattening_policy_config = compose(config_name='./sim_exp/' + config.flattening_policy)
+        folding_policy_config = compose(config_name='./sim_exp/' + config.folding_policy)
 
         self.flattening_policy = ag_ar.build_agent(
             flattening_policy_config.agent.name,
             flattening_policy_config.agent,
             project_name=flattening_policy_config.project_name,
             exp_name=config.flattening_policy,
-            save_dir=os.path.join(flattening_policy_config.save_root, config.flattening_policy),
+            save_dir=os.path.join(config.skill_save_root, config.flattening_policy),
             disable_wandb=True, # Disable wandb for sub-policies to avoid clutter
         )
 
@@ -37,7 +37,7 @@ class HumanBasedStitchingPolicy(Agent):
             folding_policy_config.agent,
             project_name=folding_policy_config.project_name,
             exp_name=config.folding_policy,
-            save_dir=os.path.join(folding_policy_config.save_root, config.folding_policy),
+            save_dir=os.path.join(config.skill_save_root, config.folding_policy),
             disable_wandb=True # Disable wandb for sub-policies to avoid clutter
         )
 
@@ -45,7 +45,7 @@ class HumanBasedStitchingPolicy(Agent):
         self.folding_policy.load_best()
 
         # 🔹 VLM phase classifier initialized with config flags
-        self.phase_classifier = GarmentPhaseClassifier(config)
+        self.gui_classifier = GarmentPhaseClassifier(config)
         
         # Buffers to store context for the VLM
         self.history_buffer = [] 
@@ -91,7 +91,7 @@ class HumanBasedStitchingPolicy(Agent):
 
     def _should_folding(self, state):
         """
-        Use VLM to decide phase using Current RGB + History + Demo
+        Use VLM to decide phase using Current RGB + History + Demote
         """
         rgb = state["observation"]["rgb"]
         
@@ -109,6 +109,9 @@ class HumanBasedStitchingPolicy(Agent):
             print(f"[HumanBasedStitchingPolicy] Human Reason: {reasoning}")
         else:
             phase = result
+
+
+        print("_____________", self.config.save_data)
 
 
         self.save_image_data(

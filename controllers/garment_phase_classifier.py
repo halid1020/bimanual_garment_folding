@@ -19,23 +19,25 @@ class GarmentPhaseClassifier:
     def __init__(self, config):
         self.device = config.get('device', "cpu")
         self.model_id = config.get('model_id', "Qwen/Qwen3-VL-8B-Instruct")
-        if "gemma-3n" in self.model_id.lower():
-            self.model = Gemma3nForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        elif "gemma" in self.model_id.lower():
-            self.model = Gemma3ForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        elif "qwen" in self.model_id.lower():
-            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        else:
-            self.model = AutoModelForImageTextToText.from_pretrained(
-                self.model_id, device_map=self.device
-            ).eval()
-        self.processor = AutoProcessor.from_pretrained(self.model_id)
+        self.use_local_ai = config.get('use_local_ai', False)
+        if self.use_local_ai:
+            if "gemma-3n" in self.model_id.lower():
+                self.model = Gemma3nForConditionalGeneration.from_pretrained(
+                    self.model_id, device_map=self.device
+                ).eval()
+            elif "gemma" in self.model_id.lower():
+                self.model = Gemma3ForConditionalGeneration.from_pretrained(
+                    self.model_id, device_map=self.device
+                ).eval()
+            elif "qwen" in self.model_id.lower():
+                self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                    self.model_id, device_map=self.device
+                ).eval()
+            else:
+                self.model = AutoModelForImageTextToText.from_pretrained(
+                    self.model_id, device_map=self.device # The clothing is still messy, needs flattening # The sleeves are getting visible but thre clothing is still messy, needs flattening
+                ).eval()
+            self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.config = config
 
         self.definitions_text = (

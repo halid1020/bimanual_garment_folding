@@ -1,8 +1,8 @@
 name: human-based-stitching-policy
-flattening_policy: sim_exp/diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_workspace_snap_one_hot
-flattening_policy_log_dir: ./tmp/garment_folding_data
-folding_policy: sim_exp/diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_100_workspace
-folding_policy_log_dir: ./tmp/garment_folding_data
+flattening_policy: diffusion_multi_primitive_multi_longsleeve_flattening_demo_100_snap_one_hot_2xtraining_constrain_inference
+flattening_policy_log_dir: ../garment_folding_data
+folding_policy: diffusion_multi_primitive_multi_longsleeve_folding_from_random_flattened_demo_200_snap_one_hot_x2_training_constrain_inference
+folding_policy_log_dir: ../garment_folding_data
 
 max_history_len: 5
 use_history: True
@@ -11,5 +11,8 @@ use_definitions: True
 use_reasoning: True
 use_goal_hints: True
 save_data: "./tmp/garment_folding_data/images"
+
+skill_save_root: /home/halid/project/garment_folding_data
+
 # exp_name: ${exp_name}
 # project_name: ${project_name}

@@ -1,0 +1,12 @@
+# @package _global_
+defaults:
+  - /agent@agent: real_world_human_stitching_primitive_policy  # Points to conf/agent/human_agent.yaml
+  - /real_world_arena@arena: dual_arm_multi_primitives     # Points to conf/arena/dual_arm.yaml
+  - /task@task: real_world_folding      # Points to conf/task/folding.yaml
+
+# save_data: "./tmp/garment_folding_data/images/human_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_id1/"
+save_data: "./tmp/garment_folding_data/images/human_based_stitching_primitive_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_id1/"
+
+project_name: 'bimanual_garment_folding'
+exp_name: real_world_human_folding
+measure_time: True

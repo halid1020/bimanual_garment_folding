@@ -116,8 +116,13 @@ python tool/eval_real_world.py --config-name real_world_exp/real_world_human_fla
 ```
 python tool/eval_real_world.py --config-name real_world_exp/real_world_human_flattening
 
-python tool/eval_real_world.py --config-name real_world_exp/vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_real
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_folding_human_decides_skill
+
+
+
 
 python tool/eval_real_world.py --config-name real_world_exp/vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_real
+
+python tool/eval_real_world.py --config-name real_world_exp/human_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace
 
 ```

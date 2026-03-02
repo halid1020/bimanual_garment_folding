@@ -17,6 +17,7 @@ from dotmap import DotMap
 from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
 from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena.utilities.save_utils import save_mask
 
 from data_augmentation.register_augmeters import build_data_augmenter
 
@@ -163,13 +164,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         torch.backends.cudnn.benchmark = True
         self.dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=self.config.batch_size, #64,
-            #num_workers=2,
+            batch_size=self.config.batch_size, 
             shuffle=True,
-            # accelerate cpu-gpu transfer
-            #pin_memory=True,
-            # don't kill worker process afte each epoch
-            #persistent_workers=True
         )
         self.dataset_inited = True
         #self.dataloader = None
@@ -219,18 +215,40 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     break
                 
                 for k, v in info['observation'].items():
-                    #print('k', k)
+                    if self.debug: print('[MultiPrimitiveDiffusionAdapter] key in info', k)
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
                             #print('k ', k, 'v', v)
                             v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
                         elif k in ['mask', 'goal_mask']:
-                            v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                            
+                            if self.debug:
+                                step_idx = len(observations[k])
+                                file_name = f"{k}_ep{episode_id}_step{step_idx}_before_resize"
+                                save_mask(
+                                    mask=v, 
+                                    filename=file_name, 
+                                    directory="tmp/debug_mluti_primitive_diffusion"
+                                )
+
+                            v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             v_ = v_ > 0.9
+                            
+                            if self.debug:
+                                step_idx = len(observations[k])
+                                file_name = f"{k}_ep{episode_id}_step{step_idx}"
+                                save_mask(
+                                    mask=v_, 
+                                    filename=file_name, 
+                                    directory="tmp/debug_mluti_primitive_diffusion"
+                                )
+                            
                             observations[k].append(v_)
                         else:
-                            observations[k].append(v_)
+                            observations[k].append(v)
+                            if self.debug:
+                                print('[MultiPrimitiveDiffusionAdapter] k, v to save', k, v)
                 
                 add_action = action
                 if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
@@ -267,11 +285,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         observations[k].append(v_)
                     elif k in ['mask', 'goal_mask']:
-                        v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                        v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         v_ = v_ > 0.9
                         observations[k].append(v_)
                     else:
-                        observations[k].append(v_)
+                        observations[k].append(v)
             #print('info eval', info['evaluation'])
             if self.config.debug:
                 frames = arena.get_frames()
@@ -352,7 +370,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
-            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
+            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K)
 
             cls_cfg = self.config.get("primitive_classifier", {}) # nn.Linear(self.config.obs_dim, self.K) by default
 
@@ -557,13 +575,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 vector_state = nbatch['vector_state'][:, :self.config.obs_horizon]
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
             obs_cond = obs_features.flatten(start_dim=1)
-
-            # TODO: optional add primtiive cond_as well, use one-hot encoding.
-            # when self.primitive_integration == 'one-hot-encoding'
-            # predict the primitve through a classification head attached to the obs_features
-            # prim_id = self.prim_class(obs_feature)
-            # calculate the prim_loss through cross_entropy
-            # obs_cond = torch.concat(obs_cond, prim_enc)
 
             prim_loss = torch.tensor(0)
             if self.primitive_integration == 'one-hot-encoding':
@@ -884,7 +895,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
             # ---  Call Debug GIF Function ---
-            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.config.constrain_action == 'bimanual_mask':
+            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.constrain_action == 'bimanual_mask':
                 print('!!!!!! Contrain Debug!!!!!')
                 from .constrain_action_functions import save_denoising_gif
                 
@@ -1041,7 +1052,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgb-workspace-mask-goal'] = np.concatenate(
                 [rgb, m0, m1, goal], axis=-1
             )
-            
+        
+        if self.config.input_obs == 'rgb+goal_mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
+            mask = resize_mask_to_rgb(info['observation']['mask'])
+
+          
+
+            info['observation']['rgb+goal_mask'] = np.concatenate(
+                [rgb, mask], axis=-1
+            )
+            if self.debug: print('input shape', info['observation']['rgb+goal_mask'].shape)
 
         input_data = {
             self.config.input_obs: info['observation'][self.config.input_obs]\

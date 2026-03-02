@@ -6,12 +6,12 @@ obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'rgb-goal'
+input_obs: 'rgb+goal_mask'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 100
-demo_horizon: 10
+num_demos: 1
+demo_horizon: 3
 batch_size: 64
 disable_updown: True
 action_shape: [8]
@@ -24,8 +24,8 @@ demo_policy: "human-multi-primitive"
 demo_policy_config:
   overlay_goal_contour: True
   
-validation_interval: 1000
-total_update_steps: 100000
+validation_interval: 10
+total_update_steps: 100
 eval_checkpoint: -1
 debug: True
 add_all_demos: True
@@ -39,6 +39,7 @@ dataset_config:
   data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
   data_dir: "./data/datasets"
   seq_length: 1
+  num_trj: 1
   io_mode: "w"
   cache_in_memory: True
   obs_config:
@@ -55,9 +56,9 @@ dataset_config:
       shape: [128, 128, 3]
       output_key: 'rgb'
 
-    semkey_pos:
-      shape: [15]
-      output_key: 'semkey_pos'
+    semkey_norm_pixel:
+      shape: [15, 2]
+      output_key: 'semkey_norm_pixel'
 
     goal_rgb: 
       shape: [128, 128, 3]
@@ -71,9 +72,9 @@ dataset_config:
       shape: [128, 128, 1]
       output_key: 'goal_mask'
 
-    flattened_semkey_pos:
-      shape: [15]
-      output_key: 'flattened_semkey_pos'
+    flattened_semkey_norm_pixel:
+      shape: [15, 2]
+      output_key: 'flattened_semkey_norm_pixel'
 
   act_config:
     default: 

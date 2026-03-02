@@ -240,9 +240,7 @@ class GarmentEnv(Arena):
         from .utils.env_utils import get_default_config
         self.default_config = get_default_config()
 
-
-
-    ## TODO: if eid is out of range, we need to raise an error.   
+   
     def reset(self, episode_config=None):
         if episode_config == None:
             episode_config = {
@@ -764,6 +762,20 @@ class GarmentEnv(Arena):
         obs['image'] = obs['rgb']
         obs['depth'] = rgbd[:, :, 3:]
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
+        if self.debug:
+            # We use local import here in case it's not at the top of your file
+            from actoris_harena.utilities.save_utils import save_mask 
+            
+            step_idx = getattr(self, 'action_step', 0)
+            ep_id = getattr(self, 'eid', 'unknown')
+            file_name = f"mask_ep{ep_id}_step{step_idx}"
+            
+            save_mask(
+                mask=obs['mask'], 
+                filename=file_name, 
+                directory="tmp/debug_garment_env"
+            )
+            
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid

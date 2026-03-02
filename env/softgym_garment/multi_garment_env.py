@@ -243,7 +243,7 @@ class MultiGarmentEnv(GarmentEnv):
             garment_type = self.all_garment_types[eid%len(self.all_garment_types)]
 
         if self.mode == 'train':
-            print('get from train keys')
+            #print('get from train keys')
             keys = self.train_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
         elif self.mode == 'eval':

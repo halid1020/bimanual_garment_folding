@@ -627,7 +627,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)
     
         if 'rgb+goal_mask' in sample:
-            sample['rgb+goal_mask'] = torch.cat([rgb_obs, goal_mask_obs], dim=2)
+            sample['rgb+goal_mask'] = torch.cat([rgb_obs, sample['goal_mask']], dim=2)
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)

@@ -60,7 +60,7 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
 
             first_pick_actions = ((samples[:, 0, :2] + 1) * (H / 2)).astype(int)
             first_pick_actions = first_pick_actions.astype(int).clip(0, H-1).reshape(self.candidates, -1)
-            place_actions = ((samples[:, :, 2:] + 1) * (H / 2)).astype(int)
+            place_actions = ((samples[:, :, 2:4] + 1) * (H / 2)).astype(int)
             place_actions = place_actions.astype(int).clip(0, H-1).reshape(self.candidates, -1)
 
             if self.config.swap_action:
@@ -83,7 +83,7 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
 
             if self.clip:
                 samples = np.clip(samples, action_space.low[:1], action_space.high[:1])
-            #print('samples shape', samples.shape)
+            
             costs, _ = self._predict_and_eval(samples, info, 
                     goal=(info['goals'] if self.goal_condition else None))
             elites = samples[np.argsort(costs)][:num_elites]

@@ -895,8 +895,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
             # ---  Call Debug GIF Function ---
-            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.constrain_action == 'bimanual_mask':
-                print('!!!!!! Contrain Debug!!!!!')
+            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.    constrain_action == 'bimanual_mask':
+                print('!!!!!! Constrain Debug!!!!!')
                 from .constrain_action_functions import save_denoising_gif
                 
                 # Extract image and masks from the deque/buffer

@@ -1,6 +1,7 @@
 from actoris_harena import Agent
 import os
 import cv2
+import json
 import torch
 from hydra import compose
 from .garment_phase_classifier import GarmentPhaseClassifier
@@ -15,33 +16,62 @@ class VLMBasedStitchingPolicy(Agent):
 
         # ... (Your existing policy loading code) ...
         import actoris_harena.api as ag_ar
+        # import actoris_harena as athar
+
         
         # Load sub-policies
-        flattening_policy_config = compose(config_name=config.flattening_policy)
-        folding_policy_config = compose(config_name=config.folding_policy)
+        flattening_policy_config = compose(config_name='./sim_exp/' + config.flattening_policy)
+        print("Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n")
+        print(dir(flattening_policy_config))
+        print(flattening_policy_config)
+        print("Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n")
+        print(config)
+
+        folding_policy_config = compose(config_name='./sim_exp/' + config.folding_policy)
 
         self.flattening_policy = ag_ar.build_agent(
             flattening_policy_config.agent.name,
             flattening_policy_config.agent,
             project_name=flattening_policy_config.project_name,
             exp_name=config.flattening_policy,
-            save_dir=os.path.join(flattening_policy_config.save_root, config.flattening_policy)
+            disable_wandb=True,
+            save_dir=os.path.join(config.skill_save_root, config.flattening_policy)
         )
+
+        
+
 
         self.folding_policy = ag_ar.build_agent(
             folding_policy_config.agent.name,
             folding_policy_config.agent,
             project_name=folding_policy_config.project_name,
             exp_name=config.folding_policy,
-            save_dir=os.path.join(folding_policy_config.save_root, config.folding_policy)
+            disable_wandb=True,
+            save_dir=os.path.join(config.skill_save_root, config.folding_policy)
         )
+
+        print("x"*50, "\n\n")
+
+        print('INIT THE SKILL POLICIES')
+
+        print("x"*50, "\n\n")
 
         self.flattening_policy.load_best()
         self.folding_policy.load_best()
 
+        print("x"*50, "\n\n")
+
+        print(' LOADED THE SKILL POLICIES')
+
+        print("x"*50, "\n\n")
+
         # 🔹 VLM phase classifier initialized with config flags
         if config.use_online_classifier:
+            print("x"*50, "\n\n")
+            print("x\n"*5)
             print('[VLMBasedStitchingPolicy] Using OnlineGarmentPhaseClassifier')
+            print("x\n"*5)
+            print("x"*50, "\n\n")
             self.phase_classifier = OnlineGarmentPhaseClassifier(config)
         else:
             self.phase_classifier = GarmentPhaseClassifier(config)

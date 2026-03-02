@@ -1,0 +1,15 @@
+# @package _global_
+defaults:
+  - /agent@agent: vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace ##
+  - /real_world_arena@arena: dual_arm_multi_primitives
+  - /task@task: centre_sleeve_folding_overstretch_penalty_1_no_big_bonus       # Points to conf/task/folding.yaml
+  # - data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_0
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace
+save_root: ../garment_folding_data
+measure_time: True
+train_and_eval: train_and_evaluate_single
+
+# train_and_eval: train_and_evaluate_single

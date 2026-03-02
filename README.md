@@ -103,3 +103,21 @@ single arm lagarnet flattenin
 python tool/eval_real_world.py --config-name real_world_exp/lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check
 ```
 
+
+
+#### Example that works
+```
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_flattening
+
+```
+
+### New example (VLM & REAL)
+
+```
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_flattening
+
+python tool/eval_real_world.py --config-name real_world_exp/vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_real
+
+python tool/eval_real_world.py --config-name real_world_exp/vlm_qwen3_32b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace_real
+
+```

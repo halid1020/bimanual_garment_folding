@@ -30,6 +30,7 @@ class RealWordHumanPolicy(Agent):
             arena_id = info['arena_id']
 
         while True:
+            print("I think you got the cr@p")
             cmd = input("\nSkill [1=pick-fling, 2=pick-place, 3=no-operation, q=quit]: ").strip().lower()
             if cmd in ("q", "quit"):
                 return None

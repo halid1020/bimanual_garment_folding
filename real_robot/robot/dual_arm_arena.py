@@ -25,7 +25,7 @@ class DualArmArena(Arena):
         # super().__init__(config)
         self.name = "dual_arm_garment_arena"
         self.config = config
-
+        self.draw_fatten_contour = False
         self.measure_time = config.get('measure_time', False)
 
         # Robot initialization

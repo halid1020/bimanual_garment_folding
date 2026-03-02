@@ -158,17 +158,31 @@ datasets:
 
     
 
+# policy:
+#   name: 'cloth_mask_workspace_pick_and_place_mpc'
+#   params:
+#     candidates: 5000
+#     planning_horizon: 1
+#     iterations: 100
+#     clip: True
+#     swap_action: False
+#     cloth_mask: "from_env"
+#     debug: True
+#     cost_fn: 'from_model'
+
 policy:
-  name: 'cloth_mask_workspace_pick_and_place_mpc'
+  name: 'single_arm_mask_pick_and_place_mpc'
   params:
     candidates: 5000
     planning_horizon: 1
     iterations: 100
     clip: True
     swap_action: False
-    cloth_mask: "from_env"
+    obj_mask: "from_env"
     debug: True
     cost_fn: 'from_model'
+    # place_orien: True
+
 
 
 test_horizons: [1, 2, 4] # This shoulud be smaller than action horizon.

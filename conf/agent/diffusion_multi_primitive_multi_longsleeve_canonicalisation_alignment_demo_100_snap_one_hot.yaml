@@ -36,7 +36,7 @@ rep_learn: 'auto-encoder'
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_horizon_10_human_demo_100"
+  data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
   data_dir: "./data/datasets"
   seq_length: 1
   io_mode: "w"
@@ -55,6 +55,10 @@ dataset_config:
       shape: [128, 128, 3]
       output_key: 'rgb'
 
+    semkey_pos:
+      shape: [15]
+      output_key: 'semkey_pos'
+
     goal_rgb: 
       shape: [128, 128, 3]
       output_key: 'goal_rgb'
@@ -66,6 +70,10 @@ dataset_config:
     goal_mask: 
       shape: [128, 128, 1]
       output_key: 'goal_mask'
+
+    flattened_semkey_pos:
+      shape: [15]
+      output_key: 'flattened_semkey_pos'
 
   act_config:
     default: 

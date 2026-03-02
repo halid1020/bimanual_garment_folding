@@ -6,4 +6,4 @@ defaults:
 train_and_eval: train_and_evaluate_single
 exp_name: vanilla_sac_multi_longsleeve_dual_picker_single_primitive_folding_from_crumpled_default_data_aug
 project_name: bimanual_garment_folding
-save_root: /mnt/ssd/garment_folding_data
+save_root: ./tmp/garment_folding_data

@@ -1,14 +1,40 @@
+import datetime
+import cv2
 import torch
 import re
-from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+import base64
+from transformers import AutoProcessor, Gemma3nForConditionalGeneration, Gemma3ForConditionalGeneration, Qwen3VLForConditionalGeneration, AutoModelForImageTextToText
+
+
+
+def load_image_array_to_url(image_array):
+
+    _, buffer = cv2.imencode('.png', cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
+    b64_str = base64.b64encode(buffer).decode('utf-8')
+    return f"data:image/png;base64,{b64_str}"
+
+
 
 class GarmentPhaseClassifier:
     def __init__(self, config):
-        self.device = config.get('device', "cuda:0")
-        self.model_id = config.get('model_id', "google/gemma-3-4b-it")
-        self.model = Gemma3ForConditionalGeneration.from_pretrained(
-            self.model_id, device_map=self.device
-        ).eval()
+        self.device = config.get('device', "cpu")
+        self.model_id = config.get('model_id', "Qwen/Qwen3-VL-8B-Instruct")
+        if "gemma-3n" in self.model_id.lower():
+            self.model = Gemma3nForConditionalGeneration.from_pretrained(
+                self.model_id, device_map=self.device
+            ).eval()
+        elif "gemma" in self.model_id.lower():
+            self.model = Gemma3ForConditionalGeneration.from_pretrained(
+                self.model_id, device_map=self.device
+            ).eval()
+        elif "qwen" in self.model_id.lower():
+            self.model = Qwen3VLForConditionalGeneration.from_pretrained(
+                self.model_id, device_map=self.device
+            ).eval()
+        else:
+            self.model = AutoModelForImageTextToText.from_pretrained(
+                self.model_id, device_map=self.device
+            ).eval()
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.config = config
 
@@ -18,13 +44,19 @@ class GarmentPhaseClassifier:
             "- Observation Space: Top-down RGB camera.\n"
         )
 
+        self.how_hints_text = (
+            "HOW:\n"
+            "- If wrinkles, crumblled, perform Flattening.\n" 
+            "- If the cloth is either flat or in the folding procedure, perform Folding\n" 
+        )
+
         self.goal_hints_text = (
             "GOALS:\n"
             "- Flattening: Success when the garment is fully spread with no wrinkles.\n" 
             "- Folding: Success when the garment is folded into the demonstrated configuration from a flattened state.\n" 
         )
 
-    def _build_prompt_content(self, history_images, demo_images):
+    def _build_prompt_content(self, current_rgb, history_images, demo_images, human_reasoning_images_urls=None, human_reasoning_phases=None, human_reasoning_reasoning=None   ):
         """
         Dynamically builds a multimodal message content list.
         Order: Demo (Reference) -> History (Context) -> Current (Target)
@@ -38,26 +70,50 @@ class GarmentPhaseClassifier:
             instruction += f"\n\n{self.definitions_text}"
         if self.config.use_goal_hints:
             instruction += f"\n{self.goal_hints_text}"
+        if self.config.use_how_hints:
+            instruction += f"\n{self.how_hints_text}"
 
         content.append({"type": "text", "text": instruction})
 
         # 2. Add Reference Demo Images (TODO: Fixed)
         if self.config.use_demo and demo_images:
             content.append({"type": "text", "text": "\nREFERENCE DEMO SEQUENCE (Success path):"})
-            for _ in demo_images:
+            for id, demo_image in enumerate(demo_images):
+                # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+                # print(type(demo_image))
+                # print(demo_image)
+                # cv2.imwrite(f"DemoImage_{id}.png", demo_image)
+                # content.append({"type": "image", "image": load_image_array_to_url(demo_image)})
                 content.append({"type": "image"})
+        
+        # 3. Add Reference Human reasoning Images (TODO: Fixed)
+        if self.config.use_human_reasoning_skill and human_reasoning_images_urls and human_reasoning_phases and human_reasoning_reasoning:
+            
+            for id, human_reasoning_image_url in enumerate(human_reasoning_images_urls):
+                human_reasoning_phase = human_reasoning_phases[id] if id < len(human_reasoning_phases) else "N/A"
+                human_reasoning_explanation = human_reasoning_reasoning[id] if id < len(human_reasoning_reasoning) else "N/A"
+                
+                content.append({"type": "text", "text": f"\nDemonstration {id + 1}\nObserved action: {human_reasoning_phase.upper()}\nExplanation: {human_reasoning_explanation}"})
+                # content.append({"type": "image", "image": human_reasoning_image_url})
+                content.append({"type": "image"})
+                
 
-        # 3. Add Trajectory History Images (TODO: Fixed)
+
+        # 4. Add Trajectory History Images (TODO: Fixed)
         if self.config.use_history and history_images:
             content.append({"type": "text", "text": "\nPAST TRAJECTORY IMAGES (Previous states):"})
-            for _ in history_images:
+            for hist in history_images:
+                # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+                # print(type(hist))
+                # content.append({"type": "image", "image": load_image_array_to_url(hist)})
                 content.append({"type": "image"})
-
-        # 4. Add Current Observation
+                # pass
+        # 5. Add Current Observation
         content.append({"type": "text", "text": "\nCURRENT OBSERVATION (Classify this):"})
+        # content.append({"type": "image", "image": load_image_array_to_url(current_rgb)})
         content.append({"type": "image"})
-
-        # 5. Output Formatting
+    
+        # 6. Output Formatting
         if self.config.use_reasoning:
             format_instruction = (
                 "\n\nFirst, explain your reasoning based on the visual evidence, history, and demo reference."
@@ -72,7 +128,14 @@ class GarmentPhaseClassifier:
         return content
 
     @torch.no_grad()
-    def predict_phase(self, current_rgb, history_images=None, demo_images=None):
+    def predict_phase(
+        self, 
+        current_rgb, 
+        history_images=None, 
+        demo_images=None, 
+        human_reasoning_images=None, 
+        human_reasoning_phases=None, 
+        human_reasoning_reasoning=None):
         """
         Args:
             current_rgb: PIL.Image or np.array (The latest state)
@@ -81,11 +144,16 @@ class GarmentPhaseClassifier:
         """
         history_images = history_images or []
         demo_images = demo_images or []
+        human_reasoning_images_urls = None
+        if human_reasoning_images is not None:
+            human_reasoning_images_urls = [load_image_array_to_url(img) for img in human_reasoning_images]
 
         # 1. Assemble the list of all images in the order they appear in the prompt
         all_images = []
         if self.config.use_demo:
             all_images.extend(demo_images)
+        if self.config.use_human_reasoning_skill:
+            all_images.extend(human_reasoning_images)
         if self.config.use_history:
             all_images.extend(history_images)
         all_images.append(current_rgb)
@@ -93,8 +161,36 @@ class GarmentPhaseClassifier:
         # 2. Build the prompt structure
         messages = [{
             "role": "user", 
-            "content": self._build_prompt_content(history_images, demo_images)
+            "content": self._build_prompt_content(current_rgb, history_images, demo_images, human_reasoning_images_urls, human_reasoning_phases, human_reasoning_reasoning)
         }]
+
+        import json
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = f"messages_{timestamp}.json"
+
+        # Save messages
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(messages, f, indent=2, ensure_ascii=False)
+
+
+
+        print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+        print("                                                    ")
+        print("                                                    ")
+        print("                                                    ")
+        print("                                                    ")
+
+        print(f"[GarmentPhaseClassifier] messages are this \n\n{messages}")
+
+        print("fglfkhlfhklfgklfglkfg ", type(history_images), history_images[0].shape if history_images else None)
+        print("                                                    ")
+        print("                                                    ")
+        print("                                                    ")
+        print("                                                    ")
+        print("                                                    ")
+
+        
 
         prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
 
@@ -105,6 +201,8 @@ class GarmentPhaseClassifier:
             return_tensors="pt"
         ).to(self.device)
 
+        # print(f"########################\n\n [GarmentPhaseClassifier] Number of images in prompt: {len(all_images)} \n\n {inputs} \n\n########################")
+        # inputs.pop("image_grid_thw", None)
         # 4. Generate
         max_tokens = 150 if self.config.use_reasoning else 10
         outputs = self.model.generate(
@@ -119,6 +217,111 @@ class GarmentPhaseClassifier:
         full_output = self.processor.decode(generated_tokens, skip_special_tokens=True).strip()
 
         return self._parse_output(full_output)
+    
+    def let_human_reason_and_decide(self, current_rgb, history_images=None, demo_images=None):
+        """
+        Args:
+            current_rgb: PIL.Image or np.array (The latest state)
+            history_images: List of PIL.Images (Past states in current episode)
+            demo_images: List of PIL.Images (Images from an expert demonstration)
+        """
+        import tkinter as tk
+        from tkinter import ttk, scrolledtext
+        import threading
+        
+        history_images = history_images or []
+        demo_images = demo_images or []
+
+        # Create result container
+        result = {"action": None, "reasoning": None}
+        
+        def create_ui():
+            root = tk.Tk()
+            root.title("Human Decision Interface - Garment Manipulation")
+            root.geometry("800x700")
+            
+            # Main frame
+            main_frame = ttk.Frame(root, padding="10")
+            main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+            
+            # Display current image
+            ttk.Label(main_frame, text="Current Garment State:", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky=tk.W)
+            
+            # Convert PIL image to PhotoImage for Tkinter
+            from PIL import ImageTk, Image
+            # img_display = current_rgb.copy() if hasattr(current_rgb, 'copy') else current_rgb
+            img_display = Image.fromarray(current_rgb) if not isinstance(current_rgb, Image.Image) else current_rgb
+            img_display = img_display.resize((400, 300), Image.Resampling.LANCZOS)
+            # img_display = img_display.resize((400, 300))
+            photo = ImageTk.PhotoImage(img_display)
+            
+            img_label = ttk.Label(main_frame, image=photo)
+            img_label.image = photo  # Keep reference to prevent garbage collection
+            img_label.grid(row=1, column=0, columnspan=2, pady=(0, 20))
+            
+            # Action selection
+            ttk.Label(main_frame, text="Choose Action:", font=("Arial", 12, "bold")).grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
+            
+            action_var = tk.StringVar(value="flattening")
+            action_frame = ttk.Frame(main_frame)
+            action_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+            
+            ttk.Radiobutton(action_frame, text="Flattening", variable=action_var, value="flattening").pack(side=tk.LEFT, padx=(0, 20))
+            ttk.Radiobutton(action_frame, text="Folding", variable=action_var, value="folding").pack(side=tk.LEFT)
+            
+            # Reasoning input
+            ttk.Label(main_frame, text="Reasoning/Explanation:", font=("Arial", 12, "bold")).grid(row=4, column=0, sticky=tk.W, pady=(0, 5))
+            
+            reasoning_text = scrolledtext.ScrolledText(main_frame, height=8, width=70, wrap=tk.WORD)
+            reasoning_text.grid(row=5, column=0, columnspan=2, pady=(0, 20))
+            
+            # Buttons
+            button_frame = ttk.Frame(main_frame)
+            button_frame.grid(row=6, column=0, columnspan=2, pady=(0, 10))
+            
+            def submit_decision():
+                result["action"] = action_var.get()
+                result["reasoning"] = reasoning_text.get("1.0", tk.END).strip()
+                root.quit()  # Close the UI
+                root.destroy()
+            
+            def cancel_decision():
+                result["action"] = None
+                result["reasoning"] = None
+                root.quit()
+                root.destroy()
+            
+            ttk.Button(button_frame, text="Submit Decision", command=submit_decision).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="Cancel", command=cancel_decision).pack(side=tk.LEFT)
+            
+            # Center the window
+            root.update_idletasks()
+            x = (root.winfo_screenwidth() // 2) - (root.winfo_width() // 2)
+            y = (root.winfo_screenheight() // 2) - (root.winfo_height() // 2)
+            root.geometry(f"+{x}+{y}")
+            
+            root.mainloop()
+        
+        # Run UI in separate thread to avoid blocking
+        ui_thread = threading.Thread(target=create_ui)
+        ui_thread.daemon = True
+        ui_thread.start()
+        ui_thread.join()  # Wait for user input
+        
+        # Return the human decision in the same format as AI output
+        # {"action": None, "reasoning": None}
+        return result["action"], result["reasoning"]
+
+# def _parse_output(self, human_result):
+#     """Parse human result to match AI output format"""
+#     if human_result["action"] is None:
+#         return {"action": None, "reasoning": None}
+    
+#     return {
+#         "action": human_result["action"],
+#         "reasoning": human_result["reasoning"]
+#     }
+
 
     def _parse_output(self, output_text):
         output_lower = output_text.lower()

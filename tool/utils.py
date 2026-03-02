@@ -16,6 +16,8 @@ def resolve_save_root(default_root):
         return '/mnt/scratch/users/hcv530/garment_folding_data'
     elif "labruja" in hostname:
         return '/data/ah390/bimanual_garment_folding'
+    elif "uos" in hostname:
+        return '.tmp/bimanual_garment_folding'
     else:
         raise ValueError
     

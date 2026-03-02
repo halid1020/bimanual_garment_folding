@@ -16,7 +16,7 @@ class WandbLogger(Logger):
             config=config,
             id=run_id,          # allow restoring
             resume="must" if resume else "never",
-            dir='/mnt/ssd'
+            dir='./tmp'
         )
 
         self.log_dir = None

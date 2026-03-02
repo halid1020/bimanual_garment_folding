@@ -7,4 +7,5 @@ runs
 datasets
 outputs
 models
+.vscode/
 *.sif

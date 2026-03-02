@@ -7,4 +7,4 @@ defaults:
 train_and_eval: train_and_evaluate_single
 exp_name: dreamerv3_multi_longsleeve_multi_primitive_folding_from_crumpled_v1_test
 project_name: bimanual_garment_folding
-save_root: /mnt/ssd/garment_folding_data
+save_root: ./tmp/garment_folding_data

@@ -25,6 +25,7 @@ class HumanMultiPrimitive(Agent):
         ]
         self.overlay_goal_contour = config.get('overlay_goal_contour', False)
 
+        print(f'XXXXXXXXXXXXXXXXXX [human-multi-primitive] Available config: {self.config}')
         self.primitive_instances = [
             PixelHumanFling(config),
             # PixelHumanTwoPicker(config),

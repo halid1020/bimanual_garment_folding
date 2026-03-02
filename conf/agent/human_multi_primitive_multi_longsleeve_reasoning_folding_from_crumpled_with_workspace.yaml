@@ -1,0 +1,52 @@
+name: human-multi-primitive-reasoning
+
+human_reasoning:
+  # Master switch
+  enabled: true
+
+  # Root directory where all episodes / steps are stored
+  save_dir: ./tmp/human_reasoning
+
+  # Episode / step directory format
+  episode_format: "episode_{episode_id}"
+  step_format: "step_{step_id}"
+
+  # What to save
+  save:
+    rendered_image: true        # image with overlays + reasoning
+    raw_rgb: true               # original observation rgb
+    goal_rgb: true              # 2x2 goal grid image
+    json: true                  # decision.json
+
+  # Image rendering options
+  image:
+    format: "png"
+
+    draw_overlays: true         # masks, IoU, success
+    draw_choice_banner: false   # reserved (not yet implemented)
+    draw_reasoning_text: true   # overlay reasoning on image
+
+    # Reasoning text rendering
+    max_reasoning_lines: 4
+    font_scale: 0.45
+    thickness: 1
+
+  # Prompt shown to the human
+  prompts:
+    reasoning: >
+      Explain your reasoning (1–3 sentences).
+      Focus on cloth configuration, failure risk,
+      and intended effect of the action.
+
+  # What metadata is logged in decision.json
+  metadata:
+    save_eval_metrics: true
+    save_success_flag: true
+    save_episode_step: true
+    save_timestamp: true
+
+  # Future-proofing (not required now, but harmless)
+  future:
+    allow_confidence_score: false
+    allow_structured_tags: false
+    allow_posthoc_comment: false

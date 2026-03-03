@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import torch
-import cv2
 
 # Relative imports to access core code
 from .utils import *

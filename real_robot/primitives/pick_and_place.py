@@ -284,6 +284,7 @@ class PickAndPlaceSkill:
 
         # 4. Release & Retract
         # -------------------------------------------------------------------------
+        self.dual_arm_release_tension()
         self.scene.both_open_gripper()
         time.sleep(0.3)
 
@@ -293,3 +294,61 @@ class PickAndPlaceSkill:
         
         if self.home_after:
             self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+    
+    def dual_arm_release_tension(self, release_force=-2.0, max_time=1.5, speed_threshold=0.005, max_release_dist=0.15): 
+        """Uses force control to let the arms comply with the fabric's tension until slack."""
+        print(f"[PickAndPlace] Relaxing tension with {release_force}N...")
+        task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+        selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
+        force_type = 2
+        limits = [0.15, 2, 2, 1, 1, 1]
+        dt = 0.1 
+
+        start_width = self.scene.get_tcp_distance()
+        target_width_min = start_width - max_release_dist 
+
+        with self.scene.ur5e.start_force_mode() as right_force_guard:
+            with self.scene.ur16e.start_force_mode() as left_force_guard:
+                start_time = time.time()
+                prev_time = start_time
+                
+                while True:
+                    elapsed = time.time() - start_time
+                    
+                    if elapsed >= max_time:
+                        print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
+                        break
+                    
+                    # Apply gentle inward wrench
+                    right_wrench = [0, release_force, 0, 0, 0, 0]
+                    left_wrench = [0, release_force, 0, 0, 0, 0]
+
+                    r = right_force_guard.apply_force(task_frame, selection_vector, right_wrench, force_type, limits)
+                    if not r: return False
+                    r = left_force_guard.apply_force(task_frame, selection_vector, left_wrench, force_type, limits)
+                    if not r: return False
+                    
+                    # Stop if they move too close together
+                    tcp_distance = self.scene.get_tcp_distance()
+                    if tcp_distance <= target_width_min:
+                        print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
+                        break
+
+                    # Monitor speed to see if the arms have settled
+                    l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
+                    r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
+                    actual_speed = max(l_speed, r_speed)
+                    
+                    # Wait 0.5s before checking speed to allow initial acceleration
+                    if elapsed > 0.5:
+                        if actual_speed < speed_threshold:
+                            print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                            break
+
+                    curr_time = time.time()
+                    duration = curr_time - prev_time
+                    if duration < dt:
+                        time.sleep(dt - duration)
+                    prev_time = curr_time
+                    
+        return True

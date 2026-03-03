@@ -32,6 +32,7 @@ from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
 from controllers.rl.lagarnet.gc_rssm import GC_RSSM
 from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
 from controllers.rl.lagarnet.single_arm_mask_pick_and_place_mpc import SingleArmMaskPickAndPlaceMPC
+from controllers.rl.cloth_mate.adapter import ClothMateAdapter
 
 import actoris_harena as athar
 
@@ -61,3 +62,4 @@ def register_agents():
     athar.register_agent('lagarnet', GC_RSSM)
     athar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)
     athar.register_agent('single_arm_mask_pick_and_place_mpc', SingleArmMaskPickAndPlaceMPC)
+    athar.register_agent('clothmate', ClothMateAdapter)

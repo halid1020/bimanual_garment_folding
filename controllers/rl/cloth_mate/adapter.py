@@ -74,7 +74,7 @@ class ClothMateAdapter(TrainableAgent):
             deformable_pos=config.get('deformable_pos', True),
             unfactorized_networks=config.get('unfactorized_networks', False),
             coverage_reward=config.get('coverage_reward', False),
-            bilinear=config.get('bilinear', True)
+            # bilinear=config.get('bilinear', True)
         ).to(self.device)
 
     def load_best(self, path=None):
@@ -429,3 +429,14 @@ class ClothMateAdapter(TrainableAgent):
             retval[f"{primitive}_mask"] = torch.logical_and(cloth_mask_dict[primitive], primitive_workspace_mask)
             
         return retval
+
+    def save(self):
+        pass
+
+    def set_eval(self):
+        self.policy.set_eval()
+        self.keypoint_detector.set_eval()
+    
+    def set_train(self):#
+        self.policy.set_train()
+        self.keypoint_detector.set_train()

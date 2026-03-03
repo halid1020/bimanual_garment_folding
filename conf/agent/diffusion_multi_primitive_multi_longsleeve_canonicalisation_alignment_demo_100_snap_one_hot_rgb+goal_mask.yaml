@@ -27,7 +27,7 @@ demo_policy_config:
 validation_interval: 1000
 total_update_steps: 100000
 eval_checkpoint: -1
-debug: True
+debug: False
 add_all_demos: True
 
 recon_weight: 0.1
@@ -55,9 +55,9 @@ dataset_config:
       shape: [128, 128, 3]
       output_key: 'rgb'
 
-    semkey_pos:
-      shape: [15]
-      output_key: 'semkey_pos'
+    semkey_norm_pixel:
+      shape: [15, 2]
+      output_key: 'semkey_norm_pixel'
 
     goal_rgb: 
       shape: [128, 128, 3]
@@ -71,9 +71,10 @@ dataset_config:
       shape: [128, 128, 1]
       output_key: 'goal_mask'
 
-    flattened_semkey_pos:
-      shape: [15]
-      output_key: 'flattened_semkey_pos'
+    flattened_semkey_norm_pixel:
+      shape: [15, 2]
+      output_key: 'flattened_semkey_norm_pixel'
+
 
   act_config:
     default: 

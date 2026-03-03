@@ -133,7 +133,8 @@ class DualArmArena(Arena):
         self.crop_size = crop_size
 
         crop_rgb = raw_rgb[y1:y2, x1:x2]
-        crop_mask = get_mask_v2(self.mask_generator, crop_rgb, 
+        crop_mask = get_mask_v2(self.mask_generator, crop_rgb,
+                                min_saturation=50,
                                 debug=self.debug, mask_threshold_max=180000)
         self.cloth_mask = crop_mask
         

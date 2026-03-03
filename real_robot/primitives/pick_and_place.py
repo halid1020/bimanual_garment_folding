@@ -215,7 +215,7 @@ class PickAndPlaceSkill:
         app_pick_0 = np.concatenate([p0_pick + [0,0,APPROACH_DIST], rot0])
         app_pick_1 = np.concatenate([p1_pick + [0,0,APPROACH_DIST], rot1])
         
-        self.scene.both_movel(app_pick_0, app_pick_1, speed=self.move_speed, acc=self.move_acc, blocking=True)
+        self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED-0.5, acc=MOVE_ACC-0.5, blocking=True)
 
         # 2. Parallel Force Detection (Threaded Contact)
         # -------------------------------------------------------------------------
@@ -293,10 +293,32 @@ class PickAndPlaceSkill:
         self.scene.both_movel(app_place_0, app_place_1, speed=self.move_speed, acc=self.move_acc, blocking=True)
         
         if self.home_after:
-            self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+            self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
     
     def dual_arm_release_tension(self, release_force=-2.0, max_time=1.5, speed_threshold=0.005, max_release_dist=0.15): 
         """Uses force control to let the arms comply with the fabric's tension until slack."""
+        
+        # --- FIX 1: Proactive Singularity Avoidance ---
+        # Get TCP positions (assuming they return [x, y, z, rx, ry, rz] in the robot's base frame)
+        pose5 = self.scene.ur5e.get_tcp_pose()
+        pose16 = self.scene.ur16e.get_tcp_pose()
+        
+        # Calculate radial distance from base Z-axis (Shoulder singularity zone)
+        dist5 = np.linalg.norm(pose5[:2])
+        dist16 = np.linalg.norm(pose16[:2])
+        
+        # 15cm is a standard safe zone to avoid UR shoulder singularities
+        SINGULARITY_THRESHOLD = 0.35
+
+        print(f"[PickAndPlace Release WARNING: Arm(s) to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
+
+        if dist5 < SINGULARITY_THRESHOLD or dist16 < SINGULARITY_THRESHOLD:
+            print(f"[PickAndPlace Release] WARNING: Arm(s) too close to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
+            print("[PickAndPlace Release] Skipping force-mode to avoid singularity error.")
+            # Simply skip force mode. The script will proceed to open the grippers naturally.
+            return False
+        # ----------------------------------------------
+
         print(f"[PickAndPlace] Relaxing tension with {release_force}N...")
         task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
         selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
@@ -307,48 +329,54 @@ class PickAndPlaceSkill:
         start_width = self.scene.get_tcp_distance()
         target_width_min = start_width - max_release_dist 
 
-        with self.scene.ur5e.start_force_mode() as right_force_guard:
-            with self.scene.ur16e.start_force_mode() as left_force_guard:
-                start_time = time.time()
-                prev_time = start_time
-                
-                while True:
-                    elapsed = time.time() - start_time
+        # --- FIX 2: Try/Except Guardrail ---
+        try:
+            with self.scene.ur5e.start_force_mode() as right_force_guard:
+                with self.scene.ur16e.start_force_mode() as left_force_guard:
+                    start_time = time.time()
+                    prev_time = start_time
                     
-                    if elapsed >= max_time:
-                        print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
-                        break
-                    
-                    # Apply gentle inward wrench
-                    right_wrench = [0, release_force, 0, 0, 0, 0]
-                    left_wrench = [0, release_force, 0, 0, 0, 0]
+                    while True:
+                        elapsed = time.time() - start_time
+                        
+                        if elapsed >= max_time:
+                            print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
+                            break
+                        
+                        # Apply gentle inward wrench
+                        right_wrench = [0, release_force, 0, 0, 0, 0]
+                        left_wrench = [0, release_force, 0, 0, 0, 0]
 
-                    r = right_force_guard.apply_force(task_frame, selection_vector, right_wrench, force_type, limits)
-                    if not r: return False
-                    r = left_force_guard.apply_force(task_frame, selection_vector, left_wrench, force_type, limits)
-                    if not r: return False
-                    
-                    # Stop if they move too close together
-                    tcp_distance = self.scene.get_tcp_distance()
-                    if tcp_distance <= target_width_min:
-                        print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
-                        break
-
-                    # Monitor speed to see if the arms have settled
-                    l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
-                    r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
-                    actual_speed = max(l_speed, r_speed)
-                    
-                    # Wait 0.5s before checking speed to allow initial acceleration
-                    if elapsed > 0.5:
-                        if actual_speed < speed_threshold:
-                            print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                        r = right_force_guard.apply_force(task_frame, selection_vector, right_wrench, force_type, limits)
+                        if not r: return False
+                        r = left_force_guard.apply_force(task_frame, selection_vector, left_wrench, force_type, limits)
+                        if not r: return False
+                        
+                        # Stop if they move too close together
+                        tcp_distance = self.scene.get_tcp_distance()
+                        if tcp_distance <= target_width_min:
+                            print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
                             break
 
-                    curr_time = time.time()
-                    duration = curr_time - prev_time
-                    if duration < dt:
-                        time.sleep(dt - duration)
-                    prev_time = curr_time
-                    
-        return True
+                        # Monitor speed to see if the arms have settled
+                        l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
+                        r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
+                        actual_speed = max(l_speed, r_speed)
+                        
+                        if elapsed > 0.5:
+                            if actual_speed < speed_threshold:
+                                print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                                break
+
+                        curr_time = time.time()
+                        duration = curr_time - prev_time
+                        if duration < dt:
+                            time.sleep(dt - duration)
+                        prev_time = curr_time
+                        
+            return True
+
+        except Exception as e:
+            # If the UR controller throws a protective stop or RTDE exception, catch it here
+            print(f"[PickAndPlace Release] ABORTED: Force mode triggered an error: {e}")
+            return False

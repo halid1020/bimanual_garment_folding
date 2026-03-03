@@ -31,6 +31,7 @@ def get_mask_v2(mask_generator, rgb,
     """
     Select the best mask likely to be the cloth based on Color Saturation.
     """
+    save_dir = f"{save_dir}/cloth_masks"
     os.makedirs(save_dir, exist_ok=True)
     
     # 1. Convert to HSV once globally to save time
@@ -102,6 +103,7 @@ def get_mask_v2(mask_generator, rgb,
             'id': idx,
             'variance': mask_variance,
             'saturation': avg_saturation,
+            'avg_value': avg_value,   # <--- ADD THIS LINE
             'score': score
         })
 
@@ -117,6 +119,15 @@ def get_mask_v2(mask_generator, rgb,
     final_mask_data = sorted(mask_data, key=lambda x: x['score'], reverse=True)[0]
     
     final_mask = final_mask_data['mask']
+
+    
+    if debug:
+        print(f"\n[Final Mask Attributes] ID: {final_mask_data['id']}")
+        print(f"  - Region Size:   {final_mask_data['mask_region_size']} pixels")
+        print(f"  - Variance:      {final_mask_data['variance']:.2f}")
+        print(f"  - Saturation:    {final_mask_data['saturation']:.2f}")
+        print(f"  - Average Value: {final_mask_data['avg_value']:.2f}\n")
+    
 
     if debug:
         final_filename = os.path.join(save_dir, f"FINAL_mask_{final_mask_data['id']}.png")

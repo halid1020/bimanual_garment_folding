@@ -158,7 +158,7 @@ class PickAndFlingSkill:
         self.scene.both_movel(
             app_pick_0,
             app_pick_1,
-            speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
+            speed=MOVE_SPEED-0.5, acc=MOVE_ACC-0.5, blocking=True)
 
         # self.scene.both_movel(
         #     np.concatenate([grasp_pick_0, rot_0]),
@@ -277,6 +277,15 @@ class PickAndFlingSkill:
             full_trajectory_ref=full_trajectory_ref)
             
         if not r: return False
+
+        self.dual_arm_shake(
+            num_shakes=3,       # Number of bounces
+            amplitude=0.03,     # updown in cm.
+            speed=2,          # Fast speed for aggressive shake
+            acc=4.0,            # High acceleration to snap the fabric
+            record_debug=record_debug,
+            full_trajectory_ref=full_trajectory_ref
+        )
         
         # Update Start Points from Actual Robots
         current_p5_base = self.scene.ur5e.get_tcp_pose()
@@ -501,3 +510,46 @@ class PickAndFlingSkill:
                     prev_time = curr_time
                     
         return True
+    
+    def dual_arm_shake(self, num_shakes=3, amplitude=0.08, speed=1.5, acc=3.0, record_debug=False, full_trajectory_ref=None):
+        """
+        Executes a rapid vertical shake to loosen folds in the fabric.
+        """
+        print(f"[Shake] Executing {num_shakes} vertical shakes...")
+        
+        # Get current starting poses for both robots
+        start_pose5 = self.scene.ur5e.get_tcp_pose()
+        start_pose16 = self.scene.ur16e.get_tcp_pose()
+        
+        path_5 = []
+        path_16 = []
+        
+        for _ in range(num_shakes):
+            # Waypoint: UP
+            up_5 = start_pose5.copy()
+            up_5[2] += amplitude
+            path_5.append(up_5)
+            
+            up_16 = start_pose16.copy()
+            up_16[2] += amplitude
+            path_16.append(up_16)
+            
+            # Waypoint: DOWN
+            down_5 = start_pose5.copy()
+            down_5[2] -= amplitude
+            path_5.append(down_5)
+            
+            down_16 = start_pose16.copy()
+            down_16[2] -= amplitude
+            path_16.append(down_16)
+            
+        # Final Waypoint: Back to start
+        path_5.append(start_pose5)
+        path_16.append(start_pose16)
+        
+        # Execute the continuous path
+        # Using a higher blend radius (if supported by your wrapper) helps smooth the shake
+        self.scene.both_movel(path_5, path_16, speed=speed, acc=acc, blocking=True, record=record_debug)
+        
+        if record_debug and full_trajectory_ref:
+            self._append_scene_trajectory(full_trajectory_ref)

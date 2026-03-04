@@ -48,6 +48,7 @@ def main(cfg: DictConfig):
 
     trajectory_map = [] 
     source_datasets = []
+    success_indices_per_source = []  # Tracks successful traj indices for each dataset
 
     print("Scanning source datasets via Hydra Configs...")
     
@@ -88,29 +89,74 @@ def main(cfg: DictConfig):
         num_trajs = src_dataset.num_trajectories()
         print(f" -> Found {num_trajs} trajectories.")
 
-        for j in range(num_trajs):
-            trajectory_map.append((i, j))
+        num_trajs = src_dataset.num_trajectories()
+        current_source_successes = []
+        print(f" -> Scanning {num_trajs} trajectories for success flags...")
 
-    # 3. Shuffle Completely Randomly
-    print(f"\nTotal trajectories to merge: {len(trajectory_map)}")
-    print("Shuffling trajectories...")
+        # Scan every trajectory to check for success
+        for j in tqdm(range(num_trajs), desc=f"Scanning Source {i}", leave=False):
+            # NOTE: Loading the full trajectory here might be slow. 
+            # If your dataset class has a faster way to read just the 'success' key, use it here.
+            trajectory_data = src_dataset.get_trajectory(j)
+            obs = trajectory_data['observation']
+            
+            is_successful = False
+            if 'success' in obs:
+                is_successful = np.any(obs['success'][-1] > 0.5)
+            
+            if is_successful:
+                current_source_successes.append(j)
+                
+        success_indices_per_source.append(current_source_successes)
+        print(f" -> Found {len(current_source_successes)} successful trajectories.")
+
+    # 3. Build the Trajectory Map based on Config Flags
     random.seed(42) 
+
+    if cfg.get("even_success", False):
+        # Find the bottleneck: the dataset with the fewest successes
+        min_success_num_trj = min(len(succ_list) for succ_list in success_indices_per_source)
+        print(f"\n[even_success=True] Minimum successes across datasets: {min_success_num_trj}")
+        
+        if min_success_num_trj == 0:
+            print("WARNING: One or more datasets have 0 successful trajectories. Target dataset will be empty!")
+
+        for i, succ_list in enumerate(success_indices_per_source):
+            # Randomly sample the exact minimum amount from each dataset
+            sampled_indices = random.sample(succ_list, min_success_num_trj)
+            for j in sampled_indices:
+                trajectory_map.append((i, j))
+                
+    elif cfg.get("success_only", False):
+        # Keep all successful trajectories, unbalanced
+        print("\n[success_only=True] Keeping all successful trajectories.")
+        for i, succ_list in enumerate(success_indices_per_source):
+            for j in succ_list:
+                trajectory_map.append((i, j))
+                
+    else:
+        # Keep everything
+        print("\n[Default] Keeping all trajectories.")
+        for i, src_dataset in enumerate(source_datasets):
+            for j in range(src_dataset.num_trajectories()):
+                trajectory_map.append((i, j))
+
+    print(f"\nTotal trajectories to merge after filtering: {len(trajectory_map)}")
+    print("Shuffling trajectories...")
     random.shuffle(trajectory_map)
 
     # 4. Write to Target Dataset
     pbar = tqdm(total=len(trajectory_map), desc='Merging Datasets')
     
-    # Keys that might require spatial resizing
     image_keys = ['rgb', 'depth', 'mask', 'goal-rgb', 'goal-depth', 'goal-mask']
     
     for src_idx, traj_idx in trajectory_map:
         src_dataset = source_datasets[src_idx]
-
-        # Retrieve the trajectory dictionary
         trajectory_data = src_dataset.get_trajectory(traj_idx) 
         
         obs = trajectory_data['observation']
         act = trajectory_data['action']
+
 
         # --- DYNAMIC RESIZING LOGIC ---
         for key in image_keys:
@@ -165,7 +211,9 @@ def main(cfg: DictConfig):
         target_dataset.add_trajectory(obs, act)
         pbar.update(1)
 
-    print(f"\nSuccessfully combined and shuffled datasets into: {cfg.target_data_path}")
+        
+
+    print(f"\nSuccessfully processed and combined {len(trajectory_map)} balanced trajectories into: {cfg.target_data_path}")
 
 if __name__ == '__main__':
     main()

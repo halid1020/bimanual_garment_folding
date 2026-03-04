@@ -357,7 +357,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 5
         elif self.config.input_obs == 'rgb-workspace-mask-goal':
             self.input_channel = 8
-        elif self.config.input_obs == 'rgb-goal':
+        elif self.config.input_obs == 'rgb+goal_rgb':
             self.input_channel = 6
         elif self.config.input_obs == 'rgb+goal_mask':
             self.input_channel = 4
@@ -537,8 +537,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 nbatch['rgb-workspace-mask-goal'] = torch.cat([
                     nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
             
-            if self.config.input_obs == 'rgb-goal':
-                nbatch['rgb-goal'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_rgb':
+                nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
             
             if self.config.input_obs == 'rgb+goal_mask':
                 nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
@@ -1004,8 +1004,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgbd'] = np.concatenate(
                 [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
         
-        if self.config.input_obs == 'rgb-goal':
-            info['observation']['rgb-goal'] = np.concatenate(
+        if self.config.input_obs == 'rgb+goal_rgb':
+            info['observation']['rgb+goal_rgb'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):

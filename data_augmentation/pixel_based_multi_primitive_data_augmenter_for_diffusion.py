@@ -245,13 +245,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['robot1_mask'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 4:5]
             sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
         
-        if self.use_goal and 'rgb-goal' in sample:
-            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] sample rgb-goal shape', sample['rgb-goal'].shape)
-            sample['rgb'] = sample['rgb-goal'][:, :, :, :, :3]
-            sample['goal_rgb'] = sample['rgb-goal'][:, :, :, :, 3:6]
+        if self.use_goal and 'rgb+goal_rgb' in sample:
+            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] sample rgb+goal_rgb shape', sample['rgb+goal_rgb'].shape)
+            sample['rgb'] = sample['rgb+goal_rgb'][:, :, :, :, :3]
+            sample['goal_rgb'] = sample['rgb+goal_rgb'][:, :, :, :, 3:6]
         
         if self.use_goal and 'rgb+goal_mask' in sample:
-            #print('sample rgb-goal shape', sample['rgb-goal'].shape)
+            #print('sample rgb+goal_rgb shape', sample['rgb+goal_rgb'].shape)
             sample['rgb'] = sample['rgb+goal_mask'][:, :, :, :, :3]
             sample['goal_mask'] = sample['rgb+goal_mask'][:, :, :, :, 3:4]
         
@@ -551,7 +551,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #     COLOR JITTER & NOISE
         # =========================
         if self.color_jitter and train:
-            if self.use_goal and 'goal_rgb' in sample:
+            if self.use_goal_rgb:
                 N_obs = rgb_obs.shape[0]
                 combined = torch.cat([rgb_obs, goal_obs], dim=0)
                 combined = self.color_aug(combined)
@@ -619,9 +619,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if 'rgb-workspace-mask' in sample:
             sample['rgb-workspace-mask'] = torch.cat([rgb_obs, robot0_mask, robot1_mask], dim=2)
 
-        if 'rgb-goal' in sample:
+        if 'rgb+goal_rgb' in sample:
             if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] reconcanation after augmentation!!!')
-            sample['rgb-goal'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
+            sample['rgb+goal_rgb'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
         
         if 'rgb-workspace-mask-goal' in sample:
             sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)

@@ -3,8 +3,8 @@ name: multi-primitive-diffusion
 oracle: False
 obs_dim: 1024 #COMP obs_emb + goal_obs_emb
 action_dim: 4
-obs_horizon: 4 # COMP
-pred_horizon: 6 # COMP
+obs_horizon: 2 # COMP
+pred_horizon: 4 # COMP
 num_diffusion_iters: 100
 action_horizon: 1
 input_obs: 'rgb+goal_rgb' # COMP
@@ -16,6 +16,7 @@ encoder_batchnorm: False
 encoder_residual: False
 embedding_dim: 512 #COMP
 activation: 'relu'
+device: "cuda:0"
 
 ## TODO: add representaiton learning of 
 # predicting mask of current observation
@@ -23,9 +24,9 @@ activation: 'relu'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: ? # COMP
+num_demos: 5000 # COMP
 batch_size: 50 # COMP
-disable_updown: True
+disable_updown: False
 collect_on_success: False # This is important!
 data_obs: 'image'
 data_state: 'agent_pos'
@@ -58,38 +59,38 @@ grad_clip_norm: 100.0 # org unset
 dataset_mode: "general"
 dataset_config:
   data_path: "all_garment_diffusion_success_only"
-  num_trj: ?
+  num_trj: 5000
   data_dir: "./data/datasets"
-  seq_length: 6 # COMP
+  seq_length: 4
   io_mode: "w"
-  cache_in_memory: True
+  cache_in_memory: False
   obs_config:
-    mask: 
-      shape: [64, 64, 1]
-      output_key: 'mask'
+    # mask: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'mask'
     
-    depth: 
-      shape: [64, 64, 1]
-      output_key: 'depth'
+    # depth: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'depth'
     
     rgb: 
       shape: [64, 64, 3]
       output_key: 'rgb'
 
-    goal_rgb: 
+    goal-rgb: 
       shape: [64, 64, 3]
       output_key: 'goal_rgb'
     
-    goal_depth: 
-      shape: [64, 64, 1]
-      output_key: 'goal_depth'
+    # goal-depth: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'goal_depth'
     
-    goal_mask: 
-      shape: [64, 64, 1]
-      output_key: 'goal_mask'
+    # goal-mask: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'goal_mask'
 
   act_config:
-    default: 
+    norm-pixel-pick-and-place: 
       shape: [4]
       output_key: 'default'
 

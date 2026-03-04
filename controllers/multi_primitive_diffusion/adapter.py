@@ -394,14 +394,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
             self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
         elif self.vision_encoder_type == 'gc_rssm_encoder':
-            from .rl.lagarnet.networks import ImageEncoder
+            from ..rl.lagarnet.networks import ImageEncoder
             self.vision_encoder = ImageEncoder(
                 image_dim=self.config.input_obs_dim,
                 embedding_size=self.config.embedding_dim,
                 activation_function=self.config.activation,
                 batchnorm=self.config.encoder_batchnorm,
                 residual=self.config.encoder_residual
-            ).to(self.config.device)
+            ) #.to(self.config.device)
 
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
@@ -480,11 +480,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             elif self.vision_encoder_type == 'gc_rssm_encoder':
                 image = torch.zeros(
                     (1, self.config.obs_horizon,
-                    3,64,64)).to(self.device)
+                    3,64,64)) #.to(self.config.device)
                 
                 goal_image = torch.zeros(
                     (1, self.config.obs_horizon,
-                    3,64,64)).to(self.device)
+                    3,64,64)) #.to(self.config.device)
 
                 # Flatten batch and time dimensions for the forward pass
                 image_feat = self.nets['vision_encoder'](image.flatten(end_dim=1))
@@ -570,7 +570,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             else:
                 obs = nbatch['observation']
                 action = nbatch['action']['default']
-                #print('[diffusion] action', action.shape)
+                print('[diffusion] action', action.shape, action[0])
                 nbatch = {v: k for v, k in obs.items()}
                 nbatch['action'] = action.reshape(*action.shape[:2], -1)
                 #print('action after shape', nbatch['action'] .shape)
@@ -609,10 +609,32 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
           
             # encoder vision features
             #print('[diffusion] input obs shape', input_obs.shape)
-            image_features = self.nets['vision_encoder'](
-                input_obs)
-            obs_features = image_features.reshape(
-                B, self.config.obs_horizon, -1)
+            # image_features = self.nets['vision_encoder'](
+            #     input_obs)
+            # obs_features = image_features.reshape(
+            #     B, self.config.obs_horizon, -1)
+
+            if self.vision_encoder_type == 'original':
+                image_features = self.nets['vision_encoder'](input_obs)
+                obs_features = image_features.reshape(
+                    B, self.config.obs_horizon, -1)
+                
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                # Slicing the 6-channel image into two 3-channel images (obs and goal)
+                # image shape is expected to be (obs_horizon, 6, H, W)
+                rgb_part = input_obs[:, :3, :, :]
+                goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                obs_feature = self.nets['vision_encoder'](rgb_part) 
+                goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+
+                # Concatenate the two feature vectors along the last dimension
+                image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
+                obs_features = image_features.reshape(
+                    B, self.config.obs_horizon, -1)
+            
+            print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 
             recon_loss = torch.tensor(0.0, device=self.device)
             if self.rep_learn == 'auto-encoder':

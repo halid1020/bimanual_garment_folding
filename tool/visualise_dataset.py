@@ -63,7 +63,7 @@ def visualize_data(data_dir, data_path, local_obs_config, action_config):
     
     # Dynamically find the action key and image size from config
     act_key = list(action_config.keys())[0]  # e.g., 'norm-pixel-pick-and-place'
-    img_size = local_obs_config['rgb']['shape'][0] # e.g., 128
+    img_size = local_obs_config['rgb']['shape'][0] # e.g., 64
     
     full_path = os.path.join(data_dir, data_path)
     print(f"Dataset Path: {full_path}")
@@ -127,6 +127,7 @@ def visualize_data(data_dir, data_path, local_obs_config, action_config):
                 action = actions[step]
             else:
                 action = np.zeros_like(actions[0]) 
+            print('action', action)
             
             img_with_action = img.copy()
 
@@ -206,14 +207,14 @@ if __name__ == "__main__":
             # 2. Fallback to manual dictionaries if no saved config exists
             print("No saved config found. Using manual fallback configurations.")
             
-            # NOTE: Change '128' if your images are a different size (e.g., 256 or 84)
+            # NOTE: Change '64' if your images are a different size (e.g., 256 or 84)
             local_obs_config = {
-                'rgb': {'shape': [128, 128, 3], 'output_key': 'rgb'},
-                'mask': {'shape': [128, 128, 1], 'output_key': 'mask'} 
+                'rgb': {'shape': [64, 64, 3], 'output_key': 'rgb'},
+                'mask': {'shape': [64, 64, 1], 'output_key': 'mask'} 
             }
             # NOTE: Change the key if your dataset uses a different action name
             action_config = {
-                'default': {'shape': [9], 'output_key': 'default'}
+                'default': {'shape': [4], 'output_key': 'default'}
             }
 
         # Run the visualization core logic directly

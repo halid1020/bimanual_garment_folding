@@ -1,21 +1,21 @@
 obs_config:
   rgb:
-    shape: [128, 128, 3]
+    shape: [64, 64, 3]
     output_key: rgb
   depth:
-    shape: [128, 128, 1]
+    shape: [64, 64, 1]
     output_key: depth
   mask:
-    shape: [128, 128, 1]
+    shape: [64, 64, 1]
     output_key: mask
   goal-rgb:
-    shape: [128, 128, 3]
+    shape: [64, 64, 3]
     output_key: goal-rgb
   goal-depth:
-    shape: [128, 128, 1]
+    shape: [64, 64, 1]
     output_key: goal-depth
   goal-mask:
-    shape: [128, 128, 1]
+    shape: [64, 64, 1]
     output_key: goal-mask
 
 action_config:

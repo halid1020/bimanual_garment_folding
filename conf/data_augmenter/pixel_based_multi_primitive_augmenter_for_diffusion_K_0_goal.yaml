@@ -4,7 +4,7 @@ rotation_degree: 1
 vertical_flip: true
 debug: false
 color_jitter: false
-img_dim: [96, 96]
+img_dim: [64, 64] # COMP
 randomise_prim_acts: false
 random_channel_permutation: false
 K: 0

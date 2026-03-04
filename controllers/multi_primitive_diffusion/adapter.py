@@ -331,22 +331,49 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         )
         self.dataset_inited = True
 
+    # def _init_optimizer(self):
+    #     self.ema = EMAModel(
+    #         parameters=self.nets.parameters(),
+    #         power=0.75)
+        
+    #     self.optimizer = torch.optim.AdamW(
+    #         params=self.nets.parameters(),
+    #         lr=1e-4, weight_decay=1e-6)#
+
+    #     self.lr_scheduler = get_scheduler(
+    #         name='cosine',
+    #         optimizer=self.optimizer,
+    #         num_warmup_steps=500,
+    #         num_training_steps=self.config.total_update_steps ## make it manual
+    #     )
+    
     def _init_optimizer(self):
         self.ema = EMAModel(
             parameters=self.nets.parameters(),
             power=0.75)
         
+        # Unpack params safely whether it's a DotMap or standard Dict
+        opt_params = self.config.get('optimiser_params', {})
+        if hasattr(opt_params, 'toDict'):
+            opt_params = opt_params.toDict()
+            
         self.optimizer = torch.optim.AdamW(
             params=self.nets.parameters(),
-            lr=1e-4, weight_decay=1e-6)#
+            **opt_params
+        )
+
+        scheduler_name = self.config.get('lr_scheduler', 'cosine')
+        warmup_steps = self.config.get('num_warmup_steps', 500)
 
         self.lr_scheduler = get_scheduler(
-            name='cosine',
+            name=scheduler_name,
             optimizer=self.optimizer,
-            num_warmup_steps=500,
-            num_training_steps=self.config.total_update_steps ## make it manual
+            num_warmup_steps=warmup_steps,
+            num_training_steps=self.config.total_update_steps
         )
-    
+
+        self.clip_norm = self.config.get('grad_clip_norm', -1)
+
     def _init_networks(self):
         self.input_channel = 3
         if self.config.input_obs == 'rgbd':
@@ -362,12 +389,20 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         elif self.config.input_obs == 'rgb+goal_mask':
             self.input_channel = 4
 
-        self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
-        self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
+        self.vision_encoder_type = self.config.get('vision_encoder', 'original')
+        if self.vision_encoder_type == 'original':
+            self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
+            self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
+        elif self.vision_encoder_type == 'gc_rssm_encoder':
+            from .rl.lagarnet.networks import ImageEncoder
+            self.vision_encoder = ImageEncoder(
+                image_dim=self.config.input_obs_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                batchnorm=self.config.encoder_batchnorm,
+                residual=self.config.encoder_residual
+            ).to(self.config.device)
 
-        
-            
-        
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
             self.prim_class_head = nn.Linear(self.config.obs_dim, self.K)
@@ -431,16 +466,34 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         with torch.no_grad():
             # example inputs
-            image = torch.zeros(
-                (1, self.config.obs_horizon,
-                 self.input_channel,96,96))
-             # vision encoder
-            image_features = self.nets['vision_encoder'](
-                image.flatten(end_dim=1)
-            )
-            # (2,512)
-            obs = image_features.reshape(*image.shape[:2],-1)
 
+            if self.vision_encoder_type == 'original':
+                image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    self.input_channel,96,96))
+                # vision encoder
+                image_features = self.nets['vision_encoder'](
+                    image.flatten(end_dim=1)
+                )
+                # (2,512)
+                obs = image_features.reshape(*image.shape[:2],-1)
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    3,64,64)).to(self.device)
+                
+                goal_image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    3,64,64)).to(self.device)
+
+                # Flatten batch and time dimensions for the forward pass
+                image_feat = self.nets['vision_encoder'](image.flatten(end_dim=1))
+                goal_feat = self.nets['vision_encoder'](goal_image.flatten(end_dim=1))
+                
+                # Concatenate features and reshape back to (Batch, Obs_Horizon, Feature_Dim)
+                obs = torch.cat([image_feat, goal_feat], dim=-1)
+                obs = obs.reshape(*image.shape[:2], -1)
+                
             if self.config.include_state:
                 vector_state = torch.zeros(
                     (1, self.config.obs_horizon, 
@@ -683,6 +736,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 total_loss += recon_loss * self.config.get('recon_weight', 0.1)
             # optimize
             total_loss.backward()
+            
+            
+            if self.clip_norm > 0:
+                nn.utils.clip_grad_norm_(self.nets.parameters(), self.clip_norm)
+
             self.optimizer.step()
             self.optimizer.zero_grad()
             # step lr scheduler every batch
@@ -809,8 +867,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             start_time = time.time()
             arena_id = info['arena_id']
 
-   
-
         if update == True:
             last_action = self.last_actions[info['arena_id']]
             
@@ -834,7 +890,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 from .draw_utils import plot_rgb_workspace_mask_goal_features
                 plot_rgb_workspace_mask_goal_features(image)
 
-            obs_features = self.nets['vision_encoder'](image)
+            if self.vision_encoder_type == 'original':
+                obs_features = self.nets['vision_encoder'](image)
+            
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                # Slicing the 6-channel image into two 3-channel images (obs and goal)
+                # image shape is expected to be (obs_horizon, 6, H, W)
+                rgb_part = image[:, :3, :, :]
+                goal_rgb_part = image[:, 3:6, :, :]
+
+                obs_feature = self.nets['vision_encoder'](rgb_part) 
+                goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+
+                # Concatenate the two feature vectors along the last dimension
+                obs_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
             # print('obs features shape', obs_features.shape)
 
             if self.config.include_state:

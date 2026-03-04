@@ -19,7 +19,7 @@ from actoris_harena.torch_utils import *
 from actoris_harena.registration.dataset import *
 from actoris_harena.agent.oracle.builder import OracleBuilder
 from actoris_harena import RLAgent
-
+from diffusers.optimization import get_scheduler
 from data_augmentation.register_augmeters import build_data_augmenter
 
 from .networks import ImageEncoder, ImageDecoder
@@ -93,6 +93,20 @@ class RSSM(RLAgent):
         optimiser_params["params"] = self.param_list
 
         self.optimiser = OPTIMISER_CLASSES[self.config.optimiser_class](**optimiser_params)
+        
+        scheduler_name = self.config.get('lr_scheduler', 'constant')
+        warmup_steps = self.config.get('num_warmup_steps', 0)
+        
+        if scheduler_name and scheduler_name.lower() != 'none':
+            self.lr_scheduler = get_scheduler(
+                name=scheduler_name,
+                optimizer=self.optimiser,
+                num_warmup_steps=warmup_steps,
+                num_training_steps=self.config.total_update_steps
+            )
+        else:
+            self.lr_scheduler = None
+
         self.loaded = False
         self.symlog = self.config.symlog
 
@@ -408,7 +422,8 @@ class RSSM(RLAgent):
             'observation_model': self.model['observation_model'].state_dict(),
             'reward_model': self.model['reward_model'].state_dict(),
             'encoder': self.model['encoder'].state_dict(),
-            'optimiser': self.optimiser.state_dict()
+            'optimiser': self.optimiser.state_dict(),
+            'lr_scheduler': self.lr_scheduler.state_dict() if getattr(self, 'lr_scheduler', None) else None
         }
         
         if path is None:
@@ -436,7 +451,8 @@ class RSSM(RLAgent):
             'observation_model': self.model['observation_model'].state_dict(),
             'reward_model': self.model['reward_model'].state_dict(),
             'encoder': self.model['encoder'].state_dict(),
-            'optimiser': self.optimiser.state_dict()
+            'optimiser': self.optimiser.state_dict(),
+            'lr_scheduler': self.lr_scheduler.state_dict() if getattr(self, 'lr_scheduler', None) else None
         }
         
         path = self.save_dir
@@ -462,7 +478,9 @@ class RSSM(RLAgent):
         self.model['reward_model'].load_state_dict(checkpoint['reward_model'])
         self.model['encoder'].load_state_dict(checkpoint['encoder'])
         self.optimiser.load_state_dict(checkpoint['optimiser'])
-
+        if 'lr_scheduler' in checkpoint and checkpoint['lr_scheduler'] is not None and getattr(self, 'lr_scheduler', None) is not None:
+            self.lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            
         self.loaded = True
              
     def load(self, path=None):
@@ -782,6 +800,9 @@ class RSSM(RLAgent):
             nn.utils.clip_grad_norm_(self.param_list, self.config.grad_clip_norm, norm_type=2)
             self.optimiser.step()
 
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+
             # Collect Losses
             for kk, vv in losses.items():
                 if kk in metrics.keys():
@@ -910,6 +931,9 @@ class RSSM(RLAgent):
             losses['total_loss'].backward()
             nn.utils.clip_grad_norm_(self.param_list, self.config.grad_clip_norm, norm_type=2)
             self.optimiser.step()
+
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
 
             # Collect Losses
             wandb_metrics = {}

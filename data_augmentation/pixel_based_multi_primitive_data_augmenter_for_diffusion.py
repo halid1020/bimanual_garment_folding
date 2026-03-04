@@ -551,7 +551,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         #     COLOR JITTER & NOISE
         # =========================
         if self.color_jitter and train:
-            if self.use_goal_rgb:
+            if use_goal_rgb:
                 N_obs = rgb_obs.shape[0]
                 combined = torch.cat([rgb_obs, goal_obs], dim=0)
                 combined = self.color_aug(combined)

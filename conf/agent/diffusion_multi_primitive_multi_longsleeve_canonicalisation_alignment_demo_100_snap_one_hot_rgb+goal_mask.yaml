@@ -6,7 +6,7 @@ obs_horizon: 1
 pred_horizon: 1
 num_diffusion_iters: 100
 action_horizon: 1
-input_obs: 'rgb-goal'
+input_obs: 'rgb+goal_rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False

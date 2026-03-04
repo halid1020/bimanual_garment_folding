@@ -23,7 +23,7 @@ HANG_HEIGHT = 0.35
 HOME_AFTER = True
 MIN_STRETCH_DIST = 0.3
 COLLISION_THRESHOLD = 0.15  # Safety distance in meters
-STRETCH_MAX_WIDTH = 0.6
+STRETCH_MAX_WIDTH = 0.65
 STRETCH_FORCE = 6
 
 class PickAndFlingSkill:
@@ -158,7 +158,7 @@ class PickAndFlingSkill:
         self.scene.both_movel(
             app_pick_0,
             app_pick_1,
-            speed=self.move_speed, acc=self.move_acc, blocking=True)
+            speed=MOVE_SPEED-0.5, acc=MOVE_ACC-0.5, blocking=True)
 
         # self.scene.both_movel(
         #     np.concatenate([grasp_pick_0, rot_0]),
@@ -248,7 +248,7 @@ class PickAndFlingSkill:
             ur5e_pick_point_world, 
             ur16e_pick_point_world, 
             stretch_force=STRETCH_FORCE,
-            stretch_max_speed=0.15,
+            stretch_max_speed=0.2, #0.15,
             stretch_max_width=STRETCH_MAX_WIDTH, 
             stretch_max_time=5,
             swing_stroke=0.4,
@@ -277,6 +277,15 @@ class PickAndFlingSkill:
             full_trajectory_ref=full_trajectory_ref)
             
         if not r: return False
+
+        self.dual_arm_shake(
+            num_shakes=3,       # Number of bounces
+            amplitude=0.03,     # updown in cm.
+            speed=2,          # Fast speed for aggressive shake
+            acc=4.0,            # High acceleration to snap the fabric
+            record_debug=record_debug,
+            full_trajectory_ref=full_trajectory_ref
+        )
         
         # Update Start Points from Actual Robots
         current_p5_base = self.scene.ur5e.get_tcp_pose()
@@ -327,6 +336,11 @@ class PickAndFlingSkill:
             record=record_debug
         )
         if record_debug: self._append_scene_trajectory(full_trajectory_ref)
+
+        self.dual_arm_release_tension(
+            record_debug=record_debug, 
+            full_trajectory_ref=full_trajectory_ref
+        )
         
         self.scene.both_open_gripper()
         return True
@@ -359,7 +373,7 @@ class PickAndFlingSkill:
         dt = 0.1 
 
         start_width = self.scene.get_tcp_distance()
-        safe_limit_width = min(max_width, start_width * 1.3) 
+        safe_limit_width = max_width #min(max_width, start_width * 1.3) 
 
         print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
         print(f"[Stretch] Applying Init Force: {init_force}N, Steady Force: {force}N")
@@ -428,3 +442,114 @@ class PickAndFlingSkill:
                         time.sleep(dt - duration)
                     prev_time = curr_time
         return True
+    
+    def dual_arm_release_tension(self, 
+        release_force=-2.0,  # Gentle inward force
+        max_time=1.5,        # Short timeout so it doesn't wait too long
+        speed_threshold=0.005,
+        max_release_dist=0.15, # Safety limit: max distance to move inward
+        record_debug=False,
+        full_trajectory_ref=None): 
+        
+        print(f"[Release] Relaxing tension with {release_force}N...")
+        task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
+        selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
+        force_type = 2
+        limits = [0.15, 2, 2, 1, 1, 1]
+        dt = 0.1 
+
+        start_width = self.scene.get_tcp_distance()
+        target_width_min = start_width - max_release_dist 
+
+        with self.scene.ur5e.start_force_mode() as right_force_guard:
+            with self.scene.ur16e.start_force_mode() as left_force_guard:
+                start_time = time.time()
+                prev_time = start_time
+                
+                while True:
+                    if record_debug and full_trajectory_ref:
+                        full_trajectory_ref['ur5e'].append(self.scene.ur5e.get_tcp_pose()[:3])
+                        full_trajectory_ref['ur16e'].append(self.scene.ur16e.get_tcp_pose()[:3])
+                    
+                    elapsed = time.time() - start_time
+                    
+                    if elapsed >= max_time:
+                        print(f'[Release] Max time {max_time}s reached, tension relaxed.')
+                        break
+                    
+                    # Apply gentle inward wrench
+                    right_wrench = [0, release_force, 0, 0, 0, 0]
+                    left_wrench = [0, release_force, 0, 0, 0, 0]
+
+                    r = right_force_guard.apply_force(task_frame, selection_vector, right_wrench, force_type, limits)
+                    if not r: return False
+                    r = left_force_guard.apply_force(task_frame, selection_vector, left_wrench, force_type, limits)
+                    if not r: return False
+                    
+                    # Stop if they move too close together
+                    tcp_distance = self.scene.get_tcp_distance()
+                    if tcp_distance <= target_width_min:
+                        print(f"[Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
+                        break
+
+                    # Monitor speed to see if the arms have settled
+                    l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
+                    r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
+                    actual_speed = max(l_speed, r_speed)
+                    
+                    # Wait 0.5s before checking speed to allow initial acceleration
+                    if elapsed > 0.5:
+                        if actual_speed < speed_threshold:
+                            print(f"[Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                            break
+
+                    curr_time = time.time()
+                    duration = curr_time - prev_time
+                    if duration < dt:
+                        time.sleep(dt - duration)
+                    prev_time = curr_time
+                    
+        return True
+    
+    def dual_arm_shake(self, num_shakes=3, amplitude=0.08, speed=1.5, acc=3.0, record_debug=False, full_trajectory_ref=None):
+        """
+        Executes a rapid vertical shake to loosen folds in the fabric.
+        """
+        print(f"[Shake] Executing {num_shakes} vertical shakes...")
+        
+        # Get current starting poses for both robots
+        start_pose5 = self.scene.ur5e.get_tcp_pose()
+        start_pose16 = self.scene.ur16e.get_tcp_pose()
+        
+        path_5 = []
+        path_16 = []
+        
+        for _ in range(num_shakes):
+            # Waypoint: UP
+            up_5 = start_pose5.copy()
+            up_5[2] += amplitude
+            path_5.append(up_5)
+            
+            up_16 = start_pose16.copy()
+            up_16[2] += amplitude
+            path_16.append(up_16)
+            
+            # Waypoint: DOWN
+            down_5 = start_pose5.copy()
+            down_5[2] -= amplitude
+            path_5.append(down_5)
+            
+            down_16 = start_pose16.copy()
+            down_16[2] -= amplitude
+            path_16.append(down_16)
+            
+        # Final Waypoint: Back to start
+        path_5.append(start_pose5)
+        path_16.append(start_pose16)
+        
+        # Execute the continuous path
+        # Using a higher blend radius (if supported by your wrapper) helps smooth the shake
+        self.scene.both_movel(path_5, path_16, speed=speed, acc=acc, blocking=True, record=record_debug)
+        
+        if record_debug and full_trajectory_ref:
+            self._append_scene_trajectory(full_trajectory_ref)

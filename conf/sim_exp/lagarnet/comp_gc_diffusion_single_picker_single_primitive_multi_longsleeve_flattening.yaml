@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: comp_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening
+  - /agent/lagarnet@agent: comp_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening
   - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
 

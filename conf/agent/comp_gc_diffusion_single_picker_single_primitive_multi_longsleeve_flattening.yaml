@@ -63,7 +63,7 @@ dataset_config:
   data_dir: "./data/datasets"
   seq_length: 4
   io_mode: "w"
-  cache_in_memory: False
+  cache_in_memory: True
   obs_config:
     # mask: 
     #   shape: [64, 64, 1]

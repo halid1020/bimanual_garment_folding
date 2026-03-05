@@ -570,7 +570,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             else:
                 obs = nbatch['observation']
                 action = nbatch['action']['default']
-                print('[diffusion] action', action.shape, action[0])
+                #print('[diffusion] action', action.shape, action[0])
                 nbatch = {v: k for v, k in obs.items()}
                 nbatch['action'] = action.reshape(*action.shape[:2], -1)
                 #print('action after shape', nbatch['action'] .shape)

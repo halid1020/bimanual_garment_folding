@@ -1,4 +1,4 @@
-# For GC-Diffusion
+## comp_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening.yaml
 name: multi-primitive-diffusion
 oracle: False
 obs_dim: 1024 #COMP obs_emb + goal_obs_emb

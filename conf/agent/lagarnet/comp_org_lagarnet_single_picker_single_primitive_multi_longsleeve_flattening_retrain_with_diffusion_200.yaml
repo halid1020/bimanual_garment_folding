@@ -1,4 +1,4 @@
-# For GC-RSSM
+# comp_org_lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_retrain_with_diffusion_200.yaml
 name: lagarnet
 device: 'cuda:0'
 debug: True
@@ -7,11 +7,11 @@ train_mode: 'offline'
 input_obs: "rgb"
 output_obs: "mask"
 
-deterministic_latent_dim: 300
-stochastic_latent_dim: 60
+deterministic_latent_dim: 300 ## 200
+stochastic_latent_dim: 60 ## 30
 action_dim: 4
-hidden_dim: 300
-embedding_dim: 512 #COMP
+hidden_dim: 300 ## 200
+embedding_dim: 1024
 min_std_dev: 0.1
 activation: 'relu'
 trans_layers: 1
@@ -24,6 +24,7 @@ decoder_residual: False
 no_op: [1, 1, 1, 1]
 free_nats: 1
 symlog: False
+# data_sampler: "count-based"
 
 state_layers: 2
 observation_scale: 1.0
@@ -41,23 +42,14 @@ kl_overshooting_balance: 1.0
 reward_overshooting_scale: 0.1
 reward_overshooting_warmup: False
 
-### Optimisation ####
-optimiser_class: 'adamw'
+optimiser_class: 'adam'
 optimiser_params: 
-  lr: 1e-4
-  eps: 1e-8
-  weight_decay: 1e-6
-
-# Learning Rate Schedule
-lr_scheduler: 'cosine'
-num_warmup_steps: 500
-
-# Gradient Clipping
-grad_clip_norm: 100.0
-##########################
+  lr: 1e-3
+  eps: 1e-4
+grad_clip_norm: 1000
 
 batch_size: 50
-sequence_size: 6 #COMP
+sequence_size: 50
 total_update_steps: 50001
 test_interval: 1000
 validation_interval: 1000
@@ -87,11 +79,11 @@ datasets:
     name: 'default'
     params:
       data_path: 'all_garment_mix' #'diffusion_policy_on_softgym|domain:cloth-funnel-real2sim-longsleeve,task:flattening,horizon:20'
-      data_dir: './data/datasets/lagarnet/datasets'
-      num_trj: ? #COMP
-      seq_length: 6 #COMP
+      data_dir: './data/datasets'
+      num_trj: 6250 # 800k transitions (or 40k trials in total, 10k trials for each garment type) data for training
+      seq_length: 50
       cross_trajectory: True
-      split_ratios: [0.01, 0.01, 0.98]
+      split_ratios: [0.1, 0.1, 0.8]
       cache_in_memory: False
       io_mode: 'r'
       sample_mode: 'train'
@@ -127,13 +119,13 @@ datasets:
     name: 'default'
     params:
       data_path: 'all_garment_mix'
-      data_dir: './data/datasets/lagarnet/datasets'
-      num_trj: 50000
+      data_dir: './data/datasets'
+      num_trj: 6250
       seq_length: 20
       cross_trajectory: False
       io_mode: 'r'
       sample_mode: 'eval'
-      split_ratios: [0.01, 0.01, 0.98]
+      split_ratios: [0.1, 0.1, 0.8]
       sample_terminal: True
       obs_config: 
         mask: 

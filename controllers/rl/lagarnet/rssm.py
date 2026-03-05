@@ -85,14 +85,23 @@ class RSSM(RLAgent):
         print(f"Number of all parameters in the model: {num_parameters}")
 
 
+        # 1. Convert Hydra config to a standard dict
         optimiser_params = OmegaConf.to_container(
             self.config.optimiser_params,
             resolve=True
         )
 
-        optimiser_params["params"] = self.param_list
+        # 2. Use the builder function instead of the dictionary
+        # Note: We pass the params list and unpack the rest of the kwargs
+        self.optimiser = build_optimizer(
+            name=self.config.optimiser_class,
+            params=self.param_list,
+            **optimiser_params
+        )
 
-        self.optimiser = OPTIMISER_CLASSES[self.config.optimiser_class](**optimiser_params)
+        # optimiser_params["params"] = self.param_list
+
+        # self.optimiser = OPTIMISER_CLASSES[self.config.optimiser_class](**optimiser_params)
         
         scheduler_name = self.config.get('lr_scheduler', 'constant')
         warmup_steps = self.config.get('num_warmup_steps', 0)
@@ -901,7 +910,7 @@ class RSSM(RLAgent):
                 data.pop('idx')
                 
 
-            #print('data key', data.keys())
+            # print('data key', data.keys())
 
             # for k, v in data.items():
             #     print(k, v.shape)
@@ -1370,13 +1379,15 @@ class RSSM(RLAgent):
         rewards = data['reward']
       
         output_obs = data['output_obs']
-        
+        #print('data[output_obs] shape', data['output_obs'].shape) 
 
 
         beliefs, posteriors, priors, _ = self._unroll_state_action(data)
-          
+        
+        recon = bottle(self.model['observation_model'], (beliefs, posteriors['sample']))
+        #print('recon shape', recon.shape) 
         observation_loss = F.mse_loss(
-            bottle(self.model['observation_model'], (beliefs, posteriors['sample'])), 
+            recon, 
             output_obs[1:],
             reduction='none')
 

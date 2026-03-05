@@ -50,6 +50,11 @@ def main(cfg: DictConfig):
     source_datasets = []
     success_indices_per_source = []  # Tracks successful traj indices for each dataset
 
+    # Check if we actually need to scan for success flags
+    even_success = cfg.get("even_success", False)
+    success_only = cfg.get("success_only", False)
+    needs_success_scan = even_success or success_only
+
     print("Scanning source datasets via Hydra Configs...")
     
     # 2. Dynamically Load Source Configs and Map Trajectories
@@ -89,31 +94,31 @@ def main(cfg: DictConfig):
         num_trajs = src_dataset.num_trajectories()
         print(f" -> Found {num_trajs} trajectories.")
 
-        num_trajs = src_dataset.num_trajectories()
-        current_source_successes = []
-        print(f" -> Scanning {num_trajs} trajectories for success flags...")
+        if needs_success_scan:
+            current_source_successes = []
+            print(f" -> Scanning {num_trajs} trajectories for success flags...")
 
-        # Scan every trajectory to check for success
-        for j in tqdm(range(num_trajs), desc=f"Scanning Source {i}", leave=False):
-            # NOTE: Loading the full trajectory here might be slow. 
-            # If your dataset class has a faster way to read just the 'success' key, use it here.
-            trajectory_data = src_dataset.get_trajectory(j)
-            obs = trajectory_data['observation']
-            
-            is_successful = False
-            if 'success' in obs:
-                is_successful = np.any(obs['success'][-1] > 0.5)
-            
-            if is_successful:
-                current_source_successes.append(j)
+            # Scan every trajectory to check for success
+            for j in tqdm(range(num_trajs), desc=f"Scanning Source {i}", leave=False):
+                trajectory_data = src_dataset.get_trajectory(j)
+                obs = trajectory_data['observation']
                 
-        success_indices_per_source.append(current_source_successes)
-        print(f" -> Found {len(current_source_successes)} successful trajectories.")
+                is_successful = False
+                if 'success' in obs:
+                    is_successful = np.any(obs['success'][-1] > 0.5)
+                
+                if is_successful:
+                    current_source_successes.append(j)
+                    
+            success_indices_per_source.append(current_source_successes)
+            print(f" -> Found {len(current_source_successes)} successful trajectories.")
+        else:
+            print(" -> Skipping success scan (even_success and success_only are False).")
 
     # 3. Build the Trajectory Map based on Config Flags
     random.seed(42) 
 
-    if cfg.get("even_success", False):
+    if even_success:
         # Find the bottleneck: the dataset with the fewest successes
         min_success_num_trj = min(len(succ_list) for succ_list in success_indices_per_source)
         print(f"\n[even_success=True] Minimum successes across datasets: {min_success_num_trj}")
@@ -127,7 +132,7 @@ def main(cfg: DictConfig):
             for j in sampled_indices:
                 trajectory_map.append((i, j))
                 
-    elif cfg.get("success_only", False):
+    elif success_only:
         # Keep all successful trajectories, unbalanced
         print("\n[success_only=True] Keeping all successful trajectories.")
         for i, succ_list in enumerate(success_indices_per_source):
@@ -135,10 +140,21 @@ def main(cfg: DictConfig):
                 trajectory_map.append((i, j))
                 
     else:
-        # Keep everything
-        print("\n[Default] Keeping all trajectories.")
+        # User requested configuration limit
+        num_trj_per_dataset = cfg.get("num_trj_per_dataset", None)
+        print(f"\n[Default] Sampling up to {num_trj_per_dataset} trajectories per dataset.")
+        
         for i, src_dataset in enumerate(source_datasets):
-            for j in range(src_dataset.num_trajectories()):
+            num_trajs = src_dataset.num_trajectories()
+            
+            if num_trj_per_dataset is not None:
+                limit = min(num_trj_per_dataset, num_trajs)
+                # Randomly sample the trajectories to avoid always taking the first N
+                sampled_indices = random.sample(range(num_trajs), limit)
+            else:
+                sampled_indices = range(num_trajs)
+                
+            for j in sampled_indices:
                 trajectory_map.append((i, j))
 
     print(f"\nTotal trajectories to merge after filtering: {len(trajectory_map)}")
@@ -156,7 +172,6 @@ def main(cfg: DictConfig):
         
         obs = trajectory_data['observation']
         act = trajectory_data['action']
-
 
         # --- DYNAMIC RESIZING LOGIC ---
         for key in image_keys:
@@ -210,8 +225,6 @@ def main(cfg: DictConfig):
 
         target_dataset.add_trajectory(obs, act)
         pbar.update(1)
-
-        
 
     print(f"\nSuccessfully processed and combined {len(trajectory_map)} balanced trajectories into: {cfg.target_data_path}")
 

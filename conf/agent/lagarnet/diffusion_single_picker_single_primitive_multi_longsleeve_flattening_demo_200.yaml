@@ -1,3 +1,4 @@
+# diffusion_single_picker_single_primitive_multi_longsleeve_flattening_demo_200.yaml
 name: multi-primitive-diffusion
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512

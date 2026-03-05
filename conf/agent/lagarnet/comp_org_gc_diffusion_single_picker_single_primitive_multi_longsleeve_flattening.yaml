@@ -1,3 +1,4 @@
+# comp_org_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening.yaml
 name: multi-primitive-diffusion
 oracle: False
 obs_dim: 512
@@ -25,6 +26,12 @@ total_update_steps: 50000
 eval_checkpoint: -1
 debug: False
 add_all_demos: True
+
+optimiser_class: 'adamw'
+optimiser_params: 
+  lr: 1e-4
+  eps: 1e-8 # org 1e-6
+  weight_decay: 1e-6 # org unset
 
 dataset_mode: "general"
 dataset_config:

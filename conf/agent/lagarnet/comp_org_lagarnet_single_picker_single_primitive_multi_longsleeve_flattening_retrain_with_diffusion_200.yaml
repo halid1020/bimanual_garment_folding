@@ -14,7 +14,7 @@ hidden_dim: 300 ## 200
 embedding_dim: 1024
 min_std_dev: 0.1
 activation: 'relu'
-trans_layers: 1
+trans_layers: 1py
 input_obs_dim: [3, 64, 64]
 output_obs_dim: [1, 64, 64]
 encoder_batchnorm: False

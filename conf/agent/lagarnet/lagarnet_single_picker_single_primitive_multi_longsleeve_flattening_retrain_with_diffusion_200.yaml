@@ -80,7 +80,7 @@ datasets:
     params:
       data_path: 'all_garment_mix' #'diffusion_policy_on_softgym|domain:cloth-funnel-real2sim-longsleeve,task:flattening,horizon:20'
       data_dir: './data/datasets'
-      num_trj: 50000 # 800k transitions (or 40k trials in total, 10k trials for each garment type) data for training
+      num_trj: 40820 # 800k transitions (or 40k trials in total, 10k trials for each garment type) data for training
       seq_length: 50
       cross_trajectory: True
       split_ratios: [0.01, 0.01, 0.98]

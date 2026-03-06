@@ -85,6 +85,7 @@ datasets:
       data_path: 'raven_pixel_packing_boxes_mix' #'diffusion_policy_on_softgym|domain:cloth-funnel-real2sim-longsleeve,task:flattening,horizon:20'
       data_dir: './data/datasets/'
       seq_length: 50
+      num_trj: 10205
       cross_trajectory: True
       split_ratios: [0.01, 0.01, 0.98]
       cache_in_memory: False
@@ -119,6 +120,7 @@ datasets:
     params:
       data_path: 'raven_pixel_packing_boxes_mix'
       data_dir: './data/datasets/'
+      num_trj: 10205
       seq_length: 20
       cross_trajectory: False
       io_mode: 'r'

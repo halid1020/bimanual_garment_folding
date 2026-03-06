@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: gc_rssm_raven_pixel_packing_boxes
+  - /agent/lagarnet@agent: gc_rssm_raven_pixel_packing_boxes
   - /arena@arena: raven_pixel_packing_boxes_lower_camera
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
 

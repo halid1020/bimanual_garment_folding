@@ -967,3 +967,10 @@ class GarmentEnv(Arena):
 
     def compare(self, results_1, results_2):
         return self.task.compare(results_1, results_2)
+
+    def close(self):
+        """
+        Shuts down the PyFlex simulation, freeing up GPU/CPU memory 
+        so a new arena can be cleanly initialized.
+        """
+        pyflex.clean()

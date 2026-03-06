@@ -99,6 +99,7 @@ class MultiGarmentEnv(GarmentEnv):
 
         self.evaluate_result = None
         
+        print('[MultiGarmentEnv] Ready to set scene')
         set_scene(
             config=init_state_params, 
             state=init_state_params)

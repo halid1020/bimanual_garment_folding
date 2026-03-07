@@ -1,4 +1,4 @@
-name: lagarnet
+name: rssm
 device: 'cuda:0'
 debug: False
 train_mode: 'offline'
@@ -67,7 +67,7 @@ dataloader_prefetch_factor: 1
 
 apply_reward_processor: True
 
-data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
+data_augmenter: "pick_and_place_transformer_v1_for_lagarnet_no_goal"
   
 
 
@@ -96,19 +96,15 @@ datasets:
         rgb:
           shape: [64, 64, 3]
           output_key: 'rgb'
-        goal-mask: 
-          shape: [64, 64, 1]
-          output_key: 'goal-mask'
-        goal-rgb:
-          shape: [64, 64, 3]
-          output_key: 'goal-rgb'
-        speedFolding_approx:
+        # goal-mask: 
+        #   shape: [64, 64, 1]
+        #   output_key: 'goal-mask'
+        # goal-rgb:
+        #   shape: [64, 64, 3]
+        #   output_key: 'goal-rgb'
+        planet_clothpick_hueristic:
           shape: [1]
           output_key: 'reward'
-        
-        normalised_coverage:
-          shape: [1]
-          output_key: 'normalised_coverage'
       
       act_config:
         norm-pixel-pick-and-place: 
@@ -135,13 +131,13 @@ datasets:
         rgb:
           shape: [64, 64, 3]
           output_key: 'rgb'
-        goal-mask: 
-          shape: [64, 64, 1]
-          output_key: 'goal-mask'
-        goal-rgb:
-          shape: [64, 64, 3]
-          output_key: 'goal-rgb'
-        speedFolding_approx:
+        # goal-mask: 
+        #   shape: [64, 64, 1]
+        #   output_key: 'goal-mask'
+        # goal-rgb:
+        #   shape: [64, 64, 3]
+        #   output_key: 'goal-rgb'
+        planet_clothpick_hueristic:
           shape: [1]
           output_key: 'reward'
 

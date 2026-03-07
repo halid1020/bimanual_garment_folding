@@ -1,9 +1,9 @@
 # conf/transfer_eval/comp_gc_diffusion.yaml
 
-eval_name: transfer_eval_comp_gc_diffusion
+eval_name: transfer_eval_comp_org_gc_diffusion
 
 # Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
-train_exp_config: sim_exp/lagarnet/comp_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening
+train_exp_config: sim_exp/lagarnet/comp_org_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening
 
 # Define evaluation arenas & tasks as a standard list of strings
 eval_arenas:

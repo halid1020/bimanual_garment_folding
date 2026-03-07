@@ -71,13 +71,15 @@ def main(cfg: DictConfig):
         print(f"\n>>> Starting Evaluation {i+1}/{len(eval_arenas)}")
         print(f">>> Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")
 
+        transfer_eval_dir_spe = os.path.join(transfer_eval_dir, eval_setup.arena)
+        os.makedirs(transfer_eval_dir_spe, exist_ok=True)
         # Build Arena
         arena = ag_ar.build_arena(
             arena_cfg.name, 
             arena_cfg,
             project_name=train_cfg.project_name,
             exp_name=f"{cfg.eval_name}_arena_{i}", 
-            save_dir=transfer_eval_dir
+            save_dir=transfer_eval_dir_spe
         )
             
         # Build and set Task

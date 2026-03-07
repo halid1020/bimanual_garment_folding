@@ -452,11 +452,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             pretrained_path = self.config.get('pretrained_encoder_path', None)
             if pretrained_path and os.path.exists(pretrained_path):
-                checkpoint = torch.load(pretrained_path, map_location=self.device)
+                checkpoint = torch.load(pretrained_path)
                 
                 # Load weights loosely to allow custom FC layers to train
-                missing_e, _ = self.vision_encoder.load_state_dict(checkpoint['encoder'], strict=False)
-                missing_t, _ = self.transition_model.load_state_dict(checkpoint['transition_model'], strict=False)
+                missing_e, _ = self.vision_encoder.load_state_dict(checkpoint['encoder'])
+                missing_t, _ = self.transition_model.load_state_dict(checkpoint['transition_model'])
                 print(f"[MultiPrimitiveDiffusion] Loaded pretrained GC-RSSM dynamic model from {pretrained_path}")
 
             if self.config.get('freeze_encoder', False):
@@ -569,7 +569,38 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 # Concatenate features and reshape back to (Batch, Obs_Horizon, Feature_Dim)
                 obs = torch.cat([image_feat, goal_feat], dim=-1)
                 obs = obs.reshape(*image.shape[:2], -1)
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+
+                B, T = 1, self.config.obs_horizon
+                image = torch.zeros(
+                    (B, T,
+                    3,64,64)) #.to(self.config.device)
                 
+                goal_image = torch.zeros(
+                    (B, T,
+                    3,64,64)) #.to(self.config.device)
+
+                # Flatten batch and time dimensions for the forward pass
+                obs_emb = self.nets['vision_encoder'](image.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                goal_emb = self.nets['vision_encoder'](goal_image.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                
+                dummy_actions = torch.ones(T, B, self.network_action_dim)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim)
+                nonterminals = torch.ones(T, B, 1)
+
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                latents = torch.cat([hidden[0], hidden[4]], dim=-1) # Cat belief and posterior
+                obs = latents.transpose(0, 1).reshape(B, T, -1) # Remove batch dim -> (T, deter+stoch)
+    
             if self.config.include_state:
                 vector_state = torch.zeros(
                     (1, self.config.obs_horizon, 
@@ -718,26 +749,25 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 rgb_part = input_obs[:, :3, :, :]
                 goal_rgb_part = input_obs[:, 3:6, :, :]
 
-                B, T = rgb_part.shape[:2]
-
-                # 1. Encode images
-                obs_emb = self.nets['vision_encoder'](rgb_part.flatten(end_dim=1)).view(B, T, -1)
-                goal_emb = self.nets['vision_encoder'](goal_rgb_part.flatten(end_dim=1)).view(B, T, -1)
+                # input_obs is ALREADY flattened to 4D: (B * T, C, H, W)
+                T = self.config.obs_horizon
+                # B is already defined safely earlier in the train method!
+                
+                # 1. Encode images directly without flattening again
+                obs_emb = self.nets['vision_encoder'](rgb_part).view(B, T, -1)
+                goal_emb = self.nets['vision_encoder'](goal_rgb_part).view(B, T, -1)
 
                 # 2. Swap to (Time, Batch, Dim) for RSSM
                 obs_emb = obs_emb.transpose(0, 1)
                 goal_emb = goal_emb.transpose(0, 1)
 
                 # 3. Setup initial states and dummy actions
-                # Note: If your dataset has aligned *past* actions, use them here. 
-                # Otherwise, dummy zeros work well for short obs_horizon warmups.
-                dummy_actions = torch.ones(T, B, self.network_action_dim, device=self.device)
+                dummy_actions = torch.zeros(T, B, self.network_action_dim, device=self.device)
                 init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
                 init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
                 nonterminals = torch.ones(T, B, 1, device=self.device)
 
                 # 4. Unroll Transition Model
-                # Output 0 is beliefs, Output 4 is posterior_states (when observations are provided)
                 hidden = self.nets['transition_model'](
                     prev_state=init_state,
                     actions=dummy_actions,

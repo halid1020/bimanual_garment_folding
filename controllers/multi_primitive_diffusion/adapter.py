@@ -348,17 +348,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
     #     )
     
     def _init_optimizer(self):
+        # Filter parameters that require gradients
+        trainable_params = [p for p in self.nets.parameters() if p.requires_grad]
+
         self.ema = EMAModel(
-            parameters=self.nets.parameters(),
+            parameters=trainable_params,
             power=0.75)
         
-        # Unpack params safely whether it's a DotMap or standard Dict
         opt_params = self.config.get('optimiser_params', {})
         if hasattr(opt_params, 'toDict'):
             opt_params = opt_params.toDict()
             
         self.optimizer = torch.optim.AdamW(
-            params=self.nets.parameters(),
+            params=trainable_params,
             **opt_params
         )
 
@@ -390,9 +392,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 4
 
         self.vision_encoder_type = self.config.get('vision_encoder', 'original')
+        
         if self.vision_encoder_type == 'original':
             self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
             self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
+       
         elif self.vision_encoder_type == 'gc_rssm_encoder':
             from ..rl.lagarnet.networks import ImageEncoder
             self.vision_encoder = ImageEncoder(
@@ -401,8 +405,75 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 activation_function=self.config.activation,
                 batchnorm=self.config.encoder_batchnorm,
                 residual=self.config.encoder_residual
-            ) #.to(self.config.device)
+            )
+            
+            
+            # Load pretrained GC-RSSM encoder weights if specified
+            pretrained_path = self.config.get('pretrained_encoder_path', None)
+            if pretrained_path:
+                if os.path.exists(pretrained_path):
+                    checkpoint = torch.load(pretrained_path)
+                    self.vision_encoder.load_state_dict(checkpoint['encoder'])
+                    print(f"[MultiPrimitiveDiffusion] Loaded pretrained GC-RSSM encoder from {pretrained_path}")
+                else:
+                    print(f"[MultiPrimitiveDiffusion] Path {pretrained_path} does not exists. Cannot load the pretrained encoder.")
+                
+            # Freeze the encoder if specified
+            if self.config.get('freeze_encoder', False):
+                for param in self.vision_encoder.parameters():
+                    param.requires_grad = False
+                self.vision_encoder.eval()
+                print("[MultiPrimitiveDiffusion] Vision encoder is frozen.")
 
+        elif self.vision_encoder_type == 'gc_rssm_dynamic':
+            # Import your transition model (adjust the import path based on your folder structure)
+            from ..rl.lagarnet.networks import ImageEncoder
+            from ..rl.lagarnet.gc_rssm import GoalConditionedTransitionModel
+
+            self.vision_encoder = ImageEncoder(
+                image_dim=self.config.input_obs_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                batchnorm=self.config.encoder_batchnorm,
+                residual=self.config.encoder_residual
+            )
+            
+            self.transition_model = GoalConditionedTransitionModel(
+                belief_size=self.config.deterministic_latent_dim,
+                state_size=self.config.stochastic_latent_dim,
+                action_size=self.network_action_dim, 
+                hidden_size=self.config.hidden_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                min_std_dev=self.config.get('min_std_dev', 0.1),
+                embedding_layers=self.config.get('trans_layers', 1),
+                state_layers=self.config.get('state_layers', 1)
+            )
+
+            pretrained_path = self.config.get('pretrained_encoder_path', None)
+            if pretrained_path and os.path.exists(pretrained_path):
+                checkpoint = torch.load(pretrained_path, map_location=self.device)
+                
+                # Load weights loosely to allow custom FC layers to train
+                missing_e, _ = self.vision_encoder.load_state_dict(checkpoint['encoder'], strict=False)
+                missing_t, _ = self.transition_model.load_state_dict(checkpoint['transition_model'], strict=False)
+                print(f"[MultiPrimitiveDiffusion] Loaded pretrained GC-RSSM dynamic model from {pretrained_path}")
+
+            if self.config.get('freeze_encoder', False):
+                # Freeze encoder
+                for name, param in self.vision_encoder.named_parameters():
+                    if 'missing_e' in locals() and name in missing_e:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+                # Freeze transition model
+                for name, param in self.transition_model.named_parameters():
+                    if 'missing_t' in locals() and name in missing_t:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+                print("[MultiPrimitiveDiffusion] Vision encoder and Transition model are frozen (except missing keys).")
+        
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
             self.prim_class_head = nn.Linear(self.config.obs_dim, self.K)
@@ -443,10 +514,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         self.rep_learn = self.config.get('rep_learn', 'none')
 
-        self.nets = nn.ModuleDict({
+        net_dict = {
             'vision_encoder': self.vision_encoder,
             'noise_pred_net': self.noise_pred_net
-        })
+        }
+
+        if self.vision_encoder_type == 'gc_rssm_dynamic':
+            net_dict['transition_model'] = self.transition_model
+        
+        self.nets = nn.ModuleDict(net_dict)
 
         if self.primitive_integration == 'one-hot-encoding':
             self.nets['prim_class_head'] = self.prim_class_head
@@ -557,6 +633,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         update_steps = min(#
             self.config.total_update_steps - self.update_step,
             update_steps)
+        
+        if self.config.get('freeze_encoder', False):
+            self.nets['vision_encoder'].eval()
+            
         #print('train update steps', update_steps)
         pbar = tqdm(range(update_steps), desc="Training")
 
@@ -634,7 +714,47 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 obs_features = image_features.reshape(
                     B, self.config.obs_horizon, -1)
             
-            print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+                rgb_part = input_obs[:, :3, :, :]
+                goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                B, T = rgb_part.shape[:2]
+
+                # 1. Encode images
+                obs_emb = self.nets['vision_encoder'](rgb_part.flatten(end_dim=1)).view(B, T, -1)
+                goal_emb = self.nets['vision_encoder'](goal_rgb_part.flatten(end_dim=1)).view(B, T, -1)
+
+                # 2. Swap to (Time, Batch, Dim) for RSSM
+                obs_emb = obs_emb.transpose(0, 1)
+                goal_emb = goal_emb.transpose(0, 1)
+
+                # 3. Setup initial states and dummy actions
+                # Note: If your dataset has aligned *past* actions, use them here. 
+                # Otherwise, dummy zeros work well for short obs_horizon warmups.
+                dummy_actions = torch.ones(T, B, self.network_action_dim, device=self.device)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
+                nonterminals = torch.ones(T, B, 1, device=self.device)
+
+                # 4. Unroll Transition Model
+                # Output 0 is beliefs, Output 4 is posterior_states (when observations are provided)
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                beliefs = hidden[0]          # (T, B, deter_dim)
+                posterior_states = hidden[4] # (T, B, stoch_dim)
+
+                # 5. Concatenate latents and swap back to (Batch, Time, Dim)
+                latents = torch.cat([beliefs, posterior_states], dim=-1)
+                obs_features = latents.transpose(0, 1) # (B, T, deter+stoch)
+            
+            #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 
             recon_loss = torch.tensor(0.0, device=self.device)
             if self.rep_learn == 'auto-encoder':
@@ -770,7 +890,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.lr_scheduler.step()
 
             # update Exponential Moving Average of the model weights
-            self.ema.step(self.nets.parameters())
+            trainable_params = [p for p in self.nets.parameters() if p.requires_grad]
+            self.ema.step(trainable_params)
 
             ## write loss value to tqdm progress bar
             pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
@@ -926,6 +1047,34 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
                 # Concatenate the two feature vectors along the last dimension
                 obs_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+                # Add a batch dimension -> (1, T, C, H, W)
+                image_batched = image.unsqueeze(0)
+                B, T = image_batched.shape[:2]
+
+                rgb_part = image_batched[:, :, :3, :, :]
+                goal_rgb_part = image_batched[:, :, 3:6, :, :]
+
+                obs_emb = self.nets['vision_encoder'](rgb_part.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                goal_emb = self.nets['vision_encoder'](goal_rgb_part.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+
+                dummy_actions = torch.ones(T, B, self.network_action_dim, device=self.device)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
+                nonterminals = torch.ones(T, B, 1, device=self.device)
+
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                latents = torch.cat([hidden[0], hidden[4]], dim=-1) # Cat belief and posterior
+                obs_features = latents.transpose(0, 1).squeeze(0)   # Remove batch dim -> (T, deter+stoch)
 
             # print('obs features shape', obs_features.shape)
 

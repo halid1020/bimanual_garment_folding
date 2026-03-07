@@ -152,17 +152,16 @@ datasets:
           output_key: 'default'
 
     
-
 policy:
-  name: 'rect_fabric_cloth_mask_mpc'
+  name: 'single_arm_mask_pick_and_place_mpc'
   params:
     candidates: 5000
     planning_horizon: 1
     iterations: 100
     clip: True
     swap_action: False
-    cloth_mask: "from_env"
-
+    obj_mask: "from_env"
+    debug: True
     cost_fn: 'from_model'
 
 

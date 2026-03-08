@@ -1,107 +1,196 @@
+# import argparse
+# import os
+# import matplotlib.pyplot as plt
+# import numpy as np
+# from omegaconf import OmegaConf
+# import actoris_harena.api as ag_ar
+
+# # Custom modules
+# from registration.agent import register_agents
+# from registration.sim_arena import register_arenas
+# from registration.task import build_task
+
+# def main():
+#     register_agents()
+#     register_arenas()
+
+#     # Define the 4 target environments
+#     garments = {
+#         "Longsleeve": "multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+#         "Trousers": "multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+#         "Skirt": "multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+#         "Dress": "multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200"
+#     }
+
+#     # Create a 4x4 figure
+#     fig, axes = plt.subplots(4, 4, figsize=(15, 15))
+    
+#     # We will fill the 4x4 grid quadrant by quadrant
+#     # Quadrant 0 (Top-Left): Longsleeve
+#     # Quadrant 1 (Top-Right): Trousers
+#     # Quadrant 2 (Bottom-Left): Skirt
+#     # Quadrant 3 (Bottom-Right): Dress
+#     quadrants = [
+#         (0, 0), (0, 2), # Top Row
+#         (2, 0), (2, 2)  # Bottom Row
+#     ]
+
+#     for (g_label, arena_name), (row_off, col_off) in zip(garments.items(), quadrants):
+#         print(f"Processing {g_label}...")
+        
+#         # 1. Load Configs
+#         arena_conf_path = os.path.join('./conf/', "arena", f"{arena_name}.yaml")
+#         arena_cfg = OmegaConf.load(arena_conf_path)
+        
+#         # 2. Build Arena and Task
+#         arena = ag_ar.build_arena(arena_cfg.name, arena_cfg)
+#         task_conf_path = os.path.join('./conf/', "task", "flattening_overstretch_penalty_1_no_big_bonus.yaml")
+#         task_cfg = OmegaConf.load(task_conf_path)
+#         arena.set_task(build_task(task_cfg))
+        
+#         # 3. Collect 4 images
+#         episode_configs = arena.get_train_configs()
+#         for i in range(4):
+#             info = arena.reset(episode_configs[i])
+#             rgb = info['observation']['rgb']
+#             goal_rgb = info['goal']['rgb']
+            
+#             if isinstance(rgb, np.ndarray) and rgb.shape[0] == 3:
+#                 rgb = np.transpose(rgb, (1, 2, 0))
+            
+#             r = row_off + (i // 2)
+#             c = col_off + (i % 2)
+#             ax = axes[r, c]
+            
+#             ax.imshow(rgb)
+#             ax.axis('off')
+            
+#             # UPDATED: Position to 0.05 (Left), ha to 'left', and larger fontsize
+#             ax.text(0.05, 0.95, f"{g_label}: Train {i}", 
+#                     transform=ax.transAxes, 
+#                     color='white', 
+#                     fontsize=16, # Larger text
+#                     fontweight='bold',
+#                     va='top', 
+#                     ha='left',   # Left aligned
+#                     bbox=dict(facecolor='black', alpha=0.5, lw=0))
+#         arena.close()
+
+#     # [Image of a 4x4 image grid layout]
+#     # Adjust spacing to be tight
+#     plt.subplots_adjust(wspace=0.01, hspace=0.01)
+    
+#     # Save Logic
+#     save_dir = './analysis'
+#     os.makedirs(save_dir, exist_ok=True)
+#     save_path = os.path.join(save_dir, "combined_garments_4x4_preview.png")
+    
+#     # [Image of image cropping with bounding box]
+#     plt.savefig(save_path, bbox_inches='tight', pad_inches=0.05)
+#     print(f"Saved combined visualization to: {save_path}")
+#     plt.show()
+
+# if __name__ == "__main__":
+#     main()
+
+
 import argparse
 import os
 import matplotlib.pyplot as plt
 import numpy as np
 from omegaconf import OmegaConf
 import actoris_harena.api as ag_ar
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-
-# Assuming these are your custom modules
+# Custom modules
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
 from registration.task import build_task
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Visualize Agent Arena Environment")
-    parser.add_argument('--arena_name', type=str, required=True, help="Name of the arena (e.g., 'standard_arena')")
-    return parser.parse_args()
-
 def main():
-    args = parse_args()
-    
     register_agents()
     register_arenas()
 
-    # 1. Load the Arena Config
-    arena_conf_path = os.path.join('./conf/', "arena", f"{args.arena_name}.yaml")
-    
-    if not os.path.exists(arena_conf_path):
-        raise FileNotFoundError(f"Arena config not found at: {arena_conf_path}")
-        
-    print(f"Loading arena config from: {arena_conf_path}")
-    arena_cfg = OmegaConf.load(arena_conf_path)
+    garments = {
+        "Longsleeve": "multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+        "Trousers": "multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+        "Skirt": "multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200",
+        "Dress": "multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200"
+    }
 
-    # 2. Build Arena
-   
-    arena = ag_ar.build_arena(
-        arena_cfg.name, 
-        arena_cfg
-    )
+    fig, axes = plt.subplots(4, 4, figsize=(15, 15))
+    
+    quadrants = [
+        (0, 0), (0, 2), 
+        (2, 0), (2, 2)  
+    ]
 
-    # 3. Load Task Config
-    task_conf_path = os.path.join('./conf/', "task", "flattening_overstretch_penalty_1_no_big_bonus.yaml")
-    if not os.path.exists(task_conf_path):
-        raise FileNotFoundError(f"Task config not found at: {task_conf_path}")
-    
-    print(f"Loading task config from: {task_conf_path}")
-    task_cfg = OmegaConf.load(task_conf_path)
-
-    task = build_task(task_cfg)
-    arena.set_task(task)
-    
-    # 4. Collect Data
-    episode_configs = arena.get_train_configs()
-    collected_images = []
-    
-    num_samples = min(9, len(episode_configs))
-    print(f"Visualizing {num_samples} episodes...")
-    
-    for i in range(num_samples):
-        eps_conf = episode_configs[i]
-        info = arena.reset(eps_conf)
+    for (g_label, arena_name), (row_off, col_off) in zip(garments.items(), quadrants):
+        print(f"Processing {g_label}...")
         
-        # Get the observation
-        rgb = info['observation']['rgb']
+        arena_conf_path = os.path.join('./conf/', "arena", f"{arena_name}.yaml")
+        arena_cfg = OmegaConf.load(arena_conf_path)
+        arena = ag_ar.build_arena(arena_cfg.name, arena_cfg)
         
-        # Handle format (Channel First -> Channel Last)
-        if isinstance(rgb, np.ndarray) and rgb.shape[0] == 3 and rgb.shape[2] != 3:
-            rgb = np.transpose(rgb, (1, 2, 0))
+        task_conf_path = os.path.join('./conf/', "task", "flattening_overstretch_penalty_1_no_big_bonus.yaml")
+        task_cfg = OmegaConf.load(task_conf_path)
+        arena.set_task(build_task(task_cfg))
+        
+        episode_configs = arena.get_train_configs()
+        for i in range(4):
+            info = arena.reset(episode_configs[i])
+            rgb = info['observation']['rgb']
+            # Correctly fetching goal RGB from info
+            goal_rgb = info['goal']['rgb']
             
-        collected_images.append(rgb)
-
-    # 5. Plot 3x3 Grid
-    if not collected_images:
-        print("No images found to plot.")
-        return
-
-    fig, axes = plt.subplots(3, 3, figsize=(10, 10))
-    axes = axes.flatten()
-
-    for idx, ax in enumerate(axes):
-        if idx < len(collected_images):
-            ax.imshow(collected_images[idx])
+            # Transpose both images if they are channel-first
+            if isinstance(rgb, np.ndarray) and rgb.shape[0] == 3:
+                rgb = np.transpose(rgb, (1, 2, 0))
+            if isinstance(goal_rgb, np.ndarray) and goal_rgb.shape[0] == 3:
+                goal_rgb = np.transpose(goal_rgb, (1, 2, 0))
+            
+            r = row_off + (i // 2)
+            c = col_off + (i % 2)
+            ax = axes[r, c]
+            
+            # Display main observation
+            ax.imshow(rgb)
             ax.axis('off')
-        else:
-            # Turn off empty axes
-            ax.axis('off')
+            
+            # Create Inset axes
+            ax_ins = inset_axes(ax, width="30%", height="30%", loc='lower right', borderpad=0.5)
+            ax_ins.imshow(goal_rgb)
 
-    # --- REMOVE SPACES ---
-    plt.subplots_adjust(wspace=0, hspace=0)
-    plt.tight_layout(pad=0)
-    # ---------------------
+            # --- UPDATED: Remove ticks and labels but keep the border ---
+            ax_ins.set_xticks([])
+            ax_ins.set_yticks([])
+            # ------------------------------------------------------------
 
-    # --- SAVE LOGIC ---
-    save_dir = './tmp'
-    os.makedirs(save_dir, exist_ok=True)
+            # Set the border color and width
+            for spine in ax_ins.spines.values():
+                spine.set_visible(True) # Ensure they are visible
+                spine.set_edgecolor('white')
+                spine.set_linewidth(1.5) # Slightly thicker looks better on 4x4
+            
+            # Text remains in top-left
+            ax.text(0.05, 0.95, f"{g_label}: Train {i}", 
+                    transform=ax.transAxes, 
+                    color='white', 
+                    fontsize=16, 
+                    fontweight='bold',
+                    va='top', 
+                    ha='left',   
+                    bbox=dict(facecolor='black', alpha=0.5, lw=0))
+        arena.close()
 
-    save_path = os.path.join(save_dir, f"{args.arena_name}_preview.png")
+    plt.subplots_adjust(wspace=0.01, hspace=0.01)
     
-    # bbox_inches='tight' and pad_inches=0 remove the final white border around the whole image
-    plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-    print(f"Saved visualization to: {save_path}")
-    # ------------------
-
+    save_dir = './analysis'
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, "combined_garments_4x4_with_goals.png")
+    
+    plt.savefig(save_path, bbox_inches='tight', pad_inches=0.05)
+    print(f"Saved combined visualization to: {save_path}")
     plt.show()
 
 if __name__ == "__main__":

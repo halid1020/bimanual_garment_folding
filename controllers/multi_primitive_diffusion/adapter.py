@@ -532,6 +532,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 input_dim=512, 
                 output_channel=self.input_channel
             )
+        elif self.rep_learn == 'predict-state':
+            # Create a simple MLP to project the visual embeddings to the state space
+            self.nets['state_predictor'] = nn.Sequential(
+                nn.Linear(self.config.obs_dim, 256),
+                nn.ReLU(),
+                nn.Linear(256, self.config.state_dim)
+            )
 
         self._test_network()
 
@@ -607,6 +614,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     self.config.state_dim))
                 obs = torch.cat([obs, vector_state],dim=-1)
             
+            if self.rep_learn == 'predict-state':
+                _ = self.nets['state_predictor'](obs)
+
             # print('[MultiPrimitiveDiffusion, _test_network] obs', obs.shape)
             
             noised_action = torch.randn(
@@ -786,12 +796,31 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 
-            recon_loss = torch.tensor(0.0, device=self.device)
+            rep_loss = torch.tensor(0.0, device=self.device)
+            #state_pred_loss = torch.tensor(0.0, device=self.device) # Add initialization
+
             if self.rep_learn == 'auto-encoder':
-                # image_features shape: (B * obs_horizon, 512)
-                # input_obs shape: (B * obs_horizon, C, 96, 96)
+                # existing auto-encoder logic
                 reconstructed_obs = self.nets['vision_decoder'](image_features)
-                recon_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+                rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+            
+            # Add this block for predict-state logic
+            elif self.rep_learn == 'predict-state':
+                # obs_features shape is (B, obs_horizon, feature_dim)
+                # Network outputs (B, obs_horizon, state_dim)
+                pred_state = self.nets['state_predictor'](obs_features) 
+                
+                state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                if state_key in nbatch:
+                    # Slice to the observation horizon
+                    gt_state = nbatch[state_key][:, :self.config.obs_horizon] 
+                    
+                    # Flatten the state. Example: [15, 2] -> 30
+                    gt_state = gt_state.reshape(B, self.config.obs_horizon, -1).float() 
+                    
+                    rep_loss = nn.functional.mse_loss(pred_state, gt_state)
+                else:
+                    print(f"Warning: {state_key} not found in batch for state prediction.")
 
             # (B,obs_horizon,D)
 
@@ -903,9 +932,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
             total_loss = actor_noise_loss + prim_loss #co-update the encoder
-            if self.rep_learn == 'auto-encoder':
+            if self.rep_learn in ['auto-encoder', 'predict-state']:
                 #print('loss!')
-                total_loss += recon_loss * self.config.get('recon_weight', 0.1)
+                total_loss += rep_loss * self.config.get('rep_weight', 0.1)
             # optimize
             total_loss.backward()
             

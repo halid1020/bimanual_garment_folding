@@ -3,10 +3,14 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from omegaconf import OmegaConf
+import actoris_harena.api as ag_ar
+
 
 # Assuming these are your custom modules
-from train.utils import register_agent, registered_arena, build_task
-import actoris_harena.api as ag_ar
+from registration.agent import register_agents
+from registration.sim_arena import register_arenas
+from registration.task import build_task
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Agent Arena Environment")
@@ -16,7 +20,8 @@ def parse_args():
 def main():
     args = parse_args()
     
-    register_agent()
+    register_agents()
+    register_arenas()
 
     # 1. Load the Arena Config
     arena_conf_path = os.path.join('./conf/', "arena", f"{args.arena_name}.yaml")
@@ -28,11 +33,12 @@ def main():
     arena_cfg = OmegaConf.load(arena_conf_path)
 
     # 2. Build Arena
-    if arena_cfg.name not in registered_arena:
-        raise ValueError(f"Arena '{arena_cfg.name}' is not registered. Available: {list(registered_arena.keys())}")
-        
-    arena = registered_arena[arena_cfg.name](arena_cfg)
-    
+   
+    arena = ag_ar.build_arena(
+        arena_cfg.name, 
+        arena_cfg
+    )
+
     # 3. Load Task Config
     task_conf_path = os.path.join('./conf/', "task", "flattening_overstretch_penalty_1_no_big_bonus.yaml")
     if not os.path.exists(task_conf_path):

@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check
+  - /agent/lagarnet@agent: lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check
   - /arena@arena: multi_longsleeve_single_picker_provide_semkey_pixel_no_success_stop_resol_64_add_goal_to_obs
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
 

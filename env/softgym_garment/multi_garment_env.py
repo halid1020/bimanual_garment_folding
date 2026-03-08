@@ -232,12 +232,16 @@ class MultiGarmentEnv(GarmentEnv):
             eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
             train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
 
-            self.eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+            eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+            #print('!!!len eval keys', len(self.eval_keys))
             self.train_keys = self._get_init_keys_helper(train_path, train_key_file)
 
-            self.val_keys = self.eval_keys[:self.num_val_trials]
-            self.eval_keys = self.eval_keys[self.num_val_trials:]
-
+            self.val_keys = eval_keys[:self.num_val_trials]
+            self.eval_keys = eval_keys[self.num_val_trials:]
+            if len(self.eval_keys) < self.num_eval_trials:
+                self.eval_keys = eval_keys[:self.num_eval_trials]
+                self.val_keys = self.train_keys[self.num_train_trials:self.num_train_trials+self.num_val_trials]
+                
     def _get_init_state_params(self, eid):
         garment_type = self.config.garment_type
         if self.config.garment_type == 'all':
@@ -249,11 +253,12 @@ class MultiGarmentEnv(GarmentEnv):
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
         elif self.mode == 'eval':
             keys = self.eval_keys
+            #print('len eval keys', len(keys))
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
         elif self.mode == 'val':
             keys = self.val_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
-        print('[MultiGarmentEnv] mode', self.mode)
+        #print('[MultiGarmentEnv] mode', self.mode)
         while True:
             key = keys[eid]
 

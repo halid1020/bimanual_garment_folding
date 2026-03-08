@@ -13,8 +13,8 @@ eval_arenas:
   - arena: multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
     task: flattening_overstretch_penalty_1_no_big_bonus
   
-  - arena: multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
-    task: flattening_overstretch_penalty_1_no_big_bonus
-  
   - arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: flattening_overstretch_penalty_1_no_big_bonus
+
+  - arena: multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
     task: flattening_overstretch_penalty_1_no_big_bonus

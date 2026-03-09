@@ -88,6 +88,7 @@ def main(cfg: DictConfig):
 
         # 5. Run the evaluation
         try:
+            arena.reset()
             res = ag_ar.evaluate(
                 agent,
                 arena,

@@ -13,23 +13,7 @@ from actoris_harena.torch_utils import *
 from .rssm import RSSM
 from .model import bottle, symlog
 
-def reward_bonus_and_penalty(rewards, observations, actions):
-    if isinstance(rewards, torch.Tensor):
-        rewards_ = rewards.clone()
-    else:
-        rewards_ = rewards.copy()
 
-    above_0_9 = observations['normalised_coverage'][:, :-1] > 0.9
-    below_0_9 = observations['normalised_coverage'][:, 1:] < 0.9
-    first_state_no_term = observations['terminal'][:, :-1] == 0
-
-    rewards_[:, 1:][above_0_9 & below_0_9 & first_state_no_term] = 0
-
-    above_0_9_5 = observations['normalised_coverage'][:] > 0.95
-    rewards_[above_0_9_5] = 0.7
-
-
-    return rewards
 
 class GoalConditionedTransitionModel(nn.Module):
     __constants__ = ['min_std_dev']
@@ -119,7 +103,6 @@ class GC_RSSM(RSSM):
 
     def __init__(self, config):
         super().__init__(config)
-        self.reward_processor = reward_bonus_and_penalty
         
 
     def init_transition_model(self):

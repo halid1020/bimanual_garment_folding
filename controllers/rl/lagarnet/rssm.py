@@ -28,6 +28,24 @@ from .memory import ExperienceReplay
 from .cost_functions import *
 from .model import *
 
+def reward_bonus_and_penalty(rewards, observations, actions):
+    if isinstance(rewards, torch.Tensor):
+        rewards_ = rewards.clone()
+    else:
+        rewards_ = rewards.copy()
+
+    above_0_9 = observations['normalised_coverage'][:, :-1] > 0.9
+    below_0_9 = observations['normalised_coverage'][:, 1:] < 0.9
+    first_state_no_term = observations['terminal'][:, :-1] == 0
+
+    rewards_[:, 1:][above_0_9 & below_0_9 & first_state_no_term] = 0
+
+    above_0_9_5 = observations['normalised_coverage'][:] > 0.95
+    rewards_[above_0_9_5] = 0.7
+
+
+    return rewards
+
 class RSSM(RLAgent):
 
     def __init__(self, config):
@@ -150,6 +168,8 @@ class RSSM(RLAgent):
         self.cur_state = {}
         self.apply_reward_processor = self.config.get('apply_reward_processor', False)
         self.datasets = None
+
+        self.reward_processor = reward_bonus_and_penalty
 
     def init_transition_model(self):
         self.model['transition_model'] = TransitionModel(

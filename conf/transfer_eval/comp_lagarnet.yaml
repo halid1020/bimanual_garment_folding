@@ -7,6 +7,10 @@ train_exp_config: sim_exp/lagarnet/comp_lagarnet_single_picker_single_primitive_
 
 # Define evaluation arenas & tasks as a standard list of strings
 eval_arenas:
+
+  - arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_horizon_30
+    task: flattening_overstretch_penalty_1_no_big_bonus
+    
   - arena: multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
     task: flattening_overstretch_penalty_1_no_big_bonus
   

@@ -32,7 +32,7 @@ from controllers.rl.lagarnet.rssm import RSSM
 from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
 from controllers.rl.lagarnet.single_arm_mask_pick_and_place_mpc import SingleArmMaskPickAndPlaceMPC
 from controllers.rl.cloth_mate.adapter import ClothMateAdapter
-
+from controllers.rl.cloth_funnels.adapter import ClothFunnelsAdapter
 import actoris_harena as athar
 
 def register_agents():
@@ -61,3 +61,4 @@ def register_agents():
     athar.register_agent('cloth_mask_workspace_pick_and_place_mpc', ClothMaskWorkspacePickAndPlaceMPC)
     athar.register_agent('single_arm_mask_pick_and_place_mpc', SingleArmMaskPickAndPlaceMPC)
     athar.register_agent('clothmate', ClothMateAdapter)
+    athar.register_agent('cloth-funnels', ClothFunnelsAdapter)

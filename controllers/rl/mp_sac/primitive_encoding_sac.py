@@ -1,23 +1,9 @@
-from .vanilla_sac import VanillaSAC, Actor, Critic
+from actoris_harena.agent.drl.sac.vanilla_sac import VanillaSAC, Actor, Critic
 
 import math
-import os
-from typing import Any, Optional
-
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import cv2
-from collections import deque
-from tqdm import tqdm
-
-from actoris_harena import TrainableAgent
-
-from dotmap import DotMap
-from .replay_buffer import ReplayBuffer
-
-from .wandb_logger import WandbLogger
 
 
 class PrimitiveEncodingSAC(VanillaSAC):

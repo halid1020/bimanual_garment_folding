@@ -1,4 +1,4 @@
-from .vanilla_sac import VanillaSAC, Actor, Critic
+from actoris_harena.agent.drl.sac.vanilla_sac import VanillaSAC, Actor, Critic
 
 import math
 import os
@@ -15,10 +15,7 @@ from tqdm import tqdm
 from actoris_harena import TrainableAgent
 
 from dotmap import DotMap
-from .replay_buffer import ReplayBuffer
-
-from .wandb_logger import WandbLogger
-
+from actoris_harena.agent.drl.sac.replay_buffer import ReplayBuffer
 from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 
 

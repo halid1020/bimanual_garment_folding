@@ -1,5 +1,5 @@
-from controllers.rl.primitive_encoding_sac \
-    import PrimitiveEncodingSAC
+# from controllers.rl.primitive_encoding_sac \
+#     import PrimitiveEncodingSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
     import CentreSleeveFoldingStochasticPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
@@ -9,17 +9,15 @@ from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
 from controllers.human.real_world_human_policy import RealWordHumanPolicy
 from controllers.human.real_world_human_single_arm_pick_and_place_policy \
     import RealWorldSingleArmHumanPickAndPlacePolicy
-from controllers.rl.vanilla_image_sac import VanillaImageSAC
-from controllers.rl.vanilla_sac import VanillaSAC
-from controllers.rl.image2state_sac import Image2State_SAC
-from controllers.rl.primitive2vector_sac \
-    import Primitive2VectorSAC
-from controllers.rl.demo_sac \
-    import DemoSAC
-from controllers.rl.maple \
-    import MAPLE
-from controllers.rl.image2state_multi_primitive_sac \
-    import Image2StateMultiPrimitiveSAC
+# from controllers.rl.image2state_sac import Image2State_SAC
+# from controllers.rl.primitive2vector_sac \
+#     import Primitive2VectorSAC
+# from controllers.rl.demo_sac \
+#     import DemoSAC
+# from controllers.rl.maple \
+#     import MAPLE
+# from controllers.rl.image2state_multi_primitive_sac \
+#     import Image2StateMultiPrimitiveSAC
 from controllers.gpt_fabric.adapter import GPTFabricAdapter
 from controllers.rl.dreamer_v3.adapter import DreamerV3Adapter
 from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
@@ -41,14 +39,12 @@ def register_agents():
     athar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
     athar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
     athar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
-    athar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
-    athar.register_agent('vanilla-image-sac', VanillaImageSAC)
-    athar.register_agent('vanilla-sac', VanillaSAC)
-    athar.register_agent('image2state-sac', Image2State_SAC)
-    athar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
-    athar.register_agent('demo-sac', DemoSAC)
-    athar.register_agent('maple', MAPLE)
-    athar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
+    # athar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
+    # athar.register_agent('image2state-sac', Image2State_SAC)
+    # athar.register_agent('primitive2vector-sac', Primitive2VectorSAC)
+    # athar.register_agent('demo-sac', DemoSAC)
+    # athar.register_agent('maple', MAPLE)
+    # athar.register_agent('image2state-multi-primitive-sac', Image2StateMultiPrimitiveSAC)
     athar.register_agent('gpt-fabric', GPTFabricAdapter)
     athar.register_agent('dreamerV3', DreamerV3Adapter)
     athar.register_agent('human-dual-pickers-pick-and-place', HumanDualPickersPickAndPlace)

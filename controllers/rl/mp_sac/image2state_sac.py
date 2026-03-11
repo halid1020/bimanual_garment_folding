@@ -10,15 +10,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import cv2
-from .vanilla_sac import VanillaSAC
+from actoris_harena.agent.drl.sac.vanilla_sac import VanillaSAC
 
-from .networks import  Critic  # expects networks similar to your repo
-from .obs_state_replay_buffer import ObsStateReplayBuffer
-from .obs_state_replay_buffer_zarr import ObsStateReplayBufferZarr
-# from .vanilla_image_sac import NatureCNNEncoder
-
-from .wandb_logger import WandbLogger
-
+from actoris_harena.agent.drl.sac.networks import  Critic  # expects networks similar to your repo
 
 class NatureCNNEncoder(nn.Module):
     def __init__(self, 

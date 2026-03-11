@@ -9,6 +9,7 @@ import torch
 import cv2
 from dotmap import DotMap
 import torch.nn as nn
+import time
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -547,6 +548,22 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
     def _test_network(self):
 
+        # --- Parameter Calculation Added Here ---
+        total_params = sum(p.numel() for p in self.nets.parameters())
+        trainable_params = sum(p.numel() for p in self.nets.parameters() if p.requires_grad)
+        
+        print("-" * 50)
+        print(f"[MultiPrimitiveDiffusion Network Stats]")
+        print(f"Total Parameters: {total_params:,}")
+        print(f"Trainable Parameters: {trainable_params:,}")
+        
+        # Optional: Print parameters per sub-network for debugging
+        for name, net in self.nets.items():
+            net_params = sum(p.numel() for p in net.parameters())
+            print(f"  - {name}: {net_params:,}")
+        print("-" * 50)
+        # ----------------------------------------
+
         with torch.no_grad():
             # example inputs
 
@@ -1064,9 +1081,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return -2
 
     def single_act(self, info, update=False):
-        
+        start_time = time.time()
         if self.measure_time:
-            start_time = time.time()
+            
             arena_id = info['arena_id']
 
         if update == True:
@@ -1259,7 +1276,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         if self.measure_time:
             self.internal_states[[info['arena_id']]]['inference_time'].append(time.time() - start_time)
         
-
+        duration = time.time() - start_time
+        print(f"Arena {info.get('arena_id', 'Unknown')}: Action planned in {duration:.4f} seconds.")
         return out_action
 
     def act(self, infos, updates):

@@ -1,5 +1,5 @@
 # comp_org_lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_retrain_with_diffusion_200.yaml
-name: lagarnet
+name: rssm
 device: 'cuda:0'
 debug: False
 train_mode: 'offline'

@@ -14,6 +14,7 @@ from torch.distributions.kl import kl_divergence
 from torch.distributions import Normal
 from omegaconf import OmegaConf
 from dotmap import DotMap
+import time
 
 from actoris_harena.torch_utils import *
 from actoris_harena.registration.dataset import *
@@ -198,13 +199,14 @@ class RSSM(RLAgent):
         return self.internal_states
     
     def single_act(self, info, update=False):
-
+        start_time = time.time()
         action =  self.planning_algo.act([info], updates=[False])[0].flatten()
         plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
         
         for k, v in plan_internal_state.items():
             self.internal_states[info['arena_id']][k] = v
-
+        duration = time.time() - start_time
+        #print(f"Arena {info.get('arena_id', 'Unknown')}: Action planned in {duration:.4f} seconds.")
         return action
 
     def act(self, infos, update=False):

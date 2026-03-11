@@ -150,9 +150,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.stats = dataset.stats
         elif self.config.dataset_mode == 'general':
             from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-            # convert dotmap to dict
             config = self.config.dataset_config.toDict()
-            #print('config', config)
             dataset = TrajectoryDataset(**config)
             
 

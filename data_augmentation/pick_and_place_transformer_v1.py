@@ -83,7 +83,7 @@ class PickAndPlaceTransformerV1:
 
 
         for obs in ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
-                    'goal-depth', 'goal-mask', 'gc-depth', 'gc-rgb', 'gc-rgbd']:
+                    'goal-depth', 'goal-mask', 'gc-depth', 'rgb+goal-rgb', 'rgb+goal-rgbd']:
             if obs in sample:
                 #print('obs', obs)
                 if sample[obs].shape[-1] <= 10:
@@ -104,16 +104,16 @@ class PickAndPlaceTransformerV1:
             sample['depth'] = sample['gc-depth'][:, :1]
             sample['goal-depth'] = sample['gc-depth'][:, 1:]
         
-        if 'gc-rgb' in sample:
-            sample['rgb'] = sample['gc-rgb'][:, :3]
-            sample['goal-rgb'] = sample['gc-rgb'][:, 3:]
+        if 'rgb+goal-rgb' in sample:
+            sample['rgb'] = sample['rgb+goal-rgb'][:, :3]
+            sample['goal-rgb'] = sample['rgb+goal-rgb'][:, 3:]
         
-        if 'gc-rgbd' in sample:
-            sample['rgb'] = sample['gc-rgbd'][:, :3]
-            sample['depth'] = sample['gc-rgbd'][:, 3:4]
-            sample['goal-rgb'] = sample['gc-rgbd'][:, 4:7]
-            sample['goal-depth'] = sample['gc-rgbd'][:, 7:]
-            # print('gc-rgb', sample['gc-rgb'].shape)
+        if 'rgb+goal-rgbd' in sample:
+            sample['rgb'] = sample['rgb+goal-rgbd'][:, :3]
+            sample['depth'] = sample['rgb+goal-rgbd'][:, 3:4]
+            sample['goal-rgb'] = sample['rgb+goal-rgbd'][:, 4:7]
+            sample['goal-depth'] = sample['rgb+goal-rgbd'][:, 7:]
+            # print('rgb+goal-rgb', sample['rgb+goal-rgb'].shape)
             # print('rgb', sample['rgb'].shape)
 
         
@@ -347,10 +347,10 @@ class PickAndPlaceTransformerV1:
         if 'gc-depth' in sample:
             sample['gc-depth'] = torch.cat([sample['depth'], sample['goal-depth']], dim=1)
 
-        if 'gc-rgb' in sample:
-            sample['gc-rgb'] = torch.cat([sample['rgb'], sample['goal-rgb']], dim=1)
-        if 'gc-rgbd' in sample:
-            sample['gc-rgbd'] = torch.cat([sample['rgb'], sample['depth'], 
+        if 'rgb+goal-rgb' in sample:
+            sample['rgb+goal-rgb'] = torch.cat([sample['rgb'], sample['goal-rgb']], dim=1)
+        if 'rgb+goal-rgbd' in sample:
+            sample['rgb+goal-rgbd'] = torch.cat([sample['rgb'], sample['depth'], 
                                            sample['goal-rgb'], sample['goal-depth']], dim=1)
 
         if self.preserve_goal_mask:

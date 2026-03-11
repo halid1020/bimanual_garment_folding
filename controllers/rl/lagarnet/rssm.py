@@ -284,10 +284,10 @@ class RSSM(RLAgent):
         if self.config.input_obs == 'gc-depth':
             obs_ = np.concatenate([obs['depth'], obs['goal_depth']], axis=-1)
             goal_mask = obs['goal_mask']
-        elif self.config.input_obs == 'gc-rgb':
+        elif self.config.input_obs == 'rgb+goal-rgb':
             obs_ = np.concatenate([obs['rgb'], obs['goal-rgb']], axis=-1)
             goal_mask = obs['goal-mask']
-        elif self.config.input_obs == 'gc-rgbd':
+        elif self.config.input_obs == 'rgb+goal-rgbd':
             obs_ = np.concatenate([obs['rgb'], obs['depth'], obs['goal_rgb'], obs['goal_depth']], axis=-1)
             goal_mask = obs['goal_mask']
         elif self.config.input_obs == 'rgbd':
@@ -303,7 +303,7 @@ class RSSM(RLAgent):
             self.config.input_obs: np.expand_dims(obs_, axis=(0)),
             'mask': np.expand_dims(mask, axis=(0)),
         }
-        if self.config.input_obs in ['gc-depth', 'gc-rgb', 'gc-rgbd']:
+        if self.config.input_obs in ['gc-depth', 'rgb+goal-rgb', 'rgb+goal-rgbd']:
             if len(goal_mask.shape) == 2:
                 goal_mask = np.expand_dims(goal_mask, axis=0)
             to_trans_dict['goal-mask'] = np.expand_dims(goal_mask, axis=(0))
@@ -343,7 +343,7 @@ class RSSM(RLAgent):
 
         ### get the last state for
         if self.config.debug:
-            if self.config.input_obs == 'gc-rgb':
+            if self.config.input_obs == 'rgb+goal-rgb':
                 rgb = ts_to_np(image[0, 0, :3, :, :].clip(0, 1)).transpose(1, 2, 0)
                 goal = ts_to_np(image[0, 0, 3:, :, :].clip(0, 1)).transpose(1, 2, 0)
                 plt.imsave(f'tmp/input_obs_rgb.png', rgb) 
@@ -667,10 +667,10 @@ class RSSM(RLAgent):
         elif self.config.input_obs == 'gc-depth':
             gc_depth = torch.cat([data['depth'], data['goal-depth']], dim=2)
             data['input_obs'] = symlog(gc_depth, self.symlog)
-        elif self.config.input_obs == 'gc-rgb':
+        elif self.config.input_obs == 'rgb+goal-rgb':
             gc_rgb = torch.cat([data['rgb'], data['goal-rgb']], dim=2)
             data['input_obs'] = symlog(gc_rgb, self.symlog)
-        elif self.config.input_obs == 'gc-rgbd':
+        elif self.config.input_obs == 'rgb+goal-rgbd':
             gc_rgbd = torch.cat([data['rgb'], data['depth'], data['goal-rgb'], data['goal-depth']], dim=2)
             data['input_obs'] = symlog(gc_rgbd, self.symlog)
         else:

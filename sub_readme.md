@@ -26,3 +26,16 @@ python train/hydra_eval.py --config-name human_based_stitching_dual_picker_multi
 python train/hydra_eval.py --config-name conf/vlm_qwen3_2b_it_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace
 
 
+python tool/hydra_eval.py --config-name sim_exp/human_multi_primitive_multi_longsleeve_folding_from_crumpled_with_workspace
+
+python tool/hydra_eval.py --config-name sim_exp/human_multi_primitive_multi_longsleeve_reasoning_folding_from_crumpled_with_workspace
+
+python tool/hydra_eval.py --config-name sim_exp/vlm_P8_based_stitching_dual_picker_multi_primitive_multi_longsleeve_folding_from_crumpled_workspace
+
+
+
+
+
+
+
+

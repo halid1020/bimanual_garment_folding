@@ -19,11 +19,13 @@ class NoOperation(Agent):
         
         return actions
     
-    def single_act(self, state, update=False):
+    def single_act(self, state, get_unnormalise=False, update=False):
         """
         Pop up a window shows the RGB image, and user can click on the image to
         produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
         """
+        if get_unnormalise:
+            return np.zeros(0), np.zeros(0)
         return np.zeros(0)
         
     def init(self, state):

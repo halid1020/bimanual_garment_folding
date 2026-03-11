@@ -23,7 +23,7 @@ class PixelHumanFling(Agent):
             
             return actions
 
-        def single_act(self, state):
+        def single_act(self, state, get_unnormalise=False):
             
             rgb = state['observation']['rgb']
         
@@ -142,6 +142,7 @@ class PixelHumanFling(Agent):
             height, width = rgb.shape[:2]
             pick_y, pick_x = clicks[0]
             place_y, place_x = clicks[1]
+
             
             normalized_action = [
                 (pick_x / width) * 2 - 1,
@@ -150,7 +151,10 @@ class PixelHumanFling(Agent):
                 (place_y / height) * 2 - 1
             ]
             
+            if get_unnormalise:
+                return np.asarray(normalized_action), np.array([pick_x, pick_y, place_x, place_y])
             return np.asarray(normalized_action)
+            
             
             
         def get_phase(self):

@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 import cv2
 
-from agent_arena import Agent
+from actoris_harena import Agent
 
 from .pick_and_fling.pixel_human import PixelHumanFling
 from .human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
@@ -13,6 +13,7 @@ from .no_operation import NoOperation
 
 from .utils import draw_text_top_right, apply_workspace_shade
 
+from .gui_garment_phase_classifier import GarmentPhaseClassifier
 
 def draw_reasoning_text(img, text, max_lines=4):
     """
@@ -102,6 +103,11 @@ class HumanMultiPrimitiveReasoning(Agent):
             "no-operation"
         ]
 
+        self.phase_names = [
+            "flattening",
+            "folding",
+        ]
+
         self.primitive_instances = [
             PixelHumanFling(config),
             HumanDualPickersPickAndPlace(config),
@@ -113,6 +119,8 @@ class HumanMultiPrimitiveReasoning(Agent):
 
         self._episode_counter = 0
         self._step_counter = 0
+
+        self.phase_classifier = GarmentPhaseClassifier(config)
 
 
 
@@ -149,7 +157,7 @@ class HumanMultiPrimitiveReasoning(Agent):
         Show image + goals, let human choose primitive, capture reasoning,
         save everything, then delegate.
         """
-
+        
         # -----------------------------
         # Image preparation
         # -----------------------------
@@ -223,13 +231,47 @@ class HumanMultiPrimitiveReasoning(Agent):
         cv2.imwrite(preview_path, img)
         print(f"[human] Preview saved to {preview_path}")
 
+
+
+        # phase, reasoning_phase = self.phase_classifier.let_human_reason_and_decide(current_rgb=state["observation"]["rgb"])
+
+
+        # -----------------------------
+        # Phase selection
+        # -----------------------------
+        while True:
+            print("\nChoose a phase:")
+            for i, p in enumerate(self.phase_names):
+                print(f"{i + 1}. {p}")
+            try:
+                choice = int(input("> ")) - 1
+                if 0 <= choice < len(self.phase_names):
+                    chosen_phase = self.phase_names[choice]
+                    # primitive = self.primitive_instances[choice]
+                    break
+            except ValueError:
+                pass
+            print("Invalid choice.")
+
+        # -----------------------------
+        # Human reasoning for the phase decision
+        # -----------------------------
+        reasoning_phase = ""
+        if self.enabled:
+            print(
+                f"\nExplain your reasoning (1–3 sentences). Why {chosen_phase}.\n"
+            )
+            while not reasoning_phase:
+                reasoning_phase = input("> ").strip()
+
+
         # -----------------------------
         # Primitive selection
         # -----------------------------
         while True:
             print("\nChoose a primitive:")
             for i, p in enumerate(self.primitive_names):
-                print(f"{i + 1}. {p}")
+                print(f"{i + 1}. {p.replace('norm-pixel-', '')}")
             try:
                 choice = int(input("> ")) - 1
                 if 0 <= choice < len(self.primitive_names):
@@ -243,17 +285,20 @@ class HumanMultiPrimitiveReasoning(Agent):
         # -----------------------------
         # Human reasoning
         # -----------------------------
-        reasoning = ""
+        reasoning_prim = ""
         if self.enabled:
             print(
                 "\nExplain your reasoning (1–3 sentences).\n"
                 "Focus on cloth state, risk, and expected effect."
             )
-            while not reasoning:
-                reasoning = input("> ").strip()
+            while not reasoning_prim:
+                reasoning_prim = input("> ").strip()
+
+
+        
 
         # Draw reasoning on image
-        img = draw_reasoning_text(img, reasoning)
+        img = draw_reasoning_text(img, reasoning_prim)
 
         episode_id = self._episode_counter
         step_id = self._step_counter
@@ -264,29 +309,46 @@ class HumanMultiPrimitiveReasoning(Agent):
         # -----------------------------
         # Delegate
         # -----------------------------
-        action = primitive.single_act(state)
+        action, un_norm_action = primitive.single_act(state, get_unnormalise=True)
         self.last_primitive = chosen_primitive
+        un_norm_action = self._swap_pairs(un_norm_action)  # swap (x,y) to (y,x) for OpenCV coord convention
+        
+        
+        reasoning_prim_coord = ""
+        if chosen_primitive != "no-operation":
+            if self.enabled:
+                print(
+                    f"\nExplain your reasoning of the coordinate for {chosen_primitive.replace('norm-pixel-', '')} (1–3 sentences).\n"
+                    "Focus on cloth state, risk, and expected effect."
+                )
+                while not reasoning_prim_coord:
+                    reasoning_prim_coord = input("> ").strip()
 
-        print("\n" + "=" * 50)
-        print(state["observation"]["rgb"].shape)
+        # print("\n" + "=" * 50)
+        # print(state["observation"]["rgb"].shape)
 
         # scaling = state["observation"]["rgb"].shape[1]
+        # rgb = cv2.resize(rgb, (512, 512))
+        rgb_for_saving = state["observation"]["rgb"].copy()
+        rgb_for_saving = cv2.cvtColor(rgb_for_saving, cv2.COLOR_BGR2RGB)
+        rgb_for_saving = cv2.resize(rgb_for_saving, (512, 512))
 
 
-        print("Action (normalized):", action)
+
+        # print("Action (normalized):", action)
         # print(state["observation"].keys())
         # print(state["observation"]["picker_norm_pixel_pos"].keys())
         # print(state["observation"])
         # print(state.keys())
 
-        new_pts = action_to_pixel_coords(
-            action,
-            image_size=(128, 128),
-            dtype=np.float32,
-            dtype_output=np.int32
-        )
+        # new_pts = action_to_pixel_coords(
+        #     action,
+        #     image_size=(128, 128),
+        #     dtype=np.float32,
+        #     dtype_output=np.int32
+        # )
 
-        print(f"[human-multi-primitive-reasoning] Chosen primitive: {chosen_primitive} -> Action: {new_pts}")
+        print(f"[human-multi-primitive-reasoning] Chosen primitive: {chosen_primitive} -> {rgb_for_saving.shape} -> Action: {un_norm_action}")
 
         # if new_pts.shape[0] == 8:
         # testing_image = state["observation"]["rgb"].copy()
@@ -294,15 +356,15 @@ class HumanMultiPrimitiveReasoning(Agent):
         pick_b = None
         place_a = None
         place_b = None
-        fling = None
 
-        if len(new_pts) == 4:
-            pick_a = new_pts[0]
-            pick_b = new_pts[1]
-            place_a = new_pts[2]
-            place_b = new_pts[3]
-        elif len(new_pts) == 2:
-            pick_a, fling = new_pts[0], new_pts[1]
+        if len(un_norm_action) == 4:
+            pick_a = un_norm_action[0:2]
+            pick_b = un_norm_action[2:4]
+        elif len(un_norm_action) == 8:
+            pick_a = un_norm_action[0:2]
+            place_a = un_norm_action[2:4]
+            pick_b = un_norm_action[4:6]
+            place_b = un_norm_action[6:8]
 
 
         
@@ -317,22 +379,24 @@ class HumanMultiPrimitiveReasoning(Agent):
                 step_id=step_id,
                 state=state,
                 img=img,
-                raw_rgb=state["observation"]["rgb"],
+                raw_rgb=rgb_for_saving,
                 goal_rgb=goal_rgb,
+                chosen_phase=chosen_phase,
+                reasoning_phase=reasoning_phase,
                 chosen_primitive=chosen_primitive,
-                reasoning=reasoning,
+                reasoning_prim=reasoning_prim,
+                reasoning_prim_coord=reasoning_prim_coord,
                 pick_a=pick_a,
                 pick_b=pick_b,
                 place_a=place_a,
                 place_b=place_b,
-                fling=fling
             )
         
         
         return {chosen_primitive: action}
 
-    def _save_decision(self, episode_id, step_id, state, img, raw_rgb, goal_rgb,
-                       chosen_primitive, reasoning, pick_a, pick_b, place_a, place_b, fling):
+    def _save_decision(self, episode_id, step_id, state, img, raw_rgb, goal_rgb, chosen_phase, reasoning_phase,
+                       chosen_primitive, reasoning_prim, reasoning_prim_coord, pick_a, pick_b, place_a, place_b):
         """
         Save images + JSON record atomically.
         """
@@ -342,15 +406,22 @@ class HumanMultiPrimitiveReasoning(Agent):
         # step_id = step_id
 
 
+        timestamp_for_filename = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
         ep_dir = os.path.join(self.save_dir, f"episode_{episode_id}")
         step_dir = os.path.join(ep_dir, f"step_{step_id}")
         os.makedirs(step_dir, exist_ok=True)
 
-        cv2.imwrite(os.path.join(step_dir, "rendered.png"), img)
-        cv2.imwrite(os.path.join(step_dir, "raw_rgb.png"), raw_rgb)
+        # cv2.imwrite(os.path.join(step_dir, f"rendered_{timestamp_for_filename}.png"), img)
+        image_filename = f"raw_rgb_{timestamp_for_filename}.png"
+        cv2.imwrite(os.path.join(step_dir, image_filename), raw_rgb)
 
-        if goal_rgb is not None:
-            cv2.imwrite(os.path.join(step_dir, "goal_rgb.png"), goal_rgb)
+        image_resolution = f"{raw_rgb.shape[0]}x{raw_rgb.shape[1]} px" 
+
+
+        # if goal_rgb is not None:
+        #     cv2.imwrite(os.path.join(step_dir, f"goal_rgb_{timestamp_for_filename}.png"), goal_rgb)
 
 
         if pick_a is not None and pick_b is not None and place_a is not None and place_b is not None:
@@ -358,9 +429,14 @@ class HumanMultiPrimitiveReasoning(Agent):
             record = {
                 "timestamp": datetime.utcnow().isoformat(),
                 "episode_id": episode_id,
+                "image_resolution": image_resolution,
+                "image_filename": image_filename,
                 "step_id": step_id,
+                "chosen_phase": chosen_phase,
+                "reasoning_phase": reasoning_phase,
                 "chosen_primitive": chosen_primitive,
-                "reasoning": reasoning,
+                "reasoning_primitive": reasoning_prim,
+                "reasoning_primitive_coord": reasoning_prim_coord,
                 "pick_a": pick_a.tolist(),
                 "pick_b": pick_b.tolist(),
                 "place_a": place_a.tolist(),
@@ -368,30 +444,39 @@ class HumanMultiPrimitiveReasoning(Agent):
                 "success": state.get("success"),
                 "evaluation": state.get("evaluation", {})
             }
-        elif pick_a is not None and fling is not None:
+        elif pick_a is not None and pick_b is not None:
             record = {
                 "timestamp": datetime.utcnow().isoformat(),
+                "image_resolution": image_resolution,
+                "image_filename": image_filename,
                 "episode_id": episode_id,
                 "step_id": step_id,
+                "chosen_phase": chosen_phase,
+                "reasoning_phase": reasoning_phase,
                 "chosen_primitive": chosen_primitive,
-                "reasoning": reasoning,
-                "pick": pick_a.tolist(),
-                "fling": fling.tolist(),
+                "reasoning_primitive": reasoning_prim,
+                "reasoning_primitive_coord": reasoning_prim_coord,
+                "pick_a": pick_a.tolist(),
+                "pick_b": pick_b.tolist(),
                 "success": state.get("success"),
                 "evaluation": state.get("evaluation", {})
             }
         else:
             record = {
                 "timestamp": datetime.utcnow().isoformat(),
+                "image_resolution": image_resolution,
+                "image_filename": image_filename,
                 "episode_id": episode_id,
                 "step_id": step_id,
+                "chosen_phase": chosen_phase,
+                "reasoning_phase": reasoning_phase,
                 "chosen_primitive": chosen_primitive,
-                "reasoning": reasoning,
+                "reasoning_primitive": reasoning_prim,
                 "success": state.get("success"),
                 "evaluation": state.get("evaluation", {})
             }
 
-        with open(os.path.join(step_dir, "decision.json"), "w") as f:
+        with open(os.path.join(step_dir, f"decision_{timestamp_for_filename}.json"), "w") as f:
             json.dump(record, f, indent=2)
 
     def terminate(self):
@@ -399,3 +484,10 @@ class HumanMultiPrimitiveReasoning(Agent):
             arena_id: (self.last_primitive == "no-operation")
             for arena_id in self.internal_states.keys()
         }
+    
+
+
+    def _swap_pairs(self, arr: np.ndarray) -> np.ndarray:
+        arr = arr.copy()  # avoid modifying original array
+        arr.reshape(-1, 2)[:, ::-1] = arr.reshape(-1, 2)
+        return arr

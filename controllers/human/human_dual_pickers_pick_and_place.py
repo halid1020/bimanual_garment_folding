@@ -22,7 +22,7 @@ class HumanDualPickersPickAndPlace(Agent):
         
         return actions
     
-    def single_act(self, state, update=False):
+    def single_act(self, state, get_unnormalise=False, update=False):
         """
         Pop up a window shows the RGB image, and user can click on the image to
         produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
@@ -84,7 +84,9 @@ class HumanDualPickersPickAndPlace(Agent):
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
-            canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
+            # print("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx\n\n")
+            # print(state['evaluation'])
+            canon_iou_flat = state['evaluation'].get('canon_IoU_to_flattened', 0.0)
             
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
@@ -200,7 +202,8 @@ class HumanDualPickersPickAndPlace(Agent):
         place1_y, place1_x = clicks[1]
         pick2_y, pick2_x = clicks[2]
         place2_y, place2_x = clicks[3]
-        
+
+    
         normalized_action1 = [
             (pick1_x / width) * 2 - 1,
             (pick1_y / height) * 2 - 1,
@@ -215,9 +218,18 @@ class HumanDualPickersPickAndPlace(Agent):
             (place2_y / width) * 2 - 1
         ]
         
+        
+    
+        if get_unnormalise:
+            return np.concatenate([
+                normalized_action1[:2], normalized_action2[:2], 
+                normalized_action1[2:], normalized_action2[2:] ]), np.array([pick1_x, pick1_y, place1_x, place1_y, pick2_x, pick2_y, place2_x, place2_y])                                                     
+        
+            
         return np.concatenate([
-            normalized_action1[:2], normalized_action2[:2], 
-            normalized_action1[2:], normalized_action2[2:] ])
+                normalized_action1[:2], normalized_action2[:2], 
+                normalized_action1[2:], normalized_action2[2:] ])
+
         
     
     # def single_act(self, state, update=False):

@@ -1,6 +1,7 @@
 from actoris_harena import Agent
 import os
 import cv2
+import json
 import torch
 from hydra import compose
 from .garment_phase_classifier import GarmentPhaseClassifier
@@ -47,12 +48,13 @@ class VLMBasedStitchingPolicy(Agent):
             self.phase_classifier = GarmentPhaseClassifier(config)
 
 
-        self.config.use_human_reasoning_skill = config.get("use_human_reasoning_skill", True)
+        self.config.use_human_demo_steps = config.get("use_human_demo_steps", True)
         
         # Buffers to store context for the VLM
         self.history_buffer = [] 
         self.demo_images = []
-        self.human_reasoning_buffer_images, self.human_reasoning_buffer_phases, self.human_reasoning_buffer_reasoning = self._fetch_human_reasoning("controllers/human/human_reasoning_skill") #if self.config.use_human_reasoning_skill else None
+        # self.human_reasoning_buffer_images, self.human_reasoning_buffer_phases, self.human_reasoning_buffer_reasoning = self._fetch_human_reasoning("controllers/human/human_reasoning_skill") #if self.config.use_human_reasoning_skill else None
+        self.human_demo_reasoning_images = self._fetch_human_reasoning_multi("controllers/human/human_reasoning_skill") #if self.config.use_human_reasoning_skill else None
         self.max_history_len = config.get("max_history_len", 3)
 
     def reset(self, arena_ids):
@@ -113,7 +115,7 @@ class VLMBasedStitchingPolicy(Agent):
         In a real implementation, this could be a UI prompt or an API call.
         For now, it returns None or a dummy reasoning string.
         """
-        if self.config.use_human_reasoning_skill:
+        if self.config.use_human_demo_steps:
             # In practice, replace this with actual human input mechanism
             ref_images = [cv2.imread(os.path.join(data_dir, img_name)) for img_name in os.listdir(data_dir) if img_name.endswith(('.png', '.jpg', '.jpeg'))]
             
@@ -128,7 +130,42 @@ class VLMBasedStitchingPolicy(Agent):
 
 
 
-            return ref_images, ref_phases, ref_reasoning
+            return list(zip(ref_images, ref_phases, ref_reasoning))
+        else:
+            return None
+        
+
+    def _fetch_human_reasoning_multi(self, data_dir="human/human_reasoning_skill"):
+        """
+        Placeholder for fetching human reasoning input.
+        In a real implementation, this could be a UI prompt or an API call.
+        For now, it returns None or a dummy reasoning string.
+        """
+        if self.config.use_human_demo_steps:
+            for dir_name in os.listdir(data_dir):
+                if not os.path.isdir(os.path.join(data_dir, dir_name)):
+                    continue
+
+                # [cv2.imread(os.path.join(data_dir, img_name)) for img_name in os.listdir(data_dir) if img_name.endswith(('.png', '.jpg', '.jpeg'))]
+                    
+            
+                # img_path = os.path.join(data_dir, img_name)
+                # print(f'[VLMBasedStitchingPolicy] Found human reasoning image: {img_path}')
+                # In practice, replace this with actual human input mechanism
+                ref_images = [cv2.imread(os.path.join(data_dir, img_name)) for img_name in os.listdir(data_dir) if img_name.endswith(('.png', '.jpg', '.jpeg'))]
+                
+                metadata = self._load_json_metadata(data_dir)
+                ref_phases = [x["phase"] for x in metadata]
+                ref_reasoning = [x['reasoning'] for x in metadata]
+
+
+                print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_images)} reference images and their reasoning from {data_dir}')
+                print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_phases)} reference images and their reasoning from {data_dir}')
+                print(f'[VLMBasedStitchingPolicy] Loaded {len(ref_reasoning)} reference images and their reasoning from {data_dir}')
+
+
+
+                return list(zip(ref_images, ref_phases, ref_reasoning))
         else:
             return None
 
@@ -144,9 +181,10 @@ class VLMBasedStitchingPolicy(Agent):
             current_rgb=rgb,
             history_images=self.history_buffer if self.config.use_history else None,
             demo_images=self.demo_images if self.config.use_demo else None,
-            human_reasoning_images=self.human_reasoning_buffer_images if self.config.use_human_reasoning_skill else None,
-            human_reasoning_phases=self.human_reasoning_buffer_phases if self.config.use_human_reasoning_skill else None,
-            human_reasoning_reasoning=self.human_reasoning_buffer_reasoning if self.config.use_human_reasoning_skill else None
+            human_demo_steps=self.human_demo_reasoning_images if self.config.use_human_demo_steps else None,
+            # human_reasoning_images=self.human_reasoning_buffer_images if self.config.use_human_reasoning_skill else None,
+            # human_reasoning_phases=self.human_reasoning_buffer_phases if self.config.use_human_reasoning_skill else None,
+            # human_reasoning_reasoning=self.human_reasoning_buffer_reasoning if self.config.use_human_reasoning_skill else None
         )
 
         if self.config.use_reasoning:

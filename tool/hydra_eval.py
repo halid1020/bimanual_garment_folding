@@ -13,12 +13,16 @@ from tool.utils import resolve_save_root
 # 1. Update config_path to point to the root 'conf' directory
 @hydra.main(config_path="../conf", version_base=None)
 def main(cfg: DictConfig):
+
+    
     
     register_agents()
     register_arenas()
+    
 
-    new_save_root = resolve_save_root(cfg.save_root)
-    print(f"[tool.hydra_train] Using Save Root: {cfg.save_root}")
+    # -------------------------------------
+    new_save_root = resolve_save_root(cfg.sim_exp.save_root)
+    print(f"[tool.hydra_train] Using Save Root: {new_save_root}")
 
     # Update the config object (must unset 'struct' to modify)
     OmegaConf.set_struct(cfg, False)
@@ -31,20 +35,20 @@ def main(cfg: DictConfig):
     print("[tool.hydra_train] ---------------------")
 
 
-    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+    save_dir = os.path.join(cfg.sim_exp.save_root, cfg.sim_exp.exp_name)
     
     # 2. Extract Names (Fallback to Exp Name if not in sub-config)
     # If your agent yaml doesn't have a 'name' field, we use cfg.exp_name or a default
-    agent_name = cfg.agent.get('name', cfg.exp_name) 
-    arena_name = cfg.arena.get('name', 'default_arena')
+    agent_name = cfg.sim_exp.agent.get('name', cfg.sim_exp.exp_name) 
+    arena_name = cfg.sim_exp.arena.get('name', 'default_arena')
 
     # 3. Build Agent
     print(f"[hydra eval] Building Agent: {agent_name}")
     agent = ag_ar.build_agent(
         agent_name, 
-        cfg.agent,
-        project_name=cfg.project_name,
-        exp_name=cfg.exp_name,
+        cfg.sim_exp.agent,
+        project_name=cfg.sim_exp.project_name,
+        exp_name=cfg.sim_exp.exp_name,
         save_dir=save_dir,
         disable_wandb=True
     )
@@ -53,15 +57,15 @@ def main(cfg: DictConfig):
     print(f"[hydra eval] Building Arena: {arena_name}")
     arena = ag_ar.build_arena(
         arena_name, 
-        cfg.arena,
-        project_name=cfg.project_name,
-        exp_name=cfg.exp_name,
+        cfg.sim_exp.arena,
+        project_name=cfg.sim_exp.project_name,
+        exp_name=cfg.sim_exp.exp_name,
         save_dir=save_dir
     )
     
     # 5. Build Task
     # Ensure build_task can handle the DictConfig object
-    task = build_task(cfg.task)
+    task = build_task(cfg.sim_exp.task)
     arena.set_task(task)
 
     # 6. Run Evaluation

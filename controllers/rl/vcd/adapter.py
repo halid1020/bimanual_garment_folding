@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 import torch
-import pyrealsense2 as rs
+# import pyrealsense2 as rs
 
 from actoris_harena import TrainableAgent
 import cv2

@@ -36,10 +36,26 @@ class RealWordHumanStitchingPrimitivePolicy(Agent):
 
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]
 
-        phase, reasoning_skill = self.gui_classifier.let_human_reason_and_decide(
-                current_rgb=rgb,
-            )
+        # phase, reasoning_skill = self.gui_classifier.let_human_reason_and_decide(
+        #         current_rgb=rgb,
+        #     )
 
+
+        while True:
+            
+            cmd = input("\nPhase [1=flatten, 2=fold, q=quit]: ").strip().lower()
+            if cmd in ("q", "quit"):
+                return None
+            elif cmd == "1":
+                chosen_phase = "flattening"
+                break
+            elif cmd == "2":
+                chosen_phase = "folding"
+                break
+            else:
+                print("Invalid command. Please enter 1, 2, 3 or q.")
+
+        reasoning_phase = input("\nWhat is the reason for the phase?: ").strip().lower()
         
 
         while True:
@@ -59,7 +75,8 @@ class RealWordHumanStitchingPrimitivePolicy(Agent):
             else:
                 print("Invalid command. Please enter 1, 2, 3 or q.")
 
-        reasoning_prim = input("\nWhat is the reason for the primitive?: ").strip().lower()
+        reasoning_primitives = input("\nWhat is the reason for the primitive?: ").strip().lower()
+        
 
         # Unpack scene info
         # rgb, depth = info['observation']["rgb"], info['observation']["depth"]
@@ -140,18 +157,23 @@ class RealWordHumanStitchingPrimitivePolicy(Agent):
 
         print("======", prim_type, '=========', clicks)
 
+
+        reasoning_primitives_coordinates = input("\nWhat is the reason for the primitive coordinates?: ").strip().lower()
+
+
         
         
-        print(phase, reasoning_skill, "##################")
+        # print(phase, reasoning_phase, "##################")
 
         self.gui_classifier.save_image_data(
             save_dir=self.config.save_data,
             image=rgb,
-            phase=phase,
-            reasoning_skill=reasoning_skill,
-            prim_type=prim_type,
+            chosen_phase = chosen_phase,
+            reasoning_phase = reasoning_phase,
+            chosen_primitive = prim_type,
+            reasoning_primitive = reasoning_primitives,
+            reasoning_primitive_coords = reasoning_primitives_coordinates,
             coords=clicks,
-            reasoning_prim=reasoning_prim,
         )
         
 

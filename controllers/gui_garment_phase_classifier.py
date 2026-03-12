@@ -190,11 +190,13 @@ class GarmentPhaseClassifier:
         self,
         save_dir: str,
         image: Any,
-        phase: str,
-        reasoning_skill: Optional[str] = None,
-        prim_type: Optional[str] = None,
+        chosen_phase: str,
+        reasoning_phase: Optional[str] = None,
+        chosen_primitive: Optional[str] = None,
+        reasoning_primitive: Optional[str] = None,
+        reasoning_primitive_coords: Optional[str] = None,
         coords: Optional[List[Tuple[int, int]]] = None,
-        reasoning_prim: Optional[str] = None,
+        # reasoning_prim: Optional[str] = None,
     ) -> None:
         """
         Saves an image and a linked JSON file containing text metadata.
@@ -220,20 +222,56 @@ class GarmentPhaseClassifier:
         save_dir.mkdir(parents=True, exist_ok=True)
         basename = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
+        h, w = image.shape[:2]
+
         # --- Save image ---
         image_path = save_dir / f"image_{basename}.png"
         Image.fromarray(image).save(image_path)
 
+
+
         # --- Save linked metadata ---
         metadata = {
-            "image_file": image_path.name,
-            "phase": phase,
-            "reasoning": reasoning_skill,
+            # "image_file": image_path.name,
+            # "phase": phase,
+            # "reasoning": reasoning_skill,
             # New fields
-            "prim_type": prim_type,
-            "coords": coords,
-            "reasoning_prim": reasoning_prim,
+            # "prim_type": prim_type,
+            # "coords": coords,
+            "image_resolution": f"{w}x{h} px",
+            "image_filename": image_path.name,
+            # "step_id": 0,
+            "chosen_phase": chosen_phase,
+            "reasoning_phase": reasoning_phase, # "The clothing is flat, can proceed to folding",
+            "chosen_primitive": chosen_primitive, # "norm-pixel-pick-and-place",
+            "reasoning_primitive": reasoning_primitive, # "No need to fling at this stage, only delicate pick and place is needed",
+            
         }
+
+        # metadata["reasoning_primitive_coord"] = reasoning_primitive_coords
+
+        if coords:
+            metadata["reasoning_primitive_coord"] = reasoning_primitive_coords
+            metadata["pick_a"] = coords[0]
+            metadata["place_a"] = coords[1] if len(coords) == 4 else None
+            metadata["pick_b"] = coords[2] if len(coords) == 4 else coords[1]
+            metadata["place_b"] = coords[3] if len(coords) == 4 else None
+
+
+        """
+        "reasoning_primitive_coord": "Bring the sleeves inside in the centre of the clothing",
+            "pick_a": coords[0],
+            "pick_b": coords[1] if coords and (len(coords) == 2) else 
+            "place_a": [
+                264,
+                301
+            ],
+            "place_b": [
+                254,
+                302
+            ],
+        
+        """
 
         metadata_path = save_dir / f"metadata_{basename}.json"
         with open(metadata_path, "w", encoding="utf-8") as f:

@@ -1,6 +1,6 @@
 # conf/transfer_eval/comp_gc_diffusion.yaml
 
-eval_name: transfer_eval_task_specific_planet_clothpick
+eval_name: transfer_eval_all_garment_planet_clothpick
 
 # Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
 train_exp_config: sim_exp/lagarnet/planet_clothpick_single_picker_single_primitive_multi_longsleeve_flattening_longsleeve_all_garment_5k_eps

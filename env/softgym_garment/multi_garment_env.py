@@ -85,6 +85,11 @@ class MultiGarmentEnv(GarmentEnv):
        
         self.info = {}
         self.last_info = None
+        self.is_recording_low_level = False
+        self.low_level_mesh_particles = []
+        self.low_level_visible_pcs = []
+        self.picker_poses = []
+        
         self.action_tool.reset(self) # get out of camera view, and open the gripper
         self._step_sim()
 
@@ -94,6 +99,7 @@ class MultiGarmentEnv(GarmentEnv):
         self.last_flattened_step = -100
         self.task.reset(self)
         self.action_step = 0
+        
         
        
 

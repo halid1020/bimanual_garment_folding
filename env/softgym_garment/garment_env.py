@@ -289,7 +289,9 @@ class GarmentEnv(Arena):
         self._initialise_trajectory()
         self.init_coverae = self._get_coverage()
 
-        self.info = self._process_info()
+        self.is_recording_low_level = False
+
+        self.info = self._process_info({})
         self.clear_frames()
 
         self.picker_poses = []
@@ -392,9 +394,7 @@ class GarmentEnv(Arena):
     
     def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
-           
             'observation': self._get_obs(flatten_obs),
-            
             'arena': self,
             'arena_id': self.aid,
             'action_space': self.get_action_space(),
@@ -402,6 +402,11 @@ class GarmentEnv(Arena):
             'sim_steps': self.sim_step,
             'draw_flatten_contour': self.draw_fatten_contour
         })
+        
+        # ---> Attach to observation dict <---
+        info['observation']['low_level_mesh_particles'] = getattr(self, 'low_level_mesh_particles', [])
+        # We leave this as a list of numpy arrays since the shapes (number of points) vary
+        info['observation']['low_level_visible_pcs'] = getattr(self, 'low_level_visible_pcs', [])
         
         if self.save_each_action_picker_poses and self.mode != 'train':
             #print('save pixel poses!!!', len(self.picker_poses))
@@ -467,8 +472,12 @@ class GarmentEnv(Arena):
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
+        
         self.picker_poses = []
-        #print('action step', self.action_step)
+        self.low_level_mesh_particles = []
+        self.low_level_visible_pcs = []
+        self.is_recording_low_level = False
+
         self.overstretch = 0
         self.sim_step = 0
         self.info = self.action_tool.step(self, action)
@@ -566,20 +575,28 @@ class GarmentEnv(Arena):
         return p
     
     def control_picker(self, signal, process_info=True):
-        
         signal = signal[:, [0, 2, 1, 3]]
         new_picker_pos = self.pickers.step(signal, self)
         self._step_sim()
-        self.picker_poses.append(new_picker_pos)
         
+        # ---> FINISH THE TODO: Save the low level meshes and PCs <---
+        if getattr(self, 'is_recording_low_level', True):
+            self.picker_poses.append(new_picker_pos)
+            
+            # Save Mesh Particles
+            mesh_pos = self.get_mesh_particles_positions()
+            self.low_level_mesh_particles.append(mesh_pos.copy()) # Copy is vital!
+            
+            # Save Visible Point Clouds
+            _, visible_mask = self.get_visibility(mesh_pos)
+            self.low_level_visible_pcs.append(mesh_pos[visible_mask].copy())
+
         info = {}
         if process_info:
-            #print('here')
             info = {
                 'observation': self._get_obs(),
             }
             info = self._process_info_(info)
-        #self.info = info
         return info
     
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
@@ -779,6 +796,16 @@ class GarmentEnv(Arena):
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
+
+        if self.config.get('collect_control_data', False):
+            # Get which particles are visible from the camera
+            _, visible_mask = self.get_visibility(obs['particle_positions'])
+            obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
+            
+            # If your init_state_params contains mesh faces, you can save them to rebuild the mesh later
+            if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
+                obs['mesh_faces'] = self.init_state_params['mesh_faces']
+                
         if self.apply_workspace:
             #print('[GarmentEnv] add workspace')
             obs['robot0_mask'] = self.robot0_mask

@@ -145,7 +145,22 @@ class GarmentEnv(Arena):
         self.overstretch = 0
         
 
+    def _get_garment_colour(self):
+        """
+        Extracts the median RGB colour of the garment using the rendered mask.
+        Returns a list: [R, G, B]
+        """
+        rgb = self.info['observation']['rgb']
+        mask = self.info['observation']['mask']
         
+        cloth_pixels = rgb[mask]
+        
+        if len(cloth_pixels) > 0:
+            # Use median to ignore bright highlights or dark creases
+            median_colour = np.median(cloth_pixels, axis=0).astype(int).tolist()
+            return median_colour
+            
+        return [0, 0, 0] # Fallback if mask is empty
     
     def _calculate_workspace_masks(self, resolution):
         """

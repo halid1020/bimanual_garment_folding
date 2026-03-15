@@ -514,7 +514,7 @@ class ClothFunnelsAdapter(TrainableAgent):
         # cv2.imwrite('tmp/output_action.png', draw_image)
 
         # swap x and y
-        p1, p2 = p1[::-1], p2[::-1]
+        #p1, p2 = p1[::-1], p2[::-1]
 
         ### pack and send the action
         H, W = info['prerot_rgb'].shape[:2]

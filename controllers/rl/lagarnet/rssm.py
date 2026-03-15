@@ -28,6 +28,7 @@ from .memory import ExperienceReplay
 # from .logger import *
 from .cost_functions import *
 from .model import *
+from .reward import REWARD
 
 def reward_bonus_and_penalty(rewards, observations, actions):
     if isinstance(rewards, torch.Tensor):
@@ -167,10 +168,11 @@ class RSSM(RLAgent):
         self.internal_states = {}
         #self.logger = Logger()
         self.cur_state = {}
-        self.apply_reward_processor = self.config.get('apply_reward_processor', False)
+        
         self.datasets = None
 
-        self.reward_processor = reward_bonus_and_penalty
+        self.apply_reward_processor = self.config.get('apply_reward_processor', False)
+        self.reward_processor = REWARD[self.config.get('reward_processor', 'identity')]
 
     def init_transition_model(self):
         self.model['transition_model'] = TransitionModel(
@@ -617,12 +619,12 @@ class RSSM(RLAgent):
                 obs_data = data['observation']
                 act_data = data['action']['default']
                 if self.apply_reward_processor:
-                    rewards = self.reward_processor(data['observation']['reward'], obs_data, act_data)
+                    rewards = self.reward_processor(data['observation']['reward'], obs_data, act_data, self.config.reward_config)
             else:
                 obs_data = data
                 act_data = data['action']
                 if self.apply_reward_processor:
-                    rewards = self.reward_processor(data['reward'], obs_data, act_data)
+                    rewards = self.reward_processor(data['reward'], obs_data, act_data, self.config.reward_config)
             
            
            
@@ -983,39 +985,39 @@ class RSSM(RLAgent):
             
 
             
-            if u%self.config.test_interval == 0:
-                self.set_eval()
+            # if u%self.config.test_interval == 0:
+            #     self.set_eval()
 
-                # Save Losses
-                losses_dict.update({'update_step': updates})
-                #loss_logger(losses_dict, self.save_dir)
-                losses_dict = {}
-                updates = []
+            #     # Save Losses
+            #     losses_dict.update({'update_step': updates})
+            #     #loss_logger(losses_dict, self.save_dir)
+            #     losses_dict = {}
+            #     updates = []
 
-                # Evaluate & Save
-                test_results = self.evaluate(test_dataset)
-                train_results = self.evaluate(train_dataset)
-                results = {'test_{}'.format(k): v for k, v in test_results.items()}
-                results.update({'train_{}'.format(k): v for k, v in train_results.items()})
+            #     # Evaluate & Save
+            #     test_results = self.evaluate(test_dataset)
+            #     train_results = self.evaluate(train_dataset)
+            #     results = {'test_{}'.format(k): v for k, v in test_results.items()}
+            #     results.update({'train_{}'.format(k): v for k, v in train_results.items()})
 
-                wandb_metrics = {}
-                for k, v in results.items():
-                    wandb_metrics[k] = v
+            #     wandb_metrics = {}
+            #     for k, v in results.items():
+            #         wandb_metrics[k] = v
 
-                self.logger.log(wandb_metrics, step=u)
+            #     self.logger.log(wandb_metrics, step=u)
 
-                results['update_step'] = [u]
+            #     results['update_step'] = [u]
 
-                #eval_logger(results, self.save_dir)
-                #break # Change here
+            #     #eval_logger(results, self.save_dir)
+            #     #break # Change here
                 
                 
-                # Save Model
-                self.metrics = {'update_step': [u]}
-                self.save()
+            #     # Save Model
+            #     self.metrics = {'update_step': [u]}
+            #     self.save()
             
 
-                self.set_train()
+            #     self.set_train()
         
         # Visualised, Evaluate & Save
         # if self.config.get('visusalise', False):

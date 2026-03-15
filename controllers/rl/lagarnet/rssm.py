@@ -469,10 +469,10 @@ class RSSM(RLAgent):
             os.path.join(path, 'checkpoints', f'model_{self.update_step}.pth')
         )
 
-        torch.save(
-            self.metrics,
-            os.path.join(path, 'checkpoints', f'metrics_{self.update_step}.pth')
-        )
+        # torch.save(
+        #     self.metrics,
+        #     os.path.join(path, 'checkpoints', f'metrics_{self.update_step}.pth')
+        # )
 
         if self.config.get('checkpoint_experience', False):
             dst = os.path.join(path, 'checkpoints', 'experience.pkl')
@@ -497,10 +497,10 @@ class RSSM(RLAgent):
             os.path.join(path, 'checkpoints', f'model_best.pth')
         )
 
-        torch.save(
-            self.metrics,
-            os.path.join(path, 'checkpoints', f'metrics_best.pth')
-        )
+        # torch.save(
+        #     self.metrics,
+        #     os.path.join(path, 'checkpoints', f'metrics_best.pth')
+        # )
 
 
     def _load_from_model_dir(self, model_dir):

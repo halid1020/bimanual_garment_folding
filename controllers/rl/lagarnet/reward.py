@@ -84,8 +84,6 @@ def coverage_alignment_bonus_and_penalty(rewards, observations, actions, config)
 
     return rewards_
 
-    return rewards_
-
 def apply_NC_bonus_and_penalty(rewards, observations, actions, config=None):
     if isinstance(rewards, torch.Tensor):
         rewards_ = rewards.clone()

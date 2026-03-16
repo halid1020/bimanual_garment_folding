@@ -33,6 +33,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
                 keepdim=True,
                 same_on_batch=True, 
             )
+        self.rgb_noise_factor = self.config.get('rgb_noise_factor', 0.0)
 
     def _flatten_bt(self, x):
         B, T = x.shape[:2]
@@ -50,6 +51,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
 
         obs = sample["image"] / 255.0
         action = sample["action"]
+        print('action shape', action.shape)
         
 
         self.device = obs.device
@@ -158,7 +160,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDreamer:
             perm = torch.randperm(3, device=obs.device)
             obs = obs[:, perm, :, :]
 
-
+        
+        if self.rgb_noise_factor > 0:
+            noise = torch.randn_like(obs) * self.rgb_noise_factor
+            obs = torch.clamp(obs + noise, 0, 1)
+            
         obs = obs.permute(0, 2, 3, 1).contiguous()
         
 

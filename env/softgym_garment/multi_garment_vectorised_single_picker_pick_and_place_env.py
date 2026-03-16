@@ -33,7 +33,7 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         
         applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
 
-        self.info['applied_action'] = applied_action
+        self.info['applied_action'] = np.stack([applied_action[:2], applied_action[4:6]]).flatten()
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['done']
         return self.info

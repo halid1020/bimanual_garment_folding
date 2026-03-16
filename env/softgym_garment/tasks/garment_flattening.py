@@ -34,7 +34,7 @@ class GarmentFlatteningTask(GarmentTask):
         return self.goals[0]
 
     def reward(self, last_info, action, info):#
-        ca_reward = coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
+        ca_reward = old_coverage_alignment_reward(last_info, action, info) # combination of delta NC and delta IOU
         if info['success'] and self.config.get('big_success_bonus', True):
             ca_reward = info['arena'].action_horizon - info['observation']['action_step']
         
@@ -77,7 +77,8 @@ class GarmentFlatteningTask(GarmentTask):
             'canon_IoU_differance': canon_IoU_differance_reward(last_info, action, info),
             'canon_l2_tanh_reward': canon_l2_tanh_reward(last_info, action, info),
             'planet_clothpick_hueristic': planet_clothpick_hueristic_reward(last_info, action, info),
-            'coverage_aligment': coverage_alignment_reward(last_info, action, info),
+            'coverage_aligment': old_coverage_alignment_reward(last_info, action, info),
+            'coverage_alignment_bonus_and_penalty': coverage_alignment_bonus_and_penalty(last_info, action, info, self.config.reward_config)
         }
     
     

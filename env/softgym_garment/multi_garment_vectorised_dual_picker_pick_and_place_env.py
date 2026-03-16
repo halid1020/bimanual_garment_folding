@@ -47,5 +47,5 @@ class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
 
         self.info['applied_action'] = applied_action
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['done']
+        self.info['observation']['is_terminal'] = self.info['terminated']
         return self.info

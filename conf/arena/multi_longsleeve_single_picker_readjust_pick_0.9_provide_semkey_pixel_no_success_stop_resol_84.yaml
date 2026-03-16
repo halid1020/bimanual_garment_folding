@@ -10,7 +10,7 @@ init_state_path: assets/init_states
 disp: false
 ray_id: 0
 action_horizon: 20
-image_resolution: [64, 64]
+image_resolution: [84, 84]
 track_semkey_on_frames: false
 num_val_trials: 10
 readjust_pick: true

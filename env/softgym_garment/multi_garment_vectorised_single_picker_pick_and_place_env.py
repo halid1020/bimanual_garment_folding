@@ -35,7 +35,7 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
 
         self.info['applied_action'] = np.stack([applied_action[:2], applied_action[4:6]]).flatten()
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['done']
+        self.info['observation']['is_terminal'] = self.info['terminated']
         return self.info
     
 import os

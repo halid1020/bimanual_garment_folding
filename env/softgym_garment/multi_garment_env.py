@@ -126,7 +126,7 @@ class MultiGarmentEnv(GarmentEnv):
         self.clear_frames()
 
         self.info['observation']['is_first'] = True
-        self.info['observation']['is_terminal'] = False
+        self.info['observation']['is_terminal'] = self.info['terminated']
 
         self.picker_poses = []
         

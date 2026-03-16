@@ -3,5 +3,6 @@ random_rotation: true
 rotation_degree: 1
 vertical_flip: true
 debug: false
-color_jitter: true
-random_channel_permutation: true
+color_jitter: false
+random_channel_permutation: false
+rgb_noise_factor: 0.01

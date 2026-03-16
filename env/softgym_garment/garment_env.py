@@ -442,7 +442,9 @@ class GarmentEnv(Arena):
             for k, v in info['flattened_obs']['observation'].items():
                 info['observation'][f'flattened-{k}'] = v
 
-        info['done'] = self.action_step >= self.action_horizon
+        # 1. Check for Truncation (Time Limit)
+        is_truncated = self.action_step >= self.action_horizon
+        is_terminated = False
         info['discount'] = 1.0 # For dreamer
         
         if task_related:
@@ -450,13 +452,14 @@ class GarmentEnv(Arena):
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
                 self.last_flattened_step = self.action_step
 
-            
-           
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
-            info['success'] =  self.success()
+            # 2. Check for Termination (Task Success)
+            info['success'] = self.success()
             if info['success'] and self.stop_on_success:
-                info['done'] = True
+                is_terminated = True
+                is_truncated = False # Prioritize termination if it succeeds on the exact last step
+                
             
             #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
@@ -482,6 +485,13 @@ class GarmentEnv(Arena):
                         info['observation'][f'goal_{k}'] = v
                         info['observation'][f'goal-{k}'] = v
 
+        # 3. Explicitly add the new Gymnasium flags
+        info['terminated'] = is_terminated
+        info['truncated'] = is_truncated
+        
+        # Keep the legacy 'done' flag so you don't break older parts of your framework
+        info['done'] = is_terminated or is_truncated
+
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
@@ -503,7 +513,7 @@ class GarmentEnv(Arena):
         self.info = self._process_info(self.info)
 
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['done']
+        self.info['observation']['is_terminal'] = self.info['terminated']
 
         if self.debug and len(self.video_frames) > 0:
             #print('[GarmentEnv] debug!')

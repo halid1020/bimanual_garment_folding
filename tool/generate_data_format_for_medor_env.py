@@ -11,7 +11,7 @@ from env.softgym_garment.multi_garment_vectorised_single_picker_pick_and_place_e
 from env.softgym_garment.tasks.garment_flattening \
     import GarmentFlatteningTask  
 
-def generate_softgym_cache(env, output_path="converted_flat_states.pkl", num_episodes=None, scale_factor=0.5):
+def generate_softgym_cache(env, output_path="converted_flat_states.pkl", num_episodes=None, scale_factor=0.4):
     """
     Steps through MultiGarmentEnv and extracts the data into the 
     SoftGym (AnyClothFlattenEnv) pickle format.

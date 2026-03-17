@@ -6,6 +6,21 @@ import pandas as pd
 import seaborn as sns
 from omegaconf import OmegaConf
 
+import os
+import ast
+import colorsys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import matplotlib.lines as mlines
+import os
+import ast
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import seaborn as sns
+
 # Adjust these imports if needed based on your project structure
 import actoris_harena.api as ag_ar
 from registration.agent import register_agents
@@ -68,7 +83,7 @@ def collect_data(garments):
 
 def plot_violin(df, y_col, save_name):
     """Generates and saves a violin plot for continuous metrics without a title."""
-    plt.figure(figsize=(14, 8))
+    plt.figure(figsize=(8, 6))
     
     sns.violinplot(
         data=df, 
@@ -82,9 +97,10 @@ def plot_violin(df, y_col, save_name):
         linewidth=1.5
     )
     
-    plt.xlabel("Garment Type")
+    # plt.xlabel("Garment Type")
     plt.ylabel(y_col)
-    plt.legend(title="Dataset Split", loc='upper right')
+    plt.xlabel("")
+    plt.legend(loc='upper right')
     plt.tight_layout()
     
     save_path = os.path.join(CACHE_DIR, save_name)
@@ -92,27 +108,102 @@ def plot_violin(df, y_col, save_name):
     print(f"Saved {y_col} violin plot to: {save_path}")
     plt.close()
 
-def plot_colour_distribution(df, save_name):
-    """Generates and saves a count plot for categorical colour distributions."""
-    plt.figure(figsize=(14, 8))
+import os
+import ast
+import colorsys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def plot_scatter_on_palette(df, save_name):
+    """Plots Train split colours as a scatter plot over a circular HSL palette."""
     
-    # We use a countplot grouped by garment and split to see the color distribution
-    sns.countplot(
-        data=df, 
-        x="Garment", 
-        hue="Colour", 
-        palette="tab10", # Distinct colors for different categorical values
-        edgecolor="black"
-    )
+    # 1. Filter for the Train split only
+    df_train = df[df['Split'] == 'Train'].copy()
     
-    plt.xlabel("Garment Type")
-    plt.ylabel("Count")
-    plt.legend(title="Colour", loc='upper right', bbox_to_anchor=(1.15, 1))
+    # 2. Helper to parse string colours into normalized RGB arrays
+    def parse_to_rgb(c_str):
+        try:
+            c = np.array(ast.literal_eval(c_str), dtype=float)
+            if c.max() > 1.0:
+                c = c / 255.0
+            return c[:3] 
+        except Exception:
+            return np.array([0.5, 0.5, 0.5])
+
+    df_train['RGB'] = df_train['Colour'].apply(parse_to_rgb)
+    
+    # 3. Convert RGB to HSL to get Hue and Lightness
+    def extract_hl(rgb):
+        h, l, s = colorsys.rgb_to_hls(*rgb)
+        return pd.Series({'Hue': h, 'Lightness': l})
+        
+    df_train[['Hue', 'Lightness']] = df_train['RGB'].apply(extract_hl)
+
+    # 4. Create a Polar subplot instead of a standard Cartesian one
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={'projection': 'polar'})
+    
+    # 5. Create the Circular HSL gradient background
+    theta = np.linspace(0, 2 * np.pi, 400) # Angle = Hue
+    r = np.linspace(0, 1, 200)             # Radius = Lightness
+    Theta, R_grid = np.meshgrid(theta, r)
+    
+    H_grid = Theta / (2 * np.pi)
+    L_grid = R_grid
+    S_grid = np.ones_like(H_grid) # Fixed saturation
+    
+    hls_to_rgb_vec = np.vectorize(colorsys.hls_to_rgb)
+    R_c, G_c, B_c = hls_to_rgb_vec(H_grid, L_grid, S_grid)
+    RGB_bg = np.dstack((R_c, G_c, B_c))
+    
+    # Paint the background using pcolormesh
+    ax.pcolormesh(Theta, R_grid, RGB_bg, shading='auto')
+    
+    # 6. Assign fixed colours and markers for each garment type
+    garments = df_train['Garment'].unique()
+    markers = ['o', 's', '^', 'D', 'v'] 
+    
+    point_colors = sns.color_palette("Set1", n_colors=len(garments)) 
+    
+    garment_styles = {
+        g: {'marker': markers[i % len(markers)], 'color': point_colors[i]} 
+        for i, g in enumerate(garments)
+    }
+    
+    # 7. Plot the scattered points
+    for g in garments:
+        subset = df_train[df_train['Garment'] == g]
+        
+        ax.scatter(
+            subset['Hue'] * 2 * np.pi,  # Map Hue [0,1] to Angle [0, 2π]
+            subset['Lightness'],        # Map Lightness [0,1] to Radius [0, 1]
+            color=garment_styles[g]['color'],   
+            marker=garment_styles[g]['marker'], 
+            edgecolors='black', # Changed back to black for better contrast on white edges
+            linewidth=1.5,
+            s=120,                              
+            zorder=3,
+            label=g                             
+        )
+
+    # 8. Format the Polar Axis
+    ax.set_ylim(0, 1) # Lock the radius from 0 to 1
+    
+    # Hide the default angular/radial numbers to keep the palette visually clean
+    ax.set_yticklabels([]) 
+    ax.set_xticklabels([]) 
+    
+    # Add a faint grid so you can still judge radius and angle distances
+    ax.grid(color='white', alpha=1.0, linestyle='--') 
+    
+    # Generate the legend, pushed slightly outside the circle
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.03), ncols=2, fontsize=20)
     plt.tight_layout()
     
     save_path = os.path.join(CACHE_DIR, save_name)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    print(f"Saved Colour distribution plot to: {save_path}")
+    print(f"Saved Circular HSL scatter colour plot to: {save_path}")
     plt.close()
 
 def main():
@@ -156,7 +247,7 @@ def main():
     # Generate the three requested plots
     plot_violin(df, "Normalised Coverage", "normalized_coverage_distribution.png")
     plot_violin(df, "Max IoU", "max_iou_distribution.png")
-    plot_colour_distribution(df, "colour_distribution.png")
+    plot_scatter_on_palette(df, "colour_distribution.png")
     
     print("\nAll plotting complete!")
 

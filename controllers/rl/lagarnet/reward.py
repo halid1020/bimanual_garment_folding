@@ -41,12 +41,22 @@ def smooth_blended_coverage_alignment(rewards, observations, actions, config):
     progress_reward = alpha * dNC + (1 - alpha) * dIoU
 
     # 2. Smooth Coupled Success Bonus (State)
-    # The (2*alpha) and (2*(1-alpha)) exponents perfectly balance the multiplicative potential
-    state_bonus_curr = ((nc_curr ** (2 * alpha)) * (iou_curr ** (2 * (1 - alpha)))) ** p
-    state_bonus_prev = ((nc_prev ** (2 * alpha)) * (iou_prev ** (2 * (1 - alpha)))) ** p
+    # Applying a 1e-8 minimum clamp to prevent 0^0 NaN crashes in backprop
+    if is_tensor:
+        term1_curr = torch.clamp(nc_curr, min=1e-8) ** (2 * alpha)
+        term2_curr = torch.clamp(iou_curr, min=1e-8) ** (2 * (1 - alpha))
+        term1_prev = torch.clamp(nc_prev, min=1e-8) ** (2 * alpha)
+        term2_prev = torch.clamp(iou_prev, min=1e-8) ** (2 * (1 - alpha))
+    else:
+        term1_curr = np.maximum(nc_curr, 1e-8) ** (2 * alpha)
+        term2_curr = np.maximum(iou_curr, 1e-8) ** (2 * (1 - alpha))
+        term1_prev = np.maximum(nc_prev, 1e-8) ** (2 * alpha)
+        term2_prev = np.maximum(iou_prev, 1e-8) ** (2 * (1 - alpha))
+
+    state_bonus_curr = (term1_curr * term2_curr) ** p
+    state_bonus_prev = (term1_prev * term2_prev) ** p
 
     # 3. Smooth "Mess Up" Penalty
-    # We calculate the difference. If it dropped, potential_diff is negative.
     potential_diff = state_bonus_curr - state_bonus_prev
     mess_up_mask = potential_diff < 0  # Creates a True/False mask of where the agent messed up
     mess_up_scale = config.get('mess_up_penalty_value', 1.0)
@@ -57,25 +67,24 @@ def smooth_blended_coverage_alignment(rewards, observations, actions, config):
     # Combine everything so far
     transition_rewards = progress_reward + state_bonus_curr + drop_penalty
 
-    # 4. Large Action Penalty in Success States
+    # 4. Continuous Large Action Penalty in Success States
     if config.get('apply_large_action_penalty_when_success', False):
         pick_pos = actions[:, :, :2]
         place_pos = actions[:, :, 2:4]
+        drag_threshold = config.get('drag_penalty_threshold', 0.15)
         
-        # Calculate distance (omitting keepdim=True so shape matches transition_rewards (B, T-1))
+        # Calculate excess distance smoothly past the safe threshold
         if is_tensor:
             action_dist = torch.norm(place_pos - pick_pos, p=2, dim=-1)
+            excess_dist = torch.clamp(action_dist - drag_threshold, min=0.0)
         else:
             action_dist = np.linalg.norm(place_pos - pick_pos, axis=-1)
+            excess_dist = np.maximum(action_dist - drag_threshold, 0.0)
             
-        drag_threshold = config.get('drag_penalty_threshold', 0.15)
-        large_action_mask = (action_dist > drag_threshold)
-        
-        # Smooth Translation: We scale the penalty by the previous state's potential.
-        # If the garment was perfectly folded (potential ~ 1.0), the penalty applies fully.
-        # If it was a mess (potential ~ 0.0), no penalty is applied.
         action_penalty_value = config.get('action_penalty_value', 1.0)
-        action_penalty = -1.0 * action_penalty_value * state_bonus_prev * large_action_mask
+        
+        # Smooth Translation: Penalty scales with BOTH the excess distance AND previous state success.
+        action_penalty = -1.0 * action_penalty_value * state_bonus_prev * excess_dist
         
         transition_rewards += action_penalty
 
@@ -93,7 +102,6 @@ def smooth_blended_coverage_alignment(rewards, observations, actions, config):
     map_max = config.get('map_max', None)
 
     if map_min is not None and map_max is not None:
-        # Assumes map_reward_range is defined in your codebase
         rewards_ = map_reward_range(rewards_, map_min, map_max, old_min=-1.0, old_max=1.0)
 
     return rewards_

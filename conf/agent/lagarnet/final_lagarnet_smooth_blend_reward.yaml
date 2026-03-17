@@ -60,7 +60,7 @@ dataloader_prefetch_factor: 1
 
 apply_reward_processor: True
 
-reward_processor: "smooth_blended"   # Ensure you register this name in your REWARD dict!
+reward_processor: "smooth_blended_coverage_alignment"   # Ensure you register this name in your REWARD dict!
 reward_config:
   alpha: 0.5
   steepness_power: 4.0               # Controls the curve (higher = steeper at the top)

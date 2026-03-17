@@ -16,7 +16,7 @@ def map_reward_range(rewards, map_min, map_max, old_min=-1.0, old_max=1.0):
     
     return mapped_rewards
 
-def smooth_blended_reward_batch(rewards, observations, actions, config):
+def smooth_blended_coverage_alignment(rewards, observations, actions, config):
     # 0. Setup and Type Checking
     is_tensor = isinstance(rewards, torch.Tensor)
     if is_tensor:
@@ -193,5 +193,6 @@ def apply_NC_bonus_and_penalty(rewards, observations, actions, config=None):
 REWARD = {
     'identity': identity,
     'coverage_alignment': coverage_alignment_bonus_and_penalty,
-    'nc_bonus_penalty': apply_NC_bonus_and_penalty
+    'nc_bonus_penalty': apply_NC_bonus_and_penalty,
+    'smooth_blended_coverage_alignment': smooth_blended_coverage_alignment
 }

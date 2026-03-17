@@ -1,0 +1,141 @@
+# lagarnet_online.yaml
+name: lagarnet
+device: 'cuda:0'
+debug: False
+train_mode: 'online'
+
+input_obs: "rgb"
+output_obs: "mask"
+
+deterministic_latent_dim: 300 
+stochastic_latent_dim: 60 
+action_dim: 4
+hidden_dim: 300 
+embedding_dim: 1024
+min_std_dev: 0.1
+activation: 'relu'
+trans_layers: 1
+input_obs_dim: [3, 64, 64]
+output_obs_dim: [1, 64, 64]
+encoder_batchnorm: False
+encoder_residual: False
+decoder_batchnorm: False
+decoder_residual: False
+no_op: [1, 1, 1, 1]
+free_nats: 1
+symlog: False
+
+state_layers: 2
+observation_scale: 1.0
+reward_scale: 1.0
+reward_gradient_stop: False
+kl_balance: 0.8
+kl_scale: 1.0
+kl_balancing: True
+reward_layers: 5 
+
+overshooting_distance: 2  
+kl_overshooting_scale: 0.1
+kl_overshooting_warmup: True
+kl_overshooting_balance: 1.0
+reward_overshooting_scale: 0.1
+reward_overshooting_warmup: False
+
+optimiser_class: 'adam'
+optimiser_params: 
+  lr: 1e-3
+  eps: 1e-4
+grad_clip_norm: 1000
+
+batch_size: 50
+sequence_size: 50
+total_update_steps: 50001
+test_interval: 1000
+validation_interval: 1000
+
+refresh_init_state: False
+apply_transform_in_dataset: True
+dataloader_workers: 0
+dataloader_prefetch_factor: 1
+
+apply_reward_processor: False
+
+data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
+encoder_mode: "default"
+cost_fn: "trajectory_return"
+logger_name: "pick_and_place_fabric_single_task_logger"
+
+# --- ONLINE RL SPECIFIC PARAMETERS ---
+intial_train_episodes: 10      # Number of random exploration episodes before training starts
+train_episodes: 10              # Number of episodes to collect per interaction phase
+collect_interval: 100          # How many update steps between environment interactions
+action_noise: 0.1              # Standard deviation of Gaussian noise added to exploration actions
+reward_key: coverage_alignment_bonus_and_penalty
+
+# # Define the exploration policy used during online collection
+# # The parameter is mostly similar to original PlaNet.
+# explore_policy:
+#   name: 'single_arm_mask_pick_and_place_mpc'
+#   params:
+#     candidates: 1000           # Might want fewer candidates for faster online exploration
+#     planning_horizon: 1
+#     iterations: 10
+#     clip: True
+#     swap_action: False
+#     obj_mask: "from_env"
+#     debug: True
+#     cost_fn: 'from_model'
+
+# The policy used for testing/evaluation
+policy:
+  name: 'single_arm_mask_pick_and_place_mpc'
+  params:
+    candidates: 5000
+    planning_horizon: 1
+    iterations: 100
+    clip: True
+    swap_action: False
+    obj_mask: "from_env"
+    debug: True
+    cost_fn: 'from_model'
+
+# --- DATASET (Online Memory Buffer) ---
+datasets:
+  - key: 'train'
+    name: 'default'
+    params:
+      data_path: 'lagarnet_online_buffer' # Adjust to an empty or valid init path if needed
+      data_dir: './data/datasets'
+      num_trj: 5000                       # Start clean!
+      seq_length: 50
+      cross_trajectory: True
+      split_ratios: [0, 0, 1]
+      cache_in_memory: False           # Highly recommended to keep this true for online
+      io_mode: 'a'                     # Ensure write permissions
+      sample_mode: 'train'
+      obs_config: 
+        mask: 
+          shape: [64, 64, 1]
+          output_key: 'mask'
+        rgb:
+          shape: [64, 64, 3]
+          output_key: 'rgb'
+        goal-mask: 
+          shape: [64, 64, 1]
+          output_key: 'goal-mask'
+        goal-rgb:
+          shape: [64, 64, 3]
+          output_key: 'goal-rgb'
+        reward:
+          shape: [1]
+          output_key: 'reward'
+      act_config:
+        default: 
+          shape: [4]
+          output_key: 'default'
+
+test_horizons: [1, 2, 4] 
+action_horizon: 50
+eval_episodes: 10
+eval_action_horizon: 20
+eval_save_latent: True

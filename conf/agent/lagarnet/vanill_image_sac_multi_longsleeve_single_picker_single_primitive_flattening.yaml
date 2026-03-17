@@ -3,7 +3,7 @@ device: ${oc.env:DEVICE,cuda:0}   # fallback to cuda:0
 
 
 obs_keys: ['rgb']
-reward_key: augmented_coverage_alignment_with_stretch_penalty
+reward_key: coverage_alignment_bonus_and_penalty
 
 init_alpha: 0.1
 auto_alpha_learning: True

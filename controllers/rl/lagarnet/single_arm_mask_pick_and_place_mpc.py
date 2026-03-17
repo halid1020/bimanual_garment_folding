@@ -54,7 +54,7 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
         for i in range(self.iterations):
             popsize = self.candidates
             samples = np.stack([np.random.normal(mean, std) for _ in range(popsize)]).reshape(popsize, plan_hor, -1)
-            
+            #print('samples shape', samples.shape)
             H, W = obj_mask.shape[:2] 
             assert H == W, "Obj mask should be square"
 

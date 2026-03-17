@@ -17,7 +17,7 @@ compile: True
 precision: 32
 debug: False
 train_video_pred_log: True
-
+updates_per_step: 1
 
 # time_limit: 1000
 grayscale: False

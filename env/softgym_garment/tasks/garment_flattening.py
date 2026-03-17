@@ -78,7 +78,7 @@ class GarmentFlatteningTask(GarmentTask):
             'canon_l2_tanh_reward': canon_l2_tanh_reward(last_info, action, info),
             'planet_clothpick_hueristic': planet_clothpick_hueristic_reward(last_info, action, info),
             'coverage_aligment': old_coverage_alignment_reward(last_info, action, info),
-            'coverage_alignment_bonus_and_penalty': coverage_alignment_bonus_and_penalty(last_info, action, info, self.config.reward_config)
+            'coverage_alignment_bonus_and_penalty': coverage_alignment_bonus_and_penalty(last_info, action, info, self.config.get('reward_config', {}))
         }
     
     

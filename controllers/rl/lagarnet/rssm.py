@@ -224,7 +224,7 @@ class RSSM(RLAgent):
         return "RSSM PlaNet"
     
     
-    def train(self, update_steps, arena) -> bool:
+    def train(self, update_steps, arenas) -> bool:
         torch.backends.cudnn.benchmark = True
      
         if self.config.train_mode == 'offline':
@@ -257,14 +257,26 @@ class RSSM(RLAgent):
             self._train_offline(self.datasets, update_steps)
 
         elif self.config.train_mode == 'online':
-            policy_params = self.config.explore_policy.params
-            policy_params['base_policy'] = self
-            policy_params['action_space'] = arena.get_action_space()
-            self.explore_policy = OracleBuilder.build(
-                self.config.explore_policy.name, arena, policy_params)
+            
+            # planning_config = OmegaConf.to_container(
+            #     self.config.explore_policy.params,
+            #     resolve=True
+            # )
 
+            # #planning_config = self.config.policy.params
+            # planning_config["model"] = self
+            # #planning_config["action_space"] = self.config.action_space
+            # planning_config["no_op"] = self.no_op
+            # planning_config = DotMap(planning_config)
 
-            self.train_online(arena, self.explore_policy, update_steps)
+            # import actoris_harena.api as ag_ar
+            # self.explore_policy = ag_ar.build_agent(
+            #     self.config.explore_policy.name,
+            #     config=planning_config,
+            #     disable_wandb=True)
+            
+
+            self.train_online(arenas[0], self, update_steps)
         else: 
             raise NotImplementedError
     
@@ -474,9 +486,9 @@ class RSSM(RLAgent):
         #     os.path.join(path, 'checkpoints', f'metrics_{self.update_step}.pth')
         # )
 
-        if self.config.get('checkpoint_experience', False):
-            dst = os.path.join(path, 'checkpoints', 'experience.pkl')
-            self.memory.save(dst)
+        # if self.config.get('checkpoint_experience', False):
+        #     dst = os.path.join(path, 'checkpoints', 'experience.pkl')
+        #     self.memory.save(dst)
     
     def save_best(self):
         model_dict = {
@@ -600,15 +612,15 @@ class RSSM(RLAgent):
         print('[lagarnet, load_checkpoint] Loaded checkpoint {}'.format(checkpoint))
         return True
     
-    def _load_metrics(self, path=None):
+    # def _load_metrics(self, path=None):
 
-        if path is None:
-            path = self.save_dir
+    #     if path is None:
+    #         path = self.save_dir
         
-        if not os.path.exists(os.path.join(path, 'checkpoint', 'metrics.pth')):
-            return {}
+    #     if not os.path.exists(os.path.join(path, 'checkpoint', 'metrics.pth')):
+    #         return {}
         
-        return torch.load(os.path.join(path, 'checkpoint', 'metrics.pth'))
+    #     return torch.load(os.path.join(path, 'checkpoint', 'metrics.pth'))
 
     def _preprocess(self, data, train=False, single=False, apply_transform=True):
 
@@ -684,7 +696,7 @@ class RSSM(RLAgent):
         elif self.config.output_obs == 'rgbm':
             rgbm = torch.cat([data['rgb'], data['mask']], dim=2)
             data['output_obs'] = symlog(rgbm, self.symlog)
-        elif self.config.output_obs == 'gc-mask':
+        elif self.config.output_obs == 'mask+goal-mask':
             gc_mask = torch.cat([data['mask'], data['goal-mask']], dim=2)
             data['output_obs'] = symlog(gc_mask, self.symlog)
         else:
@@ -700,135 +712,291 @@ class RSSM(RLAgent):
 
         return data
     
-    def train_online(self, env, explore_policy):
-        start_update_step = self.load()
-        metrics = self._load_metrics()
-        action_space = env.get_action_space()
+    # def train_online(self, env, explore_policy):
+    #     start_update_step = self.load()
+    #     metrics = self._load_metrics()
+    #     action_space = env.get_action_space()
         
-        if metrics == {}:
-            metrics = {
-                'update_step': [],
-                # 'train_episodes': [],
-                # 'interactive_steps': [],
-                'update_step_at_train_episode': [],
-                'train_episodes_reward_mean': [],
-                'train_episodes_reward_std': [],
-                'update_step_at_test_episode': [],
-                'test_episodes_reward_mean': [],
-                'test_episodes_reward_std': []
-            }
+    #     if metrics == {}:
+    #         metrics = {
+    #             'update_step': [],
+    #             # 'train_episodes': [],
+    #             # 'interactive_steps': [],
+    #             'update_step_at_train_episode': [],
+    #             'train_episodes_reward_mean': [],
+    #             'train_episodes_reward_std': [],
+    #             'update_step_at_test_episode': [],
+    #             'test_episodes_reward_mean': [],
+    #             'test_episodes_reward_std': []
+    #         }
         
         
 
-        self.memory = ExperienceReplay(
-            self.config.memory_size, 
-            self.config.symbolic_env, 
-            self.config.input_obs_dim, 
-            self.config.action_dim,  
-            self.config.device)
+    #     self.memory = ExperienceReplay(
+    #         self.config.memory_size, 
+    #         self.config.symbolic_env, 
+    #         self.config.input_obs_dim, 
+    #         self.config.action_dim,  
+    #         self.config.device)
 
-        experience_dir = os.path.join(self.save_dir, 'model/experience.pkl')
-        if self.config.checkpoint_experience and os.path.exists(experience_dir):
-            self.memory.load(experience_dir)
+    #     experience_dir = os.path.join(self.save_dir, 'model/experience.pkl')
+    #     if self.config.checkpoint_experience and os.path.exists(experience_dir):
+    #         self.memory.load(experience_dir)
     
         
         
+    #     ## Initial data collection
+    #     # if start_update_step == 0 and start_update_step < self.config.total_update_steps:
+    #     env.set_train()
+    #     with torch.no_grad():
+    #         update = start_update_step
+    #         total_rewards = []
+    #         #s = train_episodes
+    #         for _ in tqdm(range(self.memory.episodes, self.config.intial_train_episodes), 
+    #                         desc="Collecting Initial Training Epsiodes"):
+    #             #train_episodes += 1
+    #             information, total_reward = env.reset(), 0
+    #             obs = information['observation']['rgb']
+                
+
+    #             while not information['done']:
+    #                 action = env.sample_random_action()
+    #                 information = env.step(action)
+    #                 # *self.config.input_obs_dim[1:]
+    #                 obs = cv2.resize(obs, (64, 64) , interpolation=cv2.INTER_LINEAR)
+    #                 mpimg.imsave(
+    #                     os.path.join(self.save_dir, 'train_online.png'), obs)
+    #                 self.memory.append(
+    #                     obs.transpose(2, 0, 1), 
+    #                     action, 
+    #                     information['reward'], 
+    #                     information['done'])
+    #                 obs = information['observation']['rgb']
+                    
+    #                 total_reward += information['reward']
+    #             #interactive_steps += env.get_max_interactive_steps()
+                
+    #             total_rewards.append(total_reward)
+
+    #         metrics['update_step_at_train_episode'].append(update)
+    #         metrics['train_episodes_reward_mean'].append(np.mean(total_rewards))
+    #         metrics['train_episodes_reward_std'].append(np.std(total_rewards))
+            
+
+    #         print('Average running reward {} at update step {}/{}'\
+    #             .format(np.mean(total_rewards), update, self.config.total_update_steps))
+        
+    #     self.set_train()
+    #     for update in tqdm(range(start_update_step+1, self.config.total_update_steps), desc='Updateing RSSM'):
+
+    #         # Test Policy in the Env
+    #         if update%self.config.test_interval == 0:
+    #             self.metrics = metrics
+    #             self.save()
+    #             self.set_eval()
+    #             total_rewards = []
+    #             # TODO: change explore policy to test policy
+    #             env.set_eval()
+    #             for e in tqdm(range(self.config.test_episodes), desc="Testing Epsiodes"):
+    #                 information, total_reward = env.reset(episode_config={'eid': e, 'save_video': False}), 0
+    #                 explore_policy.init_state(information)
+
+    #                 while not information['done']:
+    #                     mpimg.imsave(
+    #                         os.path.join(self.save_dir, 'test_online.png'),
+    #                         information['observation']['rgb'])
+                        
+    #                     action = explore_policy.act(information, env)
+    #                     information = env.step(action)
+    #                     total_reward += information['reward']
+
+    #                     explore_policy.update(information, action)
+
+    #                 total_rewards.append(total_reward)
+                    
+                    
+    #             metrics['update_step_at_test_episode'].append(update)
+    #             metrics['test_episodes_reward_mean'].append(np.mean(total_rewards))
+    #             metrics['test_episodes_reward_std'].append(np.std(total_rewards))
+
+    #             print('Test average reward {} at update step {}/{}'\
+    #                   .format(np.mean(total_rewards), update, self.config.total_update_steps))
+
+                
+    #             self.set_train()
+            
+
+    #         # Train RSSM
+    #         data = self.memory.sample(self.config.batch_size, self.config.sequence_size)
+    #         #print('sample rgb shape', data['rgb'].shape)
+    #         for k, v in data.items():
+    #             if k != 'rgb':
+    #                 data[k] = v[:-1]
+    #             data[k] = np.transpose(v, (1, 0, *range(2, v.ndim)))
+
+    #         data = self._preprocess(data, train=True)
+
+    #         self.optimiser.zero_grad()
+
+    #         losses = self.compute_losses(data, update)
+            
+
+    #         losses['total_loss'].backward()
+    #         nn.utils.clip_grad_norm_(self.param_list, self.config.grad_clip_norm, norm_type=2)
+    #         self.optimiser.step()
+
+    #         if self.lr_scheduler is not None:
+    #             self.lr_scheduler.step()
+
+    #         # Collect Losses
+    #         for kk, vv in losses.items():
+    #             if kk in metrics.keys():
+    #                 metrics[kk].append(vv.detach().cpu().item())
+    #             else:
+    #                 metrics[kk] = [vv.detach().cpu().item()]
+    #         metrics['update_step'].append(update)
+
+    #         # Collect episode data
+    #         if update%self.config.collect_interval == self.config.collect_interval-1:
+    #             # self.save_checkpoint(
+    #             #     metrics,                
+    #             #     self.config.models_dir)
+    #             env.set_train()
+    #             with torch.no_grad():
+    #                 total_rewards = []
+    #                 print('Total loss {} at update step {}'.\
+    #                       format(metrics['total_loss'][-1], metrics['update_step'][-1]))
+
+    #                 for _ in tqdm(range(self.config.train_episodes), desc="Collecting Training Epsiodes"):
+
+    #                     information, total_reward = env.reset(), 0
+    #                     obs = information['observation']['rgb']
+    #                     explore_policy.init(information)
+                        
+
+    #                     while not information['done']:
+                            
+    #                         action = explore_policy.act(information, env)
+    #                         action += np.random.normal(size=action.shape)*self.config.action_noise
+    #                         action = action.clip(action_space.low, action_space.high)
+    #                         information = env.step(action)
+    #                         explore_policy.update_state(information, action)
+
+
+    #                         obs = cv2.resize(obs, (64, 64) , interpolation=cv2.INTER_LINEAR)
+    #                         mpimg.imsave(
+    #                             os.path.join(self.save_dir, 'train_online.png'), obs)
+    #                         self.memory.append(
+    #                             obs.transpose(2, 0, 1), 
+    #                             action, 
+    #                             information['reward'], 
+    #                             information['done'])
+                        
+    #                         obs = information['observation']['rgb']
+    #                         total_reward += information['reward']                           
+                        
+    #                     total_rewards.append(total_reward)
+
+    #                 metrics['update_step_at_train_episode'].append(update)
+    #                 metrics['train_episodes_reward_mean'].append(np.mean(total_rewards))
+    #                 metrics['train_episodes_reward_std'].append(np.std(total_rewards))
+
+    #                 print('Average running reward {} at update step {}/{}'\
+    #                     .format(np.mean(total_rewards), update, self.config.total_update_steps))
+
+
+    def train_online(self, env, explore_policy, update_steps):
+        start_update_step = self.load() + 1
+        action_space = env.get_action_space()
+        
+        # 1. Initialize self.memory using your custom dataset class
+        if getattr(self, 'datasets', None) is None:
+            datasets = {}
+            if 'datasets' in self.config:
+                for dataset_dict in self.config['datasets']:
+                    key = dataset_dict['key']
+                    print(f"Initializing dataset '{key}' from name '{dataset_dict['name']}' for online memory")
+                    dataset_params = dataset_dict['params']
+                    
+                    # Initialize the custom dataset (starts clean)
+                    dataset = name_to_dataset[dataset_dict['name']](**dataset_params)
+                    datasets[key] = dataset
+            else:
+                raise NotImplementedError("Config must contain 'datasets' definitions.")
+
+            for key, dataset in datasets.items():
+                if self.apply_transform_in_dataset:
+                    dataset.set_transform(self.data_augmenter)
+            self.datasets = datasets
+            
+        # Assign the train dataset to act as our online memory buffer
+        self.memory = self.datasets['train']
+
+        
+
         ## Initial data collection
-        # if start_update_step == 0 and start_update_step < self.config.total_update_steps:
         env.set_train()
         with torch.no_grad():
             update = start_update_step
             total_rewards = []
-            #s = train_episodes
-            for _ in tqdm(range(self.memory.episodes, self.config.intial_train_episodes), 
-                            desc="Collecting Initial Training Epsiodes"):
-                #train_episodes += 1
-                information, total_reward = env.reset(), 0
-                obs = information['observation']['rgb']
+            
+            # Use getattr to safely check for episodes attribute, default to 0 if clean
+            current_episodes = self.memory.num_trajectories()
+            
+            for _ in tqdm(range(current_episodes, self.config.get('intial_train_episodes', 10)), 
+                            desc="Collecting Initial Training Episodes"):
                 
-
+                information, total_reward = env.reset(), 0
+                
                 while not information['done']:
                     action = env.sample_random_action()
                     information = env.step(action)
-                    # *self.config.input_obs_dim[1:]
-                    obs = cv2.resize(obs, (64, 64) , interpolation=cv2.INTER_LINEAR)
-                    mpimg.imsave(
-                        os.path.join(self.save_dir, 'train_online.png'), obs)
-                    self.memory.append(
-                        obs.transpose(2, 0, 1), 
-                        action, 
-                        information['reward'], 
-                        information['done'])
-                    obs = information['observation']['rgb']
                     
-                    total_reward += information['reward']
-                #interactive_steps += env.get_max_interactive_steps()
+                    
+                    # Pass the full dictionary of observations and action to your dataset's append method
+                    obs_to_add = information['observation'].copy()
+                    obs_to_add['reward'] = np.array([information['reward'][self.config.reward_key]], dtype=np.float32)
+                    
+                    # Format action as a dict expected by act_config
+                    act_to_add = {'default': action}
+
+                    self.memory.add_transition(
+                        observation=obs_to_add, 
+                        action=act_to_add, 
+                        done=information['done']
+                    )
+                    
+                    total_reward += information['reward'][self.config.reward_key]
                 
                 total_rewards.append(total_reward)
 
-            metrics['update_step_at_train_episode'].append(update)
-            metrics['train_episodes_reward_mean'].append(np.mean(total_rewards))
-            metrics['train_episodes_reward_std'].append(np.std(total_rewards))
-            
-
-            print('Average running reward {} at update step {}/{}'\
-                .format(np.mean(total_rewards), update, self.config.total_update_steps))
+            if total_rewards:
+                # ---> ADDED LOGGING HERE FOR INITIAL COLLECTION <---
+                self.logger.log({
+                    'train_episodes_reward_mean': np.mean(total_rewards),
+                    'train_episodes_reward_std': np.std(total_rewards)
+                }, step=update)
+                print('Average running reward {} at update step {}/{}'\
+                    .format(np.mean(total_rewards), update, self.config.total_update_steps))
         
+        train_dataloader = DataLoader(
+            self.memory ,
+            batch_size=self.config.batch_size,
+            num_workers=self.config.get('dataloader_workers', 0),
+            shuffle=True)
         self.set_train()
-        for update in tqdm(range(start_update_step+1, self.config.total_update_steps), desc='Updateing RSSM'):
-
-            # Test Policy in the Env
-            if update%self.config.test_interval == 0:
-                self.metrics = metrics
-                self.save()
-                self.set_eval()
-                total_rewards = []
-                # TODO: change explore policy to test policy
-                env.set_eval()
-                for e in tqdm(range(self.config.test_episodes), desc="Testing Epsiodes"):
-                    information, total_reward = env.reset(episode_config={'eid': e, 'save_video': False}), 0
-                    explore_policy.init_state(information)
-
-                    while not information['done']:
-                        mpimg.imsave(
-                            os.path.join(self.save_dir, 'test_online.png'),
-                            information['observation']['rgb'])
-                        
-                        action = explore_policy.act(information, env)
-                        information = env.step(action)
-                        total_reward += information['reward']
-
-                        explore_policy.update(information, action)
-
-                    total_rewards.append(total_reward)
-                    
-                    
-                metrics['update_step_at_test_episode'].append(update)
-                metrics['test_episodes_reward_mean'].append(np.mean(total_rewards))
-                metrics['test_episodes_reward_std'].append(np.std(total_rewards))
-
-                print('Test average reward {} at update step {}/{}'\
-                      .format(np.mean(total_rewards), update, self.config.total_update_steps))
-
-                
-                self.set_train()
+        for update in tqdm(range(start_update_step, start_update_step+update_steps), desc='Training agent'):
             
-
             # Train RSSM
-            data = self.memory.sample(self.config.batch_size, self.config.sequence_size)
-            #print('sample rgb shape', data['rgb'].shape)
-            for k, v in data.items():
-                if k != 'rgb':
-                    data[k] = v[:-1]
-                data[k] = np.transpose(v, (1, 0, *range(2, v.ndim)))
+            # Ensure your dataset class supports .sample(batch_size, sequence_size)
+            data = next(iter(train_dataloader))
+            data = {k: v.to(self.config.device, non_blocking=True) for k,v in data.items()}
 
-            data = self._preprocess(data, train=True)
+            # Preprocess to feed into GC_RSSM
+            data = self._preprocess(data, train=True, apply_transform=(not self.apply_transform_in_dataset))
 
             self.optimiser.zero_grad()
-
             losses = self.compute_losses(data, update)
-            
-
             losses['total_loss'].backward()
             nn.utils.clip_grad_norm_(self.param_list, self.config.grad_clip_norm, norm_type=2)
             self.optimiser.step()
@@ -836,61 +1004,67 @@ class RSSM(RLAgent):
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
-            # Collect Losses
+            # ---> ADDED LOGGING HERE FOR NETWORK LOSSES <---
+            wandb_metrics = {}
             for kk, vv in losses.items():
-                if kk in metrics.keys():
-                    metrics[kk].append(vv.detach().cpu().item())
-                else:
-                    metrics[kk] = [vv.detach().cpu().item()]
-            metrics['update_step'].append(update)
+                wandb_metrics[kk] = vv.detach().cpu().item()
+            
+            self.logger.log(wandb_metrics, step=update)
+            # -----------------------------------------------
 
-            # Collect episode data
-            if update%self.config.collect_interval == self.config.collect_interval-1:
-                # self.save_checkpoint(
-                #     metrics,                
-                #     self.config.models_dir)
+            # Collect episode data interactively
+            if update % self.config.get('collect_interval', 100) == self.config.get('collect_interval', 100) - 1:
                 env.set_train()
                 with torch.no_grad():
                     total_rewards = []
-                    print('Total loss {} at update step {}'.\
-                          format(metrics['total_loss'][-1], metrics['update_step'][-1]))
 
-                    for _ in tqdm(range(self.config.train_episodes), desc="Collecting Training Epsiodes"):
-
+                    for _ in tqdm(range(self.config.get('train_episodes', 1)), desc="Collecting Training Episodes"):
                         information, total_reward = env.reset(), 0
-                        obs = information['observation']['rgb']
-                        explore_policy.init(information)
                         
+                        explore_policy.reset([0])
+                        explore_policy.init([information])
 
                         while not information['done']:
-                            
-                            action = explore_policy.act(information, env)
-                            action += np.random.normal(size=action.shape)*self.config.action_noise
+                            action = explore_policy.single_act(information).flatten()
+                            action += np.random.normal(size=action.shape) * self.config.get('action_noise', 0.1)
                             action = action.clip(action_space.low, action_space.high)
+                            
                             information = env.step(action)
-                            explore_policy.update_state(information, action)
+                            explore_policy.update([information], [action])
+                                
+                            # Pass the full dictionary of observations and action to your dataset's append method
+                            obs_to_add = information['observation'].copy()
+                            obs_to_add['reward'] = np.array([information['reward'][self.config.reward_key]], dtype=np.float32)
+                            
+                            # Format action as a dict expected by act_config
+                            act_to_add = {'default': action}
 
-
-                            obs = cv2.resize(obs, (64, 64) , interpolation=cv2.INTER_LINEAR)
-                            mpimg.imsave(
-                                os.path.join(self.save_dir, 'train_online.png'), obs)
-                            self.memory.append(
-                                obs.transpose(2, 0, 1), 
-                                action, 
-                                information['reward'], 
-                                information['done'])
-                        
-                            obs = information['observation']['rgb']
-                            total_reward += information['reward']                           
+                            self.memory.add_transition(
+                                observation=obs_to_add, 
+                                action=act_to_add, 
+                                done=information['done']
+                            )
+                                
+                            total_reward += information['reward'][self.config.reward_key]                        
                         
                         total_rewards.append(total_reward)
 
-                    metrics['update_step_at_train_episode'].append(update)
-                    metrics['train_episodes_reward_mean'].append(np.mean(total_rewards))
-                    metrics['train_episodes_reward_std'].append(np.std(total_rewards))
+                    # ---> ADDED LOGGING HERE FOR INTERACTIVE EPISODE REWARDS <---
+                    if total_rewards:
+                        reward_metrics = {
+                            'train_episodes_reward_mean': np.mean(total_rewards),
+                            'train_episodes_reward_std': np.std(total_rewards)
+                        }
+                        self.logger.log(reward_metrics, step=update)
+                        print('Average running reward {} at update step {}/{}'\
+                            .format(np.mean(total_rewards), update, self.config.total_update_steps))
+                    # ------------------------------------------------------------
 
-                    print('Average running reward {} at update step {}/{}'\
-                        .format(np.mean(total_rewards), update, self.config.total_update_steps))
+                train_dataloader = DataLoader(
+                    self.memory,
+                    batch_size=self.config.batch_size,
+                    num_workers=self.config.get('dataloader_workers', 0),
+                    shuffle=True)
       
     def _train_offline(self, datasets, update_steps=-1):
         
@@ -901,11 +1075,11 @@ class RSSM(RLAgent):
         losses_dict = {}
         updates = []
         start_step = self.load()
-        metrics = self._load_metrics()
-        if metrics == {}:
-            metrics = {
-                'update_step': []
-            }
+        #metrics = self._load_metrics()
+        # if metrics == {}:
+        #     metrics = {
+        #         'update_step': []
+        #     }
 
 
         self.set_train()

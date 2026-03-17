@@ -68,8 +68,9 @@ class PickAndPlaceTransformerV1:
                 elif 'norm-pixel-pick-and-place' in sample_in['action']:
                     sample['action'] = sample_in['action']['norm-pixel-pick-and-place']
             ## flatten the last two dimension
-            sample['action'] = sample['action'].reshape(sample['action'].shape[0], -1)
             #print('sample action', sample['action'].shape)
+            sample['action'] = sample['action'].reshape(sample['action'].shape[0], -1)
+            #
 
         for k, v in sample.items():
             #print(k, v.shape)
@@ -107,6 +108,10 @@ class PickAndPlaceTransformerV1:
         if 'rgb+goal-rgb' in sample:
             sample['rgb'] = sample['rgb+goal-rgb'][:, :3]
             sample['goal-rgb'] = sample['rgb+goal-rgb'][:, 3:]
+        
+        if 'mask+goal-mask' in sample:
+            sample['mask'] = sample['mask+goal-mask'][:, :1]
+            sample['goal-mask'] = sample['mask+goal-mask'][:, 1:]
         
         if 'rgb+goal-rgbd' in sample:
             sample['rgb'] = sample['rgb+goal-rgbd'][:, :3]
@@ -349,6 +354,10 @@ class PickAndPlaceTransformerV1:
 
         if 'rgb+goal-rgb' in sample:
             sample['rgb+goal-rgb'] = torch.cat([sample['rgb'], sample['goal-rgb']], dim=1)
+        
+        if 'mask+goal-mask' in sample:
+            sample['mask+goal-mask'] = torch.cat([sample['mask'], sample['goal-mask']], dim=1)
+        
         if 'rgb+goal-rgbd' in sample:
             sample['rgb+goal-rgbd'] = torch.cat([sample['rgb'], sample['depth'], 
                                            sample['goal-rgb'], sample['goal-depth']], dim=1)

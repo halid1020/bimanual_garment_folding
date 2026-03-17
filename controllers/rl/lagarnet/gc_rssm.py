@@ -520,6 +520,12 @@ class GC_RSSM(RSSM):
         # Determine output observation based on configuration
         if self.config.output_obs == 'input_obs':
             data['output_obs'] = data['input_obs']
+        elif self.config.output_obs == 'rgbm':
+            rgbm = torch.cat([data['rgb'], data['mask']], dim=2)
+            data['output_obs'] = symlog(rgbm, self.symlog)
+        elif self.config.output_obs == 'mask+goal-mask':
+            gc_mask = torch.cat([data['mask'], data['goal-mask']], dim=2)
+            data['output_obs'] = symlog(gc_mask, self.symlog)
         else:
             data['output_obs'] = symlog(data[self.config.output_obs], self.symlog)
 

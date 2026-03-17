@@ -13,7 +13,12 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         super().__init__(config)
         self.action_space = gym.spaces.Box(-1, 1, (4, ), dtype=np.float32)
         self.logger = PixelBasedPickAndPlaceEnvLogger()
-        
+    
+    def sample_random_action(self):
+        return self.action_space.sample()
+
+    def get_action_space(self):
+        return self.action_space
 
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info

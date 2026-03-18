@@ -24,6 +24,7 @@ from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickers
 from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
+from controllers.random.dual_arm_random_pick_and_place import DualArmRandomPickAndPlace
 from controllers.random.noise_injected_policy import NoiseInjectedPolcy
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
@@ -66,3 +67,4 @@ def register_agents():
     athar.register_agent('cloth-funnels', ClothFunnelsAdapter)
     athar.register_agent('vcd', VCDAdapter)
     athar.register_agent('noise-injected-policy', NoiseInjectedPolcy)
+    athar.register_agent('dual-arm-random-pick-and-place', DualArmRandomPickAndPlace)

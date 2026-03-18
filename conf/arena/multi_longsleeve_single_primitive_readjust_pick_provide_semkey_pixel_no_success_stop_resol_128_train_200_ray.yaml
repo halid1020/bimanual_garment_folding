@@ -1,5 +1,5 @@
 garment_type: longsleeve
-name: multi-garment-vectorised-dual-picker-pick-and-place-env
+name: multi-garment-vectorised-dual-picker-pick-and-place-env-ray
 picker_radius: 0.03
 picker_threshold: 0.007
 picker_low: [-5, 0, -5]
@@ -13,10 +13,10 @@ action_horizon: 5
 image_resolution: [128, 128]
 track_semkey_on_frames: false
 num_val_trials: 10
-readjust_pick: true
-provide_semkey_pos: true
-provide_flattened_semkey_pos: true
+readjust_pick_poss: 1.0
+provide_semkey_pos: false
+provide_flattened_semkey_pos: false
 provide_semkey_norm_pixel: true
 provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
-init_mode: flattened
+num_train_trials: 200

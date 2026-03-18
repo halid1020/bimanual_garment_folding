@@ -46,7 +46,7 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
 import os
 import ray
 
-@ray.remote(num_gpus=0.05)
+@ray.remote(num_gpus=1.0)
 class MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay(MultiGarmentVectorisedSinglePickerPickAndPlaceEnv):
     
     def __init__(self, config):

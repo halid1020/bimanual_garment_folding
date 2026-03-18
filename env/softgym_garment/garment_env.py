@@ -858,10 +858,11 @@ class GarmentEnv(Arena):
             semkey2pid = obs['semkey2pid']                    # dict {name: pid}
             keypids = list(semkey2pid.values())
             key_particles = particle_pos[keypids]                 # (K, 3)
-            key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+            key_pixels, visibility = self.get_visibility(key_particles, resolution=self.obs_resolution)  # (K,2), (K,)
             H, W = self.camera_size
-            norm_pixels = key_pixels/np.array([H, W]) * 2 - 1
+            norm_pixels = key_pixels/np.array(self.obs_resolution) * 2 - 1
             obs['semkey_norm_pixel'] = norm_pixels.flatten()
+            obs['key_pixels'] = key_pixels
 
         if flatten_obs and self.config.get("provide_flattened_semkey_norm_pixel", False) and obs['semkey2pid']:
             particle_pos = self.flattened_obs['observation']['particle_positions']          # (N, 3)
@@ -989,6 +990,7 @@ class GarmentEnv(Arena):
 
         # Rendered depth map (same size as camera)
         # print('vis here')
+        #print('resolution', resolution)
         depth_img = self._render('depth', resolution=resolution).reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds

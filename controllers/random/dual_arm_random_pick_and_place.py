@@ -1,16 +1,13 @@
 from actoris_harena import Agent
 import numpy as np
 
-class RandomPickAndPlace(Agent):
+class DualArmRandomPickAndPlace(Agent):
 
     def __init__(self, config):
         super().__init__(config)
         self.name = "random-pixel-pick-and-place"
 
-    def act(self, info_list, update=False):
-        return [self.single_act(info) for info in info_list]
-
-    def single_act(self, state):
+    def single_act(self, state, update=False):
         mask = state['observation']['mask']
         if mask.ndim == 3:
             mask = mask[:, :, 0]
@@ -50,7 +47,7 @@ class RandomPickAndPlace(Agent):
         place1 = random_norm_xy()
 
         # ----------------------------
-        # 🔑 FLAT ACTION VECTOR
+        # FLAT ACTION VECTOR
         # (MUST MATCH HUMAN POLICY)
         # ----------------------------
         action = np.concatenate([

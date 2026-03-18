@@ -74,11 +74,12 @@ def smooth_blended_coverage_alignment(rewards, observations, actions, config):
         drag_threshold = config.get('drag_penalty_threshold', 0.15)
         
         # Calculate excess distance smoothly past the safe threshold
+        # ADDED BACK: keepdim=True and keepdims=True to preserve the trailing [..., 1] dimension!
         if is_tensor:
-            action_dist = torch.norm(place_pos - pick_pos, p=2, dim=-1)
+            action_dist = torch.norm(place_pos - pick_pos, p=2, dim=-1, keepdim=True)
             excess_dist = torch.clamp(action_dist - drag_threshold, min=0.0)
         else:
-            action_dist = np.linalg.norm(place_pos - pick_pos, axis=-1)
+            action_dist = np.linalg.norm(place_pos - pick_pos, axis=-1, keepdims=True)
             excess_dist = np.maximum(action_dist - drag_threshold, 0.0)
             
         action_penalty_value = config.get('action_penalty_value', 1.0)

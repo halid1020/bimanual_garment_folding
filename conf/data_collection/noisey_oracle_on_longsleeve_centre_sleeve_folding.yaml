@@ -2,7 +2,7 @@
 defaults:
   - /agent/lagarnet@agent: noise_injected_oracle_centre_sleeve_folding_from_flattened
   - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
-  - /task@task: dummy
+  - /task@task: centre_sleeve_folding
   - dataset: single_arm_pick_and_place_garments_for_folding
   - _self_
 

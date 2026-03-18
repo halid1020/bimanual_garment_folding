@@ -6,7 +6,7 @@ from env.softgym_garment.multi_garment_env import MultiGarmentEnv
 # from env.softgym_garment.multi_garment_vectorised_fold_prim_env import MultiGarmentVectorisedFoldPrimEnv
 from env.softgym_garment.multi_garment_vectorised_single_picker_pick_and_place_env \
     import MultiGarmentVectorisedSinglePickerPickAndPlaceEnv, MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay
-from env.softgym_garment.multi_garment_vectorised_dual_picker_pick_and_place_env import MultiGarmentVectorisedDualPickerPickAndPlaceEnv
+from env.softgym_garment.multi_garment_vectorised_dual_picker_pick_and_place_env import *
 from env.softgym_garment.single_garment_subgoal_init_vectorised_fold_prim_env import SingleGarmentSubgoalInitVectorisedFoldPrimEnv
 from env.softgym_garment.single_garment_second_last_goal_vectorised_fold_prim_env import SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv    
 from env.robosuite_env.robosuite_arena import RoboSuiteArena    
@@ -19,6 +19,7 @@ def register_arenas():
     ag_ar.register_arena('single-garment-subgoal-init-vectorised-fold-prim-env', SingleGarmentSubgoalInitVectorisedFoldPrimEnv)
     ag_ar.register_arena('multi-garment-env', MultiGarmentEnv)
     ag_ar.register_arena('multi-garment-vectorised-dual-picker-pick-and-place-env', MultiGarmentVectorisedDualPickerPickAndPlaceEnv)
+    ag_ar.register_arena('multi-garment-vectorised-dual-picker-pick-and-place-env-ray', MultiGarmentVectorisedDualPickerPickAndPlaceEnvRay)
     ag_ar.register_arena('multi-garment-vectorised-single-picker-pick-and-place-env', MultiGarmentVectorisedSinglePickerPickAndPlaceEnv)
     ag_ar.register_arena('multi-garment-vectorised-single-picker-pick-and-place-env-ray', MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay)
     ag_ar.register_arena('robosuite-env', RoboSuiteArena)

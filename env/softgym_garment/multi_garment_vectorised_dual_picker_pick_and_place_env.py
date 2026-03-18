@@ -50,3 +50,10 @@ class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
         self.info['observation']['is_first'] = False
         self.info['observation']['is_terminal'] = self.info['terminated']
         return self.info
+
+import ray
+@ray.remote(num_gpus=0.05)
+class MultiGarmentVectorisedDualPickerPickAndPlaceEnvRay(MultiGarmentVectorisedDualPickerPickAndPlaceEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)

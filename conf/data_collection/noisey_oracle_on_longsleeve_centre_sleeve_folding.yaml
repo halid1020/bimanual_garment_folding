@@ -1,14 +1,14 @@
 # @package _global_
 defaults:
   - /agent/lagarnet@agent: noise_injected_oracle_centre_sleeve_folding_from_flattened
-  - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
+  - /arena@arena: multi_longsleeve_single_primitive_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_from_flattened_ray
   - /task@task: centre_sleeve_folding
   - dataset: single_arm_pick_and_place_garments_for_folding
   - _self_
 
 parallel_processes: 4
 trials: 5000
-single_agent: True
+single_agent: False
 
 agent_save_root: '/data/ah390/garment_folding_data'
 agent_exp_name: orcale_centre_sleeve_folding

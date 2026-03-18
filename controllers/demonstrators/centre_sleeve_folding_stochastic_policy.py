@@ -181,9 +181,9 @@ class CentreSleeveFoldingPolicy(Agent):
 
         keypids = list(semkey2pid.values())
         key_particles = particle_pos[keypids]
-        key_pixels, visibility = arena.get_visibility(key_particles)
+        key_pixels = info['observation']['key_pixels']
         
-        cloth_mask = arena._render(mode='mask')
+        cloth_mask = info['observation']['mask']
 
         step = self.internal_states[arena_id]['step']
 

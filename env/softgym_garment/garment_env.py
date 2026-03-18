@@ -376,7 +376,7 @@ class GarmentEnv(Arena):
             goal_particles = goal_particles @ rotation_matrix.T  # rotate
 
             # Random displacement within ±0.5 range per axis
-            displacement = rng.uniform(-0.5, 0.5, size=3)
+            displacement = rng.uniform(-0.3, 0.3, size=3)
             displacement[2] = 0
             goal_particles += displacement
 
@@ -495,6 +495,7 @@ class GarmentEnv(Arena):
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+        print('action', action)
         self.last_info = self.info
         self.evaluate_result = None
         

@@ -10,7 +10,7 @@ import torch
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 from controllers.data_augmentation.pixel_based_primitives_data_augmenter import PixelBasedPrimitiveDataAugmenter
 
 def main():
@@ -31,7 +31,7 @@ def main():
         'init_mode': "flattened"
     }
     
-    demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False}))
+    demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': False}))
     task_config = {
         'num_goals': 10,
         'demonstrator': demonstrator,
@@ -58,7 +58,7 @@ def main():
     arena.set_task(task)
 
     agent =  ag_ar.build_agent('diffusion_policy', exp_config)
-    ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
+    ag_ar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingPolicy)
 
     save_dir = os.path.join('./tmp', 'garment_folding', 'test_diffusion_folding_from_flattened')
     arena.set_log_dir(save_dir)

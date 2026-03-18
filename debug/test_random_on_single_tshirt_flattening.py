@@ -11,7 +11,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 
 def main():
 

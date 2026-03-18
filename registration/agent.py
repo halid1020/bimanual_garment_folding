@@ -1,7 +1,7 @@
 # from controllers.rl.primitive_encoding_sac \
 #     import PrimitiveEncodingSAC
 from controllers.demonstrators.centre_sleeve_folding_stochastic_policy \
-    import CentreSleeveFoldingStochasticPolicy
+    import CentreSleeveFoldingPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
     import WaistLegFoldingStochasticPolicy
 from controllers.demonstrators.waist_hem_alignment_folding_stochastic_policy \
@@ -24,6 +24,7 @@ from controllers.human.human_dual_pickers_pick_and_place import HumanDualPickers
 from controllers.human.human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
+from controllers.random.noise_injected_policy import NoiseInjectedPolcy
 from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
@@ -37,7 +38,7 @@ from controllers.rl.vcd.adapter import VCDAdapter
 import actoris_harena as athar
 
 def register_agents():
-    athar.register_agent('centre_sleeve_folding_stochastic_policy', CentreSleeveFoldingStochasticPolicy)
+    athar.register_agent('centre_sleeve_folding_policy', CentreSleeveFoldingPolicy)
     athar.register_agent('wasit_leg_alignment_folding_stochastic_policy', WaistLegFoldingStochasticPolicy)
     athar.register_agent('wasit_hem_alignment_folding_stochastic_policy', WaistHemAlignmentFoldingStochasticPolicy)
     # athar.register_agent('primitive-encoding-sac', PrimitiveEncodingSAC)
@@ -64,3 +65,4 @@ def register_agents():
     athar.register_agent('clothmate', ClothMateAdapter)
     athar.register_agent('cloth-funnels', ClothFunnelsAdapter)
     athar.register_agent('vcd', VCDAdapter)
+    athar.register_agent('noise-injected-policy', NoiseInjectedPolcy)

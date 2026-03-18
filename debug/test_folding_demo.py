@@ -9,7 +9,7 @@ import os
 from env.multi_garment_env import MultiGarmentEnv
 from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy import WaistLegFoldingStochasticPolicy
 
 def main():
@@ -38,7 +38,7 @@ def main():
     }
     
     if task == 'centre-sleeve-folding':
-        demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
+        demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': True})) # TODO: create demonstrator for 'centre-sleeve-folding'
     elif task == 'waist-leg-alignment-folding':
         demonstrator = WaistLegFoldingStochasticPolicy(DotMap({'debug': True}))
     else:

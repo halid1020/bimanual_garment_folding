@@ -10,7 +10,7 @@ from env.softgym_garment.multi_garment_env import MultiGarmentEnv
 from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.human.human_multi_primitive import HumanMultiPrimitive
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 
 def main():
 

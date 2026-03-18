@@ -22,6 +22,7 @@ class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
         self.last_info = self.info
         self.evaluate_result = None
         self.overstretch = 0
+        #print('action!!!', action)
         dict_action = {
             'norm-pixel-pick-and-place': {
                 'pick_0': action[:2],

@@ -30,6 +30,7 @@ def generate_softgym_cache(env, output_path="converted_flat_states.pkl", num_epi
         env.reset({'eid': i})
         
         old_config = env.init_state_params
+        print('my config', old_config)
 
         # Extract the integer ID from the filename (e.g., '07037_Tshirt.obj.pkl' -> 7037)
         instance_name = old_config.get('cloth_instance', '0_')
@@ -123,7 +124,7 @@ def generate_softgym_cache(env, output_path="converted_flat_states.pkl", num_epi
         # NEW PRINT BLOCK: Garment & Data Format Details (For bridging verification)
         # =====================================================================
         print("\n" + "="*60)
-        print(f" EXPORTING CONFIGURATION (Config ID: {i})")
+        print(f" EXPORTING MEDOR CONFIGURATION (Config ID: {i})")
         print("="*60)
         
         print("[Garment Geometry Information]")

@@ -22,23 +22,19 @@ obs_config:
     output_key: success
 
 action_config:
-  norm-pixel-pick-and-place:
-    shape: [2, 2]
-    output_key: norm-pixel-pick-and-place
+  dual-norm-pixel-pick-and-place:
+    shape: [8]
+    output_key: dual-norm-pixel-pick-and-place
 
 reward_names:
-  - clothfunnel_default
-  - clothfunnel_tanh_reward
-  - speedFolding_approx
-  - learningToUnfold_approx
-  - planet_clothpick_hueristic
-  - max_IoU_differance
-  - coverage_differance
-  - canon_IoU_differance
-  - coverage_aligment
+  - particle_distance
+  - particle_distance_with_stretch_penality
+  - keypoint_distance
+  - multi_stage_reward
 
 evaluation_names:
   - normalised_coverage
-  - normalised_improvement
   - max_IoU_to_flattened
   - max_IoU
+  - mean_particle_distance
+  - semantic_keypoint_distance

@@ -14,17 +14,17 @@ obs_config:
   # goal-depth:
   #   shape: [128, 128, 1]
   #   output_key: goal-depth
-  goal-mask:
-    shape: [128, 128, 1]
-    output_key: goal-mask
+  # goal-mask:
+  #   shape: [128, 128, 1]
+  #   output_key: goal-mask
   success:
     shape: [1]
     output_key: success
 
 action_config:
-  dual-norm-pixel-pick-and-place:
+  norm-pixel-pick-and-place:
     shape: [8]
-    output_key: dual-norm-pixel-pick-and-place
+    output_key: norm-pixel-pick-and-place
 
 reward_names:
   - particle_distance

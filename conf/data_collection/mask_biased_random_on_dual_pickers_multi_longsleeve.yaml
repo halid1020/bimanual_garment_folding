@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - /agent/lagarnet@agent: dual_arm_random_pick_and_place
+  - /arena@arena: multi_longsleeve_single_primitive_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_from_flattened_ray
+  - /task@task: centre_sleeve_folding
+  - dataset: single_arm_pick_and_place_garments_for_folding
+  - _self_
+
+parallel_processes: 4
+trials: 10000
+single_agent: True
+
+agent_save_root: '/data/ah390/garment_folding_data'
+agent_exp_name: random_dual_picker_single_primitive_multi_longsleeve_folding_from_flattened
+
+data_path: mask_biased_random_on_dual_pickers_multi_longsleeve
+data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
+# collected in thanos, transfer to pc282

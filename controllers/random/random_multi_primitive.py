@@ -2,7 +2,7 @@ from actoris_harena import Agent
 import random
 
 from .random_pick_and_fling import RandomPickAndFling
-from .random_pick_and_place import RandomPickAndPlace
+from .dual_arm_random_pick_and_place import DualArmRandomPickAndPlace
 from ..human.no_operation import NoOperation
 
 
@@ -20,7 +20,7 @@ class RandomMultiPrimitive(Agent):
 
         self.primitive_instances = [
             RandomPickAndFling(config),
-            RandomPickAndPlace(config),   # MUST be dual-picker compatible
+            DualArmRandomPickAndPlace(config),   # MUST be dual-picker compatible
             NoOperation(config)
         ]
 

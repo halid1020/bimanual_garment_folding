@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent/lagarnet@agent: noise_injected_oracle_centre_sleeve_folding_from_flattened
-  - /arena@arena: multi_longsleeve_single_primitive_no_success_stop_resol_128_from_flattened_train_200
+  - /arena@arena: multi_longsleeve_single_primitive_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_from_flattened
   - /task@task: centre_sleeve_folding
 
 exp_name: noise_injected_oracle_centre_sleeve_folding_from_flattened

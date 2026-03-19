@@ -7,7 +7,7 @@ import random
 from actoris_harena import Agent
 
 
-class CentreSleeveFoldingStochasticPolicy(Agent):
+class CentreSleeveFoldingPolicy(Agent):
     """
     Oracle policy for long-sleeve garment:
     Step 1: Bring right/left sleeves inward
@@ -79,51 +79,29 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
         """Sleeve folding step."""
         higher_left_sleeve = self.get_pixel("higher_left_sleeve", semkey2pid, keypids, key_pixels)
         higher_right_sleeve = self.get_pixel("higher_right_sleeve", semkey2pid, keypids, key_pixels)
-        lower_left_sleeve = self.get_pixel("lower_left_sleeve", semkey2pid, keypids, key_pixels)
-        lower_right_sleeve = self.get_pixel("lower_right_sleeve", semkey2pid, keypids, key_pixels)
-
-        lower_left_sleeve[0] -= 20
-        lower_right_sleeve[0] -= 20
 
         centre = self.get_pixel("centre", semkey2pid, keypids, key_pixels)
-        centre[0] += 60
         centre_hem = self.get_pixel("centre_hem", semkey2pid, keypids, key_pixels)
-        centre_hem[0] += 20
-        # print('centre', centre)
-        # print('centre_hem', centre_hem)
+    
+        left_pick = higher_left_sleeve
+        right_pick = higher_right_sleeve
 
-        # randomized picks near sleeves
-        left_pick = self.random_point_on_line(lower_left_sleeve, higher_left_sleeve, cloth_mask)
-        right_pick = self.random_point_on_line(lower_right_sleeve, higher_right_sleeve, cloth_mask)
-
-        # randomized places along line (centre -> centre_hem)
-        centre_for_left = centre.copy()
-        centre_for_left[1] += 30
-        centre_hem_for_left = centre_hem.copy()
-        centre_hem_for_left[1] += 30
-        left_place = self.random_point_on_line(centre_for_left, centre_hem_for_left, cloth_mask)
+        mid_centre = (centre_hem + centre)/2
         
-        centre_for_right = centre.copy()
-        centre_for_right[1] -= 30
-        centre_hem_for_right = centre_hem.copy()
-        centre_hem_for_right[1] -= 30
-        right_place = self.random_point_on_line(centre_for_right, centre_for_right, cloth_mask)
+        left_place = mid_centre
+        
+        
+        right_place = mid_centre
 
-        # # enforce left is left of right
-        # if left_place[1] > right_place[1]:
-        #     left_place, right_place = right_place, left_place
-
-        H, W = cloth_mask.shape
-        action = {
-            'norm-pixel-fold': {
-                'pick_0': self.norm_pixel(left_pick, H, W),
-                'pick_1': self.norm_pixel(right_pick, H, W),
-                'place_0': self.norm_pixel(left_place, H, W),
-                'place_1': self.norm_pixel(right_place, H, W)
-            }
-        }
-
+    
         self.internal_states[arena_id]['step'] += 1
+        H, W = cloth_mask.shape
+        action = np.stack([
+            self.norm_pixel(left_pick, H, W),
+            self.norm_pixel(right_pick, H, W),
+            self.norm_pixel(left_place, H, W),
+            self.norm_pixel(right_place, H, W)
+        ]).flatten()
         return action
 
     def act_step1(self, arena_id, key_pixels, semkey2pid, keypids, cloth_mask):
@@ -134,44 +112,59 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
         left_collar = self.get_pixel("left_collar", semkey2pid, keypids, key_pixels)
         right_collar = self.get_pixel("right_collar", semkey2pid, keypids, key_pixels)
 
-        # randomized picks near hems
-        left_pick = self.sample_near_pixel(left_hem, cloth_mask)
-        right_pick = self.sample_near_pixel(right_hem, cloth_mask)
+       
+        left_pick = left_hem
+        right_pick = right_hem
 
-        # places: near collar line but not below
-        left_target = np.array([left_collar[0]-30, left_hem[1]])
-        right_target = np.array([right_collar[0]-30, right_hem[1]])
+        offset = 0.04 * cloth_mask.shape[0]
+        left_target = np.array([left_collar[0]-offset, left_hem[1]])
+        right_target = np.array([right_collar[0]-offset, right_hem[1]])
 
-        left_place = self.sample_near_pixel(left_target, cloth_mask, on_mask=False)
-        right_place = self.sample_near_pixel(right_target, cloth_mask, on_mask=False)
+        left_place = left_target
+        right_place = right_target
+        
 
-        # # ensure not below collar line
-        # min_y = min(left_collar[1], right_collar[1])
-        # left_place[1] = min(left_place[1], min_y)
-        # right_place[1] = min(right_place[1], min_y)
         H, W = cloth_mask.shape
-        action = {
-            'norm-pixel-fold': {
-                'pick_0': self.norm_pixel(left_pick, H, W),
-                'pick_1': self.norm_pixel(right_pick, H, W),
-                'place_0': self.norm_pixel(left_place, H, W),
-                'place_1': self.norm_pixel(right_place, H, W)
-            }
-        }
 
         self.internal_states[arena_id]['step'] += 1
+        action = np.stack([
+            self.norm_pixel(left_pick, H, W),
+            self.norm_pixel(right_pick, H, W),
+            self.norm_pixel(left_place, H, W),
+            self.norm_pixel(right_place, H, W)
+        ]).flatten()
         return action
     
-    def no_op(self):
-        action = {
-            'norm-pixel-fold': {
-                'pick_0': np.ones(2),
-                'pick_1': np.ones(2),
-                'place_0': np.ones(2),
-                'place_1': np.ones(2)
-            }
-        }
+    def no_op(self, cloth_mask):
+        """Pick and place the bottom-left and bottom-right corners of the cloth mask."""
+        # Find all y (row) and x (col) coordinates where cloth is present
+        ys, xs = np.where(cloth_mask > 0)
+        
+        # Fallback if the mask is empty for some reason
+        if len(ys) == 0:
+            return np.ones(8)
 
+        # Bottom-left minimizes x and maximizes y. 
+        # Therefore, we want the index that maximizes (y - x)
+        bl_idx = np.argmax(ys - xs)
+        left_pick = np.array([ys[bl_idx], xs[bl_idx]])
+        left_place = left_pick.copy() # Place exactly where we picked
+
+        # Bottom-right maximizes both x and y.
+        # Therefore, we want the index that maximizes (y + x)
+        br_idx = np.argmax(ys + xs)
+        right_pick = np.array([ys[br_idx], xs[br_idx]])
+        right_place = right_pick.copy()
+
+        H, W = cloth_mask.shape[:2]
+
+        action = np.stack([
+            self.norm_pixel(left_pick, H, W),
+            self.norm_pixel(right_pick, H, W),
+            self.norm_pixel(left_place, H, W),
+            self.norm_pixel(right_place, H, W)
+        ]).flatten()
+        
         return action
 
 
@@ -184,24 +177,27 @@ class CentreSleeveFoldingStochasticPolicy(Agent):
         semkey2pid = info['observation']['semkey2pid']
         particle_pos = info['observation']['particle_positions']
         
-        arena = info['arena']
+        # arena = info['arena']
 
         keypids = list(semkey2pid.values())
         key_particles = particle_pos[keypids]
-        key_pixels, visibility = arena.get_visibility(key_particles)
-        #rgb = arena._render()
-        cloth_mask = arena._render(mode='mask')
-        #print('cloth maks shape', cloth_mask.shape)
-
+        key_pixels = info['observation']['key_pixels']
+        #print('key pxiels', key_pixels)
+        
+        cloth_mask = info['observation']['mask']
+        #print('mask resolution', cloth_mask.shape)
 
         step = self.internal_states[arena_id]['step']
+
+        #print('step!!', step)
 
         if step == 0:
             return self.act_step0(arena_id, key_pixels, semkey2pid, keypids, cloth_mask)
         elif step == 1:
             return self.act_step1(arena_id, key_pixels, semkey2pid, keypids, cloth_mask)
         else:
-            return self.no_op()
+            # Pass the cloth mask here
+            return self.no_op(cloth_mask)
 
     def terminate(self):
         return {arena_id: (self.internal_states[arena_id]['step'] >= 2)

@@ -59,6 +59,8 @@ class PixelBasedSinglePrimitiveDataAugmenter:
                 same_on_batch=True, 
             )
 
+        self.rgb_noise_factor = self.config.get('rgb_noise_factor', 0.0)
+
     def _save_debug_image(self, rgb_tensor, state_tensor, prefix, step):
         """Save an RGB tensor with state points drawn on it."""
         save_dir = "./tmp/augment_debug"
@@ -173,6 +175,11 @@ class PixelBasedSinglePrimitiveDataAugmenter:
             # Generate ONE permutation for the whole batch
             perm = torch.randperm(3, device=observation.device)
             observation = observation[:, perm, :, :]
+
+        if self.rgb_noise_factor > 0:
+            noise = torch.randn_like(observation) * self.rgb_noise_factor
+            observation = torch.clamp(observation + noise, 0, 1)
+            
 
         # Save after augmentation
         if self.debug:

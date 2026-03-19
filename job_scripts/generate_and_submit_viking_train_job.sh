@@ -49,12 +49,14 @@ else
 fi
 
 OUT_DIR="./tmp"
-SCRIPT_PATH="${OUT_DIR}/submit_${EXP_NAME}.sh"
+SAFE_EXP_NAME="${EXP_NAME//\//_}"
+SCRIPT_PATH="${OUT_DIR}/submit_${SAFE_EXP_NAME}.sh"
+
 mkdir -p "$OUT_DIR"
 
 cat << EOF > "$SCRIPT_PATH"
 #!/usr/bin/env bash
-#SBATCH --job-name=${EXP_NAME}
+#SBATCH --job-name=${SAFE_EXP_NAME}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=${CPUS}

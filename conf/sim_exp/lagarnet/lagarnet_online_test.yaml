@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent/lagarnet@agent: lagarnet_online_test
+  - /arena@arena: multi_longsleeve_single_picker_provide_semkey_pixel_no_success_stop_resol_64_add_goal_to_obs
+  - /task@task: flattening_with_coverage_alignment_bonus_and_penalty
+
+exp_name: lagarnet_online_test
+project_name: bimanual_garment_folding
+save_root: /media/hcv530/T7/garment_folding_data
+train_and_eval: train_and_evaluate_single

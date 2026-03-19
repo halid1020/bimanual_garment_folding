@@ -9,6 +9,7 @@ import torch
 import cv2
 from dotmap import DotMap
 import torch.nn as nn
+import time
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -17,6 +18,7 @@ from dotmap import DotMap
 from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
 from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena.utilities.save_utils import save_mask
 
 from data_augmentation.register_augmeters import build_data_augmenter
 
@@ -148,9 +150,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.stats = dataset.stats
         elif self.config.dataset_mode == 'general':
             from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-            # convert dotmap to dict
             config = self.config.dataset_config.toDict()
-            #print('config', config)
             dataset = TrajectoryDataset(**config)
             
 
@@ -163,13 +163,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         torch.backends.cudnn.benchmark = True
         self.dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=self.config.batch_size, #64,
-            #num_workers=2,
+            batch_size=self.config.batch_size, 
             shuffle=True,
-            # accelerate cpu-gpu transfer
-            #pin_memory=True,
-            # don't kill worker process afte each epoch
-            #persistent_workers=True
         )
         self.dataset_inited = True
         #self.dataloader = None
@@ -219,18 +214,40 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     break
                 
                 for k, v in info['observation'].items():
-                    #print('k', k)
+                    if self.debug: print('[MultiPrimitiveDiffusionAdapter] key in info', k)
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
                             #print('k ', k, 'v', v)
                             v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
                         elif k in ['mask', 'goal_mask']:
-                            v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                            
+                            if self.debug:
+                                step_idx = len(observations[k])
+                                file_name = f"{k}_ep{episode_id}_step{step_idx}_before_resize"
+                                save_mask(
+                                    mask=v, 
+                                    filename=file_name, 
+                                    directory="tmp/debug_mluti_primitive_diffusion"
+                                )
+
+                            v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                             v_ = v_ > 0.9
+                            
+                            if self.debug:
+                                step_idx = len(observations[k])
+                                file_name = f"{k}_ep{episode_id}_step{step_idx}"
+                                save_mask(
+                                    mask=v_, 
+                                    filename=file_name, 
+                                    directory="tmp/debug_mluti_primitive_diffusion"
+                                )
+                            
                             observations[k].append(v_)
                         else:
-                            observations[k].append(v_)
+                            observations[k].append(v)
+                            if self.debug:
+                                print('[MultiPrimitiveDiffusionAdapter] k, v to save', k, v)
                 
                 add_action = action
                 if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
@@ -267,11 +284,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         observations[k].append(v_)
                     elif k in ['mask', 'goal_mask']:
-                        v_ = cv2.resize(v_.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                        v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
                         v_ = v_ > 0.9
                         observations[k].append(v_)
                     else:
-                        observations[k].append(v_)
+                        observations[k].append(v)
             #print('info eval', info['evaluation'])
             if self.config.debug:
                 frames = arena.get_frames()
@@ -286,7 +303,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
-                    # print(f'[debug] k {k}')
+                    print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
@@ -313,22 +330,51 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         )
         self.dataset_inited = True
 
+    # def _init_optimizer(self):
+    #     self.ema = EMAModel(
+    #         parameters=self.nets.parameters(),
+    #         power=0.75)
+        
+    #     self.optimizer = torch.optim.AdamW(
+    #         params=self.nets.parameters(),
+    #         lr=1e-4, weight_decay=1e-6)#
+
+    #     self.lr_scheduler = get_scheduler(
+    #         name='cosine',
+    #         optimizer=self.optimizer,
+    #         num_warmup_steps=500,
+    #         num_training_steps=self.config.total_update_steps ## make it manual
+    #     )
+    
     def _init_optimizer(self):
+        # Filter parameters that require gradients
+        trainable_params = [p for p in self.nets.parameters() if p.requires_grad]
+
         self.ema = EMAModel(
-            parameters=self.nets.parameters(),
+            parameters=trainable_params,
             power=0.75)
         
+        opt_params = self.config.get('optimiser_params', {})
+        if hasattr(opt_params, 'toDict'):
+            opt_params = opt_params.toDict()
+            
         self.optimizer = torch.optim.AdamW(
-            params=self.nets.parameters(),
-            lr=1e-4, weight_decay=1e-6)#
+            params=trainable_params,
+            **opt_params
+        )
+
+        scheduler_name = self.config.get('lr_scheduler', 'cosine')
+        warmup_steps = self.config.get('num_warmup_steps', 500)
 
         self.lr_scheduler = get_scheduler(
-            name='cosine',
+            name=scheduler_name,
             optimizer=self.optimizer,
-            num_warmup_steps=500,
-            num_training_steps=self.config.total_update_steps ## make it manual
+            num_warmup_steps=warmup_steps,
+            num_training_steps=self.config.total_update_steps
         )
-    
+
+        self.clip_norm = self.config.get('grad_clip_norm', -1)
+
     def _init_networks(self):
         self.input_channel = 3
         if self.config.input_obs == 'rgbd':
@@ -339,18 +385,97 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.input_channel = 5
         elif self.config.input_obs == 'rgb-workspace-mask-goal':
             self.input_channel = 8
-        elif self.config.input_obs == 'rgb-goal':
+        elif self.config.input_obs == 'rgb+goal_rgb':
             self.input_channel = 6
+        elif self.config.input_obs == 'rgb+goal_mask':
+            self.input_channel = 4
 
-        self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
-        self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
-
+        self.vision_encoder_type = self.config.get('vision_encoder', 'original')
         
+        if self.vision_encoder_type == 'original':
+            self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
+            self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
+       
+        elif self.vision_encoder_type == 'gc_rssm_encoder':
+            from ..rl.lagarnet.networks import ImageEncoder
+            self.vision_encoder = ImageEncoder(
+                image_dim=self.config.input_obs_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                batchnorm=self.config.encoder_batchnorm,
+                residual=self.config.encoder_residual
+            )
             
+            
+            # Load pretrained GC-RSSM encoder weights if specified
+            pretrained_path = self.config.get('pretrained_encoder_path', None)
+            if pretrained_path:
+                if os.path.exists(pretrained_path):
+                    checkpoint = torch.load(pretrained_path)
+                    self.vision_encoder.load_state_dict(checkpoint['encoder'])
+                    print(f"[MultiPrimitiveDiffusion] Loaded pretrained GC-RSSM encoder from {pretrained_path}")
+                else:
+                    print(f"[MultiPrimitiveDiffusion] Path {pretrained_path} does not exists. Cannot load the pretrained encoder.")
+                
+            # Freeze the encoder if specified
+            if self.config.get('freeze_encoder', False):
+                for param in self.vision_encoder.parameters():
+                    param.requires_grad = False
+                self.vision_encoder.eval()
+                print("[MultiPrimitiveDiffusion] Vision encoder is frozen.")
+
+        elif self.vision_encoder_type == 'gc_rssm_dynamic':
+            # Import your transition model (adjust the import path based on your folder structure)
+            from ..rl.lagarnet.networks import ImageEncoder
+            from ..rl.lagarnet.gc_rssm import GoalConditionedTransitionModel
+
+            self.vision_encoder = ImageEncoder(
+                image_dim=self.config.input_obs_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                batchnorm=self.config.encoder_batchnorm,
+                residual=self.config.encoder_residual
+            )
+            
+            self.transition_model = GoalConditionedTransitionModel(
+                belief_size=self.config.deterministic_latent_dim,
+                state_size=self.config.stochastic_latent_dim,
+                action_size=self.network_action_dim, 
+                hidden_size=self.config.hidden_dim,
+                embedding_size=self.config.embedding_dim,
+                activation_function=self.config.activation,
+                min_std_dev=self.config.get('min_std_dev', 0.1),
+                embedding_layers=self.config.get('trans_layers', 1),
+                state_layers=self.config.get('state_layers', 1)
+            )
+
+            pretrained_path = self.config.get('pretrained_encoder_path', None)
+            if pretrained_path and os.path.exists(pretrained_path):
+                checkpoint = torch.load(pretrained_path)
+                
+                # Load weights loosely to allow custom FC layers to train
+                missing_e, _ = self.vision_encoder.load_state_dict(checkpoint['encoder'])
+                missing_t, _ = self.transition_model.load_state_dict(checkpoint['transition_model'])
+                print(f"[MultiPrimitiveDiffusion] Loaded pretrained GC-RSSM dynamic model from {pretrained_path}")
+
+            if self.config.get('freeze_encoder', False):
+                # Freeze encoder
+                for name, param in self.vision_encoder.named_parameters():
+                    if 'missing_e' in locals() and name in missing_e:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+                # Freeze transition model
+                for name, param in self.transition_model.named_parameters():
+                    if 'missing_t' in locals() and name in missing_t:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+                print("[MultiPrimitiveDiffusion] Vision encoder and Transition model are frozen (except missing keys).")
         
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
-            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K) #TODO: make it more layers later.
+            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K)
 
             cls_cfg = self.config.get("primitive_classifier", {}) # nn.Linear(self.config.obs_dim, self.K) by default
 
@@ -388,10 +513,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         self.rep_learn = self.config.get('rep_learn', 'none')
 
-        self.nets = nn.ModuleDict({
+        net_dict = {
             'vision_encoder': self.vision_encoder,
             'noise_pred_net': self.noise_pred_net
-        })
+        }
+
+        if self.vision_encoder_type == 'gc_rssm_dynamic':
+            net_dict['transition_model'] = self.transition_model
+        
+        self.nets = nn.ModuleDict(net_dict)
 
         if self.primitive_integration == 'one-hot-encoding':
             self.nets['prim_class_head'] = self.prim_class_head
@@ -401,6 +531,13 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 input_dim=512, 
                 output_channel=self.input_channel
             )
+        elif self.rep_learn == 'predict-state':
+            # Create a simple MLP to project the visual embeddings to the state space
+            self.nets['state_predictor'] = nn.Sequential(
+                nn.Linear(self.config.obs_dim, 256),
+                nn.ReLU(),
+                nn.Linear(256, self.config.state_dim)
+            )
 
         self._test_network()
 
@@ -409,24 +546,92 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
     def _test_network(self):
 
+        # --- Parameter Calculation Added Here ---
+        total_params = sum(p.numel() for p in self.nets.parameters())
+        trainable_params = sum(p.numel() for p in self.nets.parameters() if p.requires_grad)
+        
+        print("-" * 50)
+        print(f"[MultiPrimitiveDiffusion Network Stats]")
+        print(f"Total Parameters: {total_params:,}")
+        print(f"Trainable Parameters: {trainable_params:,}")
+        
+        # Optional: Print parameters per sub-network for debugging
+        for name, net in self.nets.items():
+            net_params = sum(p.numel() for p in net.parameters())
+            print(f"  - {name}: {net_params:,}")
+        print("-" * 50)
+        # ----------------------------------------
+
         with torch.no_grad():
             # example inputs
-            image = torch.zeros(
-                (1, self.config.obs_horizon,
-                 self.input_channel,96,96))
-             # vision encoder
-            image_features = self.nets['vision_encoder'](
-                image.flatten(end_dim=1)
-            )
-            # (2,512)
-            obs = image_features.reshape(*image.shape[:2],-1)
 
+            if self.vision_encoder_type == 'original':
+                image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    self.input_channel,96,96))
+                # vision encoder
+                image_features = self.nets['vision_encoder'](
+                    image.flatten(end_dim=1)
+                )
+                # (2,512)
+                obs = image_features.reshape(*image.shape[:2],-1)
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    3,64,64)) #.to(self.config.device)
+                
+                goal_image = torch.zeros(
+                    (1, self.config.obs_horizon,
+                    3,64,64)) #.to(self.config.device)
+
+                # Flatten batch and time dimensions for the forward pass
+                image_feat = self.nets['vision_encoder'](image.flatten(end_dim=1))
+                goal_feat = self.nets['vision_encoder'](goal_image.flatten(end_dim=1))
+                
+                # Concatenate features and reshape back to (Batch, Obs_Horizon, Feature_Dim)
+                obs = torch.cat([image_feat, goal_feat], dim=-1)
+                obs = obs.reshape(*image.shape[:2], -1)
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+
+                B, T = 1, self.config.obs_horizon
+                image = torch.zeros(
+                    (B, T,
+                    3,64,64)) #.to(self.config.device)
+                
+                goal_image = torch.zeros(
+                    (B, T,
+                    3,64,64)) #.to(self.config.device)
+
+                # Flatten batch and time dimensions for the forward pass
+                obs_emb = self.nets['vision_encoder'](image.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                goal_emb = self.nets['vision_encoder'](goal_image.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                
+                dummy_actions = torch.ones(T, B, self.network_action_dim)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim)
+                nonterminals = torch.ones(T, B, 1)
+
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                latents = torch.cat([hidden[0], hidden[4]], dim=-1) # Cat belief and posterior
+                obs = latents.transpose(0, 1).reshape(B, T, -1) # Remove batch dim -> (T, deter+stoch)
+    
             if self.config.include_state:
                 vector_state = torch.zeros(
                     (1, self.config.obs_horizon, 
                     self.config.state_dim))
                 obs = torch.cat([obs, vector_state],dim=-1)
             
+            if self.rep_learn == 'predict-state':
+                _ = self.nets['state_predictor'](obs)
+
             # print('[MultiPrimitiveDiffusion, _test_network] obs', obs.shape)
             
             noised_action = torch.randn(
@@ -484,6 +689,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         update_steps = min(#
             self.config.total_update_steps - self.update_step,
             update_steps)
+        
+        if self.config.get('freeze_encoder', False):
+            self.nets['vision_encoder'].eval()
+            
         #print('train update steps', update_steps)
         pbar = tqdm(range(update_steps), desc="Training")
 
@@ -497,7 +706,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             else:
                 obs = nbatch['observation']
                 action = nbatch['action']['default']
-                #print('[diffusion] action', action.shape)
+                #print('[diffusion] action', action.shape, action[0])
                 nbatch = {v: k for v, k in obs.items()}
                 nbatch['action'] = action.reshape(*action.shape[:2], -1)
                 #print('action after shape', nbatch['action'] .shape)
@@ -517,8 +726,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 nbatch['rgb-workspace-mask-goal'] = torch.cat([
                     nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
             
-            if self.config.input_obs == 'rgb-goal':
-                nbatch['rgb-goal'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_rgb':
+                nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            
+            if self.config.input_obs == 'rgb+goal_mask':
+                nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
 
             
             B = nbatch[self.config.input_obs].shape[0]
@@ -533,17 +745,97 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
           
             # encoder vision features
             #print('[diffusion] input obs shape', input_obs.shape)
-            image_features = self.nets['vision_encoder'](
-                input_obs)
-            obs_features = image_features.reshape(
-                B, self.config.obs_horizon, -1)
+            # image_features = self.nets['vision_encoder'](
+            #     input_obs)
+            # obs_features = image_features.reshape(
+            #     B, self.config.obs_horizon, -1)
 
-            recon_loss = torch.tensor(0.0, device=self.device)
+            if self.vision_encoder_type == 'original':
+                image_features = self.nets['vision_encoder'](input_obs)
+                obs_features = image_features.reshape(
+                    B, self.config.obs_horizon, -1)
+                
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                # Slicing the 6-channel image into two 3-channel images (obs and goal)
+                # image shape is expected to be (obs_horizon, 6, H, W)
+                rgb_part = input_obs[:, :3, :, :]
+                goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                obs_feature = self.nets['vision_encoder'](rgb_part) 
+                goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+
+                # Concatenate the two feature vectors along the last dimension
+                image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
+                obs_features = image_features.reshape(
+                    B, self.config.obs_horizon, -1)
+            
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+                rgb_part = input_obs[:, :3, :, :]
+                goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                # input_obs is ALREADY flattened to 4D: (B * T, C, H, W)
+                T = self.config.obs_horizon
+                # B is already defined safely earlier in the train method!
+                
+                # 1. Encode images directly without flattening again
+                obs_emb = self.nets['vision_encoder'](rgb_part).view(B, T, -1)
+                goal_emb = self.nets['vision_encoder'](goal_rgb_part).view(B, T, -1)
+
+                # 2. Swap to (Time, Batch, Dim) for RSSM
+                obs_emb = obs_emb.transpose(0, 1)
+                goal_emb = goal_emb.transpose(0, 1)
+
+                # 3. Setup initial states and dummy actions
+                dummy_actions = torch.zeros(T, B, self.network_action_dim, device=self.device)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
+                nonterminals = torch.ones(T, B, 1, device=self.device)
+
+                # 4. Unroll Transition Model
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                beliefs = hidden[0]          # (T, B, deter_dim)
+                posterior_states = hidden[4] # (T, B, stoch_dim)
+
+                # 5. Concatenate latents and swap back to (Batch, Time, Dim)
+                latents = torch.cat([beliefs, posterior_states], dim=-1)
+                obs_features = latents.transpose(0, 1) # (B, T, deter+stoch)
+            
+            #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
+
+            rep_loss = torch.tensor(0.0, device=self.device)
+            #state_pred_loss = torch.tensor(0.0, device=self.device) # Add initialization
+
             if self.rep_learn == 'auto-encoder':
-                # image_features shape: (B * obs_horizon, 512)
-                # input_obs shape: (B * obs_horizon, C, 96, 96)
+                # existing auto-encoder logic
                 reconstructed_obs = self.nets['vision_decoder'](image_features)
-                recon_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+                rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+            
+            # Add this block for predict-state logic
+            elif self.rep_learn == 'predict-state':
+                # obs_features shape is (B, obs_horizon, feature_dim)
+                # Network outputs (B, obs_horizon, state_dim)
+                pred_state = self.nets['state_predictor'](obs_features) 
+                
+                state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                if state_key in nbatch:
+                    # Slice to the observation horizon
+                    gt_state = nbatch[state_key][:, :self.config.obs_horizon] 
+                    
+                    # Flatten the state. Example: [15, 2] -> 30
+                    gt_state = gt_state.reshape(B, self.config.obs_horizon, -1).float() 
+                    
+                    rep_loss = nn.functional.mse_loss(pred_state, gt_state)
+                else:
+                    print(f"Warning: {state_key} not found in batch for state prediction.")
 
             # (B,obs_horizon,D)
 
@@ -552,13 +844,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 vector_state = nbatch['vector_state'][:, :self.config.obs_horizon]
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
             obs_cond = obs_features.flatten(start_dim=1)
-
-            # TODO: optional add primtiive cond_as well, use one-hot encoding.
-            # when self.primitive_integration == 'one-hot-encoding'
-            # predict the primitve through a classification head attached to the obs_features
-            # prim_id = self.prim_class(obs_feature)
-            # calculate the prim_loss through cross_entropy
-            # obs_cond = torch.concat(obs_cond, prim_enc)
 
             prim_loss = torch.tensor(0)
             if self.primitive_integration == 'one-hot-encoding':
@@ -662,11 +947,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
             total_loss = actor_noise_loss + prim_loss #co-update the encoder
-            if self.rep_learn == 'auto-encoder':
+            if self.rep_learn in ['auto-encoder', 'predict-state']:
                 #print('loss!')
-                total_loss += recon_loss * self.config.get('recon_weight', 0.1)
+                total_loss += rep_loss * self.config.get('rep_weight', 0.1)
             # optimize
             total_loss.backward()
+            
+            
+            if self.clip_norm > 0:
+                nn.utils.clip_grad_norm_(self.nets.parameters(), self.clip_norm)
+
             self.optimizer.step()
             self.optimizer.zero_grad()
             # step lr scheduler every batch
@@ -674,7 +964,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.lr_scheduler.step()
 
             # update Exponential Moving Average of the model weights
-            self.ema.step(self.nets.parameters())
+            trainable_params = [p for p in self.nets.parameters() if p.requires_grad]
+            self.ema.step(trainable_params)
 
             ## write loss value to tqdm progress bar
             pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
@@ -788,12 +1079,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         return -2
 
     def single_act(self, info, update=False):
-        
+        start_time = time.time()
         if self.measure_time:
-            start_time = time.time()
+            
             arena_id = info['arena_id']
-
-   
 
         if update == True:
             last_action = self.last_actions[info['arena_id']]
@@ -818,7 +1107,49 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 from .draw_utils import plot_rgb_workspace_mask_goal_features
                 plot_rgb_workspace_mask_goal_features(image)
 
-            obs_features = self.nets['vision_encoder'](image)
+            if self.vision_encoder_type == 'original':
+                obs_features = self.nets['vision_encoder'](image)
+            
+            elif self.vision_encoder_type == 'gc_rssm_encoder':
+                # Slicing the 6-channel image into two 3-channel images (obs and goal)
+                # image shape is expected to be (obs_horizon, 6, H, W)
+                rgb_part = image[:, :3, :, :]
+                goal_rgb_part = image[:, 3:6, :, :]
+
+                obs_feature = self.nets['vision_encoder'](rgb_part) 
+                goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+
+                # Concatenate the two feature vectors along the last dimension
+                obs_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
+            elif self.vision_encoder_type == 'gc_rssm_dynamic':
+                # Add a batch dimension -> (1, T, C, H, W)
+                image_batched = image.unsqueeze(0)
+                B, T = image_batched.shape[:2]
+
+                rgb_part = image_batched[:, :, :3, :, :]
+                goal_rgb_part = image_batched[:, :, 3:6, :, :]
+
+                obs_emb = self.nets['vision_encoder'](rgb_part.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+                goal_emb = self.nets['vision_encoder'](goal_rgb_part.flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
+
+                dummy_actions = torch.ones(T, B, self.network_action_dim, device=self.device)
+                init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
+                init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
+                nonterminals = torch.ones(T, B, 1, device=self.device)
+
+                hidden = self.nets['transition_model'](
+                    prev_state=init_state,
+                    actions=dummy_actions,
+                    prev_belief=init_belief,
+                    goal_observations=goal_emb,
+                    observations=obs_emb,
+                    nonterminals=nonterminals
+                )
+
+                latents = torch.cat([hidden[0], hidden[4]], dim=-1) # Cat belief and posterior
+                obs_features = latents.transpose(0, 1).squeeze(0)   # Remove batch dim -> (T, deter+stoch)
+
             # print('obs features shape', obs_features.shape)
 
             if self.config.include_state:
@@ -879,8 +1210,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 noise_actions.append(ts_to_np(naction[:, start:end]))
             
             # ---  Call Debug GIF Function ---
-            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.config.constrain_action == 'bimanual_mask':
-                print('!!!!!! Contrain Debug!!!!!')
+            if self.debug and self.primitive_integration == 'one-hot-encoding' and self.    constrain_action == 'bimanual_mask':
+                print('!!!!!! Constrain Debug!!!!!')
                 from .constrain_action_functions import save_denoising_gif
                 
                 # Extract image and masks from the deque/buffer
@@ -943,7 +1274,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         if self.measure_time:
             self.internal_states[[info['arena_id']]]['inference_time'].append(time.time() - start_time)
         
-
+        duration = time.time() - start_time
+        print(f"Arena {info.get('arena_id', 'Unknown')}: Action planned in {duration:.4f} seconds.")
         return out_action
 
     def act(self, infos, updates):
@@ -988,8 +1320,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgbd'] = np.concatenate(
                 [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
         
-        if self.config.input_obs == 'rgb-goal':
-            info['observation']['rgb-goal'] = np.concatenate(
+        if self.config.input_obs == 'rgb+goal_rgb':
+            info['observation']['rgb+goal_rgb'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
@@ -1036,7 +1368,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             info['observation']['rgb-workspace-mask-goal'] = np.concatenate(
                 [rgb, m0, m1, goal], axis=-1
             )
-            
+        
+        if self.config.input_obs == 'rgb+goal_mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
+            mask = resize_mask_to_rgb(info['observation']['mask'])
+
+          
+
+            info['observation']['rgb+goal_mask'] = np.concatenate(
+                [rgb, mask], axis=-1
+            )
+            if self.debug: print('input shape', info['observation']['rgb+goal_mask'].shape)
 
         input_data = {
             self.config.input_obs: info['observation'][self.config.input_obs]\

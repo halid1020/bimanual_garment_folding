@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
+import os
 
-REMOTE = False
-
+REMOTE = True
+ACTUAL_DISPLAY = os.environ.get("DISPLAY", "localhost:10.0")
 if REMOTE:
     CV2_DISPLAY =  "localhost:10.0" 
     SIM_DISPLAY =  ""

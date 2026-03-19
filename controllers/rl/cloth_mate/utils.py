@@ -4,8 +4,8 @@ from copy import deepcopy
 from sklearn.cluster import DBSCAN
 from Imath import PixelType
 from scipy.ndimage import distance_transform_edt
-from clothmate.utils.utils import compute_intrinsics, translate2d, scale2d, rot2d, rigid_transform_3D, superimpose, transform
-from clothmate.utils.utils import get_transform_matrix, pixel_to_3d
+from .utils.utils import compute_intrinsics, translate2d, scale2d, rot2d, rigid_transform_3D, superimpose, transform
+from .utils.utils import get_transform_matrix, pixel_to_3d
 from torchvision import transforms
 from pathlib import Path
 from itertools import product

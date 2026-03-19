@@ -11,7 +11,7 @@ from env.single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
 from env.tasks.garment_folding import GarmentFoldingTask
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.multi_primitive_sac.image_based_multi_primitive_SAC import ImageBasedMultiPrimitiveSAC
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 from controllers.multi_primitive_sac.data_augmenter import PixelBasedPrimitiveDataAugmenter
 
 def get_agent_config() -> DotMap:
@@ -85,7 +85,7 @@ def main():
         'readjust_pick': True
     }
     
-    demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False})) # TODO: create demonstrator for 'centre-sleeve-folding'
+    demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': False})) # TODO: create demonstrator for 'centre-sleeve-folding'
     
     task_config = {
         'num_goals': 10,

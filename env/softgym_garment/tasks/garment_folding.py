@@ -8,7 +8,7 @@ from statistics import mean
 from actoris_harena import save_video
 from actoris_harena.utilities.visual_utils import save_numpy_as_gif as sg
 
-from .utils import get_max_IoU
+from .utils import *
 from .folding_rewards import *
 from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
@@ -182,6 +182,7 @@ class GarmentFoldingTask(GarmentTask):
             "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
+            'canon_IoU_to_flattened': self._get_canon_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
         }
 
@@ -208,6 +209,12 @@ class GarmentFoldingTask(GarmentTask):
         
         return aligned_curr, aligned_goal
 
+    def _get_canon_IoU_to_flattened(self, arena):
+        cur_mask = arena.cloth_mask
+        goal_mask = arena.get_flattened_obs()['observation']['mask']
+        IoU = calculate_iou(cur_mask, goal_mask)
+        return IoU
+    
     def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
         #print('len cur', len(cur))
@@ -289,14 +296,6 @@ class GarmentFoldingTask(GarmentTask):
                 multi_stage_reward = self.config.goal_steps
         else:
 
-            # -------------------------------
-            # IoU-based multi-stage reward
-            # Sequential goal matching
-            # -------------------------------
-
-            
-
-
             arena = info['arena']
             trj_infos = arena.get_trajectory_infos()
             N = len(trj_infos)
@@ -375,7 +374,7 @@ class GarmentFoldingTask(GarmentTask):
             #         # print(f'!!match at last goal step {i-1}, current step mdp', cur_mdp)
             #         multi_stage_reward = i + particle_distance_reward(cur_mdp)
                 
-        
+        multi_stage_reward /= self.config.goal_steps # make sure it is between 0 and 1
 
         threshold =  self.config.get('overstretch_penalty_threshold', 0)
         if info['overstretch'] > threshold:

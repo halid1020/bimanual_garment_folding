@@ -1,0 +1,40 @@
+obs_config:
+  rgb:
+    shape: [128, 128, 3]
+    output_key: rgb
+  depth:
+    shape: [128, 128, 1]
+    output_key: depth
+  mask:
+    shape: [128, 128, 1]
+    output_key: mask
+  goal-rgb:
+    shape: [128, 128, 3]
+    output_key: goal-rgb
+  # goal-depth:
+  #   shape: [128, 128, 1]
+  #   output_key: goal-depth
+  # goal-mask:
+  #   shape: [128, 128, 1]
+  #   output_key: goal-mask
+  success:
+    shape: [1]
+    output_key: success
+
+action_config:
+  norm-pixel-pick-and-place:
+    shape: [8]
+    output_key: norm-pixel-pick-and-place
+
+reward_names:
+  - particle_distance
+  - particle_distance_with_stretch_penality
+  - keypoint_distance
+  - multi_stage_reward
+
+evaluation_names:
+  - normalised_coverage
+  - max_IoU_to_flattened
+  - max_IoU
+  - mean_particle_distance
+  - semantic_keypoint_distance

@@ -51,16 +51,20 @@ def update_observations(observations, idx, info, reward_names, evaluation_names)
     mask = mask > 0.9 # Binarize
 
     goal_rgb = cv2.resize(info['goal']['rgb'], (128, 128))
-    goal_depth = cv2.resize(info['goal']['depth'], (128, 128))
-    goal_mask = cv2.resize(info['goal']['mask'].astype(np.float32), (128, 128))
-    goal_mask = goal_mask > 0.9
+    if 'depth' in info['goal']:
+        goal_depth = cv2.resize(info['goal']['depth'], (128, 128))
+        observations[idx]['goal-depth'].append(goal_depth)
+    if 'mask' in info['goal']:
+        goal_mask = cv2.resize(info['goal']['mask'].astype(np.float32), (128, 128))
+        goal_mask = goal_mask > 0.9
+        observations[idx]['goal-mask'].append(goal_mask)
 
     observations[idx]['rgb'].append(rgb)
     observations[idx]['depth'].append(depth)
     observations[idx]['mask'].append(mask)
     observations[idx]['goal-rgb'].append(goal_rgb)
-    observations[idx]['goal-depth'].append(goal_depth)
-    observations[idx]['goal-mask'].append(goal_mask)
+    
+    
 
     # Only append success if the key exists in the observation buffer
     if 'success' in observations[idx]:

@@ -3,25 +3,29 @@ import gym
 import random 
 
 from .multi_garment_env import MultiGarmentEnv
-from .multi_garment_env import MultiGarmentEnv
 from .pixel_based_pick_and_place_env_logger import PixelBasedPickAndPlaceEnvLogger
 
 global ENV_NUM
 ENV_NUM = 0
 
-# @ray.remote
 class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
     
     def __init__(self, config):
         super().__init__(config)
         self.action_space = gym.spaces.Box(-1, 1, (8, ), dtype=np.float32)
         self.logger = PixelBasedPickAndPlaceEnvLogger()
-        
+
+    def sample_random_action(self):
+        return self.action_space.sample()
+
+    def get_action_space(self):
+        return self.action_space 
 
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
         self.last_info = self.info
         self.evaluate_result = None
         self.overstretch = 0
+        #print('action!!!', action)
         dict_action = {
             'norm-pixel-pick-and-place': {
                 'pick_0': action[:2],
@@ -47,5 +51,12 @@ class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
 
         self.info['applied_action'] = applied_action
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['done']
+        self.info['observation']['is_terminal'] = self.info['terminated']
         return self.info
+
+import ray
+@ray.remote(num_gpus=1.0)
+class MultiGarmentVectorisedDualPickerPickAndPlaceEnvRay(MultiGarmentVectorisedDualPickerPickAndPlaceEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)

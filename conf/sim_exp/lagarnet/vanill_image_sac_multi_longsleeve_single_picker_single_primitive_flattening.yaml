@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent/lagarnet@agent: vanill_image_sac_multi_longsleeve_single_picker_single_primitive_flattening
+  - /arena@arena: multi_longsleeve_single_picker_readjust_pick_0.9_provide_semkey_pixel_no_success_stop_resol_84
+  - /task@task: flattening_with_coverage_alignment_bonus_and_penalty
+
+train_and_eval: train_and_evaluate_single
+exp_name: vanill_image_sac_multi_longsleeve_single_picker_single_primitive_flattening
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data

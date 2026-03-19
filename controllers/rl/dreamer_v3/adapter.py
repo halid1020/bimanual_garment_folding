@@ -77,9 +77,9 @@ class DreamerV3Adapter(TrainableAgent):
     def set_data_augmenter(self, data_augmenter):
         self.data_augmenter = data_augmenter
     
-    def set_log_dir(self, log_dir, project_name, exp_name):
+    def set_log_dir(self, log_dir, project_name, exp_name, disable_wandb=False):
         logdir = pathlib.Path(log_dir).expanduser()
-        super().set_log_dir(log_dir, project_name, exp_name)
+        super().set_log_dir(log_dir, project_name, exp_name, disable_wandb)
         if self.use_bc_policy_to_seed:
             bc_logger_dir = os.path.join(log_dir, 'bc_policy')
             self.bc_policy.set_log_dir(bc_logger_dir, project_name, exp_name)

@@ -1,0 +1,126 @@
+name: clothmate
+obs_dim: 128 
+init_dim: 256
+gui: False
+num_samples: 75000
+
+lr: 4e-3
+batch_size: 128
+input_channel_types: rgb_pos 
+category: all
+network: null
+train_path: null
+supervised_training: False
+fling_only: False
+task_id: null
+kps_model: models/keypoint_model.pth
+
+eval: False
+episode_length: 8
+log_dir: experiments
+ray_local_mode: True
+render_engine: opengl
+action_primitives:
+- fling 
+
+num_rotations: 16 #number of rotations for spatial action map
+# scale_factors: [0.75, 1.0, 1.5, 2.0, 2.5, 3.0]
+scale_factors: [1.0, 1.5, 2.0, 2.5, 3.0]
+init_image_dim: null
+
+
+output_dir: null
+tags: null
+notes: null 
+log: null # keep this null
+seed: 0
+deterministic: False
+load: null
+
+expert_demonstration: False
+reward_type: delta_weighted
+
+dataset_path: null
+max_steps: 100000
+
+# vis:
+dump_visualizations: False
+dump_network_inputs: False 
+
+#logging
+record_task_config: False
+
+# render:
+render_dim: 480
+
+# network:
+pos_deformable: False 
+weight_decay: 1e-6
+num_workers: 0
+n_bins: 1
+
+network_gpu: 0
+constant_positional_enc: True
+
+#nocs 
+nocs_mode: collapsed
+
+# pretrain:
+pretrain_epochs: 
+pretrain_dataset_path: null
+pretrain_validation_path: null 
+network_eval: False
+  
+# train:
+replay_buffer_size: 4096
+batches_per_update: 8  # how many batches per each optimization step
+update_frequency: 1  # how many steps to take before updating
+points_per_update: 128
+save_ckpt: 256
+unfactorized_networks: False
+unfactorized_rewards: False
+coverage_reward: False
+
+override_exploration: False 
+action_expl_prob: 1
+action_expl_decay: 0.980
+value_expl_prob: 1
+value_expl_decay: 0.965
+fixed_fling_height: -1
+
+action_expl_halflife: 10000
+value_expl_halflife: 5000
+
+use_adaptive_scaling: True 
+use_normalized_coverage: True 
+
+fold_finish: False
+repeat_tasks: True
+
+pix_grasp_dist: 16
+pix_drag_dist: 16
+pix_place_dist: 10
+stretchdrag_dist: 0.3
+reach_distance_limit: 1.5
+table_width: 1.53
+adaptive_fling_momentum: 0.8
+
+alpha: 1 #for dense alignment
+deformable_weight: 0.4
+deformable_pos: True
+gamma: 0  ## for multistep formulation
+
+
+#for recreating scenarios
+recreate_buffer: null 
+recreate_key: null
+recreate_primitive: null
+recreate_x_offset: 0 
+recreate_y_offset: 0
+
+grid_search: False
+grid_search_vmap_idx: None 
+grid_search_primitive: None
+
+##some irrelevant parameters:
+action_forward_size: 4

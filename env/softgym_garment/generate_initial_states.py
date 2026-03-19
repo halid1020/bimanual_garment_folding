@@ -3,8 +3,6 @@
 
 import h5py
 import hashlib
-import matplotlib.pyplot as plt
-import sys
 
 from env.utils.trial_utils import *
 from env.utils.flex_utils import (
@@ -32,10 +30,6 @@ from pathlib import Path
 import trimesh
 import ray
 import os
-import pickle
-import open3d as o3d
-import cv2
-import glob 
 import json
 from functools import partial
 

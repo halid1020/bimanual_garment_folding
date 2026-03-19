@@ -30,8 +30,8 @@ eval_checkpoint: -1
 debug: False
 add_all_demos: True
 
-recon_weight: 0.1
-rep_learn: 'auto-encoder'
+# recon_weight: 0.1
+# rep_learn: 'auto-encoder'
 
 
 dataset_mode: "general"

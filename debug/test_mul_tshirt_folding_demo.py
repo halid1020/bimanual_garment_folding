@@ -8,7 +8,7 @@ import os
 
 from env.multi_garment_env import MultiGarmentEnv
 from env.tasks.garment_folding import GarmentFoldingTask
-from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingStochasticPolicy
+from controllers.demonstrators.centre_sleeve_folding_stochastic_policy import CentreSleeveFoldingPolicy
 import cv2
 
 def main():
@@ -30,7 +30,7 @@ def main():
         'track_semkey_on_frames': False
     }
     
-    demonstrator = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': True}))
+    demonstrator = CentreSleeveFoldingPolicy(DotMap({'debug': True}))
     
     task_config = {
         'num_goals': 10,
@@ -53,7 +53,7 @@ def main():
     info = arena.set_to_flatten(re_process_info=True)
     cv2.imwrite('tmp/set2flat_rgb.png', info['observation']['rgb'])
 
-    agent = CentreSleeveFoldingStochasticPolicy(DotMap({'debug': False}))
+    agent = CentreSleeveFoldingPolicy(DotMap({'debug': False}))
     agent.reset([arena.id])
     print(f"\n\nstep {arena.action_step} evaluation {info['evaluation']}")
     print(f"\nstep {arena.action_step} reward {info['reward']}")

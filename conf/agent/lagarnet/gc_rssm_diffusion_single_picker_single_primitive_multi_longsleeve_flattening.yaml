@@ -1,0 +1,109 @@
+## comp_gc_diffusion_single_picker_single_primitive_multi_longsleeve_flattening.yaml
+name: multi-primitive-diffusion
+oracle: False
+obs_dim: 360 #!!!!COMP obs_emb + goal_obs_emb
+action_dim: 4
+obs_horizon: 2 # COMP
+pred_horizon: 4 # COMP
+num_diffusion_iters: 100
+action_horizon: 1
+input_obs: 'rgb+goal_rgb' # COMP
+
+# Vision Coder # COMP
+vision_encoder: 'gc_rssm_dynamic'
+# GC-RSSM Transition Model Parameters (Make sure these match your pretrained model)
+deterministic_latent_dim: 300
+stochastic_latent_dim: 60
+hidden_dim: 300
+trans_layers: 1
+state_layers: 2
+
+pretrained_encoder_path: '/data/ah390/bimanual_garment_folding/comp_org_lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_retrain_with_diffusion_200/checkpoints/model_best.pth' # Update with your actual path
+freeze_encoder: True
+
+input_obs_dim: [3, 64, 64]
+encoder_batchnorm: False
+encoder_residual: False
+embedding_dim: 1024 #!!!!!COMP
+activation: 'relu'
+device: "cuda:0"
+
+## TODO: add representaiton learning of 
+# predicting mask of current observation
+
+use_mask: True
+eval_action_sampler: 'normal'
+include_state: False
+num_demos: 5000 # COMP
+batch_size: 50 # COMP
+disable_updown: False
+collect_on_success: False # This is important!
+data_obs: 'image'
+data_state: 'agent_pos'
+data_action: 'action'
+train_mode: 'from_policy'
+demo_policy: "human-single-picker-pick-and-place"
+validation_interval: 1000
+total_update_steps: 50000
+eval_checkpoint: -1
+debug: False
+add_all_demos: True
+
+### Optimisation ####
+optimiser_class: 'adamw'
+optimiser_params: 
+  lr: 1e-4
+  eps: 1e-8 # org 1e-6
+  weight_decay: 1e-6 # org unset
+
+# Learning Rate Schedule
+lr_scheduler: 'cosine'
+num_warmup_steps: 500
+
+# Gradient Clipping
+grad_clip_norm: 100.0 # org unset
+
+##########################
+
+
+dataset_mode: "general"
+dataset_config:
+  data_path: "all_garment_diffusion_success_only"
+  num_trj: 5000
+  data_dir: "./data/datasets"
+  seq_length: 4
+  io_mode: "w"
+  cache_in_memory: True
+  obs_config:
+    # mask: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'mask'
+    
+    # depth: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'depth'
+    
+    rgb: 
+      shape: [64, 64, 3]
+      output_key: 'rgb'
+
+    goal-rgb: 
+      shape: [64, 64, 3]
+      output_key: 'goal_rgb'
+    
+    # goal-depth: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'goal_depth'
+    
+    # goal-mask: 
+    #   shape: [64, 64, 1]
+    #   output_key: 'goal_mask'
+
+  act_config:
+    norm-pixel-pick-and-place: 
+      shape: [4]
+      output_key: 'default'
+
+primitive_integration: 'none'
+
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_K_0_goal

@@ -1,0 +1,3 @@
+name: noise-injected-policy
+base_policy: sim_exp/lagarnet/oracle_centre_sleeve_folding_from_flattened
+noise_sacle: 0.05

@@ -41,7 +41,4 @@ evaluation_names:
   - normalised_coverage
   - normalised_improvement
   - max_IoU_to_flattened
-  - canon_IoU_to_flattened
-  - canon_l2_distance
-  - deform_l2_distance
-  - rigid_l2_distance
+  - max_IoU

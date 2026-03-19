@@ -14,7 +14,6 @@ import gym
 
 from .action_primitives.picker import Picker
 from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
-# from ..video_logger import VideoLogger
 from .pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
 from .utils.env_utils import set_scene
 from .utils.camera_utils import get_camera_matrix
@@ -73,6 +72,7 @@ class GarmentEnv(Arena):
         super().__init__(config)
         self.config = config
         self.info = {}
+        self.draw_fatten_contour = False
         self.all_infos = []
         self.sim_step = 0
         self.save_video = False
@@ -143,8 +143,24 @@ class GarmentEnv(Arena):
         self.action_horizon = self.config.action_horizon
 
         self.overstretch = 0
-
         
+
+    def _get_garment_colour(self):
+        """
+        Extracts the median RGB colour of the garment using the rendered mask.
+        Returns a list: [R, G, B]
+        """
+        rgb = self.info['observation']['rgb']
+        mask = self.info['observation']['mask']
+        
+        cloth_pixels = rgb[mask]
+        
+        if len(cloth_pixels) > 0:
+            # Use median to ignore bright highlights or dark creases
+            median_colour = np.median(cloth_pixels, axis=0).astype(int).tolist()
+            return median_colour
+            
+        return [0, 0, 0] # Fallback if mask is empty
     
     def _calculate_workspace_masks(self, resolution):
         """
@@ -239,9 +255,7 @@ class GarmentEnv(Arena):
         from .utils.env_utils import get_default_config
         self.default_config = get_default_config()
 
-
-
-    ## TODO: if eid is out of range, we need to raise an error.   
+   
     def reset(self, episode_config=None):
         if episode_config == None:
             episode_config = {
@@ -255,7 +269,7 @@ class GarmentEnv(Arena):
         self.eid = episode_config['eid']
         init_state_params = self._get_init_state_params(episode_config['eid'])
 
-
+        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
 
         self.sim_step = 0
         self.video_frames = []
@@ -281,6 +295,7 @@ class GarmentEnv(Arena):
         self.last_flattened_step = -100
         self.flattened_obs = None
         self.get_flattened_obs()
+        
         self.task.reset(self)
         self.action_step = 0
 
@@ -289,7 +304,9 @@ class GarmentEnv(Arena):
         self._initialise_trajectory()
         self.init_coverae = self._get_coverage()
 
-        self.info = self._process_info()
+        self.is_recording_low_level = False
+
+        self.info = self._process_info({})
         self.clear_frames()
 
         self.picker_poses = []
@@ -359,7 +376,7 @@ class GarmentEnv(Arena):
             goal_particles = goal_particles @ rotation_matrix.T  # rotate
 
             # Random displacement within ±0.5 range per axis
-            displacement = rng.uniform(-0.5, 0.5, size=3)
+            displacement = rng.uniform(-0.3, 0.3, size=3)
             displacement[2] = 0
             goal_particles += displacement
 
@@ -372,8 +389,6 @@ class GarmentEnv(Arena):
     def get_episode_config(self):
         return self.episode_config
     
-   
-
     def get_num_episodes(self):
         if self.mode == 'eval':
             return 1
@@ -394,15 +409,19 @@ class GarmentEnv(Arena):
     
     def _process_info(self, info, task_related=True, flatten_obs=True):
         info.update({
-           
             'observation': self._get_obs(flatten_obs),
-            
             'arena': self,
             'arena_id': self.aid,
             'action_space': self.get_action_space(),
             'overstretch': self.overstretch,
             'sim_steps': self.sim_step,
+            'draw_flatten_contour': self.draw_fatten_contour
         })
+        
+        # ---> Attach to observation dict <---
+        info['observation']['low_level_mesh_particles'] = getattr(self, 'low_level_mesh_particles', [])
+        # We leave this as a list of numpy arrays since the shapes (number of points) vary
+        info['observation']['low_level_visible_pcs'] = getattr(self, 'low_level_visible_pcs', [])
         
         if self.save_each_action_picker_poses and self.mode != 'train':
             #print('save pixel poses!!!', len(self.picker_poses))
@@ -423,7 +442,9 @@ class GarmentEnv(Arena):
             for k, v in info['flattened_obs']['observation'].items():
                 info['observation'][f'flattened-{k}'] = v
 
-        info['done'] = self.action_step >= self.action_horizon
+        # 1. Check for Truncation (Time Limit)
+        is_truncated = self.action_step >= self.action_horizon
+        is_terminated = False
         info['discount'] = 1.0 # For dreamer
         
         if task_related:
@@ -431,13 +452,14 @@ class GarmentEnv(Arena):
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
                 self.last_flattened_step = self.action_step
 
-            
-           
             info['observation']['last_flattened_step'] = self.last_flattened_step
             
-            info['success'] =  self.success()
+            # 2. Check for Termination (Task Success)
+            info['success'] = self.success()
             if info['success'] and self.stop_on_success:
-                info['done'] = True
+                is_terminated = True
+                is_truncated = False # Prioritize termination if it succeeds on the exact last step
+                
             
             #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
@@ -463,13 +485,25 @@ class GarmentEnv(Arena):
                         info['observation'][f'goal_{k}'] = v
                         info['observation'][f'goal-{k}'] = v
 
+        # 3. Explicitly add the new Gymnasium flags
+        info['terminated'] = is_terminated
+        info['truncated'] = is_truncated
+        
+        # Keep the legacy 'done' flag so you don't break older parts of your framework
+        info['done'] = is_terminated or is_truncated
+
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+        print('action', action)
         self.last_info = self.info
         self.evaluate_result = None
+        
         self.picker_poses = []
-        #print('action step', self.action_step)
+        self.low_level_mesh_particles = []
+        self.low_level_visible_pcs = []
+        self.is_recording_low_level = False
+
         self.overstretch = 0
         self.sim_step = 0
         self.info = self.action_tool.step(self, action)
@@ -480,7 +514,7 @@ class GarmentEnv(Arena):
         self.info = self._process_info(self.info)
 
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['done']
+        self.info['observation']['is_terminal'] = self.info['terminated']
 
         if self.debug and len(self.video_frames) > 0:
             #print('[GarmentEnv] debug!')
@@ -508,16 +542,8 @@ class GarmentEnv(Arena):
     
     def _get_particle_distance_matrix(self):
         mesh_particles = self.get_mesh_particles_positions()
-        # Only use xyz coordinates (ignore mass or extra channels if present)
-        #positions = mesh_particles[:, :3]
 
-        # Compute pairwise Euclidean distances
         self.particle_dist_matrix = cdist(mesh_particles, mesh_particles)
-
-        #return self.particle_dist_matrix
-
-    
-
 
     def get_flattened_obs(self):
         
@@ -567,43 +593,40 @@ class GarmentEnv(Arena):
     def sample_random_action(self):
         return self.action_tool.sample_random_action()
 
-    # TODO: we may need to modify this.
-    
     
     # these funcitons is required by the action_tool
     def get_picker_position(self):
         p = self._get_picker_position()
-        #print('p', p)
-        # swap y and z
         p[:, [1, 2]] = p[:, [2, 1]]
         return p
     
     def control_picker(self, signal, process_info=True):
-        
         signal = signal[:, [0, 2, 1, 3]]
         new_picker_pos = self.pickers.step(signal, self)
         self._step_sim()
-        self.picker_poses.append(new_picker_pos)
         
+        # ---> FINISH THE TODO: Save the low level meshes and PCs <---
+        if getattr(self, 'is_recording_low_level', True):
+            self.picker_poses.append(new_picker_pos)
+            
+            # Save Mesh Particles
+            mesh_pos = self.get_mesh_particles_positions()
+            self.low_level_mesh_particles.append(mesh_pos.copy()) # Copy is vital!
+            
+            # Save Visible Point Clouds
+            _, visible_mask = self.get_visibility(mesh_pos)
+            self.low_level_visible_pcs.append(mesh_pos[visible_mask].copy())
+
         info = {}
         if process_info:
-            #print('here')
             info = {
                 'observation': self._get_obs(),
             }
             info = self._process_info_(info)
-        #self.info = info
         return info
     
     def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006):
         wait_steps = self._wait_to_stabalise(max_wait_step=max_wait_step, stable_vel_threshold=stable_vel_threshold)
-        # print('wait steps', wait_steps)
-        # obs = self._get_obs()
-        # return {
-        #     'observation': obs,
-        #     'done': False,
-        #     'wait_steps': wait_steps
-        # }
     
     ## Helper Functions
     def _wait_to_stabalise(self, max_wait_step=300, stable_vel_threshold=0.0006,
@@ -782,9 +805,33 @@ class GarmentEnv(Arena):
         obs['image'] = obs['rgb']
         obs['depth'] = rgbd[:, :, 3:]
         obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
+        if self.debug:
+            # We use local import here in case it's not at the top of your file
+            from actoris_harena.utilities.save_utils import save_mask 
+            
+            step_idx = getattr(self, 'action_step', 0)
+            ep_id = getattr(self, 'eid', 'unknown')
+            file_name = f"mask_ep{ep_id}_step{step_idx}"
+            
+            save_mask(
+                mask=obs['mask'], 
+                filename=file_name, 
+                directory="tmp/debug_garment_env"
+            )
+            
         self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
+
+        if self.config.get('collect_control_data', False):
+            # Get which particles are visible from the camera
+            _, visible_mask = self.get_visibility(obs['particle_positions'])
+            obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
+            
+            # If your init_state_params contains mesh faces, you can save them to rebuild the mesh later
+            if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
+                obs['mesh_faces'] = self.init_state_params['mesh_faces']
+                
         if self.apply_workspace:
             #print('[GarmentEnv] add workspace')
             obs['robot0_mask'] = self.robot0_mask
@@ -811,10 +858,11 @@ class GarmentEnv(Arena):
             semkey2pid = obs['semkey2pid']                    # dict {name: pid}
             keypids = list(semkey2pid.values())
             key_particles = particle_pos[keypids]                 # (K, 3)
-            key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+            key_pixels, visibility = self.get_visibility(key_particles, resolution=self.obs_resolution)  # (K,2), (K,)
             H, W = self.camera_size
-            norm_pixels = key_pixels/np.array([H, W]) * 2 - 1
+            norm_pixels = key_pixels/np.array(self.obs_resolution) * 2 - 1
             obs['semkey_norm_pixel'] = norm_pixels.flatten()
+            obs['key_pixels'] = key_pixels
 
         if flatten_obs and self.config.get("provide_flattened_semkey_norm_pixel", False) and obs['semkey2pid']:
             particle_pos = self.flattened_obs['observation']['particle_positions']          # (N, 3)
@@ -942,6 +990,7 @@ class GarmentEnv(Arena):
 
         # Rendered depth map (same size as camera)
         # print('vis here')
+        #print('resolution', resolution)
         depth_img = self._render('depth', resolution=resolution).reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds
@@ -973,3 +1022,10 @@ class GarmentEnv(Arena):
 
     def compare(self, results_1, results_2):
         return self.task.compare(results_1, results_2)
+
+    def close(self):
+        """
+        Shuts down the PyFlex simulation, freeing up GPU/CPU memory 
+        so a new arena can be cleanly initialized.
+        """
+        pyflex.clean()

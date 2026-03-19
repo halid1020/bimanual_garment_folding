@@ -1,0 +1,143 @@
+# lagarnet_online_test.yaml
+name: lagarnet
+device: 'cuda:0'
+debug: False                  # Turn on debug to test image saving functionality
+train_mode: 'online'
+
+input_obs: "rgb"
+output_obs: "mask"
+
+# Architecture (Kept the same to test actual memory/forward pass footprint)
+deterministic_latent_dim: 300 
+stochastic_latent_dim: 60 
+action_dim: 4
+hidden_dim: 300 
+embedding_dim: 1024
+min_std_dev: 0.1
+activation: 'relu'
+trans_layers: 1
+input_obs_dim: [3, 64, 64]
+output_obs_dim: [1, 64, 64]
+encoder_batchnorm: False
+encoder_residual: False
+decoder_batchnorm: False
+decoder_residual: False
+no_op: [1, 1, 1, 1]
+free_nats: 1
+symlog: False
+
+state_layers: 2
+observation_scale: 1.0
+reward_scale: 1.0
+reward_gradient_stop: False
+kl_balance: 0.8
+kl_scale: 1.0
+kl_balancing: True
+reward_layers: 5 
+
+overshooting_distance: 2  
+kl_overshooting_scale: 0.1
+kl_overshooting_warmup: True
+kl_overshooting_balance: 1.0
+reward_overshooting_scale: 0.1
+reward_overshooting_warmup: False
+
+optimiser_class: 'adam'
+optimiser_params: 
+  lr: 1e-3
+  eps: 1e-4
+grad_clip_norm: 1000
+
+# --- SCALED DOWN FOR TESTING ---
+batch_size: 4                # Very small batch
+sequence_size: 10            # Short sequences to speed up RNN unrolling
+total_update_steps: 21       # Just enough steps to trigger intervals below
+test_interval: 10            # Trigger evaluation twice
+validation_interval: 10
+collect_interval: 5          # Trigger interactive data collection 4 times
+
+refresh_init_state: False
+apply_transform_in_dataset: True
+dataloader_workers: 0
+dataloader_prefetch_factor: 1
+
+apply_reward_processor: False
+
+data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
+encoder_mode: "default"
+cost_fn: "trajectory_return"
+logger_name: "pick_and_place_fabric_single_task_logger"
+
+# --- ONLINE RL SPECIFIC PARAMETERS ---
+intial_train_episodes: 2       # Test initial collection loop quickly
+train_episodes: 1              # Test interactive collection loop quickly
+action_noise: 0.1                
+reward_key: coverage_alignment_bonus_and_penalty
+
+# Define the exploration policy used during online collection
+explore_policy:
+  name: 'single_arm_mask_pick_and_place_mpc'
+  params:
+    candidates: 1000             # DRASTICALLY reduced for fast planning
+    planning_horizon: 1
+    iterations: 100              # DRASTICALLY reduced 
+    clip: True
+    swap_action: False
+    obj_mask: "from_env"
+    debug: True
+    cost_fn: 'from_model'
+
+# The policy used for testing/evaluation
+policy:
+  name: 'single_arm_mask_pick_and_place_mpc'
+  params:
+    candidates: 5000             # DRASTICALLY reduced for fast testing
+    planning_horizon: 1
+    iterations: 100
+    clip: True
+    swap_action: False
+    obj_mask: "from_env"
+    debug: True
+    cost_fn: 'from_model'
+
+# --- DATASET (Online Memory Buffer) ---
+datasets:
+  - key: 'train'
+    name: 'default'
+    params:
+      data_path: 'lagarnet_online_test_buffer' # Separate buffer so we don't mess up the real one
+      data_dir: './data/datasets'
+      num_trj: 50                       
+      seq_length: 10                   # Must match sequence_size above
+      cross_trajectory: True
+      split_ratios: [0, 0, 1]
+      cache_in_memory: False            
+      io_mode: 'w'                     
+      sample_mode: 'train'
+      obs_config: 
+        mask: 
+          shape: [64, 64, 1]
+          output_key: 'mask'
+        rgb:
+          shape: [64, 64, 3]
+          output_key: 'rgb'
+        goal-mask: 
+          shape: [64, 64, 1]
+          output_key: 'goal-mask'
+        goal-rgb:
+          shape: [64, 64, 3]
+          output_key: 'goal-rgb'
+        reward:
+          shape: [1]
+          output_key: 'reward'
+      act_config:
+        default: 
+          shape: [4]
+          output_key: 'default'
+
+# --- EVALUATION SCALING ---
+test_horizons: [1, 2]          # Keep short
+action_horizon: 10
+eval_episodes: 2               # Only test 2 episodes
+eval_action_horizon: 5
+eval_save_latent: True

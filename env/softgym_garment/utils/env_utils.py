@@ -69,7 +69,7 @@ def load_cloth(path):
 
 
 def get_default_config(
-        particle_radius=0.0175,
+        particle_radius=0.014,
         cloth_stiffness = (0.75, .02, .02),
         scale=0.8,
         ):
@@ -92,7 +92,7 @@ def get_default_config(
             },
         'scene_config': {
             'scene_id': 2,
-            'radius': particle_radius * scale,
+            'radius': particle_radius,
             'buoyancy': 0,
             'numExtraParticles': 20000,
             'collisionDistance': 0.0006,
@@ -137,7 +137,7 @@ def set_scene(config,
         shear_edges=config['mesh_shear_edges'], 
         stiffness=config['cloth_stiff'], 
         uvs=config['mesh_nocs_verts'],
-        mass=config['cloth_mass'])
+        mass=1)
 
 
     random_state = np.random.RandomState(np.abs(int(np.sum(config['mesh_verts']))))

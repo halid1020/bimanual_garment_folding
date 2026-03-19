@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: raven_pixel_noisy_oracle
+  - /agent/lagarnet@agent: raven_pixel_noisy_oracle
   - /arena@arena: raven_pixel_towers_of_stack_block_pyramids_ray
   - /task@task: dummy
   - dataset: single_arm_pick_and_place_raven

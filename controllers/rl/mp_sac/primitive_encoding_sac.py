@@ -1,0 +1,393 @@
+from actoris_harena.agent.drl.sac.vanilla_sac import VanillaSAC, Actor, Critic
+
+import math
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+
+class PrimitiveEncodingSAC(VanillaSAC):
+    """
+    SAC variant that encodes a discrete set of K primitives as learnable codes.
+    - config must contain:
+        - num_primitives: K
+        - primitive_code_dim: dim of embedding
+        - action_param_dim: dimensionality of continuous action parameters (not including primitive one-hot)
+        - action_range: same as in VanillaSAC (used to clip)
+        - (other usual VanillaSAC config fields)
+    Replay action format (to remain compatible with existing ReplayBuffer):
+        [ action_params (action_param_dim), primitive_one_hot (num_primitives) ]
+    """
+    def __init__(self, config):
+        #self.action_dims = config.action_dims
+        
+        #self.primitive_param = config.primitive_param
+        
+        super().__init__(config)
+
+        self.reward_scale = config.get('reward_scale', 1.0)
+
+
+    def _make_actor_critic(self, config):
+        # number of discrete primitives
+        #self.critic_gradient_clip = config.get('critic_gradient_clip', False)
+        self.critic_grad_clip_value = config.get('critic_grad_clip_value', float('inf'))
+        self.disable_one_hot = config.get('disable_one_hot', False)
+        self.update_temperature = config.get('update_temperature', 0.01)
+        self.sampling_temperature = config.get('sampling_temperature', 1.)
+        self.detach_unused_action_params = config.get('detach_unused_action_params', False)
+        self.preprocess_action_detach = False
+
+        # self.K = int(config.num_primitives)
+        # self.network_action_dim = max([config.action_dims[k] for k in range(self.K)])
+        self.primitives = config.primitives
+        self.K = len(config.primitives)
+        self.action_dims = [prim.dim for prim in self.primitives]
+        self.network_action_dim = max(self.action_dims)
+        #print('self.network_action_dim', self.network_action_dim)
+        self.replay_action_dim = self.network_action_dim  + 1 if not self.disable_one_hot else self.network_action_dim
+
+        # augmented state dimension for actor/critic: original state + primitive encoding
+        self.aug_state_dim = int(config.state_dim) +  self.K if not self.disable_one_hot else int(config.state_dim) 
+
+        # actor maps augmented state -> action_params (continuous)
+        # reuse Actor class but give it aug_state_dim and action_param_dim
+        self.actor = Actor(self.aug_state_dim, self.network_action_dim, config.hidden_dim).to(self.device)
+
+        # critic consumes augmented state and action_params
+        self.critic = Critic(self.aug_state_dim, self.network_action_dim, config.hidden_dim).to(self.device)
+        self.critic_target = Critic(self.aug_state_dim, self.network_action_dim, config.hidden_dim).to(self.device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        
+        # optimizers
+        self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=config.actor_lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=config.critic_lr)
+
+        self.auto_alpha_learning = config.get('auto_alpha_learning', True)
+
+        self.init_alpha = self.config.get("init_alpha", 1.0)
+        
+        # entropy temperature
+        if self.auto_alpha_learning:
+            self.log_alpha = torch.nn.Parameter(
+                torch.tensor([math.log(self.init_alpha)], device=self.device, requires_grad=True)
+            )
+            self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=config.alpha_lr)
+            self.target_entropy = -float(self.network_action_dim)
+
+    
+    # def _init_reply_buffer(self, config):
+    #     self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+
+    # def _init_reply_buffer(self, config):
+    #     self.replay_device = config.get('replay_device', 'RAM')
+    #     if self.replay_device == 'RAM':
+    #         self.replay = ReplayBuffer(config.replay_capacity, (config.state_dim, ), self.replay_action_dim, self.device)
+    #     elif self.replay_device == 'Disk':
+    #         self.replay = ReplayBufferZarr(
+    #             config.replay_capacity, (config.state_dim, ), self.replay_action_dim, 
+    #             self.device, os.path.join(self.save_dir, 'replay_buffer.zarr'))
+
+
+    # ---------- helpers ----------
+    def _one_hot(self, idxs: torch.LongTensor) -> torch.Tensor:
+        B = idxs.shape[0]
+        one_hot = torch.zeros((B, self.K), device=idxs.device, dtype=torch.float32)
+        one_hot.scatter_(1, idxs.unsqueeze(1), 1.0)
+        scalar = float(self.config.get("one_hot_scalar", 0.1))
+        one_hot = one_hot * scalar   # <- ensure multiplication is applied
+        return one_hot
+
+    def _augment_state_with_code(self, state: torch.Tensor, prim_idx: torch.LongTensor) -> torch.Tensor:
+        # state: (B, state_dim)
+        # prim_idx: (B,) long
+        # returns: (B, aug_state_dim)
+        if self.disable_one_hot:
+            return state
+        codes = self._one_hot(prim_idx)  # (B, code_dim)
+        return torch.cat([state, codes], dim=-1)
+
+    def _expand_state_all_primitives(self, state: torch.Tensor) -> torch.Tensor:
+        # state: (B, state_dim)
+        # returns: (B*K, aug_state_dim) where each state's primitive code is concatenated
+        B = state.shape[0]
+        # repeat states K times
+        state_rep = state.unsqueeze(1).repeat(1, self.K, 1).view(B * self.K, -1)  # (B*K, state_dim)
+        # create primitive indices 0..K-1 repeated for each batch
+        prim_idxs = torch.arange(self.K, device=state.device, dtype=torch.long).unsqueeze(0).repeat(B, 1).view(-1)
+        aug_state = self._augment_state_with_code(state_rep, prim_idxs)
+        return aug_state, prim_idxs  # (B*K, aug_state_dim), (B*K,)
+
+    def _split_actions_from_replay(self, actions: torch.Tensor):
+        # actions: (B, action_param_dim + K) as stored in buffer
+        if self.disable_one_hot:
+            return actions, None
+        prim_idx = actions[:, 0].long()
+        action_params = actions[:, 1: self.network_action_dim+1]  # (B, param_dim)
+        return action_params, prim_idx
+
+    # ---------- selection / acting ----------
+    def _select_action(self, info: dict, stochastic: bool = False):
+        # override to produce (action_params + primitive_one_hot) packed action for env
+        obs = [info['observation'][k] for k in self.obs_keys]
+        obs = self._process_obs_for_input(obs)
+        aid = info['arena_id']
+        if aid not in self.internal_states:
+            self.reset([aid])
+        self.internal_states[aid]['obs_que'].append(obs)
+        while len(self.internal_states[aid]['obs_que']) < self.context_horizon:
+            self.internal_states[aid]['obs_que'].append(obs)
+        obs_list = list(self.internal_states[aid]['obs_que'])[-self.context_horizon:]
+        ctx = self._process_context_for_input(obs_list)  # tensor (1, state_dim) or (1, enc_dim)
+        #print('ctx shape', ctx.shape, ctx)
+        # compute per-primitive actions and Qs
+        with torch.no_grad():
+            B = ctx.shape[0]  # should be 1 usually for act
+            aug_states_all, _ = self._expand_state_all_primitives(ctx)  # (B*K, aug_state_dim)
+            #print('aug_stats_all shape', aug_states_all.shape, aug_states_all)
+            # actor deterministic mean or stochastic sample:
+            if stochastic:
+                a_all, logp_all = self.actor.sample(aug_states_all)  # a_all: (B*K, param_dim), logp_all: (B*K,1)
+            else:
+                mean, _ = self.actor(aug_states_all)
+                a_all = torch.tanh(mean)
+                logp_all = None
+            
+            
+
+            # critic per-primitive Q
+            q1_all, q2_all = self.critic(aug_states_all, a_all.view(B * self.K, -1))
+            q_all = torch.min(q1_all, q2_all).view(B, self.K)  # (B, K)
+
+            # softmax over Qs -> probabilities
+            probs = torch.softmax(q_all/self.sampling_temperature, dim=-1)  # (B, K)
+            #print('probs', probs)
+            # choose primitive according to probs if stochastic, else argmax
+
+            
+            if stochastic:
+                # sample primitive index per batch element
+                prim_idx = torch.multinomial(probs, num_samples=1).squeeze(-1).detach().cpu().item()  # (B,)
+                #print('chosen prim idx', prim_idx)
+            else:
+                prim_idx = torch.argmax(probs, dim=-1).detach().cpu().item()  # (B,)
+            
+            a_all = torch.clip(a_all, -self.config.action_range, self.config.action_range)
+
+        
+        best_action = a_all[prim_idx].detach().cpu().numpy()
+
+        primitive_name = self.primitives[prim_idx]['name']
+        dim = self.primitives[prim_idx]['dim']
+        out_dict = {primitive_name: best_action} #best_action[: dim]}
+    
+
+        vector_action = np.concatenate(([float(prim_idx)], best_action.flatten()))
+        return out_dict, vector_action
+
+        # primitive_name, params = self.primitive_param[prim_idx]['name'],  self.primitive_param[prim_idx]['params']
+        # dims = self.primitive_param[prim_idx]['dims']
+            
+        # out_dict = {primitive_name: {}}
+
+        # idx = 0
+        # for param_name, dim in zip(params, dims):
+        #     out_dict[primitive_name][param_name] = best_action[idx: idx + dim]
+        #     idx += dim
+        
+        # if self.disable_one_hot:
+        #     return out_dict, best_action
+        
+        # best_action = np.array([prim_idx] + best_action.tolist())
+        
+        # return out_dict, best_action
+
+    # ---------- learning ----------
+    def _update_networks(self, batch: dict):
+        """
+        batch expected to contain:
+            context: torch.tensor (B, state_dim)
+            action: torch.tensor (B, action_param_dim + K)  # params + one-hot
+            reward: (B,1)
+            next_context: (B, state_dim)
+            done: (B,1)
+        """
+
+        config = self.config
+        device = self.device
+        context, action, reward, next_context, done = batch.values()
+        # print('context max', context.max())
+        # print('context max', context.min())
+        #print('action', action[:2, :3])
+
+        B = context.shape[0]
+
+        
+        # --- alpha (temperature) update --- ## Important Change
+        action_params_taken, prim_idx_taken = self._split_actions_from_replay(action)  # (B,param_dim), (B,)
+        aug_state_taken = self._augment_state_with_code(context, prim_idx_taken)  # (B, aug_state_dim)
+        pi, logp = self.actor.sample(aug_state_taken)
+        alpha = self.log_alpha.exp().detach() # !!! Important Change
+        alpha_loss = -(self.log_alpha * (logp + self.target_entropy).detach()).mean()
+        
+        # print('alpha loss', alpha_loss)
+        # print("log_alpha shape:", self.log_alpha.shape)
+        # for p in self.alpha_optim.param_groups[0]['params']:
+        #     print("alpha_optim param shape:", p.shape)
+        
+
+        self.alpha_optim.zero_grad()
+        alpha_loss.backward()
+        #print("grad shape:", self.log_alpha.grad.shape)
+        self.alpha_optim.step()
+
+
+        # --- compute target Q using target critic and actor across all primitives ---
+        # expand next_context across primitives
+        with torch.no_grad():
+            #print('next_context', next_context[0, :3], next_context[0, -3:])
+            next_aug_states_all, prim_idxs_all = self._expand_state_all_primitives(next_context)  # (B*K, aug_state_dim)
+            #print('next_aug_states_all', next_aug_states_all[0, :3], next_aug_states_all[0, -3:])
+            # sample actor for each next augmented state
+            a_next_all, logp_next_all = self.actor.sample(next_aug_states_all)  # (B*K, param_dim), (B*K,1)
+            q1_next_all, q2_next_all = self.critic_target(next_aug_states_all, a_next_all.view(B * self.K, -1))
+            q_next_all = torch.min(q1_next_all, q2_next_all)  # (B*K, 1)
+            #print('q_next_all shape and value', q_next_all.shape, q_next_all[0])
+
+            # compute softmax weights over q_next_all (using raw q values)
+            if self.K == 1:
+                weighted_q_minus_alpha_logp = q_next_all - alpha *  logp_next_all
+            else:
+                w_next = torch.softmax(q_next_all.view(B, self.K)/self.update_temperature, dim=-1).detach()  # (B, K) #check
+                weighted_q_minus_alpha_logp = (w_next * (q_next_all.view(B, self.K) - alpha *  logp_next_all.view(B, self.K)))
+                weighted_q_minus_alpha_logp = weighted_q_minus_alpha_logp.sum(dim=-1, keepdim=True)  # (B,1)
+            #print('w_next', w_next)
+            #print('weight shape', w_next.shape)
+
+            # compute weighted target Q per batch: note q_next_all already (B,K)
+            #print('rl reward scale', self.reward_scale)
+            target_q = self.reward_scale * reward + (1 - done) * config.gamma * weighted_q_minus_alpha_logp  # (B,1)
+            
+            # print('done', done)
+        
+        # --- critic update: compute Q for taken (primitive + params) from batch and MSE to target_q ---
+        #print('sampled action', action[0])
+        action_params_taken, prim_idx_taken = self._split_actions_from_replay(action)  # (B,param_dim), (B,)
+        #print('action_params_taken', action_params_taken[:2, :3])
+        #print('splitted action', action_params_taken[0],  prim_idx_taken[0])
+        #print('context', context[0, :3], context[0, -3:])
+        aug_state_taken = self._augment_state_with_code(context, prim_idx_taken)  # (B, aug_state_dim)
+        #print('aug_state_taken', aug_state_taken[0, :3], aug_state_taken[0, -3:])
+        #print('aug_state_taken shape', aug_state_taken.shape)
+        q1_pred, q2_pred = self.critic(aug_state_taken, action_params_taken.view(B, -1))
+        critic_loss = 0.5 * (F.mse_loss(q1_pred, target_q) + F.mse_loss(q2_pred, target_q))
+
+        self.critic_optim.zero_grad()
+        critic_loss.backward()
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.critic_grad_clip_value)
+        self.critic_optim.step()
+
+        # --- actor update: compute per-primitive actions & Qs for current context, softmax over Qs, weighted actor loss ---
+        aug_states_all, prim_idxs_all = self._expand_state_all_primitives(context)  # (B*K, aug_state_dim)
+        #print('aug_states_all shape', aug_states_all.shape)
+        pi_all, logp_all = self.actor.sample(aug_states_all)  # (B*K, param_dim), (B*K,1)
+        # print('update action logp_all shape', logp_all.shape)
+        # print('pi all shape', pi_all.shape)
+
+        if self.detach_unused_action_params:
+            if not self.preprocess_action_detach:
+                # 1. Create a tensor of actual dimensions, repeated B times
+                # self.action_dims is assumed to be a list/tuple of length K
+                action_dims_tensor = torch.tensor(self.action_dims, device=pi_all.device, dtype=torch.long) # (K,)
+                
+                # Repeat the dimensions for all B batches
+                # prim_dims_per_action will have shape (B*K,)
+                prim_dims_per_action = action_dims_tensor[prim_idxs_all] 
+                
+                # 2. Create an index tensor for the action dimensions (0, 1, 2, ... network_action_dim-1)
+                # The action_dim_indices will have shape (1, network_action_dim)
+                action_dim_indices = torch.arange(self.network_action_dim, device=pi_all.device).unsqueeze(0)
+                
+                # 3. Compare the action parameter indices to the primitive's actual dimension
+                # (B*K, 1) < (1, network_action_dim) -> (B*K, network_action_dim) mask
+                # This mask is True for all indices that are greater than or equal to the actual dimension.
+                # e.g., if actual_dim=3, indices 0, 1, 2 are False (used), 3, 4, ... are True (unused/padded).
+                self.is_padding_mask = action_dim_indices >= prim_dims_per_action.unsqueeze(1)
+                #print(self.is_padding_mask)
+
+                self.preprocess_action_detach = True
+            # 4. Use the mask to detach the unused parts of pi_all
+            # Only the elements where the mask is True are detached and reassigned.
+            pi_all_detached = pi_all.clone()
+            
+            # The .detach() is applied to the selected elements (which is valid even if it's a view of pi_all_detached)
+            pi_all_detached[self.is_padding_mask] = pi_all_detached[self.is_padding_mask].detach()
+            
+            # Use the detached version for the critic
+            pi_all = pi_all_detached
+
+        q1_all, q2_all = self.critic(aug_states_all, pi_all)
+        #print('q1 all', q1_all[:5])
+        #print('q1 all', q2_all[:5])
+        q_all = torch.min(q1_all, q2_all)  # (B*K, 1)
+        #print('q all', q_all[:5])
+        #logp_all = logp_all.view(B, self.K)  # (B,K)
+        #print('update action logp_all shape 2', logp_all.shape)
+
+        # softmax weights over q_all
+        if self.K == 1:
+            w_pi = torch.ones((B, 1), device=device)
+            actor_loss = (alpha * logp_all - q_all).mean()
+        else:
+            w_pi = torch.softmax(q_all.view(B, self.K)/self.update_temperature, dim=-1).detach()  # (B,K) # check
+            actor_loss = w_pi * (alpha * logp_all.view(B, self.K)  - q_all.view(B, self.K))
+            actor_loss = actor_loss.sum(dim=-1).mean()
+
+        self.actor_optim.zero_grad()
+        actor_loss.backward()
+        self.actor_optim.step()
+
+        
+        # --- soft update target critic ---
+        if self.update_steps % self.config.target_update_interval == 0:
+            self._soft_update(self.critic, self.critic_target, config.tau)
+
+        # logging
+
+        with torch.no_grad():
+            q_stats = {
+                'q_mean': q_all.mean().item(),
+                'q_max': q_all.max().item(),
+                'q_min': q_all.min().item(),
+                'logp_mean': logp_all.mean().item(),
+                'logp_max': logp_all.max().item(),
+                'logp_min': logp_all.min().item(),
+                'critic_grad_norm': critic_grad_norm.item(),
+            }
+            self.logger.log({f"diag/{k}": v for k,v in q_stats.items()}, step=self.act_steps)
+
+        self.logger.log({
+            'critic_loss': critic_loss.item(),
+            'actor_loss': actor_loss.item(),
+            'alpha': alpha,
+            'alpha_loss': alpha_loss.item()
+        }, step=self.act_steps)
+    
+    def _post_process_action_to_replay(self, action): # dictionary action e.g. {'push': [...]}
+        prim_name = list(action.keys())[0]
+        prim_id = -1 # Initialize with a default value
+        for id_, prim in enumerate(self.primitives):
+            if prim.name == prim_name:
+                prim_id = id_
+                break
+        assert prim_id >= 0, "Primitive Id should be non-negative."
+        self.logger.log({
+            f"train/primitive_id": prim_id,
+        }, step=self.act_steps)
+
+        vector_action = list(action.values())[0] # Assume one-level of hierachy.
+        accept_action = np.zeros(self.replay_action_dim, dtype=np.float32) 
+        accept_action[1:len(vector_action)+1] = vector_action
+        accept_action[0] = prim_id
+        #print('accept_action', accept_action)
+        return accept_action

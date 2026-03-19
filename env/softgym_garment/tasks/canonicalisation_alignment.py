@@ -14,8 +14,6 @@ class CanonicalisationAlignmentTask(GarmentFlatteningTask):
         self.randomise_goal = config.get('randomise_goal', False)
     
     def reset(self, arena):
-        #self.cur_coverage = self._get_normalised_coverage(arena)
-        #info = self._process_info(arena)
         if self.randomise_goal:
             arena.flattened_obs = None
             arena.get_random_flattened_obs()

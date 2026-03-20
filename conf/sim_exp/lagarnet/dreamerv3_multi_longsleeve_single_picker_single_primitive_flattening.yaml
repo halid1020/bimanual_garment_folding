@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent/lagarnet@agent: dreamerv3_multi_longsleeve_singel_picker_single_primitive_flattening
-  - /arena@arena: multi_longsleeve_single_picker_readjust_pick_0.9_provide_semkey_pixel_no_success_stop_resol_64
+  - /arena@arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_84
   - /task@task: flattening_with_coverage_alignment_bonus_and_penalty
 
 train_and_eval: train_and_evaluate_single

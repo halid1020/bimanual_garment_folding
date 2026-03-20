@@ -13,9 +13,6 @@ reward_config:
   alpha: 0.5
   NC_success_threshold: 0.95
   IoU_success_threshold: 0.90
-  apply_success_bonus: True
-  apply_mess_up_penalty: True
-  apply_large_action_penalty_when_success: True
-  drag_penalty_threshold: 0.15
-  mess_up_penalty_value: 1.0
-  action_penalty_value: 1.0
+  apply_success_bonus: False
+  apply_mess_up_penalty: False
+  apply_large_action_penalty_when_success: False

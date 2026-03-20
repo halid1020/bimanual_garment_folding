@@ -514,7 +514,7 @@ class GarmentEnv(Arena):
         self.info = self._process_info(self.info)
 
         self.info['observation']['is_first'] = False
-        self.info['observation']['is_terminal'] = self.info['terminated']
+        self.info['observation']['is_terminal'] = self.info['done']
 
         if self.debug and len(self.video_frames) > 0:
             #print('[GarmentEnv] debug!')

@@ -269,7 +269,7 @@ def simulate(
             
 
             if agent.primitive_integration == 'none':
-                action_to_add = aa
+                action_to_add = oa
             elif agent.primitive_integration == 'predict_bin_as_output':
                 action_name = list(aa.keys())[0]
                 action_param = aa[action_name]

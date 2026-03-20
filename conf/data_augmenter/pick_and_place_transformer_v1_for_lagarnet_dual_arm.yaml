@@ -1,0 +1,21 @@
+name: 'pick_and_place_transformer_v1'
+
+img_dim: [64, 64]
+remap_image: [0, 1]
+device: "cuda:0"
+rgb_norm_mode: ['remap']
+rgb_norm_param:
+  remap_range: [0, 1]
+rgb_noise_factor: 0.01
+random_rotation: True
+random_terminal: False
+rotation_degree: 1
+all_goal_rotate: True
+goal_translate: 0.2
+preserve_goal_mask: True
+vertical_flip: True
+random_resize: False
+action_noise: 0.0
+maskout: True
+bg_value: 0
+num_picker: 2

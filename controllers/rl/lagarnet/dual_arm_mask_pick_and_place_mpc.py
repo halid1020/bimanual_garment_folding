@@ -61,10 +61,10 @@ class DualArmMaskPickAndPlaceMPC(MPC_CEM):
             # --- Extract Actions for Both Arms ---
             # pick0, place0
             pick0_actions = ((samples[:, 0, 0:2] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
-            place0_actions = ((samples[:, 0, 2:4] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
+            place0_actions = ((samples[:, 0, 4:6] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
             
             # pick1, place1
-            pick1_actions = ((samples[:, 0, 4:6] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
+            pick1_actions = ((samples[:, 0, 2:4] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
             place1_actions = ((samples[:, 0, 6:8] + 1) * (H / 2)).astype(int).clip(0, H-1).reshape(self.candidates, -1)
 
             # --- Validate Indices Against Masks ---

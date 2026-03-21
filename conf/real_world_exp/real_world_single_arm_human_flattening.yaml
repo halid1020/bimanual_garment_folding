@@ -6,5 +6,5 @@ defaults:
 
 
 project_name: 'bimanual_garment_folding'
-exp_name: real_world_human_flattening
+exp_name: real_world_single_arm_human_flattening
 measure_time: True

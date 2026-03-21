@@ -28,25 +28,16 @@ class RealWorldGarmentFlatteningTask():
         return self.goals[0]
 
     def reward(self, last_info, action, info):#
-        reward = coverage_alignment_reward(last_info, action, info)
-        if info['success']:
-            reward = info['arena'].action_horizon - info['observation']['action_step']
-        
-        reward_ = reward
-        
-        if info['evaluation']['normalised_coverage'] > 0.7:
-            reward_ += (info['evaluation']['normalised_coverage'] - 0.5)
-
         #print('rev aff score', aff_score_rev)
         return {
-            'coverage_alignment': reward,
+            'coverage_alignment': coverage_alignment_bonus_and_penalty(last_info, action, info, self.config),
         }
     
     def evaluate(self, arena):
         eval_dict = {
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
-            'normalised_improvement': self._get_normalised_impovement(arena),
+            'normalised_improvement': self._get_normalised_improvement(arena),
             'canon_IoU_to_flattened': self._get_canon_IoU_to_flattened(arena),
         }
 
@@ -63,7 +54,7 @@ class RealWorldGarmentFlatteningTask():
             self.canon_ious[arena.action_step] = eval_dict['canon_IoU_to_flattened']
 
         eval_dict.update({
-            'maximum_trdef resetj_max_IoU_to_flattened': max(self.ious),
+            'maximum_trj_max_IoU_to_flattened': max(self.ious),
             'maximum_trj_canon_IoU_to_flattened': max(self.canon_ious),
             'maximum_trj_normalised_coverage': max(self.ncs),
             'maximum_trj_normalised_improvement': max(self.nis),
@@ -80,11 +71,21 @@ class RealWorldGarmentFlatteningTask():
         IoU = calculate_iou(cur_mask, goal_mask)
         return IoU
     
-    def _get_normalised_impovement(self, arena):
+    def _get_normalised_improvement(self, arena):
         print(f'current coverage {arena.coverage}, init coverage {arena.init_coverage}, flatten coverage {arena.flatten_coverage}')
-        res = (arena.coverage - arena.init_coverage) / \
-            (max(arena.flatten_coverage - arena.init_coverage, 0) + 1e-3)
-        return np.clip(res, 0, 1)
+        
+        # Cast to float to prevent unsigned integer underflow
+        cov = float(arena.coverage)
+        init_cov = float(arena.init_coverage)
+        flat_cov = float(arena.flatten_coverage)
+        
+        # Now the math will evaluate to negative numbers correctly
+        res = (cov - init_cov) / (max(flat_cov - init_cov, 0.0) + 1e-3)
+        
+        res = np.clip(res, 0.0, 1.0)
+        print(f'normalised improvments', res)
+        
+        return res
     
     def _get_max_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask

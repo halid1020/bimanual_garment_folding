@@ -66,11 +66,14 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
             if self.config.swap_action:
                 valid_indices_for_pick = obj_mask[first_pick_actions[:, 1], first_pick_actions[:, 0]] == 1
                 if self.apply_workspace:
+                    #print('!!! Apply workspace if')
                     workspace_mask = info['observation']['robot0_mask']
                     valid_indices_for_place = workspace_mask[place_actions[:, 1], place_actions[:, 0]] == 1
             else:
                 valid_indices_for_pick = obj_mask[first_pick_actions[:, 0], first_pick_actions[:, 1]] == 1
                 if self.apply_workspace:
+                    workspace_mask = info['observation']['robot0_mask']
+                    #print('!!! Apply workspace else')
                     valid_indices_for_place = workspace_mask[place_actions[:, 0], place_actions[:, 1]] == 1
 
             valid_indices = valid_indices_for_pick
@@ -107,5 +110,6 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
             'pick-mask': np.expand_dims(obj_mask, axis=2),
             # 'place-mask': np.expand_dims(workspace_mask, axis=2)
         }
+
         
         return ret_act

@@ -1,5 +1,6 @@
 import torch
 import cv2
+import shutil
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 import numpy as np
 import os
@@ -22,16 +23,22 @@ def get_mask_generator():
 def get_mask_v2(mask_generator, rgb, 
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
-                min_saturation=40,         # NEW: Filter out white/grey things
+                min_saturation=47,         # NEW: Filter out white/grey things
                 white_value_threshold=210, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
-                max_variance=7000,
+                max_variance=5000,
                 debug=False,
                 save_dir="./tmp"):
     """
     Select the best mask likely to be the cloth based on Color Saturation.
     """
     save_dir = f"{save_dir}/cloth_masks"
+    
+    # --- NEW: Remove the old directory if it exists ---
+    # if os.path.exists(save_dir):
+    #     shutil.rmtree(save_dir)
+        
+    # Create the fresh directory
     os.makedirs(save_dir, exist_ok=True)
     
     # 1. Convert to HSV once globally to save time

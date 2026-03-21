@@ -4,7 +4,6 @@ import cv2
 import torch
 from torchvision.utils import make_grid
 from .camera_utils import project_to_image
-import pyflex
 import re
 import h5py
 import os

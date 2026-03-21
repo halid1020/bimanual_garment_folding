@@ -196,6 +196,7 @@ class RSSM(RLAgent):
         for arena_id in areana_ids:
             self.cur_state[arena_id] = {}
             self.internal_states[arena_id] = {}
+            self.internal_states[arena_id]['inference_time'] = []
 
     def get_state(self):
         return self.internal_states
@@ -204,10 +205,12 @@ class RSSM(RLAgent):
         start_time = time.time()
         action =  self.planning_algo.act([info], updates=[False])[0].flatten()
         plan_internal_state = self.planning_algo.get_state()[info['arena_id']]
-        
+        #print('plan internal state', plan_internal_state)
         for k, v in plan_internal_state.items():
             self.internal_states[info['arena_id']][k] = v
         duration = time.time() - start_time
+        self.internal_states[info['arena_id']]['inference_time'].append(duration)
+        
         #print(f"Arena {info.get('arena_id', 'Unknown')}: Action planned in {duration:.4f} seconds.")
         return action
 
@@ -363,7 +366,7 @@ class RSSM(RLAgent):
                 plt.imsave(f'tmp/input_obs_rgb.png', rgb) 
                 plt.imsave(f'tmp/input_obs_goal_rgb.png', goal)
 
-        self.internal_states[arena_id] = {
+        self.internal_states[arena_id].update({
             'raw_input_obs': obs_.copy(),
             'input_obs': image.squeeze(0).squeeze(0) \
                 .cpu().detach().numpy().transpose(1, 2, 0),
@@ -373,10 +376,11 @@ class RSSM(RLAgent):
                 .squeeze(1).cpu().detach().numpy(),
             'latent_state': self.cur_state[arena_id],
             'input_type': self.config.input_obs,
+            'output_type': self.config.output_obs,
             'posterior_reward': self.model['reward_model'](self.cur_state[arena_id]['deter'], self.cur_state[arena_id]['stoch']['sample'])
                 .squeeze(0).cpu().detach().item(),
             'recon_obs': self.model['observation_model'](self.cur_state[arena_id]['deter'], self.cur_state[arena_id]['stoch']['sample']).cpu().detach()
-        }
+        })
 
     def init(self, infos):
         if not self.loaded:

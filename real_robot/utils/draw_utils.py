@@ -136,7 +136,11 @@ def draw_text_with_bg(img, text, org, color, scale=1.2, thickness=4):
         cv2.LINE_AA
     )
 
-def draw_pick_and_place(img, action):
+def draw_pick_and_place(img, action, rgb2bgr=True):
+    # ----- Apply RGB to BGR conversion if flag is True -----
+    if rgb2bgr:
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
     H, W = img.shape[:2]
     if len(action) > 4:
         pick_0  = norm_to_px(action[:2], W, H)
@@ -151,9 +155,8 @@ def draw_pick_and_place(img, action):
         (left_pick, left_place), (right_pick, right_place) = picks_sorted
         
     else:
-
         left_pick  = norm_to_px(action[:2], W, H)
-        left_place  = norm_to_px(action[2:4], W, H)
+        left_place = norm_to_px(action[2:4], W, H)
 
    
     # BLUE = left, RED = right
@@ -162,7 +165,7 @@ def draw_pick_and_place(img, action):
     small_tip = 0.08    # << smaller arrowhead tip size
 
     # Colormaps (same convention as fling)
-    cmap_left  = cv2.COLORMAP_COOL   # BLUE-ish
+    cmap_left  = cv2.COLORMAP_COOL     # BLUE-ish
     cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
 
     draw_colored_line(

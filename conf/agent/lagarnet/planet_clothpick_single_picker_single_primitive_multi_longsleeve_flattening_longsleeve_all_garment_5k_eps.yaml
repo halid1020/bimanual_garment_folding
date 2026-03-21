@@ -163,6 +163,7 @@ policy:
     swap_action: False
     obj_mask: "from_env"
     debug: True
+    apply_workspace: True
     cost_fn: 'from_model'
 
 

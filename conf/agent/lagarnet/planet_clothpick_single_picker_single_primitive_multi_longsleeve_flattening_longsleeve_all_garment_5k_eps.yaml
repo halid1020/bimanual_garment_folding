@@ -156,7 +156,7 @@ datasets:
 policy:
   name: 'single_arm_mask_pick_and_place_mpc'
   params:
-    candidates: 5000
+    candidates: 10000
     planning_horizon: 1
     iterations: 100
     clip: True

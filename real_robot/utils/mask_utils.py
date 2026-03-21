@@ -23,8 +23,8 @@ def get_mask_generator():
 def get_mask_v2(mask_generator, rgb, 
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
-                min_saturation=47,         # NEW: Filter out white/grey things
-                white_value_threshold=210, # NEW: Filter out very bright white things
+                min_saturation=15,         # NEW: Filter out white/grey things
+                white_value_threshold=300, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
                 max_variance=5000,
                 debug=False,
@@ -68,7 +68,7 @@ def get_mask_v2(mask_generator, rgb,
         h, w = mask.shape
         border_pixels = np.sum(mask[0, :]) + np.sum(mask[-1, :]) + np.sum(mask[:, 0]) + np.sum(mask[:, -1])
         # If it touches more than 10% of the perimeter, kill it
-        if border_pixels > (2 * (h + w)) * 0.30: 
+        if border_pixels > (2 * (h + w)) * 0.15: 
             if debug: print(f"ID {idx}: Filtered (Touching Borders)")
             continue
 
@@ -82,9 +82,9 @@ def get_mask_v2(mask_generator, rgb,
         avg_value = np.mean(masked_hsv[:, 2])      # Index 2 is Value (Brightness)
 
         # 1. Reject if it is too White (High Brightness + Low Saturation)
-        if avg_value > white_value_threshold and avg_saturation < min_saturation:
-            if debug: print(f"ID {idx}: Filtered (Too White: Val={avg_value:.0f}, Sat={avg_saturation:.0f})")
-            continue
+        # if avg_value > white_value_threshold and avg_saturation < min_saturation:
+        #     if debug: print(f"ID {idx}: Filtered (Too White: Val={avg_value:.0f}, Sat={avg_saturation:.0f})")
+        #     continue
 
         # 2. Reject if it is too Grey/Shadowy (Low Saturation)
         # Plain coloured clothes usually have Saturation > 30-40. 
@@ -95,14 +95,14 @@ def get_mask_v2(mask_generator, rgb,
 
         # --- D. Variance Filter ---
         # We calculate variance on the Value (brightness) channel or Grayscale
-        # Plain clothes have LOW variance. High variance means texture or noise.
+        # Plain background have LOW variance. High variance means texture or noise.
         mask_variance = np.var(masked_rgb)
         if mask_variance < min_variance or mask_variance > max_variance:
             if debug: print(f"ID {idx}: Filtered (Variance: {mask_variance:.0f})")
             continue
 
         # If we passed all filters, keep it
-        score = mask_region_size * avg_saturation # Heuristic: Big + Colorful = Good
+        score = mask_region_size * mask_variance # Heuristic: Big + Colorful = Good
         
         mask_data.append({
             'mask': mask,

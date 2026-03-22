@@ -76,7 +76,7 @@ datasets:
       seq_length: 50
       cross_trajectory: True
       split_ratios: [0.1, 0.1, 0.8]
-      cache_in_memory: False
+      cache_in_memory: True
       io_mode: 'r'
       sample_mode: 'train'
       obs_config: 

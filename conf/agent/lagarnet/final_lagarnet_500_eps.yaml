@@ -70,7 +70,7 @@ reward_config:
   apply_success_bonus: False
   apply_mess_up_penalty: False
   apply_large_action_penalty_when_success: False
-  
+
 data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
   
 
@@ -115,7 +115,10 @@ datasets:
         normalised_coverage:
           shape: [1]
           output_key: 'normalised_coverage'
-      
+        max_IoU_to_flattened:      # <--- Added missing dependency for reward calc
+          shape: [1]
+          output_key: 'max_IoU_to_flattened'
+
       act_config:
         norm-pixel-pick-and-place: 
           shape: [4]
@@ -155,7 +158,9 @@ datasets:
         normalised_coverage:
           shape: [1]
           output_key: 'normalised_coverage'
-        
+        max_IoU_to_flattened:      # <--- Added missing dependency for reward calc
+          shape: [1]
+          output_key: 'max_IoU_to_flattened'
       
       act_config:
         norm-pixel-pick-and-place: 

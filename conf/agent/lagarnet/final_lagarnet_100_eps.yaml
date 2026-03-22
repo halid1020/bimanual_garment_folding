@@ -115,7 +115,11 @@ datasets:
         normalised_coverage:
           shape: [1]
           output_key: 'normalised_coverage'
-      
+
+        max_IoU_to_flattened:      # <--- Added missing dependency for reward calc
+          shape: [1]
+          output_key: 'max_IoU_to_flattened'
+
       act_config:
         norm-pixel-pick-and-place: 
           shape: [4]
@@ -156,6 +160,9 @@ datasets:
           shape: [1]
           output_key: 'normalised_coverage'
         
+        max_IoU_to_flattened:      # <--- Added missing dependency for reward calc
+          shape: [1]
+          output_key: 'max_IoU_to_flattened'
       
       act_config:
         norm-pixel-pick-and-place: 

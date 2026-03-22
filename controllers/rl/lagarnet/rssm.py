@@ -1563,7 +1563,7 @@ class RSSM(RLAgent):
             save_debug_img(goal_ts, f'goal')
             save_debug_img(out_ts, f'output')
             save_debug_img(rec_ts, f'recon')
-            exit()
+            # exit()
         # =========================================================
 
         #print('recon shape', recon.shape) 

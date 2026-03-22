@@ -62,6 +62,14 @@ dataloader_workers: 0
 dataloader_prefetch_factor: 1
 
 apply_reward_processor: True
+reward_processor: "coverage_alignment"
+reward_config:
+  alpha: 0.5
+  NC_success_threshold: 0.9
+  IoU_success_threshold: 0.8
+  apply_success_bonus: False
+  apply_mess_up_penalty: False
+  apply_large_action_penalty_when_success: False
 
 data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
   

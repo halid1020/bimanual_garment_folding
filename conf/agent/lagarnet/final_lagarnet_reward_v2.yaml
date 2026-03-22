@@ -59,7 +59,6 @@ dataloader_workers: 0
 dataloader_prefetch_factor: 1
 
 apply_reward_processor: True
-
 reward_processor: "coverage_alignment"
 reward_config:
   alpha: 0.5

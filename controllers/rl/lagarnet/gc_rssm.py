@@ -469,7 +469,6 @@ class GC_RSSM(RSSM):
                 obs_data = data['observation']
                 act_data = data['action']['default']
                 if self.apply_reward_processor:
-                    #print('apply reward processor')
                     rewards = self.reward_processor(data['observation']['reward'], obs_data, act_data, self.config.reward_config)
                 else:
                     rewards = data['observation']['reward']
@@ -477,13 +476,10 @@ class GC_RSSM(RSSM):
                 obs_data = data
                 act_data = data['action']
                 if self.apply_reward_processor:
-                    #print('apply reward processor')
                     rewards = self.reward_processor(data['reward'], obs_data, act_data, self.config.reward_config)
                 else:
                     rewards = data['reward']
             
-           
-           
             data = {
                 'action': act_data,
             }
@@ -496,6 +492,9 @@ class GC_RSSM(RSSM):
                 data['reward'] = rewards[:, 1:].squeeze(-1)
                 data['terminal'] = data['terminal'][:, 1:].squeeze(-1)
         
+        
+        # =========================================================
+
         # Apply transformations
         if apply_transform:
             if single and not self.apply_transform_in_dataset:

@@ -54,6 +54,7 @@ class RSSM(RLAgent):
         super().__init__(config)
         self.config = config
         self.input_obs = self.config.input_obs
+        self.debug = self.config.debug
         
         self.no_op = np.asarray(config.no_op).flatten()
         self.model = dict()
@@ -1076,12 +1077,6 @@ class RSSM(RLAgent):
         losses_dict = {}
         updates = []
         start_step = self.load()
-        #metrics = self._load_metrics()
-        # if metrics == {}:
-        #     metrics = {
-        #         'update_step': []
-        #     }
-
 
         self.set_train()
 
@@ -1091,8 +1086,6 @@ class RSSM(RLAgent):
             num_workers=self.config.get('dataloader_workers', 0),
             shuffle=True)
 
-        
-        
 
         end_update_steps = self.config.total_update_steps if update_steps == -1 \
             else min(start_step+update_steps+1, self.config.total_update_steps)
@@ -1108,11 +1101,6 @@ class RSSM(RLAgent):
                 indices = ts_to_np(data['idx'])
                 data.pop('idx')
                 
-
-            # print('data key', data.keys())
-
-            # for k, v in data.items():
-            #     print(k, v.shape)
 
             data = self._preprocess(data, train=True, apply_transform=(not self.apply_transform_in_dataset))
             
@@ -1156,55 +1144,6 @@ class RSSM(RLAgent):
             self.logger.log(wandb_metrics, u)
 
             updates.append(u)
-
-            
-
-            
-            # if u%self.config.test_interval == 0:
-            #     self.set_eval()
-
-            #     # Save Losses
-            #     losses_dict.update({'update_step': updates})
-            #     #loss_logger(losses_dict, self.save_dir)
-            #     losses_dict = {}
-            #     updates = []
-
-            #     # Evaluate & Save
-            #     test_results = self.evaluate(test_dataset)
-            #     train_results = self.evaluate(train_dataset)
-            #     results = {'test_{}'.format(k): v for k, v in test_results.items()}
-            #     results.update({'train_{}'.format(k): v for k, v in train_results.items()})
-
-            #     wandb_metrics = {}
-            #     for k, v in results.items():
-            #         wandb_metrics[k] = v
-
-            #     self.logger.log(wandb_metrics, step=u)
-
-            #     results['update_step'] = [u]
-
-            #     #eval_logger(results, self.save_dir)
-            #     #break # Change here
-                
-                
-            #     # Save Model
-            #     self.metrics = {'update_step': [u]}
-            #     self.save()
-            
-
-            #     self.set_train()
-        
-        # Visualised, Evaluate & Save
-        # if self.config.get('visusalise', False):
-        #     self.visualise(datasets)
-        
-        # if self.config.get('end_training_evaluate', False):
-        #     test_results = self.evaluate(test_dataset)
-        #     train_results = self.evaluate(train_dataset)
-        #     results = {'test_{}'.format(k): v for k, v in test_results.items()}
-        #     results.update({'train_{}'.format(k): v for k, v in train_results.items()})
-        #     results['update_step'] = [self.config.total_update_steps-1]
-            #eval_logger(results, self.config)
         
     def evaluate(self, dataset, train=False):
 
@@ -1584,6 +1523,49 @@ class RSSM(RLAgent):
         beliefs, posteriors, priors, _ = self._unroll_state_action(data)
         
         recon = bottle(self.model['observation_model'], (beliefs, posteriors['sample']))
+
+        # =========================================================
+        # ADD THIS DEBUG BLOCK HERE
+        # =========================================================
+        if self.debug:  # Saves every 100 steps to avoid disk spam
+            import os
+            import matplotlib.pyplot as plt
+            
+            debug_dir = 'tmp/lagarnet_debug'
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            # Reverse symlog and grab sequence=0, batch=0
+            inp_ts = symexp(data['input_obs'][0, 0], self.symlog).detach().cpu()
+            goal_ts = symexp(data['goal_obs'][0, 0], self.symlog).detach().cpu()
+            out_ts = symexp(output_obs[1, 0], self.symlog).detach().cpu() 
+            rec_ts = symexp(recon[0, 0], self.symlog).detach().cpu()
+
+            def save_debug_img(tensor, base_name):
+                # Convert to numpy (H, W, C) and clip
+                img = tensor.numpy().transpose(1, 2, 0).clip(0, 1)
+                
+                # Split 6 channels into Obs and Goal (e.g., rgb+goal-rgb)
+                if img.shape[-1] == 6:
+                    plt.imsave(os.path.join(debug_dir, f'{base_name}_obs.jpg'), img[:, :, :3])
+                    plt.imsave(os.path.join(debug_dir, f'{base_name}_goal.jpg'), img[:, :, 3:])
+                # Split 4 channels into RGB and Depth
+                elif img.shape[-1] == 4:
+                    plt.imsave(os.path.join(debug_dir, f'{base_name}_rgb.jpg'), img[:, :, :3])
+                    plt.imsave(os.path.join(debug_dir, f'{base_name}_depth.jpg'), img[:, :, 3].repeat(3, axis=-1))
+                # Standard 1 or 3 channel image
+                else:
+                    if img.shape[-1] == 1:
+                        img = img.repeat(3, axis=-1)
+                    plt.imsave(os.path.join(debug_dir, f'{base_name}.jpg'), img)
+
+            # Execute saves
+            save_debug_img(inp_ts, f'input')
+            save_debug_img(goal_ts, f'goal')
+            save_debug_img(out_ts, f'output')
+            save_debug_img(rec_ts, f'recon')
+            exit()
+        # =========================================================
+
         #print('recon shape', recon.shape) 
         observation_loss = F.mse_loss(
             recon, 

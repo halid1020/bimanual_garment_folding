@@ -54,6 +54,55 @@ class PickAndPlaceTransformerV1:
     def __call__(self, sample_in, train=True, to_tensor=True, single=False):
         allowed_keys = ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                         'goal-depth', 'goal-mask', 'action', 'reward', 'terminal']
+        # =========================================================
+        # ADDED DEBUG BLOCK: Save original images before augmentation
+        # =========================================================
+        if False:
+            import os
+            import time
+            import matplotlib.pyplot as plt
+            
+            debug_dir = 'tmp/lagarnet_debug'
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            ts = int(time.time() * 1000)
+            # Helper to handle tensor vs numpy and shape extraction safely
+            def _extract_and_save(img_data, save_path):
+                # If it's a tensor, convert to numpy
+                if torch.is_tensor(img_data):
+                    img = img_data.detach().cpu().numpy()
+                else:
+                    img = img_data
+                
+                # Assume shape is [Batch, Time, C, H, W] or [Time, C, H, W] if single
+                # Grab the first available frame
+                if len(img.shape) == 5:
+                    img = img[0, 0]
+                elif len(img.shape) == 4:
+                    img = img[0]
+                elif len(img.shape) == 3:
+                    pass # Already C, H, W
+                
+                # transpose to H, W, C for saving and clip
+                #img = img.transpose(1, 2, 0).clip(0, 1)
+                
+                # If grayscale or depth (1 channel), repeat to 3 channels for pyplot
+                if img.shape[-1] == 1:
+                    img = np.repeat(img, 3, axis=-1)
+                # If more than 3 channels (e.g. RGBD), just save the RGB part
+                elif img.shape[-1] > 3:
+                    img = img[:, :, :3]
+                    
+                plt.imsave(save_path, img/255.0)
+
+            # Check for the raw keys before data augmentation alters them
+            # Depending on config, the key might be 'rgb' or self.config.input_obs
+            # obs_key = 'rgb'
+            # goal_key = 'goal-rgb' 
+            print('sample in keys', sample_in.keys())
+            _extract_and_save(sample_in['observation']['rgb'], os.path.join(debug_dir, f'original_obs.jpg'))
+            _extract_and_save(sample_in['observation']['goal-rgb'], os.path.join(debug_dir, f'original_goal.jpg'))
+
         if 'observation' in sample_in:
             sample = {k: v for k, v in sample_in['observation'].items() if k in allowed_keys}
         else:

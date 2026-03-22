@@ -56,6 +56,7 @@ validation_interval: 1000
 
 refresh_init_state: False
 
+apply_transform_in_dataset: True
 apply_reward_processor: True
 reward_processor: "coverage_alignment"
 reward_config:
@@ -69,7 +70,6 @@ reward_config:
 dataloader_workers: 0
 dataloader_prefetch_factor: 1
 
-apply_reward_processor: True
 
 data_augmenter: "pick_and_place_transformer_v1_for_lagarnet"
   
@@ -152,6 +152,7 @@ datasets:
         goal-rgb:
           shape: [64, 64, 3]
           output_key: 'goal-rgb'
+        
         speedFolding_approx:
           shape: [1]
           output_key: 'reward'

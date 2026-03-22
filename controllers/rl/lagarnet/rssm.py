@@ -988,6 +988,7 @@ class RSSM(RLAgent):
         for update in tqdm(range(start_update_step, start_update_step+update_steps), desc='Training agent'):
             
             # Train RSSM
+            self.update_step = update
             # Ensure your dataset class supports .sample(batch_size, sequence_size)
             data = next(iter(train_dataloader))
             data = {k: v.to(self.config.device, non_blocking=True) for k,v in data.items()}

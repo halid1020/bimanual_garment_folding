@@ -92,7 +92,7 @@ datasets:
       seq_length: 50
       cross_trajectory: True
       split_ratios: [0.1, 0.1, 0.8]
-      cache_in_memory: True
+      cache_in_memory: False
       io_mode: 'r'
       sample_mode: 'train'
       obs_config: 
@@ -139,6 +139,7 @@ datasets:
       sample_mode: 'eval'
       split_ratios: [0.1, 0.1, 0.8]
       sample_terminal: True
+      cache_in_memory: False
       obs_config: 
         mask: 
           shape: [64, 64, 1]
@@ -163,7 +164,7 @@ datasets:
         max_IoU_to_flattened:      # <--- Added missing dependency for reward calc
           shape: [1]
           output_key: 'max_IoU_to_flattened'
-          
+
       act_config:
         norm-pixel-pick-and-place: 
           shape: [4]

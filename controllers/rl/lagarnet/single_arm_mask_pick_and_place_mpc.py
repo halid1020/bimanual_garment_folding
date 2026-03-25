@@ -81,6 +81,9 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
             samples = samples[valid_indices]
             popsize = samples.shape[0]
 
+            if popsize == 0:
+                break
+
             if self.clip:
                 samples = np.clip(samples, action_space.low[:1], action_space.high[:1])
             

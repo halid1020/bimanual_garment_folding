@@ -104,7 +104,7 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
         
         self.internal_states[info['arena_id']] = {
             'action_cost': cost,
-            'iteration_means': np.stack(iteration_means),
+            'iteration_means': np.stack(iteration_means) if len(iteration_means) == 0 else [],
             'last_samples': samples,
             'last_costs': costs,
             'pick-mask': np.expand_dims(obj_mask, axis=2),

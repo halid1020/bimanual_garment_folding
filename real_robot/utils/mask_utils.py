@@ -23,7 +23,7 @@ def get_mask_generator():
 def get_mask_v2(mask_generator, rgb, 
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
-                min_saturation=15,         # NEW: Filter out white/grey things
+                min_saturation=10,         # NEW: Filter out white/grey things
                 white_value_threshold=300, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
                 max_variance=5000,
@@ -66,10 +66,11 @@ def get_mask_v2(mask_generator, rgb,
         # --- B. Border Filter (Crucial for removing Background) ---
         # If a mask touches all 4 borders, or a significant portion of the border, it's likely the background.
         h, w = mask.shape
-        border_pixels = np.sum(mask[0, :]) + np.sum(mask[-1, :]) + np.sum(mask[:, 0]) + np.sum(mask[:, -1])
+        border_pixels = np.sum(mask[5, :]) + np.sum(mask[-5, :]) + np.sum(mask[:, 5]) + np.sum(mask[:, -5])
         # If it touches more than 10% of the perimeter, kill it
         if border_pixels > (2 * (h + w)) * 0.15: 
-            if debug: print(f"ID {idx}: Filtered (Touching Borders)")
+            border_ratio = border_pixels/ (2 * (h + w - 2))
+            if debug: print(f"ID {idx}: Filtered (Touching Borders) border pixels {border_pixels}, ratio {border_ratio}")
             continue
 
         # Get pixels for this mask
@@ -108,6 +109,7 @@ def get_mask_v2(mask_generator, rgb,
             'mask': mask,
             'mask_region_size': mask_region_size,
             'id': idx,
+            'border_pixels': border_pixels,
             'variance': mask_variance,
             'saturation': avg_saturation,
             'avg_value': avg_value,   # <--- ADD THIS LINE
@@ -134,6 +136,7 @@ def get_mask_v2(mask_generator, rgb,
         print(f"  - Variance:      {final_mask_data['variance']:.2f}")
         print(f"  - Saturation:    {final_mask_data['saturation']:.2f}")
         print(f"  - Average Value: {final_mask_data['avg_value']:.2f}\n")
+        print(f"  - Border Pixel: {final_mask_data['border_pixels']:.2f}\n")
     
 
     if debug:

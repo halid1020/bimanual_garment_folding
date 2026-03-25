@@ -68,6 +68,11 @@ class SingleArmPixelLogger(VideoLogger):
                 save_mask(obs["mask"], filename='mask', directory=step_dir)
             if "robot0_mask" in obs:
                 save_mask(obs["robot0_mask"], filename='robot0_mask', directory=step_dir)
+            if "roi_rgb" in obs:
+                save_colour(obs["roi_rgb"], filename='roi_rgb', directory=step_dir, rgb2bgr=True)
+            if "roi_workspace_mask" in obs:
+                save_mask(obs["roi_workspace_mask"], filename='roi_workspace_mask', directory=step_dir)
+            
 
             # B. Save Action (The final state has no subsequent action)
             act = actions[i] if i < len(actions) else None

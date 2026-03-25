@@ -236,7 +236,7 @@ class SingleArmPickAndPlaceArena(Arena):
         if self.snap_to_cloth_mask:
             mask = self.cloth_mask
             kernel = np.ones((3, 3), np.uint8) 
-            eroded_mask = cv2.erode(mask, kernel, iterations=15)
+            eroded_mask = cv2.erode(mask, kernel, iterations=10)
             target_mask = mask if np.sum(eroded_mask) == 0 else eroded_mask
             
             # Snap both points
@@ -375,7 +375,7 @@ class SingleArmPickAndPlaceArena(Arena):
         crop_rgb = rot_rgb[self.cy1:self.cy1+self.crop_size, self.cx1:self.cx1+self.crop_size]
         crop_cloth_mask = get_mask_v2(
             self.mask_generator, crop_rgb, debug=self.debug, 
-            mask_threshold_min=2400, mask_threshold_max=90000)
+            mask_threshold_min=1000, mask_threshold_max=90000)
 
         # ---------------------------------------------------------------------
         # --- HEURISTIC WORKSPACE SAMPLING ---
@@ -384,8 +384,8 @@ class SingleArmPickAndPlaceArena(Arena):
         if np.sum(crop_cloth_mask) < 50:
             self.activate_transfer_workspace_hueristic = True
             print("[Arena] Heuristic: Central window is empty. Searching for cloth in full ROI...")
-            full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=False, 
-            mask_threshold_min=2400, mask_threshold_max=90000)
+            full_rot_mask = get_mask_v2(self.mask_generator, rot_rgb, debug=self.debug, 
+            mask_threshold_min=1000, mask_threshold_max=90000)
             
             if np.sum(full_rot_mask) > 50:
                 # Find center of mass of the cloth
@@ -448,6 +448,8 @@ class SingleArmPickAndPlaceArena(Arena):
 
         info.update({
             'observation': {
+                "roi_rgb": rot_rgb,
+                "roi_workspace_mask": rot_mask_0,
                 "rgb": resized_rgb,
                 "depth": resized_depth,
                 "mask": resized_mask.astype(np.bool_),

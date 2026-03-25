@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 # --- Configuration ---
 data_dir = '/media/hcv530/T7/garment_folding_data/real_world/'
-method_folder = 'planet_clothpick_single_picker_single_primitive_multi_longsleeve_flattening_longsleeve_all_garment_5k_eps'
+method_folder = 'final_lagarnet_reward_v2'
 eval_dir = os.path.join(data_dir, method_folder, 'eval_checkpoint_-2') 
 
 # Directory to save the output visualizations

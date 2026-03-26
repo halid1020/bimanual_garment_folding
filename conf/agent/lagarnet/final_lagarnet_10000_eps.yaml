@@ -64,7 +64,7 @@ dataloader_prefetch_factor: 1
 apply_reward_processor: True
 reward_processor: "coverage_alignment"
 reward_config:
-  alpha: 0.5
+  alpha: 0.3
   NC_success_threshold: 0.9
   IoU_success_threshold: 0.8
   apply_success_bonus: False

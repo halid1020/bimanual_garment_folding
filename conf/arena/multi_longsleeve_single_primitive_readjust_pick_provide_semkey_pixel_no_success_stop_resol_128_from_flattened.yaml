@@ -20,3 +20,4 @@ provide_semkey_norm_pixel: true
 provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
 init_mode: flattened
+add_final_goal_to_obs: True

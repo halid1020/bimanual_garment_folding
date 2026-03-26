@@ -128,22 +128,30 @@ class GC_RSSM(RSSM):
         self.no_op = self.no_op.flatten()
         obs_ = obs[self.config.input_obs]
         goal_obs_ = obs[f'goal-{self.config.input_obs}']
-        goal_mask = obs['goal-mask']
 
+        
 
         if len(mask.shape) == 2:
             mask = np.expand_dims(mask, axis=0)
         
-        if len(goal_mask.shape) == 2:
-            goal_mask = np.expand_dims(goal_mask, axis=0)
+       
 
         
         to_trans_dict = {
             self.config.input_obs: np.expand_dims(obs_, axis=(0)),
             f'goal-{self.config.input_obs}': np.expand_dims(goal_obs_, axis=(0)),
             'mask': np.expand_dims(mask, axis=(0)),
-            'goal-mask': np.expand_dims(goal_mask, axis=(0)),
+            
         }
+
+        if 'goal-mask' in obs:
+            goal_mask = obs['goal-mask']
+            if len(goal_mask.shape) == 2:
+                goal_mask = np.expand_dims(goal_mask, axis=0)
+            
+            to_trans_dict['goal-mask'] = np.expand_dims(goal_mask, axis=(0))
+
+
         res = self.data_augmenter(
             to_trans_dict, 
             train=False)
@@ -461,7 +469,6 @@ class GC_RSSM(RSSM):
                 obs_data = data['observation']
                 act_data = data['action']['default']
                 if self.apply_reward_processor:
-                    #print('apply reward processor')
                     rewards = self.reward_processor(data['observation']['reward'], obs_data, act_data, self.config.reward_config)
                 else:
                     rewards = data['observation']['reward']
@@ -469,13 +476,10 @@ class GC_RSSM(RSSM):
                 obs_data = data
                 act_data = data['action']
                 if self.apply_reward_processor:
-                    #print('apply reward processor')
                     rewards = self.reward_processor(data['reward'], obs_data, act_data, self.config.reward_config)
                 else:
                     rewards = data['reward']
             
-           
-           
             data = {
                 'action': act_data,
             }
@@ -488,6 +492,9 @@ class GC_RSSM(RSSM):
                 data['reward'] = rewards[:, 1:].squeeze(-1)
                 data['terminal'] = data['terminal'][:, 1:].squeeze(-1)
         
+        
+        # =========================================================
+
         # Apply transformations
         if apply_transform:
             if single and not self.apply_transform_in_dataset:

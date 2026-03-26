@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - /data_collection/dataset@dataset: dual_arm_pick_and_place_mix_folding_garments_for_training
+  - _self_
+
+# Target combined dataset properties
+target_data_path: longsleeve_folding_mix_5k_eps
+target_data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
+
+# Determine if the final dataset should include the success key
+include_success_key: False 
+num_trj_per_dataset: 5000 # its 80% is 5000.
+
+# List the Hydra configuration names used for data collection
+# Adjust the prefix (e.g., 'data_collection/') based on your folder structure in 'conf/'
+sources:
+  - data_collection/mask_biased_random_on_dual_pickers_multi_longsleeve
+  - data_collection/noisey_oracle_on_longsleeve_centre_sleeve_folding

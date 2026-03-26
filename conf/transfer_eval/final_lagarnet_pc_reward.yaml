@@ -1,0 +1,21 @@
+# conf/transfer_eval/comp_gc_diffusion.yaml
+
+eval_name: transfer_eval_final_lagarnet_pc_reward
+
+# Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
+train_exp_config: sim_exp/lagarnet/final_lagarnet_pc_reward
+
+# Define evaluation arenas & tasks as a standard list of strings
+eval_arenas:
+
+  - arena: multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: flattening_overstretch_penalty_1_no_big_bonus

@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 
 def get_camera_matrix(cam_pos, cam_angle, cam_size, cam_fov):
     # Assuming cam_fov is vertical FOV
-    print('!!!!!!!!!cam_size:', cam_size)
+    #print('!!!!!!!!!cam_size:', cam_size)
     focal_length_x = 1.0*cam_size[1] / 2 / np.tan(cam_fov / 2)
     focal_length_y = 1.0*cam_size[0] / 2 / np.tan(cam_fov / 2)
     c_x = 1.0*cam_size[1] / 2

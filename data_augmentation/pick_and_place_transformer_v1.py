@@ -16,8 +16,12 @@ def gaussian_2d(shape, sigma=1):
     return h
 
 class PickAndPlaceTransformerV1:
-    def __init__(self,  config=None):
+    def __init__(self, config=None):
         self.config = config
+        self.num_picker = config.get('num_picker', 1)
+        self.base_act_dim = 4 * self.num_picker
+        self.num_points = 2 * self.num_picker # 2 points (pick and place) per picker
+        
         self.process_rgb = self.config.get('rgb_eval_process', False)
         self.process_depth = self.config.get('depth_eval_process', False)
         self.swap_action = self.config.get('swap_action', False)
@@ -35,7 +39,6 @@ class PickAndPlaceTransformerV1:
         self.img_dim = (self.config.img_dim[0], self.config.img_dim[1])
         if self.all_goal_rotate:
             self.goal_rotation_degree = self.config.get('goal_rotation_degree', self.config.get('rotation_degree', 360))
-        #self.maskout = self.config.get('maskout', False)
 
         if self.depth_blur:
             kernel_size = self.config.depth_blur_kernel_size
@@ -48,49 +51,83 @@ class PickAndPlaceTransformerV1:
                 self.padding = kernel_size//2
     
 
-    def __call__(self, sample_in, train=True, to_tensor=True, 
-                 single=False):
-        #print('before preprocess goal-rgb', sample['goal-rgb'].shape)
-        # batch is assumed to have the shape B*T*C*H*W
-        #print('transform!!!!')
+    def __call__(self, sample_in, train=True, to_tensor=True, single=False):
         allowed_keys = ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                         'goal-depth', 'goal-mask', 'action', 'reward', 'terminal']
+        # =========================================================
+        # ADDED DEBUG BLOCK: Save original images before augmentation
+        # =========================================================
+        if False:
+            import os
+            import time
+            import matplotlib.pyplot as plt
+            
+            debug_dir = 'tmp/lagarnet_debug'
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            ts = int(time.time() * 1000)
+            # Helper to handle tensor vs numpy and shape extraction safely
+            def _extract_and_save(img_data, save_path):
+                # If it's a tensor, convert to numpy
+                if torch.is_tensor(img_data):
+                    img = img_data.detach().cpu().numpy()
+                else:
+                    img = img_data
+                
+                # Assume shape is [Batch, Time, C, H, W] or [Time, C, H, W] if single
+                # Grab the first available frame
+                if len(img.shape) == 5:
+                    img = img[0, 0]
+                elif len(img.shape) == 4:
+                    img = img[0]
+                elif len(img.shape) == 3:
+                    pass # Already C, H, W
+                
+                # transpose to H, W, C for saving and clip
+                #img = img.transpose(1, 2, 0).clip(0, 1)
+                
+                # If grayscale or depth (1 channel), repeat to 3 channels for pyplot
+                if img.shape[-1] == 1:
+                    img = np.repeat(img, 3, axis=-1)
+                # If more than 3 channels (e.g. RGBD), just save the RGB part
+                elif img.shape[-1] > 3:
+                    img = img[:, :, :3]
+                    
+                plt.imsave(save_path, img/255.0)
+
+            # Check for the raw keys before data augmentation alters them
+            # Depending on config, the key might be 'rgb' or self.config.input_obs
+            # obs_key = 'rgb'
+            # goal_key = 'goal-rgb' 
+            print('sample in keys', sample_in.keys())
+            _extract_and_save(sample_in['observation']['rgb'], os.path.join(debug_dir, f'original_obs.jpg'))
+            _extract_and_save(sample_in['observation']['goal-rgb'], os.path.join(debug_dir, f'original_goal.jpg'))
+
         if 'observation' in sample_in:
             sample = {k: v for k, v in sample_in['observation'].items() if k in allowed_keys}
         else:
             sample = sample_in
         
         if 'action' in sample_in:
-            # if sample action is a dict
             if isinstance(sample_in['action'], dict):
                 if 'default' in sample_in['action']:
                     sample['action'] = sample_in['action']['default']
                 elif 'norm-pixel-pick-and-place' in sample_in['action']:
                     sample['action'] = sample_in['action']['norm-pixel-pick-and-place']
-            ## flatten the last two dimension
-            #print('sample action', sample['action'].shape)
             sample['action'] = sample['action'].reshape(sample['action'].shape[0], -1)
-            #
 
         for k, v in sample.items():
-            #print(k, v.shape)
             if isinstance(v, np.ndarray):
                 sample[k] = np_to_ts(v.copy(), self.config.device)
             else:
                 sample[k] = v.to(self.config.device)
-            
-            #sample[k] = sample[k].unsqueeze(0)
             sample[k] = sample[k].float()
-
 
         for obs in ['rgb', 'depth', 'mask', 'rgbd', 'goal-rgb', 
                     'goal-depth', 'goal-mask', 'gc-depth', 'rgb+goal-rgb', 'rgb+goal-rgbd']:
             if obs in sample:
-                #print('obs', obs)
                 if sample[obs].shape[-1] <= 10:
                     sample[obs] = sample[obs].permute(0, 3, 1, 2)
-                # print('obs', obs, sample[obs].shape)
-                # print(' img dim', self.img_dim)
                 T, C, H, W = sample[obs].shape
                 if (H, W) != self.img_dim:
                     sample[obs] = F.interpolate(
@@ -118,12 +155,8 @@ class PickAndPlaceTransformerV1:
             sample['depth'] = sample['rgb+goal-rgbd'][:, 3:4]
             sample['goal-rgb'] = sample['rgb+goal-rgbd'][:, 4:7]
             sample['goal-depth'] = sample['rgb+goal-rgbd'][:, 7:]
-            # print('rgb+goal-rgb', sample['rgb+goal-rgb'].shape)
-            # print('rgb', sample['rgb'].shape)
-
         
         if 'rgbd' in sample:
-            #print('Were!!!!!!!!!!!!!!')
             sample['rgb'] = sample['rgbd'][:, :, :3]
             sample['depth'] = sample['rgbd'][:, :, 3:]
    
@@ -142,7 +175,6 @@ class PickAndPlaceTransformerV1:
                 normalise={'mode': self.config.rgb_norm_mode, 
                            'param': self.config.rgb_norm_param}, 
                 noise_factor=(self.config.rgb_noise_factor if process_rgb else 0))
-            #print('after preprocess goal-rgb', sample['goal-rgb'].shape)
 
         if 'depth' in sample:
             sample['depth'] = self._process_depth(
@@ -150,34 +182,34 @@ class PickAndPlaceTransformerV1:
                 sample.get('mask', None), train)
         
         if 'goal-depth' in sample:
-            #print('goal-depth', sample['goal-depth'].shape)
             sample['goal-depth'] = self._process_depth(
                 sample['goal-depth'], 
                 sample.get('goal-mask', None), train)
 
-        if self.preserve_goal_mask:
+        if self.preserve_goal_mask and 'goal-mask' in sample:
             org_goal_mask = sample['goal-mask']
 
      
-            
         if 'action' in sample.keys():
-            self.has_orientation = sample['action'].shape[-1] > 4
+            self.has_orientation = sample['action'].shape[-1] > self.base_act_dim
             
             if self.has_orientation:
-                # Split spatial coordinates from orientation
-                pixel_actions = sample['action'][:, :4]  # Fixed: act -> sample['action']
-                orient_actions = sample['action'][:, 4:] # (B, 1) -> [theta] in [-1, 1]
+                # Split spatial coordinates from orientation dynamically
+                pixel_actions = sample['action'][:, :self.base_act_dim]
+                orient_actions = sample['action'][:, self.base_act_dim:] 
             else:
-                pixel_actions = sample['action'][:, :4]
+                pixel_actions = sample['action'][:, :self.base_act_dim]
                 orient_actions = None
 
             if not self.swap_action:
-                # Swap [y, x, y, x] to [x, y, x, y] for geometric transformations
-                pixel_actions = pixel_actions[:, [1, 0, 3, 2]]
+                # Swap [y, x, ...] to [x, y, ...] dynamically for any number of pickers
+                b_size = pixel_actions.shape[0]
+                pixel_actions_reshaped = pixel_actions.reshape(-1, 2)
+                pixel_actions = pixel_actions_reshaped[:, [1, 0]].reshape(b_size, self.base_act_dim)
 
         
         if self.all_goal_rotate and train:
-            T, _, H, W = sample['goal-mask'].shape
+            T, _, H, W = sample['goal-rgb'].shape
             samples = T
             degree = self.goal_rotation_degree * \
                 torch.randint(int(360 / self.goal_rotation_degree), size=(samples,))
@@ -192,7 +224,6 @@ class PickAndPlaceTransformerV1:
             affine_matrix[:, :2, :2] = rot.reshape(T, 2, 2)
 
             if self.goal_translate != 0:
-                #print('goal_translate', self.config.goal_translate)
                 affine_matrix[:, 0, 2] = (torch.randn(T, device=self.config.device) * 2 -1) \
                     * self.config.goal_translate
                 affine_matrix[:, 1, 2] = (torch.randn(T, device=self.config.device) * 2 -1) \
@@ -204,7 +235,6 @@ class PickAndPlaceTransformerV1:
             combined_obs = torch.cat(list(obs_dict.values()), dim=1)
             T, C, H, W = combined_obs.shape
 
-            # Rotate all observations at once
             grid = F.affine_grid(affine_matrix[:, :2], (T, C, H, W), align_corners=True)
             rotated_images = F.grid_sample(combined_obs, grid, align_corners=True)
 
@@ -217,10 +247,7 @@ class PickAndPlaceTransformerV1:
     
         # Random Rotation
         if self.random_rotation and train:
-
-            ### Generate torch version of the follow code:
             while True:
-                
                 degree = self.config.rotation_degree * \
                     torch.randint(int(360 / self.config.rotation_degree), size=(1,))
                 thetas = torch.deg2rad(degree)
@@ -231,17 +258,15 @@ class PickAndPlaceTransformerV1:
                     torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
                 ], dim=0).to(self.config.device)
 
-
                 # Rotate actions
                 T_act = pixel_actions.shape[0]
-                # Fixed: Use T_act instead of T-1 to match the batch dimension perfectly
-                rotation_matrices_tensor = rot.expand(T_act * 2, 2, 2).reshape(-1, 2, 2)
+                # Scale expansion matrix based on dynamic number of points
+                rotation_matrices_tensor = rot.expand(T_act * self.num_points, 2, 2).reshape(-1, 2, 2)
                 rotation_action = pixel_actions.reshape(-1, 1, 2)
                
                 rotated_action = torch.bmm(rotation_action, rotation_matrices_tensor)\
                     .reshape(*pixel_actions.shape)
                 
-                # Fixed: Check the rotated_action for out-of-bounds, not the original
                 if torch.abs(rotated_action).max() > 1:
                     continue
                 
@@ -249,29 +274,20 @@ class PickAndPlaceTransformerV1:
 
                 # apply rotation to the orient action
                 if self.has_orientation:
-                    # Map degree to [-1, 1] space (Assuming 1.0 = 180 degrees)
                     degree_tensor = degree.to(orient_actions.device)
                     orient_shift = degree_tensor / 180.0
-                    
-                    # The affine grid rotates the image, so we rotate the angle equivalently
                     orient_actions = orient_actions - orient_shift
-                    
-                    # Wrap the angle strictly back to the [-1, 1] interval
                     orient_actions = ((orient_actions + 1.0) % 2.0) - 1.0
 
-                # Rotate observations
                 affine_matrix = torch.zeros(T, 2, 3, device=self.config.device)
                 affine_matrix[:, :2, :2] = rot.expand(T, 2, 2)
 
-
-                # Rotate observations
                 obs_to_rotate = ['rgb', 'depth', 'mask']
                 obs_dict = {obs: sample[obs] for obs in obs_to_rotate if obs in sample}
 
                 combined_obs = torch.cat(list(obs_dict.values()), dim=1)
                 T, C, H, W = combined_obs.shape
 
-                # Rotate all observations at once
                 grid = F.affine_grid(affine_matrix[:, :2], (T, C, H, W), align_corners=True)
                 rotated_images = F.grid_sample(combined_obs, grid, align_corners=True)
 
@@ -282,12 +298,9 @@ class PickAndPlaceTransformerV1:
                     start_idx = end_idx
     
                 break
-                # if the max absolute value of the action is more than 1, continue
                 
         # Vertical Flip
         if self.vertical_flip and train and (random.random() < 0.5):
-            
-            # Generate random vertical flip decisions
             obs_dict = {obs: sample[obs] for obs in ['rgb', 'depth', 'mask'] if obs in sample}
             obs_images = torch.cat(list(obs_dict.values()), dim=1)
             flip_obs_images = torch.flip(obs_images, [2])
@@ -300,52 +313,40 @@ class PickAndPlaceTransformerV1:
             T_act = pixel_actions.shape[0]
             new_actions = pixel_actions.reshape(-1, 2)
             new_actions[:, 1] = -new_actions[:, 1]
-            pixel_actions = new_actions.reshape(T_act, 4)
+            pixel_actions = new_actions.reshape(T_act, self.base_act_dim) # Dynamic shape
             
-            # apply flipping to the orient action
             if self.has_orientation:
-                # Vertical flip inverts the Y axis, meaning the angle sign flips
                 orient_actions = -orient_actions
 
         if 'action' in sample.keys():
-            if not self.swap_action: # Fixed: removed the syntax error ')'
-                # swap action back to the original order [y1, x1, y2, x2]
-                pixel_actions = pixel_actions[:, [1, 0, 3, 2]]
+            if not self.swap_action:
+                # swap action back to the original order dynamically
+                b_size = pixel_actions.shape[0]
+                pixel_actions_reshaped = pixel_actions.reshape(-1, 2)
+                pixel_actions = pixel_actions_reshaped[:, [1, 0]].reshape(b_size, self.base_act_dim)
             
-            if self.has_orientation: # Fixed: self.has_orient -> self.has_orientation
-                # combine back the pixel actions and orient actions
+            if self.has_orientation:
                 sample['action'] = torch.cat([pixel_actions, orient_actions], dim=-1)
             else:
                 sample['action'] = pixel_actions
 
         if self.maskout:
-           
-            
-            # Prepare masks
             mask = sample['mask']
+            goal_mask = None
             if 'goal-mask' in sample:
                 goal_mask = sample['goal-mask']
-            #goal_mask_3ch = goal_mask.repeat(1, 3, 1, 1) if goal_mask is not None else None
 
-            # Define a helper function for masking
-            
-
-            # Apply masking to rgb and depth
             if 'rgb' in sample and mask is not None:
                 sample['rgb'] = self.apply_mask(sample['rgb'], mask)
             if 'depth' in sample and mask is not None:
                 sample['depth'] = self.apply_mask(sample['depth'], mask)
 
-            # Apply masking to goal-rgb and goal-depth
             if 'goal-rgb' in sample and goal_mask is not None:
                 sample['goal-rgb'] = self.apply_mask(sample['goal-rgb'], goal_mask)
             if 'goal-depth' in sample and goal_mask is not None:
                 sample['goal-depth'] = self.apply_mask(sample['goal-depth'], goal_mask)
 
-                
-
         if 'rgbd' in sample:
-            #print('Here!!!!!!!!!!!!!!')
             sample['rgbd'][:, :3] = sample['rgb']
             sample['rgbd'][:, 3:] = sample['depth']
 
@@ -362,35 +363,27 @@ class PickAndPlaceTransformerV1:
             sample['rgb+goal-rgbd'] = torch.cat([sample['rgb'], sample['depth'], 
                                            sample['goal-rgb'], sample['goal-depth']], dim=1)
 
-        if self.preserve_goal_mask:
+        if self.preserve_goal_mask and 'goal-mask' in sample:
             sample['goal-mask'] = org_goal_mask
         
-        
-        
-        ## check if there is any nan value
         for k, v in sample.items():
             if torch.isnan(v).any():
-                print('Transform nan value in', k)
-                #print(v)
-                raise ValueError('nan value in the transform data {k}')
+                print(f'Transform nan value in {k}')
+                raise ValueError(f'nan value in the transform data {k}')
 
-      
         if not to_tensor:
             for k, v in sample.items():
                 sample[k] = ts_to_np(v)
         
-        
         return sample
     
     def postprocess(self, sample):
-        
         res = {}
         for k, v in sample.items():
             if isinstance(v, torch.Tensor):
                 res[k] = ts_to_np(v)
             else:
                 res[k] = v   
-            #print(k, res[k].shape)
 
         if 'rgb' in res:
             res['rgb'] = postprocess_rgb(
@@ -425,7 +418,6 @@ class PickAndPlaceTransformerV1:
             res['rgbm'] = postprocess_rgb(res['rgbm'][:, :3, :, :])
             
         if 'depth' in res:
-            
             if self.config.z_norm:
                 res['depth'] = res['depth'] * self.config.z_norm_std + \
                       self.config.z_norm_mean
@@ -444,25 +436,17 @@ class PickAndPlaceTransformerV1:
     def _process_depth(self, depth, mask=None, train=False):
         T, C, H, W = depth.shape
     
-
-
-        #print('depth')
-        #obs[:,-1,:, :] += torch.randn(obs[:,-1,:, :].shape, device=self.config.device) * (self.config.depth_noise_var if train else 0)
         if self.config.depth_clip:
             depth = depth.clip(self.config.depth_clip_min, self.config.depth_clip_max)
         
-        if self.config.z_norm:
+        if self.config.get('z_norm', False):
             depth = (depth - self.config.z_norm_mean) / self.config.z_norm_std
 
         elif self.config.min_max_norm:
-            # get the min and max of each trajectory
             depth_min = depth.view(T, -1).min(dim=1, keepdim=True).values
             depth_max = depth.view(T, -1).max(dim=1, keepdim=True).values
 
-            ## depth_min compare with self.config.depth_min and get the max ; each trajectory
-
             if self.config.get('depth_hard_interval', False):
-                #print('depth_hard_interval', self.config.depth_hard_interval)
                 depth_min = self.config.depth_min
                 depth_max = self.config.depth_max
             else:
@@ -473,8 +457,6 @@ class PickAndPlaceTransformerV1:
                 depth_max = torch.min(
                     depth_max, 
                     torch.tensor(self.config.depth_max).to(depth_max.device)).view(T, 1, 1, 1)
-
-
 
             depth = (depth-depth_min) / (depth_max-depth_min+1e-6)
             if self.depth_flip:
@@ -487,23 +469,15 @@ class PickAndPlaceTransformerV1:
                 * (self.config.depth_noise_var if depth_process else 0)
 
         if self.depth_blur and depth_process:
-            ### apply gaussian blur on each image
             T, C, H, W = depth.shape
-            
             
             depth_reshaped = depth.view(T, C, H, W)
             blurred_depth = F.conv2d(depth_reshaped, self.kernel, padding=self.padding, groups=C)[:, :, :H, :W]
 
-
-            # Reshape back to original dimensions
             depth = blurred_depth.reshape(T, C, H, W)
 
-            # remap to [0, 1]
             depth_min = depth.reshape(T, -1).min(dim=1, keepdim=True).values.reshape(T, 1, 1, 1)
             depth_max = depth.reshape(T, -1).max(dim=1, keepdim=True).values.reshape(T, 1, 1, 1)
-            # print('depth min shape', depth_min.shape)
-            # print('depth max shape', depth_max.shape)
-            # print('depth shape', depth.shape)
             depth = (depth-depth_min) / (depth_max-depth_min+1e-6)
 
         if  self.apply_depth_noise_on_mask \
@@ -515,7 +489,6 @@ class PickAndPlaceTransformerV1:
         depth = depth.clip(0, 1)
         
         if self.config.depth_map:
-            # At this point we assume depth is between [0, 1]
             map_diff = self.config.depth_map_range[1] - self.config.depth_map_range[0]
             depth = depth*map_diff + self.config.depth_map_range[0]
         

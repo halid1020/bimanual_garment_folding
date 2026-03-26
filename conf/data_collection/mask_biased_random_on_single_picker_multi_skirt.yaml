@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - /agent@agent: random_mask_biased_pick_and_place
+  - /agent/lagarnet@agent: random_mask_biased_pick_and_place
   - /arena@arena: multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_ray
   - /task@task: flattening_overstretch_penalty_1_no_big_bonus
   - dataset: single_arm_pick_and_place_garments_no_success

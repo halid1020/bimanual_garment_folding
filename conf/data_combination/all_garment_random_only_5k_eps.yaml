@@ -1,0 +1,20 @@
+# @package _global_
+defaults:
+  - /data_collection/dataset@dataset: single_arm_pick_and_place_garments_for_training_gc_diffusion
+  - _self_
+
+# Target combined dataset properties
+target_data_path: all_garment_random_only_5k_eps
+target_data_dir: /home/ah390/project/bimanual_garment_folding/data/datasets
+
+# Determine if the final dataset should include the success key
+include_success_key: True 
+num_trj_per_dataset: 1600 # its 80% is 5000.
+
+# List the Hydra configuration names used for data collection
+# Adjust the prefix (e.g., 'data_collection/') based on your folder structure in 'conf/'
+sources:
+  - data_collection/mask_biased_random_on_single_picker_multi_dress
+  - data_collection/mask_biased_random_on_single_picker_multi_skirt
+  - data_collection/mask_biased_random_on_single_picker_multi_trousers
+  - data_collection/mask_biased_random_on_single_picker_multi_longsleeve

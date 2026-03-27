@@ -194,6 +194,44 @@ class SingleArmPixelLogger(VideoLogger):
 
             images.append(img)
 
+
+        # ---------------------------------------------------------
+        # Save Final State Explicitly
+        # ---------------------------------------------------------
+        if result["information"]:
+            last_info = result["information"][-1]
+            final_state_dir = os.path.join(episode_data_dir, 'final_state')
+            os.makedirs(final_state_dir, exist_ok=True)
+            
+            last_obs = last_info.get("observation", {})
+            
+            # Save final images
+            if "rgb" in last_obs:
+                save_colour(last_obs["rgb"], filename='rgb', directory=final_state_dir, rgb2bgr=True)
+            if "depth" in last_obs:
+                save_depth(last_obs["depth"], filename='depth', directory=final_state_dir)
+            if "mask" in last_obs:
+                save_mask(last_obs["mask"], filename='mask', directory=final_state_dir)
+            if "robot0_mask" in last_obs:
+                save_mask(last_obs["robot0_mask"], filename='robot0_mask', directory=final_state_dir)
+            if "roi_rgb" in last_obs:
+                save_colour(last_obs["roi_rgb"], filename='roi_rgb', directory=final_state_dir, rgb2bgr=True)
+            if "roi_workspace_mask" in last_obs:
+                save_mask(last_obs["roi_workspace_mask"], filename='roi_workspace_mask', directory=final_state_dir)
+                
+            # Save final info.json
+            final_info = {
+                "evaluation": last_info.get("evaluation", {}),
+                "success": last_info.get("success", False),
+                "reward": last_info.get("reward", 0.0),
+                "done": last_info.get("done", True), # Hardcoded to True since it's the final state
+                "eid": eid,
+                "garment_id": last_info.get("garment_id"),
+                "activate_transfer_workspace_hueristic": last_info.get('activate_transfer_workspace_hueristic', False)
+            }
+            with open(os.path.join(final_state_dir, 'info.json'), 'w') as f:
+                json.dump(final_info, f, indent=4, cls=NumpyEncoder)
+
         # Remove the old `if len(frames) > len(images): images.append(frames[-1])` 
         # because the loop now explicitly handles the final state.
 

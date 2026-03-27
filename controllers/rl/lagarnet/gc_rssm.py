@@ -19,7 +19,8 @@ class GoalConditionedTransitionModel(nn.Module):
     __constants__ = ['min_std_dev']
 
     def __init__(self, belief_size, state_size, action_size, hidden_size, 
-                 embedding_size, activation_function='relu', min_std_dev=0.1, embedding_layers=1, state_layers=1):
+                 embedding_size, activation_function='relu', min_std_dev=0.1, 
+                 embedding_layers=1, state_layers=1, goal_condition='cat'):
         super().__init__()
         self.act_fn = getattr(F, activation_function)
         self.min_std_dev = min_std_dev

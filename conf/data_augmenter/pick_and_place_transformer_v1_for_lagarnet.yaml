@@ -11,7 +11,7 @@ random_rotation: True
 random_terminal: False
 rotation_degree: 1
 all_goal_rotate: True
-goal_translate: 0.1
+goal_translate: 0.2
 preserve_goal_mask: True
 vertical_flip: True
 random_resize: False

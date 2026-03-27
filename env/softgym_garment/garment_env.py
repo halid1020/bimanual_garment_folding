@@ -424,7 +424,6 @@ class GarmentEnv(Arena):
         info['observation']['low_level_visible_pcs'] = getattr(self, 'low_level_visible_pcs', [])
         
         if self.save_each_action_picker_poses and self.mode != 'train':
-            #print('save pixel poses!!!', len(self.picker_poses))
             if len(self.picker_poses) > 0:
                 picker_poses = np.stack(self.picker_poses) #T, 2, 3
                 picker_poses = picker_poses[:, :, [0, 2, 1]].reshape(-1, 3)
@@ -447,6 +446,17 @@ class GarmentEnv(Arena):
         is_terminated = False
         info['discount'] = 1.0 # For dreamer
         
+        # ---> NEW: Check if garment is out of view <---
+        # The mask is a boolean array; summing it gives the total number of cloth pixels.
+        # We use a threshold of 10 pixels to prevent a tiny edge artifact from keeping the episode alive.
+        cloth_pixel_count = np.sum(info['observation']['mask'])
+        out_of_view = cloth_pixel_count < 10 
+        info['out_of_view'] = out_of_view
+        
+        if out_of_view:
+            is_terminated = True
+            is_truncated = False # Prioritize termination over truncation
+        
         if task_related:
             info['evaluation'] = self.evaluate()
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
@@ -460,19 +470,13 @@ class GarmentEnv(Arena):
                 is_terminated = True
                 is_truncated = False # Prioritize termination if it succeeds on the exact last step
                 
-            
-            #print('ev', info['evaluation'])
             if info['evaluation'] != {}:
-                #print('self.last_info', self.last_info)
-                #print(info['evaluation'])
                 info['reward'] = self.task.reward(self.last_info, None, info)
 
                 for k, v in info['reward'].items():
                     info['evaluation'][f'reward/{k}'] = v
             
-
             goals = self.task.get_goals()
-            #print('len goals', len(goals))
             if len(goals) > 0:
                 goal = goals[0]
                 info['goal'] = {}

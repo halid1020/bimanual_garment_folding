@@ -1,2 +1,11 @@
 task_name: "real-world-garment-flattening"
 debug: False
+
+
+reward_config:
+  alpha: 0.5
+  NC_success_threshold: 0.95
+  IoU_success_threshold: 0.90
+  apply_success_bonus: False
+  apply_mess_up_penalty: False
+  apply_large_action_penalty_when_success: False

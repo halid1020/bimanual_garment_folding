@@ -201,7 +201,7 @@ class GC_RSSM(RSSM):
                 plt.imsave(f'tmp/input_obs_rgb.png', rgb) 
                 plt.imsave(f'tmp/input_obs_goal_rgb.png', goal)
 
-        self.internal_states[arena_id] = {
+        self.internal_states[arena_id].update({
             'raw_input_obs': obs_.copy(),
             'input_obs': image.squeeze(0).squeeze(0) \
                 .cpu().detach().numpy().transpose(1, 2, 0),
@@ -214,7 +214,7 @@ class GC_RSSM(RSSM):
             'posterior_reward': self.model['reward_model'](self.cur_state[arena_id]['deter'], self.cur_state[arena_id]['stoch']['sample'])
                 .squeeze(0).cpu().detach().item(),
             'recon_obs': self.model['observation_model'](self.cur_state[arena_id]['deter'], self.cur_state[arena_id]['stoch']['sample']).cpu().detach()
-        }
+        })
 
 
     def _unroll_action(self, actions, belief_, latent_state_, goal_obs):

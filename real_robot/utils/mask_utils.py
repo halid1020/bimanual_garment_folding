@@ -1,5 +1,6 @@
 import torch
 import cv2
+import shutil
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 import numpy as np
 import os
@@ -22,15 +23,22 @@ def get_mask_generator():
 def get_mask_v2(mask_generator, rgb, 
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
-                min_saturation=40,         # NEW: Filter out white/grey things
-                white_value_threshold=210, # NEW: Filter out very bright white things
+                min_saturation=10,         # NEW: Filter out white/grey things
+                white_value_threshold=300, # NEW: Filter out very bright white things
                 min_variance=10,           # CHANGED: Lowered significantly for plain clothes
-                max_variance=7000,
+                max_variance=5000,
                 debug=False,
                 save_dir="./tmp"):
     """
     Select the best mask likely to be the cloth based on Color Saturation.
     """
+    save_dir = f"{save_dir}/cloth_masks"
+    
+    # --- NEW: Remove the old directory if it exists ---
+    # if os.path.exists(save_dir):
+    #     shutil.rmtree(save_dir)
+        
+    # Create the fresh directory
     os.makedirs(save_dir, exist_ok=True)
     
     # 1. Convert to HSV once globally to save time
@@ -58,10 +66,11 @@ def get_mask_v2(mask_generator, rgb,
         # --- B. Border Filter (Crucial for removing Background) ---
         # If a mask touches all 4 borders, or a significant portion of the border, it's likely the background.
         h, w = mask.shape
-        border_pixels = np.sum(mask[0, :]) + np.sum(mask[-1, :]) + np.sum(mask[:, 0]) + np.sum(mask[:, -1])
+        border_pixels = np.sum(mask[5, :]) + np.sum(mask[-5, :]) + np.sum(mask[:, 5]) + np.sum(mask[:, -5])
         # If it touches more than 10% of the perimeter, kill it
-        if border_pixels > (2 * (h + w)) * 0.30: 
-            if debug: print(f"ID {idx}: Filtered (Touching Borders)")
+        if border_pixels > (2 * (h + w)) * 0.15: 
+            border_ratio = border_pixels/ (2 * (h + w - 2))
+            if debug: print(f"ID {idx}: Filtered (Touching Borders) border pixels {border_pixels}, ratio {border_ratio}")
             continue
 
         # Get pixels for this mask
@@ -74,9 +83,9 @@ def get_mask_v2(mask_generator, rgb,
         avg_value = np.mean(masked_hsv[:, 2])      # Index 2 is Value (Brightness)
 
         # 1. Reject if it is too White (High Brightness + Low Saturation)
-        if avg_value > white_value_threshold and avg_saturation < min_saturation:
-            if debug: print(f"ID {idx}: Filtered (Too White: Val={avg_value:.0f}, Sat={avg_saturation:.0f})")
-            continue
+        # if avg_value > white_value_threshold and avg_saturation < min_saturation:
+        #     if debug: print(f"ID {idx}: Filtered (Too White: Val={avg_value:.0f}, Sat={avg_saturation:.0f})")
+        #     continue
 
         # 2. Reject if it is too Grey/Shadowy (Low Saturation)
         # Plain coloured clothes usually have Saturation > 30-40. 
@@ -87,21 +96,23 @@ def get_mask_v2(mask_generator, rgb,
 
         # --- D. Variance Filter ---
         # We calculate variance on the Value (brightness) channel or Grayscale
-        # Plain clothes have LOW variance. High variance means texture or noise.
+        # Plain background have LOW variance. High variance means texture or noise.
         mask_variance = np.var(masked_rgb)
         if mask_variance < min_variance or mask_variance > max_variance:
             if debug: print(f"ID {idx}: Filtered (Variance: {mask_variance:.0f})")
             continue
 
         # If we passed all filters, keep it
-        score = mask_region_size * avg_saturation # Heuristic: Big + Colorful = Good
+        score = mask_region_size * mask_variance # Heuristic: Big + Colorful = Good
         
         mask_data.append({
             'mask': mask,
             'mask_region_size': mask_region_size,
             'id': idx,
+            'border_pixels': border_pixels,
             'variance': mask_variance,
             'saturation': avg_saturation,
+            'avg_value': avg_value,   # <--- ADD THIS LINE
             'score': score
         })
 
@@ -117,6 +128,16 @@ def get_mask_v2(mask_generator, rgb,
     final_mask_data = sorted(mask_data, key=lambda x: x['score'], reverse=True)[0]
     
     final_mask = final_mask_data['mask']
+
+    
+    if debug:
+        print(f"\n[Final Mask Attributes] ID: {final_mask_data['id']}")
+        print(f"  - Region Size:   {final_mask_data['mask_region_size']} pixels")
+        print(f"  - Variance:      {final_mask_data['variance']:.2f}")
+        print(f"  - Saturation:    {final_mask_data['saturation']:.2f}")
+        print(f"  - Average Value: {final_mask_data['avg_value']:.2f}\n")
+        print(f"  - Border Pixel: {final_mask_data['border_pixels']:.2f}\n")
+    
 
     if debug:
         final_filename = os.path.join(save_dir, f"FINAL_mask_{final_mask_data['id']}.png")

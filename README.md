@@ -71,6 +71,7 @@ pip install pycurl
 pip install segment_anything #1.0
 pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+cu121.html
 pip install torch_geometric
+pip install gymnasium_robotics
 
 download sam_vit_h_4b8939.pth and put it under sam_vit
 

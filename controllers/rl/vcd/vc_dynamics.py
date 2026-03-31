@@ -12,7 +12,7 @@ from tqdm import tqdm
 import torch
 import torch_geometric
 
-from softgym.utils.visualization import save_numpy_as_gif
+# from softgym.utils.visualization import save_numpy_as_gif
 
 from .models import GNN
 from .dataset import ClothDataset

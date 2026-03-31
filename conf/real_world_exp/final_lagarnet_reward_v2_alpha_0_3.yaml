@@ -1,9 +1,9 @@
 # @package _global_
 defaults:
-  - /agent/lagarnet@agent: lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check  # Points to conf/agent/human_agent.yaml
+  - /agent/lagarnet@agent: final_lagarnet_reward_v2_alpha_0_3  # Points to conf/agent/human_agent.yaml
   - /real_world_arena@arena: single_arm_pick_and_place     # Points to conf/arena/dual_arm.yaml
   - /task@task: real_world_flattening      # Points to conf/task/folding.yaml
 
 project_name: bimanual_garment_folding
-exp_name: lagarnet_single_picker_single_primitive_multi_longsleeve_flattening_sanity_check
+exp_name: final_lagarnet_reward_v2_alpha_0_3
 measure_time: True

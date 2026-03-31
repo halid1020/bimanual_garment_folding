@@ -5,7 +5,7 @@ import torch
 
 from torch_geometric.data import Dataset
 
-import pyflex
+# import pyflex
 
 from .utils.utils import downsample, load_data, \
     load_data_list, store_h5_data, \

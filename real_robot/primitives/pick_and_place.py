@@ -169,7 +169,7 @@ class PickAndPlaceSkill:
     def _execute_single_arm(self, robot, pick_pt, place_pt, rot, force_threshold):
         # 1. Approach & Grasp
         approach_pick = np.concatenate([pick_pt + [0,0,APPROACH_DIST], rot])
-        robot.movel(approach_pick, speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+        robot.movel(approach_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
         
         grasp_pose = move_until_contact(robot, approach_pick, APPROACH_DIST+0.1, force_threshold=force_threshold)
         robot.close_gripper()
@@ -204,9 +204,9 @@ class PickAndPlaceSkill:
 
         # Retract
         approach_place = np.concatenate([place_pt + [0,0,APPROACH_DIST], rot])
-        robot.movel(approach_place, speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+        robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
         if self.home_after:
-             robot.home(speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+             robot.home(speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
 
     
     def _execute_dual_arm(self, p0_pick, p0_place, rot0, p1_pick, p1_place, rot1):

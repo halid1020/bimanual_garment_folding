@@ -351,7 +351,7 @@ class DualArmArena(Arena):
             if self.snap_to_cloth_mask:
                 mask = self.cloth_mask
                 kernel = np.ones((3, 3), np.uint8) 
-                eroded_mask = cv2.erode(mask, kernel, iterations=10)
+                eroded_mask = cv2.erode(mask, kernel, iterations=5)
                 
                 if np.sum(eroded_mask) == 0:
                     print("[Warning] Erosion removed entire mask. Using original mask.")

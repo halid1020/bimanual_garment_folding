@@ -14,6 +14,7 @@ from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from dotmap import DotMap
+import torchvision.models as models
 
 from actoris_harena import TrainableAgent
 from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
@@ -161,12 +162,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
        
        
         torch.backends.cudnn.benchmark = True
+        # Ensure persistent_workers is strictly False if num_workers is 0
+        num_workers = self.config.get('num_workers', 0)
+        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
+
         self.dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=self.config.batch_size, 
             shuffle=True,
+            num_workers=num_workers,
+            pin_memory=self.config.get('pin_memory', False),
+            persistent_workers=persistent
         )
-        self.dataset_inited = True
+
         #self.dataloader = None
     
     def _init_demo_policy_dataset(self, arenas):
@@ -395,7 +403,16 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         if self.vision_encoder_type == 'original':
             self.vision_encoder = get_resnet('resnet18', input_channel=self.input_channel)
             self.vision_encoder = replace_bn_with_gn(self.vision_encoder)
-       
+
+        elif self.vision_encoder_type == 'vit':
+            # Load pre-trained ViT. ViT-B/16 outputs a 768-dim embedding.
+            self.vision_encoder = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
+            # Strip the classification head to output raw 768-dim features
+            self.vision_encoder.heads = nn.Identity() 
+            
+            # Notice: No freezing logic! The encoder will train end-to-end.
+            print("[MultiPrimitiveDiffusion] ViT encoder initialized for end-to-end fine-tuning.")
+                        
         elif self.vision_encoder_type == 'gc_rssm_encoder':
             from ..rl.lagarnet.networks import ImageEncoder
             self.vision_encoder = ImageEncoder(
@@ -532,11 +549,20 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 output_channel=self.input_channel
             )
         elif self.rep_learn == 'predict-state':
-            # Create a simple MLP to project the visual embeddings to the state space
+            # Check if we are extending the prediction to include the goal state
+            self.predict_goal_state = self.config.get('predict_goal_state', False)
+            self.goal_state_dim = self.config.get('goal_state_dim', 30) # Default assuming 15 points * 2 (x,y)
+            
+            out_dim = self.config.state_dim
+            if self.predict_goal_state:
+                out_dim += self.goal_state_dim
+                print(f"[MultiPrimitiveDiffusion] state_predictor out_dim extended to {out_dim} (State + Goal)")
+
+            # Unified MLP predicting both current and goal states
             self.nets['state_predictor'] = nn.Sequential(
                 nn.Linear(self.config.obs_dim, 256),
                 nn.ReLU(),
-                nn.Linear(256, self.config.state_dim)
+                nn.Linear(256, out_dim)
             )
 
         self._test_network()
@@ -575,6 +601,34 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 )
                 # (2,512)
                 obs = image_features.reshape(*image.shape[:2],-1)
+            elif self.vision_encoder_type == 'vit':
+                import torchvision.transforms.functional as TF
+                
+                # Dummy input: 5D (Batch=1, Time=obs_horizon, Channels=6, H=128, W=128)
+                image = torch.zeros(
+                    (1, self.config.obs_horizon, 6, 128, 128), 
+                   
+                )
+                
+                # FLATTEN FIRST: (B*T, C, H, W) -> (1, 6, 128, 128)
+                flat_image = image.flatten(end_dim=1)
+                
+                # NOW SLICE CHANNELS:
+                rgb_part = flat_image[:, :3, :, :]
+                goal_rgb_part = flat_image[:, 3:6, :, :]
+
+                # Resize to 224x224 for ViT
+                rgb_resized = TF.resize(rgb_part, [224, 224], antialias=True)
+                goal_resized = TF.resize(goal_rgb_part, [224, 224], antialias=True)
+
+                # Forward pass
+                obs_feature = self.nets['vision_encoder'](rgb_resized) 
+                goal_feature = self.nets['vision_encoder'](goal_resized)
+
+                # Concatenate features (768 + 768 = 1536) and reshape back to (B, T, Feature_Dim)
+                obs = torch.cat([obs_feature, goal_feature], dim=-1)
+                obs = obs.reshape(*image.shape[:2], -1)
+
             elif self.vision_encoder_type == 'gc_rssm_encoder':
                 image = torch.zeros(
                     (1, self.config.obs_horizon,
@@ -737,219 +791,253 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon]\
                 .flatten(end_dim=1).float()
 
+
             if 'action' in nbatch:
                 nbatch['action'] = nbatch['action'].float()
             
             if 'vector_state' in nbatch:
                  nbatch['vector_state'] = nbatch['vector_state'].float()
-          
-            # encoder vision features
-            #print('[diffusion] input obs shape', input_obs.shape)
-            # image_features = self.nets['vision_encoder'](
-            #     input_obs)
-            # obs_features = image_features.reshape(
-            #     B, self.config.obs_horizon, -1)
-
-            if self.vision_encoder_type == 'original':
-                image_features = self.nets['vision_encoder'](input_obs)
-                obs_features = image_features.reshape(
-                    B, self.config.obs_horizon, -1)
-                
-            elif self.vision_encoder_type == 'gc_rssm_encoder':
-                # Slicing the 6-channel image into two 3-channel images (obs and goal)
-                # image shape is expected to be (obs_horizon, 6, H, W)
-                rgb_part = input_obs[:, :3, :, :]
-                goal_rgb_part = input_obs[:, 3:6, :, :]
-
-                obs_feature = self.nets['vision_encoder'](rgb_part) 
-                goal_feature = self.nets['vision_encoder'](goal_rgb_part)
-
-                # Concatenate the two feature vectors along the last dimension
-                image_features = torch.cat([obs_feature, goal_feature], dim=-1)
-
-                obs_features = image_features.reshape(
-                    B, self.config.obs_horizon, -1)
             
-            elif self.vision_encoder_type == 'gc_rssm_dynamic':
-                rgb_part = input_obs[:, :3, :, :]
-                goal_rgb_part = input_obs[:, 3:6, :, :]
+            device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
+            use_amp = self.config.get('use_amp', False)
 
-                # input_obs is ALREADY flattened to 4D: (B * T, C, H, W)
-                T = self.config.obs_horizon
-                # B is already defined safely earlier in the train method!
+            with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
                 
-                # 1. Encode images directly without flattening again
-                obs_emb = self.nets['vision_encoder'](rgb_part).view(B, T, -1)
-                goal_emb = self.nets['vision_encoder'](goal_rgb_part).view(B, T, -1)
 
-                # 2. Swap to (Time, Batch, Dim) for RSSM
-                obs_emb = obs_emb.transpose(0, 1)
-                goal_emb = goal_emb.transpose(0, 1)
-
-                # 3. Setup initial states and dummy actions
-                dummy_actions = torch.zeros(T, B, self.network_action_dim, device=self.device)
-                init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
-                init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
-                nonterminals = torch.ones(T, B, 1, device=self.device)
-
-                # 4. Unroll Transition Model
-                hidden = self.nets['transition_model'](
-                    prev_state=init_state,
-                    actions=dummy_actions,
-                    prev_belief=init_belief,
-                    goal_observations=goal_emb,
-                    observations=obs_emb,
-                    nonterminals=nonterminals
-                )
-
-                beliefs = hidden[0]          # (T, B, deter_dim)
-                posterior_states = hidden[4] # (T, B, stoch_dim)
-
-                # 5. Concatenate latents and swap back to (Batch, Time, Dim)
-                latents = torch.cat([beliefs, posterior_states], dim=-1)
-                obs_features = latents.transpose(0, 1) # (B, T, deter+stoch)
-            
-            #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
-
-            rep_loss = torch.tensor(0.0, device=self.device)
-            #state_pred_loss = torch.tensor(0.0, device=self.device) # Add initialization
-
-            if self.rep_learn == 'auto-encoder':
-                # existing auto-encoder logic
-                reconstructed_obs = self.nets['vision_decoder'](image_features)
-                rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
-            
-            # Add this block for predict-state logic
-            elif self.rep_learn == 'predict-state':
-                # obs_features shape is (B, obs_horizon, feature_dim)
-                # Network outputs (B, obs_horizon, state_dim)
-                pred_state = self.nets['state_predictor'](obs_features) 
+                if self.vision_encoder_type == 'original':
+                    image_features = self.nets['vision_encoder'](input_obs)
+                    obs_features = image_features.reshape(
+                        B, self.config.obs_horizon, -1)
                 
-                state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                if state_key in nbatch:
-                    # Slice to the observation horizon
-                    gt_state = nbatch[state_key][:, :self.config.obs_horizon] 
+                elif self.vision_encoder_type == 'vit':
+                    # input_obs is ALREADY 4D here: (B * T, 6, H, W)
+                    #print('input_obs shape',  input_obs.shape)
+                    rgb_part = input_obs[:, :3, :, :]
+                    goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                    import torchvision.transforms.functional as TF
+                    # REMOVED .flatten(end_dim=1) -> Keep it 4D!
+                    rgb_resized = TF.resize(rgb_part, [224, 224], antialias=True)
+                    goal_resized = TF.resize(goal_rgb_part, [224, 224], antialias=True)
+
+                    obs_feature = self.nets['vision_encoder'](rgb_resized) 
+                    goal_feature = self.nets['vision_encoder'](goal_resized)
+
+                    # Concatenate -> Shape: (B * T, 1536)
+                    image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
                     
-                    # Flatten the state. Example: [15, 2] -> 30
-                    gt_state = gt_state.reshape(B, self.config.obs_horizon, -1).float() 
+                elif self.vision_encoder_type == 'gc_rssm_encoder':
+                    # Slicing the 6-channel image into two 3-channel images (obs and goal)
+                    # image shape is expected to be (obs_horizon, 6, H, W)
+                    rgb_part = input_obs[:, :3, :, :]
+                    goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                    obs_feature = self.nets['vision_encoder'](rgb_part) 
+                    goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+
+                    # Concatenate the two feature vectors along the last dimension
+                    image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+
+                    obs_features = image_features.reshape(
+                        B, self.config.obs_horizon, -1)
+                
+                elif self.vision_encoder_type == 'gc_rssm_dynamic':
+                    rgb_part = input_obs[:, :3, :, :]
+                    goal_rgb_part = input_obs[:, 3:6, :, :]
+
+                    # input_obs is ALREADY flattened to 4D: (B * T, C, H, W)
+                    T = self.config.obs_horizon
+                    # B is already defined safely earlier in the train method!
                     
-                    rep_loss = nn.functional.mse_loss(pred_state, gt_state)
-                else:
-                    print(f"Warning: {state_key} not found in batch for state prediction.")
+                    # 1. Encode images directly without flattening again
+                    obs_emb = self.nets['vision_encoder'](rgb_part).view(B, T, -1)
+                    goal_emb = self.nets['vision_encoder'](goal_rgb_part).view(B, T, -1)
 
-            # (B,obs_horizon,D)
+                    # 2. Swap to (Time, Batch, Dim) for RSSM
+                    obs_emb = obs_emb.transpose(0, 1)
+                    goal_emb = goal_emb.transpose(0, 1)
 
-            # concatenate vision feature and low-dim obs
-            if self.config.include_state:
-                vector_state = nbatch['vector_state'][:, :self.config.obs_horizon]
-                obs_features = torch.cat([obs_features, vector_state], dim=-1)
-            obs_cond = obs_features.flatten(start_dim=1)
+                    # 3. Setup initial states and dummy actions
+                    dummy_actions = torch.zeros(T, B, self.network_action_dim, device=self.device)
+                    init_belief = torch.zeros(B, self.config.deterministic_latent_dim, device=self.device)
+                    init_state = torch.zeros(B, self.config.stochastic_latent_dim, device=self.device)
+                    nonterminals = torch.ones(T, B, 1, device=self.device)
 
-            prim_loss = torch.tensor(0)
-            if self.primitive_integration == 'one-hot-encoding':
-                
-                # 1. Predict primitive ID from observation features
-                prim_logits = self.nets['prim_class_head'](obs_cond)
-                
-                # 2. Extract ground truth primitive ID from the action encoding
-                # Based on your _init_demo_policy_dataset, prim_id is encoded in action[0]
-                # We decode it back to the class index (0 to K-1)
-                prim_bin = nbatch['action'][:, 0, 0] 
-                gt_prim_ids = (((prim_bin + 1) / 2) * self.K).long()
-                gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.K - 1)
-                
-                # 3. Calculate Cross Entropy Loss
-                prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
-
-                if self.update_step % self.log_prim_metrics_every == 0:
-
-                    metrics = compute_classification_metrics(
-                        prim_logits.detach(),
-                        gt_prim_ids.detach(),
-                        self.K
+                    # 4. Unroll Transition Model
+                    hidden = self.nets['transition_model'](
+                        prev_state=init_state,
+                        actions=dummy_actions,
+                        prev_belief=init_belief,
+                        goal_observations=goal_emb,
+                        observations=obs_emb,
+                        nonterminals=nonterminals
                     )
 
-                    wandb_metrics = {
-                        f"train/prim_{k}": v for k, v in metrics.items()
-                    }
+                    beliefs = hidden[0]          # (T, B, deter_dim)
+                    posterior_states = hidden[4] # (T, B, stoch_dim)
 
-                    self.logger.log(wandb_metrics, step=self.update_step)
-                    
-                    import wandb
-                    confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                        probs=None,
-                        y_true=gt_prim_ids.cpu().numpy(),
-                        preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
-                        class_names=[p['name'] for p in self.primitives]
-                    )}
-                    self.logger.log(confusion, step=self.update_step)
-                                
-                # 4. Create one-hot encoding for conditioning the Diffusion net
-                # Use ground truth during training (Teacher Forcing)
-                prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
+                    # 5. Concatenate latents and swap back to (Batch, Time, Dim)
+                    latents = torch.cat([beliefs, posterior_states], dim=-1)
+                    obs_features = latents.transpose(0, 1) # (B, T, deter+stoch)
                 
-                # 5. Concatenate to obs_cond
-                obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-                nbatch['action'] = nbatch['action'][:, :, 1:]
-                # print(f'[MultiPrimitiveDiffusion, train] obs_cond shape {obs_cond.shape}')
+                #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 
+                rep_loss = torch.tensor(0.0, device=self.device)
+                #state_pred_loss = torch.tensor(0.0, device=self.device) # Add initialization
 
-            # sample noise to add to actions
-            noise = torch.randn(nbatch['action'].shape, device=self.device)
-            #print('noise shape', noise.shape)
-
-            # sample a diffusion iteration for each data point
-            timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps,
-                (B,), device=self.device
-            ).long()
-
-            # add noise to the clean images according to the noise magnitude at each diffusion iteration
-            # (this is the forward diffusion process)
-            #print('action before adding noise',  nbatch['action'].shape)
-            noisy_actions = self.noise_scheduler.add_noise(
-                nbatch['action'], noise, timesteps)
-
-            #print('noisy actino shape', noisy_actions.shape)
-
-            # predict the noise residual
-            noise_pred = self.noise_pred_net(
-                noisy_actions, timesteps, global_cond=obs_cond)
-
-            if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
-                # nbatch['action']: (B, T, action_dim)
-                actions = nbatch['action'] # bin encoded prim acctions.
-
-                # primitive bin is in action[..., 0] ∈ [-1, 1]
-                prim_bin = actions[:, 0, 0]  # (B,)
-
-                # same decoding logic you use in inference
-                prim_ids = (((prim_bin + 1) / 2) * self.K).long()
-                prim_ids = torch.clamp(prim_ids, 0, self.K - 1).cpu().detach().numpy()
-                B, T, D = actions.shape
-                device = actions.device
-
-                mask = torch.zeros((B, T, D), device=device)
-
-                for b in range(B):
-                    mask[b] = self.primitive_action_masks[prim_ids[b]].clone().to(device)
-
-                # apply mask
-                diff = (noise_pred - noise) * mask
-
-                # normalize by number of valid elements
-                valid_count = mask.sum().clamp(min=1.0)
-
-                actor_noise_loss = (diff ** 2).sum() / valid_count
+                if self.rep_learn == 'auto-encoder':
+                    # existing auto-encoder logic
+                    reconstructed_obs = self.nets['vision_decoder'](image_features)
+                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs)
+                
+                # Add this block for predict-state logic
+                elif self.rep_learn == 'predict-state':
+                    # Network outputs (B, obs_horizon, state_dim) OR (B, obs_horizon, state_dim + goal_state_dim)
+                    pred_combined = self.nets['state_predictor'](obs_features) 
                     
-            else:
-                # L2 loss
-                actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors = []
+                    
+                    # 1. Fetch current state ground truth
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon] 
+                        gt_state = gt_state.reshape(B, self.config.obs_horizon, -1).float() 
+                        gt_tensors.append(gt_state)
+                    else:
+                        print(f"Warning: {state_key} not found in batch for state prediction.")
 
-            total_loss = actor_noise_loss + prim_loss #co-update the encoder
-            if self.rep_learn in ['auto-encoder', 'predict-state']:
-                #print('loss!')
-                total_loss += rep_loss * self.config.get('rep_weight', 0.1)
+                    # 2. Fetch goal state ground truth (if enabled)
+                    if getattr(self, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            # Assuming goal keys have the same temporal structure or broadcast well
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon]
+                            gt_goal = gt_goal.reshape(B, self.config.obs_horizon, -1).float()
+                            gt_tensors.append(gt_goal)
+                        else:
+                            print(f"Warning: {goal_key} not found in batch for goal prediction.")
+
+                    # 3. Concatenate and compute unified loss
+                    if gt_tensors:
+                        gt_combined = torch.cat(gt_tensors, dim=-1) # Shape: (B, obs_horizon, out_dim)
+                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
+
+                # (B,obs_horizon,D)
+
+                # concatenate vision feature and low-dim obs
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon]
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+                obs_cond = obs_features.flatten(start_dim=1)
+
+                prim_loss = torch.tensor(0)
+                if self.primitive_integration == 'one-hot-encoding':
+                    
+                    # 1. Predict primitive ID from observation features
+                    prim_logits = self.nets['prim_class_head'](obs_cond)
+                    
+                    # 2. Extract ground truth primitive ID from the action encoding
+                    # Based on your _init_demo_policy_dataset, prim_id is encoded in action[0]
+                    # We decode it back to the class index (0 to K-1)
+                    prim_bin = nbatch['action'][:, 0, 0] 
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.K - 1)
+                    
+                    # 3. Calculate Cross Entropy Loss
+                    weights_list = self.config.get('prim_class_weights', [1.0] * self.K)
+                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
+                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
+
+                    if self.update_step % self.log_prim_metrics_every == 0:
+
+                        metrics = compute_classification_metrics(
+                            prim_logits.detach(),
+                            gt_prim_ids.detach(),
+                            self.K
+                        )
+
+                        wandb_metrics = {
+                            f"train/prim_{k}": v for k, v in metrics.items()
+                        }
+
+                        self.logger.log(wandb_metrics, step=self.update_step)
+                        
+                        import wandb
+                        confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                            probs=None,
+                            y_true=gt_prim_ids.cpu().numpy(),
+                            preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
+                            class_names=[p['name'] for p in self.primitives]
+                        )}
+                        self.logger.log(confusion, step=self.update_step)
+                                    
+                    # 4. Create one-hot encoding for conditioning the Diffusion net
+                    # Use ground truth during training (Teacher Forcing)
+                    prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
+                    
+                    # 5. Concatenate to obs_cond
+                    obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                    nbatch['action'] = nbatch['action'][:, :, 1:]
+                    # print(f'[MultiPrimitiveDiffusion, train] obs_cond shape {obs_cond.shape}')
+
+
+                # sample noise to add to actions
+                noise = torch.randn(nbatch['action'].shape, device=self.device)
+                #print('noise shape', noise.shape)
+
+                # sample a diffusion iteration for each data point
+                timesteps = torch.randint(
+                    0, self.noise_scheduler.config.num_train_timesteps,
+                    (B,), device=self.device
+                ).long()
+
+                # add noise to the clean images according to the noise magnitude at each diffusion iteration
+                # (this is the forward diffusion process)
+                #print('action before adding noise',  nbatch['action'].shape)
+                noisy_actions = self.noise_scheduler.add_noise(
+                    nbatch['action'], noise, timesteps)
+
+                #print('noisy actino shape', noisy_actions.shape)
+
+                # predict the noise residual
+                noise_pred = self.noise_pred_net(
+                    noisy_actions, timesteps, global_cond=obs_cond)
+
+                if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
+                    # nbatch['action']: (B, T, action_dim)
+                    actions = nbatch['action'] # bin encoded prim acctions.
+
+                    # primitive bin is in action[..., 0] ∈ [-1, 1]
+                    prim_bin = actions[:, 0, 0]  # (B,)
+
+                    # same decoding logic you use in inference
+                    prim_ids = (((prim_bin + 1) / 2) * self.K).long()
+                    prim_ids = torch.clamp(prim_ids, 0, self.K - 1).cpu().detach().numpy()
+                    B, T, D = actions.shape
+                    device = actions.device
+
+                    mask = torch.zeros((B, T, D), device=device)
+
+                    for b in range(B):
+                        mask[b] = self.primitive_action_masks[prim_ids[b]].clone().to(device)
+
+                    # apply mask
+                    diff = (noise_pred - noise) * mask
+
+                    # normalize by number of valid elements
+                    valid_count = mask.sum().clamp(min=1.0)
+
+                    actor_noise_loss = (diff ** 2).sum() / valid_count
+                        
+                else:
+                    # L2 loss
+                    actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
+
+                total_loss = actor_noise_loss + prim_loss #co-update the encoder
+                if self.rep_learn in ['auto-encoder', 'predict-state']:
+                    #print('loss!')
+                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
             # optimize
             total_loss.backward()
             
@@ -1109,6 +1197,25 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             if self.vision_encoder_type == 'original':
                 obs_features = self.nets['vision_encoder'](image)
+
+            
+            elif self.vision_encoder_type == 'vit':
+                import torchvision.transforms.functional as TF
+                # image shape from buffer is (Time, Channels=6, H, W)
+                
+                rgb_part = image[:, :3, :, :]
+                goal_rgb_part = image[:, 3:6, :, :]
+
+                # Resize
+                rgb_resized = TF.resize(rgb_part, [224, 224], antialias=True)
+                goal_resized = TF.resize(goal_rgb_part, [224, 224], antialias=True)
+
+                # Extract features
+                obs_feature = self.nets['vision_encoder'](rgb_resized.to(self.device)) 
+                goal_feature = self.nets['vision_encoder'](goal_resized.to(self.device))
+
+                # Concatenate the two feature vectors along the last dimension
+                obs_features = torch.cat([obs_feature, goal_feature], dim=-1)
             
             elif self.vision_encoder_type == 'gc_rssm_encoder':
                 # Slicing the 6-channel image into two 3-channel images (obs and goal)

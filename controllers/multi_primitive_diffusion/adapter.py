@@ -1108,7 +1108,59 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             if self.primitive_integration == 'one-hot-encoding':
                 self.logger.log({'train/prim_loss_raw': prim_loss.item(), 
                                 'train/prim_loss_weighted': (prim_loss * prim_weight).item()}, step=self.update_step)
-                
+            
+            # ==========================================================
+            # --- PERIODIC FULL DENOISING METRIC EVALUATION ---
+            # ==========================================================
+            log_interval = self.config.get('log_state_eval_every', 500) # Configure how often this runs
+            
+            if self.rep_learn == 'predict-state-with-action' and self.update_step % log_interval == 0:
+                with torch.no_grad():
+                    self.nets.eval() # Switch to eval mode
+                    
+                    # Start from pure noise
+                    eval_naction = torch.randn((B, self.config.pred_horizon, self.diffusion_dim), device=self.device)
+                    
+                    if loss_type == 'ot_flow_match':
+                        num_steps = self.config.num_diffusion_iters
+                        dt = 1.0 / num_steps
+                        for i in range(num_steps):
+                            t_val = i / num_steps
+                            # Create a batch-sized timestep tensor
+                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                            v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = eval_naction + v_pred * dt
+                    else:
+                        self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                        for k in self.noise_scheduler.timesteps:
+                            # Create a batch-sized timestep tensor
+                            timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
+                            n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = self.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+
+                    # Calculate and Log Metrics against ground truth
+                    act_dim = self.network_action_dim
+                    state_dim = self.config.state_dim
+                    num_kpts = state_dim // 2
+                    
+                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    
+                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
+                    self.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.update_step)
+                    
+                    if getattr(self, 'predict_goal_state', False):
+                        goal_dim = getattr(self, 'goal_state_dim', 30)
+                        num_goal_kpts = goal_dim // 2
+                        
+                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        
+                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
+                        self.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.update_step)
+
+                    self.nets.train() # Safely switch back to train mode
+
             self.update_step += 1
 
     def _build_primitive_action_masks(self):

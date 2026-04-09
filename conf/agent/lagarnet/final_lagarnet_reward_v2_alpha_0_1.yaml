@@ -164,6 +164,7 @@ policy:
     obj_mask: "from_env"
     debug: True
     cost_fn: 'from_model'
+    apply_workspace: True
 
 test_horizons: [1, 2, 4] 
 action_horizon: 50

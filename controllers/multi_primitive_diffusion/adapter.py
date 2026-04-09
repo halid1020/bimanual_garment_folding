@@ -338,21 +338,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         )
         self.dataset_inited = True
 
-    # def _init_optimizer(self):
-    #     self.ema = EMAModel(
-    #         parameters=self.nets.parameters(),
-    #         power=0.75)
-        
-    #     self.optimizer = torch.optim.AdamW(
-    #         params=self.nets.parameters(),
-    #         lr=1e-4, weight_decay=1e-6)#
-
-    #     self.lr_scheduler = get_scheduler(
-    #         name='cosine',
-    #         optimizer=self.optimizer,
-    #         num_warmup_steps=500,
-    #         num_training_steps=self.config.total_update_steps ## make it manual
-    #     )
     
     def _init_optimizer(self):
         # Filter parameters that require gradients
@@ -384,6 +369,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.clip_norm = self.config.get('grad_clip_norm', -1)
 
     def _init_networks(self):
+        self.rep_learn = self.config.get('rep_learn', 'none')
         self.input_channel = 3
         if self.config.input_obs == 'rgbd':
             self.input_channel = 4
@@ -511,12 +497,25 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         else:
             global_cond_dim = self.config.obs_dim * self.config.obs_horizon
 
+        # Determine the total dimension for diffusion
+        self.diffusion_dim = self.network_action_dim
+        if self.rep_learn == 'predict-state-with-action':
+            self.diffusion_dim += self.config.state_dim
+            
+            # --- NEW: Account for Goal State Dimension ---
+            self.predict_goal_state = self.config.get('predict_goal_state', False)
+            if self.predict_goal_state:
+                self.goal_state_dim = self.config.get('goal_state_dim', 30)
+                self.diffusion_dim += self.goal_state_dim
+                
+            print(f"[MultiPrimitiveDiffusion] Joint Action+State Diffusion Active. Total dim: {self.diffusion_dim}")
+
         # Check config to decide which backbone to use (defaults to unet)
         backbone_type = self.config.get('noise_pred_net', 'unet')
 
         if backbone_type == 'mlp':
             self.noise_pred_net = ConditionalMLP1D(
-                input_dim=self.network_action_dim,
+                input_dim=self.diffusion_dim,          # <--- Updated
                 global_cond_dim=global_cond_dim,
                 pred_horizon=self.config.pred_horizon,
                 hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
@@ -525,7 +524,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             )
         else:
             self.noise_pred_net = ConditionalUnet1D(
-                input_dim=self.network_action_dim,
+                input_dim=self.diffusion_dim,          # <--- Updated
                 global_cond_dim=global_cond_dim,
                 diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
             )
@@ -701,8 +700,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             # print('[MultiPrimitiveDiffusion, _test_network] obs', obs.shape)
             
+            test_dim = getattr(self, 'diffusion_dim', self.network_action_dim)
             noised_action = torch.randn(
-                (1, self.config.pred_horizon, self.network_action_dim))
+                (1, self.config.pred_horizon, test_dim))
             diffusion_iter = torch.zeros((1,))
             # print('noised action', noised_action.shape)
 
@@ -807,6 +807,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             if 'action' in nbatch:
                 nbatch['action'] = nbatch['action'].float()
+
             
             if 'vector_state' in nbatch:
                  nbatch['vector_state'] = nbatch['vector_state'].float()
@@ -994,58 +995,83 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     nbatch['action'] = nbatch['action'][:, :, 1:]
                     # print(f'[MultiPrimitiveDiffusion, train] obs_cond shape {obs_cond.shape}')
 
+                # ==========================================================
+                # --- NEW LOGIC: Create Joint Target AFTER action is sliced
+                # ==========================================================
+                if self.rep_learn == 'predict-state-with-action':
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float()
+                    gt_state = gt_state.reshape(B, self.config.pred_horizon, -1)
+                    
+                    # --- NEW: Append Goal State if active ---
+                    if getattr(self, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float()
+                            gt_goal = gt_goal.reshape(B, self.config.pred_horizon, -1)
+                            diffusion_target = torch.cat([nbatch['action'], gt_state, gt_goal], dim=-1)
+                        else:
+                            print(f"Warning: {goal_key} not found in batch for joint diffusion target!")
+                            diffusion_target = torch.cat([nbatch['action'], gt_state], dim=-1)
+                    else:
+                        diffusion_target = torch.cat([nbatch['action'], gt_state], dim=-1)
+                else:
+                    diffusion_target = nbatch['action']
 
-                # sample noise to add to actions
-                noise = torch.randn(nbatch['action'].shape, device=self.device)
-                #print('noise shape', noise.shape)
+                # --- APPLY DIFFUSION/OT TO JOINT TARGET ---
+                loss_type = self.config.get('loss_type', 'diffusion')
+                
+                if loss_type == 'ot_flow_match':
+                    noise = torch.randn_like(diffusion_target)
+                    x_1 = diffusion_target
+                    
+                    t = torch.rand((B,), device=self.device, dtype=x_1.dtype)
+                    t_expand = t.view(B, 1, 1)
+                    noisy_actions = (1 - t_expand) * noise + t_expand * x_1
+                    target = x_1 - noise
+                    
+                    timesteps = t * self.config.num_diffusion_iters
+                    noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+                else:
+                    noise = torch.randn(diffusion_target.shape, device=self.device)
+                    timesteps = torch.randint(
+                        0, self.noise_scheduler.config.num_train_timesteps,
+                        (B,), device=self.device
+                    ).long()
+                    
+                    noisy_actions = self.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
+                    noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+                    target = noise
 
-                # sample a diffusion iteration for each data point
-                timesteps = torch.randint(
-                    0, self.noise_scheduler.config.num_train_timesteps,
-                    (B,), device=self.device
-                ).long()
-
-                # add noise to the clean images according to the noise magnitude at each diffusion iteration
-                # (this is the forward diffusion process)
-                #print('action before adding noise',  nbatch['action'].shape)
-                noisy_actions = self.noise_scheduler.add_noise(
-                    nbatch['action'], noise, timesteps)
-
-                #print('noisy actino shape', noisy_actions.shape)
-
-                # predict the noise residual
-                noise_pred = self.noise_pred_net(
-                    noisy_actions, timesteps, global_cond=obs_cond)
-
+                # --- MASKING LOGIC UPDATE ---
                 if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
-                    # nbatch['action']: (B, T, action_dim)
-                    actions = nbatch['action'] # bin encoded prim acctions.
-
-                    # primitive bin is in action[..., 0] ∈ [-1, 1]
-                    prim_bin = actions[:, 0, 0]  # (B,)
-
-                    # same decoding logic you use in inference
+                    actions = nbatch['action']
+                    prim_bin = actions[:, 0, 0] 
                     prim_ids = (((prim_bin + 1) / 2) * self.K).long()
                     prim_ids = torch.clamp(prim_ids, 0, self.K - 1).cpu().detach().numpy()
-                    B, T, D = actions.shape
-                    device = actions.device
-
-                    mask = torch.zeros((B, T, D), device=device)
-
+                    B, T, _ = actions.shape
+                    
+                    # Create base action mask
+                    mask = torch.zeros((B, T, self.network_action_dim), device=self.device)
                     for b in range(B):
-                        mask[b] = self.primitive_action_masks[prim_ids[b]].clone().to(device)
+                        mask[b] = self.primitive_action_masks[prim_ids[b]].clone().to(self.device)
 
-                    # apply mask
-                    diff = (noise_pred - noise) * mask
+                    # If predicting state with action, append 1.0s to the mask so state loss is never ignored
+                    if self.rep_learn == 'predict-state-with-action':
+                        # --- NEW: Expand mask size for Goal State ---
+                        mask_extra_dim = self.config.state_dim
+                        if getattr(self, 'predict_goal_state', False):
+                            mask_extra_dim += getattr(self, 'goal_state_dim', 30)
+                            
+                        state_mask = torch.ones((B, T, mask_extra_dim), device=self.device)
+                        mask = torch.cat([mask, state_mask], dim=-1)
 
-                    # normalize by number of valid elements
+                    diff = (noise_pred - target) * mask
                     valid_count = mask.sum().clamp(min=1.0)
-
                     actor_noise_loss = (diff ** 2).sum() / valid_count
                         
                 else:
-                    # L2 loss
-                    actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
+                    actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
 
                 # Fetch the weight from config, default to 1.0 if not set
                 prim_weight = self.config.get('prim_weight', 1.0)
@@ -1299,42 +1325,63 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
             
 
+            # --- START SAMPLING ---
             naction = self.eval_action_sampler.sample(
                 state=sample_state, 
                 horizon=self.config.pred_horizon, 
-                action_dim=self.network_action_dim
+                action_dim=getattr(self, 'diffusion_dim', self.network_action_dim) # Sample joint space
             ).to(self.device)
             
             if self.primitive_integration == 'one-hot-encoding':
-                naction = self.constrain_action(naction, info, t=-1, debug=self.debug)
+                act_part = naction[..., :self.network_action_dim]
+                state_part = naction[..., self.network_action_dim:]
+                act_part = self.constrain_action(act_part, info, t=-1, debug=self.debug)
+                naction = torch.cat([act_part, state_part], dim=-1)
 
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
             
-            #torch.randn((1, self.config.pred_horizon, self.config.action_dim)).to(self.device)
-
-            self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-            noise_actions = [ts_to_np(naction[:, start:end])]
-            for k in self.noise_scheduler.timesteps:
-                # predict noise
-                noise_pred = self.nets['noise_pred_net'](
-                    sample=naction,
-                    timestep=k,
-                    global_cond=obs_cond
-                )
-
-                # inverse diffusion step (remove noise)
-                naction = self.noise_scheduler.step(
-                    model_output=noise_pred,
-                    timestep=k,
-                    sample=naction
-                ).prev_sample
-                
-                if self.primitive_integration == 'one-hot-encoding':
-                    naction = self.constrain_action(naction, info, t=k, debug=self.debug)
-
-                noise_actions.append(ts_to_np(naction[:, start:end]))
+            loss_type = self.config.get('loss_type', 'diffusion')
             
+            if loss_type == 'ot_flow_match':
+                num_steps = self.config.num_diffusion_iters
+                dt = 1.0 / num_steps
+                noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
+                
+                for i in range(num_steps):
+                    t_val = i / num_steps
+                    timestep_tensor = torch.tensor([t_val * self.config.num_diffusion_iters], device=self.device, dtype=torch.float32)
+                    
+                    v_pred = self.nets['noise_pred_net'](sample=naction, timestep=timestep_tensor, global_cond=obs_cond)
+                    naction = naction + v_pred * dt
+                    
+                    if self.primitive_integration == 'one-hot-encoding':
+                        act_part = naction[..., :self.network_action_dim]
+                        state_part = naction[..., self.network_action_dim:]
+                        act_part = self.constrain_action(act_part, info, t=i, debug=self.debug)
+                        naction = torch.cat([act_part, state_part], dim=-1)
+                        
+                    noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+                    
+            else:
+                self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
+                for k in self.noise_scheduler.timesteps:
+                    noise_pred = self.nets['noise_pred_net'](sample=naction, timestep=k, global_cond=obs_cond)
+                    naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
+                    
+                    if self.primitive_integration == 'one-hot-encoding':
+                        act_part = naction[..., :self.network_action_dim]
+                        state_part = naction[..., self.network_action_dim:]
+                        act_part = self.constrain_action(act_part, info, t=k, debug=self.debug)
+                        naction = torch.cat([act_part, state_part], dim=-1)
+
+                    noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+
+            # Extract the final action portion from the joint tensor for execution
+            final_action = naction[..., :self.network_action_dim]
+            action_pred = self.data_augmenter.postprocess({'action': ts_to_np(final_action)})['action'][0]
+                    
             # ---  Call Debug GIF Function ---
             if self.debug and self.primitive_integration == 'one-hot-encoding' and self.    constrain_action == 'bimanual_mask':
                 print('!!!!!! Constrain Debug!!!!!')
@@ -1366,15 +1413,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     step_idx=step_idx
                 )
 
+            # --- FIX: Slice out ONLY the action dimensions before post-processing ---
+            final_naction = naction[..., :self.network_action_dim]
+
             action_pred = self.data_augmenter.postprocess(
-                {'action': ts_to_np(naction)})['action'][0]
+                {'action': ts_to_np(final_naction)})['action'][0]
             
             self.buffer_actions[info['arena_id']] = deque(
                 action_pred[start:end,:], 
                 maxlen=self.config.action_horizon)
 
-        action = self.buffer_actions[info['arena_id']]\
-            .popleft().reshape(self.network_action_dim)
+        # Pop the action and safely reshape it
+        action = self.buffer_actions[info['arena_id']].popleft()
+        
+        # Double safeguard: ensure we strictly have the action dimensions here
+        action = action[:self.network_action_dim].reshape(self.network_action_dim)
        
         action = action.flatten()
 

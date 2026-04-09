@@ -1,0 +1,11 @@
+# @package transfer_eval
+
+eval_name: transfer_eval_gc_diffusion_canon_v0
+
+# Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
+train_exp_config: sim_exp/magpie/gc_diff_mp_longsleve_canon_align_100_demo_one_hot_pred_sem_key_v0
+
+# Define evaluation arenas & tasks as a standard list of strings
+eval_arenas:
+  - arena: magpie/multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace_contraints
+    task: canonicalisation_alignment_fix_pose_overstretch_penalty_1_no_big_bonus

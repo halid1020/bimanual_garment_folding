@@ -25,7 +25,7 @@ from data_augmentation.register_augmeters import build_data_augmenter
 
 from .utils \
     import get_resnet, replace_bn_with_gn, compute_classification_metrics
-from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder
+from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder, ConditionalMLP1D
 from .dataset import DiffusionDataset, normalize_data, unnormalize_data
 from .constrain_action_functions import name2func
 
@@ -511,11 +511,24 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         else:
             global_cond_dim = self.config.obs_dim * self.config.obs_horizon
 
-        self.noise_pred_net = ConditionalUnet1D(
-            input_dim=self.network_action_dim,
-            global_cond_dim=global_cond_dim,
-            diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
-        )
+        # Check config to decide which backbone to use (defaults to unet)
+        backbone_type = self.config.get('noise_pred_net', 'unet')
+
+        if backbone_type == 'mlp':
+            self.noise_pred_net = ConditionalMLP1D(
+                input_dim=self.network_action_dim,
+                global_cond_dim=global_cond_dim,
+                pred_horizon=self.config.pred_horizon,
+                hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
+                activation="relu",
+                dropout=0.1
+            )
+        else:
+            self.noise_pred_net = ConditionalUnet1D(
+                input_dim=self.network_action_dim,
+                global_cond_dim=global_cond_dim,
+                diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
+            )
 
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.config.num_diffusion_iters, # default value 100
@@ -1034,10 +1047,15 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     # L2 loss
                     actor_noise_loss = nn.functional.mse_loss(noise_pred, noise)
 
-                total_loss = actor_noise_loss + prim_loss #co-update the encoder
+                # Fetch the weight from config, default to 1.0 if not set
+                prim_weight = self.config.get('prim_weight', 1.0)
+                
+                # Apply the weight to the primitive loss
+                total_loss = actor_noise_loss + (prim_loss * prim_weight) #co-update the encoder
+                
                 if self.rep_learn in ['auto-encoder', 'predict-state']:
-                    #print('loss!')
                     total_loss += rep_loss * self.config.get('rep_weight', 0.1)
+                    
             # optimize
             total_loss.backward()
             
@@ -1062,8 +1080,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.logger.log({'train/actor_noise_loss': actor_noise_loss.item()}, step=self.update_step)
             self.logger.log({'train/total_loss': total_loss.item()}, step=self.update_step)
             if self.primitive_integration == 'one-hot-encoding':
-                self.logger.log({'train/prim_loss': prim_loss.item()}, step=self.update_step)
-            
+                self.logger.log({'train/prim_loss_raw': prim_loss.item(), 
+                                'train/prim_loss_weighted': (prim_loss * prim_weight).item()}, step=self.update_step)
+                
             self.update_step += 1
 
     def _build_primitive_action_masks(self):

@@ -87,14 +87,15 @@ primitive_integration: 'one-hot-encoding'
 primitive_classifier:
   hidden_dims: [256, 128]
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
-  dropout: 0.1            # 0.0 to disable
+  dropout: 0.4            # 0.0 to disable
   use_layernorm: true
-# prim_class_weights: [10.0, 1.0, 10.0]
+prim_class_weights: [10.0, 1.0, 10.0]
+prim_weight: 0.05
 
-# optimiser_class: 'adamw'
-# optimiser_params: 
-#   lr: 1e-4
-#   weight_decay: 1e-4 # org unset
+optimiser_class: 'adamw'
+optimiser_params: 
+  lr: 1e-4
+  weight_decay: 1e-4 # org unset
 
 
 primitives:
@@ -113,9 +114,6 @@ mask_out_irrelavent_action_dim: false
 vision_encoder: 'original'
 obs_dim: 512
 
-constrain_action: bimanual_mask
-
-
 # --- Training Optimizations ---
 # use_amp: True                # Enables Automatic Mixed Precision
 # num_workers: 4               # Number of CPU threads for data loading (0 means main thread only)
@@ -123,8 +121,8 @@ constrain_action: bimanual_mask
 # persistent_workers: True     # Keeps workers alive between epochs (only valid if num_workers > 0)
 
 # --- New Params for Unified State/Goal Prediction ---
-# predict_goal_state: True
-# goal_state_dim: 30     # 15 keypoints * 2 coordinates
-# goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
+predict_goal_state: True
+goal_state_dim: 30     # 15 keypoints * 2 coordinates
+goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
 
 data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_goal_sem_key_control_rotate

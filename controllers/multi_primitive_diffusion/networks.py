@@ -338,3 +338,97 @@ class MLPClassifier(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+class ConditionalMLP1D(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        global_cond_dim,
+        pred_horizon,
+        diffusion_step_embed_dim=256,
+        hidden_dims=[512, 512, 512],
+        activation="relu",
+        dropout=0.1
+    ):
+        """
+        input_dim: Dim of actions.
+        global_cond_dim: Dim of global conditioning (usually obs_horizon * obs_dim)
+        pred_horizon: The length of the action sequence (needed to flatten/unflatten)
+        diffusion_step_embed_dim: Size of positional encoding for diffusion iteration
+        hidden_dims: List of hidden layer dimensions for the MLP
+        """
+        super().__init__()
+        self.input_dim = input_dim
+        self.pred_horizon = pred_horizon
+
+        # Time step embedding (identical to ConditionalUnet1D for consistency)
+        dsed = diffusion_step_embed_dim
+        self.diffusion_step_encoder = nn.Sequential(
+            SinusoidalPosEmb(dsed),
+            nn.Linear(dsed, dsed * 4),
+            nn.Mish(),
+            nn.Linear(dsed * 4, dsed),
+        )
+
+        # The MLP takes the flattened action + time embedding + global conditioning
+        cond_dim = dsed + global_cond_dim
+        mlp_input_dim = (pred_horizon * input_dim) + cond_dim
+        output_dim = pred_horizon * input_dim
+
+        # Build the MLP layers
+        layers = []
+        dims = [mlp_input_dim] + list(hidden_dims)
+        act = get_activation(activation)
+
+        for i in range(len(hidden_dims)):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            layers.append(act)
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+        # Final projection to the flattened action dimension
+        layers.append(nn.Linear(dims[-1], output_dim))
+        self.net = nn.Sequential(*layers)
+
+        print("number of parameters (MLP backbone): {:e}".format(
+            sum(p.numel() for p in self.parameters()))
+        )
+
+    def forward(
+        self,
+        sample: torch.Tensor,
+        timestep: Union[torch.Tensor, float, int],
+        global_cond=None
+    ):
+        """
+        sample: (B, T, input_dim)
+        timestep: (B,) or int, diffusion step
+        global_cond: (B, global_cond_dim)
+        output: (B, T, input_dim)
+        """
+        B, T, C = sample.shape
+
+        # 1. Process time steps
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample.device)
+        timesteps = timesteps.expand(B)
+
+        global_feature = self.diffusion_step_encoder(timesteps)
+
+        # 2. Concatenate conditioning features
+        if global_cond is not None:
+            global_feature = torch.cat([global_feature, global_cond], dim=-1)
+
+        # 3. Flatten the action sample and concatenate with the conditioning
+        sample_flat = sample.reshape(B, -1) # (B, T*C)
+        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) # (B, T*C + cond_dim)
+
+        # 4. Forward pass through the dense network
+        out_flat = self.net(mlp_in) # (B, T*C)
+
+        # 5. Unflatten back to the original sequence shape
+        out = out_flat.reshape(B, T, C)
+        return out

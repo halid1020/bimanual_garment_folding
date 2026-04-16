@@ -7,6 +7,9 @@ import numpy as np
 from collections import deque
 import torch
 import cv2
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+cv2.setNumThreads(0)
 from dotmap import DotMap
 import torch.nn as nn
 import time
@@ -96,6 +99,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
         self.constrain_action = name2func[config.get('constrain_action', 'identity')]
+        self.val_interval = self.config.get('val_interval', 100)
+        self.validate_training = self.config.get('validate_training', 100)
 
         self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
@@ -142,17 +147,21 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
     def _init_dataset(self):
 
         if self.config.dataset_mode == 'diffusion':
-            dataset = DiffusionDataset(
+            train_dataset = DiffusionDataset(
                 dataset_path=self.config.dataset_path,
                 pred_horizon=self.config.pred_horizon,
                 obs_horizon=self.config.obs_horizon,
                 action_horizon=self.config.action_horizon
             )
-            self.stats = dataset.stats
+            self.stats = train_dataset.stats
         elif self.config.dataset_mode == 'general':
             from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             config = self.config.dataset_config.toDict()
-            dataset = TrajectoryDataset(**config)
+            train_dataset = TrajectoryDataset(**config, sample_mode='train')
+
+            if self.validate_training:
+                val_dataset = TrajectoryDataset(**config, sample_mode='val')
+
         else:
             raise ValueError('Invalid dataset mode')
 
@@ -172,8 +181,8 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             
             # Iterate through dataset to count primitive occurrences
             # Wrapped in tqdm as this might take a few seconds for large datasets
-            for i in tqdm(range(len(dataset)), desc="Calculating ROS Weights"):
-                action_data = dataset[i]['action']
+            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
+                action_data = train_dataset[i]['action']
                 
                 # Dynamically get the action key (usually 'default')
                 act_key = list(action_data.keys())[0]
@@ -208,17 +217,32 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         # Ensure persistent_workers is strictly False if num_workers is 0
         num_workers = self.config.get('num_workers', 0)
         persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
+        prefetch_factor = self.config.get('prefetch_factor', None)
 
         self.dataloader = torch.utils.data.DataLoader(
-            dataset,
+            train_dataset, # <-- Use train_dataset
             batch_size=self.config.batch_size, 
-            shuffle=shuffle_data,   # <--- Updated to use flag
-            sampler=sampler,        # <--- Added sampler
+            shuffle=shuffle_data,   
+            sampler=sampler,        
             num_workers=num_workers,
             pin_memory=self.config.get('pin_memory', False),
-            persistent_workers=persistent
+            persistent_workers=persistent,
+            prefetch_factor=prefetch_factor
         )
-    
+
+        # Create Validation Dataloader
+        if self.validate_training:
+            self.val_dataloader = torch.utils.data.DataLoader(
+                val_dataset,
+                batch_size=self.config.batch_size, 
+                shuffle=False, # No need to shuffle validation
+                num_workers=max(1, num_workers // 4), # Fewer workers for val
+                pin_memory=self.config.get('pin_memory', False),
+                persistent_workers=persistent
+            )
+        
+        self.dataset_inited = True
+        
     def _init_demo_policy_dataset(self, arenas):
         
         
@@ -230,7 +254,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         config = self.config.dataset_config #.toDict()
         config['io_mode'] = 'a'
         #print('config', config)
-        dataset = TrajectoryDataset(**config)
+        train_dataset = TrajectoryDataset(**config, sample_mode='train')
+
+        if self.validate_training:
+            val_dataset = TrajectoryDataset(**config, sample_mode='val')
 
         import actoris_harena as ag_ar
         policy = ag_ar.build_agent(
@@ -241,14 +268,14 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         qbar = tqdm(total=self.config.num_demos, 
                     desc='Collecting data from policy ...')
 
-        qbar.update(dataset.num_trajectories())
+        qbar.update(train_dataset.num_trajectories())
         qbar.refresh()
         
-        episode_id = dataset.num_trajectories()
+        episode_id = train_dataset.num_trajectories()
         train_configs = arena.get_train_configs()
-        while dataset.num_trajectories() < self.config.num_demos:
-            observations = {obs_type: [] for obs_type in dataset.obs_types}
-            actions = {act_type: [] for act_type in dataset.action_types}
+        while train_dataset.num_trajectories() < self.config.num_demos:
+            observations = {obs_type: [] for obs_type in train_dataset.obs_types}
+            actions = {act_type: [] for act_type in train_dataset.action_types}
 
             policy.reset([arena.id])
             print('[multi-primitive diffusion] reset episode id', episode_id)
@@ -268,7 +295,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
                             #print('k ', k, 'v', v)
-                            v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                            v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
                             observations[k].append(v_)
                         elif k in ['mask', 'goal_mask']:
                             
@@ -281,7 +308,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                                     directory="tmp/debug_mluti_primitive_diffusion"
                                 )
 
-                            v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                            v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
                             v_ = v_ > 0.9
                             
                             if self.debug:
@@ -331,10 +358,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
-                        v_ = cv2.resize(v, (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
                         observations[k].append(v_)
                     elif k in ['mask', 'goal_mask']:
-                        v_ = cv2.resize(v.astype(np.float32), (dataset.obs_config[k]['shape'][0], dataset.obs_config[k]['shape'][1]))
+                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
                         v_ = v_ > 0.9
                         observations[k].append(v_)
                     else:
@@ -359,7 +386,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 #print('actions default shape', actions['default'].shape)
                 skip = False
                 if not skip:
-                    dataset.add_trajectory(observations, actions)
+                    train_dataset.add_trajectory(observations, actions)
                     qbar.update(1)
                 
             episode_id += 1
@@ -367,19 +394,207 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             episode_id %= arena.get_num_episodes()
 
         arena.action_horizon = org_horizon
+        
+        # ==========================================================
+        # --- NEW FEATURE: Random Oversampling (ROS) via Config ---
+        # ==========================================================
+        use_ros = self.config.get('use_random_oversampling', False)
+        sampler = None
+        shuffle_data = True # Default to True unless using a sampler
+        
+        if use_ros and self.primitive_integration != 'none':
+            print("[MultiPrimitiveDiffusionAdapter] Initializing WeightedRandomSampler for ROS...")
+            from torch.utils.data import WeightedRandomSampler
+            
+            class_counts = np.zeros(self.K)
+            sample_classes = []
+            
+            # Iterate through dataset to count primitive occurrences
+            # Wrapped in tqdm as this might take a few seconds for large datasets
+            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
+                action_data = train_dataset[i]['action']
+                
+                # Dynamically get the action key (usually 'default')
+                act_key = list(action_data.keys())[0]
+                prim_bin = action_data[act_key][0][0] 
+                
+                # Decode primitive ID
+                prim_id = int(np.clip((((prim_bin + 1) / 2) * self.K), 0, self.K - 1))
+                class_counts[prim_id] += 1
+                sample_classes.append(prim_id)
+                
+            # Calculate weight per class (inverse frequency)
+            # np.where prevents division by zero if a primitive is entirely missing
+            class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
+            
+            # Assign a weight to every specific sample
+            sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
+            
+            # Create the PyTorch Sampler
+            sampler = WeightedRandomSampler(
+                weights=sample_weights, 
+                num_samples=len(sample_weights), 
+                replacement=True
+            )
+            
+            # PyTorch DataLoader throws an error if shuffle=True and sampler is provided
+            shuffle_data = False 
+            
+            print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
+        # ==========================================================
+
         torch.backends.cudnn.benchmark = True
+        # Ensure persistent_workers is strictly False if num_workers is 0
+        num_workers = self.config.get('num_workers', 0)
+        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
+        prefetch_factor = self.config.get('prefetch_factor', None)
         self.dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=self.config.batch_size, #64,
-            #num_workers=2,
-            shuffle=True,
-            # accelerate cpu-gpu transfer
-            #pin_memory=True,
-            # don't kill worker process afte each epoch
-            #persistent_workers=True
+            train_dataset, # <-- Use train_dataset
+            batch_size=self.config.batch_size, 
+            shuffle=shuffle_data,   
+            sampler=sampler,        
+            num_workers=num_workers,
+            pin_memory=self.config.get('pin_memory', False),
+            persistent_workers=persistent,
+            prefetch_factor=prefetch_factor
         )
+
+        # Create Validation Dataloader
+        if self.validate_training:
+            self.val_dataloader = torch.utils.data.DataLoader(
+                val_dataset,
+                batch_size=self.config.batch_size, 
+                shuffle=False, # No need to shuffle validation
+                num_workers=max(1, num_workers // 4), # Fewer workers for val
+                pin_memory=self.config.get('pin_memory', False),
+                persistent_workers=persistent
+            )
+
+
+
         self.dataset_inited = True
 
+    
+    def validate(self):
+        if not hasattr(self, 'val_dataloader'):
+            print("[Validation] No validation dataloader found. Skipping.")
+            return
+
+        self.nets.eval() # Switch to evaluation mode
+        
+        val_prim_losses = []
+        val_state_l2 = []
+        all_preds = []
+        all_gts = []
+        
+        print(f"--- Running Validation at Step {self.update_step} ---")
+        
+        with torch.no_grad():
+            for nbatch in self.val_dataloader:
+                
+                # Apply data augmenter for standardisation (train=False)
+                if self.config.dataset_mode == 'general':
+                    obs = nbatch['observation']
+                    action = nbatch['action']['default']
+                    nbatch = {v: k for v, k in obs.items()}
+                    nbatch['action'] = action.reshape(*action.shape[:2], -1)
+                    nbatch = self.data_augmenter(nbatch, train=False, device=self.device)
+
+                # ==========================================================
+                # --- ADDED: Reconstruct composite observation tensors ---
+                # ==========================================================
+                if self.config.input_obs == 'rgbd':
+                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask':
+                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask-goal':
+                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_rgb':
+                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_mask':
+                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+                # ==========================================================
+
+                B = nbatch[self.config.input_obs].shape[0]
+                input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
+                
+                # 1. Extract Vision Features (Match training logic)
+                if self.vision_encoder_type == 'original':
+                    image_features = self.nets['vision_encoder'](input_obs)
+                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                elif self.vision_encoder_type == 'gc_rssm_encoder':
+                    rgb_part = input_obs[:, :3, :, :]
+                    goal_rgb_part = input_obs[:, 3:6, :, :]
+                    obs_feature = self.nets['vision_encoder'](rgb_part) 
+                    goal_feature = self.nets['vision_encoder'](goal_rgb_part)
+                    image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                # (Add any other encoder variants you actively use here)
+
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+
+                obs_cond = obs_features.flatten(start_dim=1)
+
+                # 2. Validate Keypoint Precision (L2 Distance)
+                if self.rep_learn == 'predict-state':
+                    pred_combined = self.nets['state_predictor'](obs_features)
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                        
+                        # Compute L2 norm across keypoint coordinates
+                        state_dim = self.config.state_dim
+                        num_kpts = state_dim // 2
+                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
+                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
+                        
+                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
+                        val_state_l2.append(l2_dist.item())
+
+                # 3. Validate Primitive Classification Accuracy
+                if self.primitive_integration == 'one-hot-encoding':
+                    prim_logits = self.nets['prim_class_head'](obs_cond)
+                    
+                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.K - 1)
+                    
+                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
+                    val_prim_losses.append(loss.item())
+                    
+                    preds = torch.argmax(prim_logits, dim=-1)
+                    all_preds.extend(preds.cpu().numpy())
+                    all_gts.extend(gt_prim_ids.cpu().numpy())
+
+        # 4. Aggregate and Log Metrics
+        metrics = {}
+        if val_state_l2:
+            metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
+            
+        if val_prim_losses:
+            metrics['val/prim_loss'] = np.mean(val_prim_losses)
+            acc = np.mean(np.array(all_preds) == np.array(all_gts))
+            metrics['val/prim_accuracy'] = acc
+            
+            # Log Confusion Matrix to wandb
+            import wandb
+            if wandb.run is not None:
+                confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=all_gts,
+                    preds=all_preds,
+                    class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.primitives]
+                )}
+                self.logger.log(confusion, step=self.update_step)
+
+        if metrics:
+            self.logger.log(metrics, step=self.update_step)
+            print(f"Validation Results: {metrics}")
+
+        self.nets.train() # Switch back to training mode
     
     def _init_optimizer(self):
         # Filter parameters that require gradients
@@ -387,7 +602,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
         self.ema = EMAModel(
             parameters=trainable_params,
-            power=0.75)
+            power=self.config.get('ema_power', 0.75))
         
         opt_params = self.config.get('optimiser_params', {})
         if hasattr(opt_params, 'toDict'):
@@ -1202,6 +1417,11 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         self.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.update_step)
 
                     self.nets.train() # Safely switch back to train mode
+
+           
+            if self.validate_training and self.update_step > 0 \
+                and self.update_step % self.val_interval == 0:
+                self.validate()
 
             self.update_step += 1
 

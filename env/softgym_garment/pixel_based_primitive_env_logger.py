@@ -1,10 +1,13 @@
 import os
 import cv2
 import numpy as np
+import json
 from ..video_logger import VideoLogger
 import matplotlib.pyplot as plt
 
 from .draw_utils import *
+# Make sure to import your NumpyEncoder from wherever it lives in your project
+from real_robot.utils.save_utils import NumpyEncoder 
 
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
@@ -30,6 +33,50 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         out_dir = os.path.join(self.log_dir, filename, 'performance_visualisation')
         os.makedirs(out_dir, exist_ok=True)
 
+        # =======================================================================
+        # --- NEW: Setup Directory for Step Data and Save Internal States ---
+        # =======================================================================
+        episode_data_dir = os.path.join(self.log_dir, filename, f'episode_{eid}')
+        os.makedirs(episode_data_dir, exist_ok=True)
+
+        # Iterate through ALL steps to save internal states (including the final state)
+        for i, info in enumerate(result["information"]):
+            step_dir = os.path.join(episode_data_dir, f'step_{i}')
+            os.makedirs(step_dir, exist_ok=True)
+            
+            step_internal_state = info.get('internal_states')
+            
+            # Fallback if it's stored in the main result dict
+            if step_internal_state is None and 'internal_states' in result and i < len(result['internal_states']):
+                step_internal_state = result['internal_states'][i]
+
+            if step_internal_state is not None:
+                # 1. Make a shallow copy to safely mutate
+                state_to_save = step_internal_state.copy()
+                
+                # 2. Extract heavy arrays/tensors to save as .npy
+                npy_keys = [
+                    'noise_actions_history', 'primitive_probabilities',
+                    'predicted_keypoints', 'gt_keypoints',
+                    # Add any other big arrays you might have here like 'recon_obs', etc.
+                ]
+                
+                for key in npy_keys:
+                    if key in state_to_save:
+                        data_arr = state_to_save.pop(key)
+                        
+                        # Safely convert PyTorch tensors or Lists to numpy arrays
+                        if hasattr(data_arr, 'cpu'):
+                            data_arr = data_arr.cpu().detach().numpy()
+                        elif not isinstance(data_arr, np.ndarray):
+                            if data_arr is not None:
+                                data_arr = np.array(data_arr)
+                                
+                        if data_arr is not None:
+                            np.save(os.path.join(step_dir, f'{key}.npy'), data_arr)
+
+        # =======================================================================
+                    
         images = []
         for i, act in enumerate(actions):
             info = result["information"][i]
@@ -110,21 +157,17 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 primitive_color
             )
 
-
-
-            # RED   = (50, 50, 200)     # softer red
-            # BLUE  = (200, 50, 50)     # softer blue
-            # print('result length', len(result["information"]))
-            # print('action lenght', len(actions))
             # ================================
             #          FOLD / PICK-PLACE
             # ================================
             if key == "norm-pixel-pick-and-place":
-                applied_action = result["information"][i+1]['applied_action']
-                # print('applied action before', applied_action)
-                applied_action = applied_action['norm-pixel-pick-and-place']
-                # print('applied action', applied_action)
-                img = draw_pick_and_place(img, applied_action)
+                # ADDED BOUNDS CHECK
+                if i + 1 < len(result["information"]):
+                    info_next = result["information"][i+1]
+                    if 'applied_action' in info_next:
+                        applied_action = info_next['applied_action'].get('norm-pixel-pick-and-place')
+                        if applied_action is not None:
+                            img = draw_pick_and_place(img, applied_action)
 
             # ================================
             #        PICK & FLING
@@ -133,8 +176,10 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 pick_0 = norm_to_px(val[:2], W, H)
                 pick_1 = norm_to_px(val[2:4], W, H)
 
-                # Retrieve trajectory of NEXT environment step
-                traj = picker_traj[i + 1]
+                # ADDED BOUNDS CHECK
+                traj = None
+                if i + 1 < len(picker_traj):
+                    traj = picker_traj[i + 1]
 
                 ## TODO: do not overlap with the step-wise primitive information text
                 if traj is None or len(traj) == 0:
@@ -205,8 +250,9 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
             images.append(img)
 
-        # Add final frame
-        images.append(frames[-1])
+        # Add final frame safely
+        if len(frames) > len(images):
+             images.append(frames[-1])
 
         # ===========================================
         #  CONCAT images in a matplotlib grid
@@ -217,6 +263,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
         # Compute number of rows
         num_rows = (num_images + MAX_COLS - 1) // MAX_COLS
+        if num_rows == 0: num_rows = 1
 
         # Create the figure
         fig, axes = plt.subplots(

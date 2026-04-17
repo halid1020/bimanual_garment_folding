@@ -121,9 +121,9 @@ vision_encoder: 'original'
 obs_dim: 512
 
 # --- Training Optimizations --- 16 cpu
-# use_amp: True                
-# num_workers: 12              # 12 dedicated to data loading, 4 left for the main thread/OS
-# pin_memory: True             
+use_amp: True                
+# num_workers: 4              # 12 dedicated to data loading, 4 left for the main thread/OS
+# pin_memory: False             
 # persistent_workers: True     
 # prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
 

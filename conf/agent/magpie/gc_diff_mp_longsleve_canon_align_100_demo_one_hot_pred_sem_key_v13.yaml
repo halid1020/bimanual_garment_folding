@@ -22,8 +22,8 @@ train_mode: 'from_policy'
 demo_policy: "human-multi-primitive"
 demo_policy_config:
   overlay_goal_contour: True
-  
-validation_interval: 1000
+
+validation_interval: 5000
 val_interval: 100
 validate_training: True
 
@@ -44,6 +44,7 @@ dataset_config:
   data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
   data_dir: "./data/datasets"
   seq_length: 1
+  split_ratios: [0.0, 0.1, 0.9]
   io_mode: "w"
   cache_in_memory: True
   obs_config:
@@ -120,12 +121,12 @@ mask_out_irrelavent_action_dim: false
 vision_encoder: 'original'
 obs_dim: 512
 
-# --- Training Optimizations --- 16 cpu
-use_amp: True                
-num_workers: 12              # 12 dedicated to data loading, 4 left for the main thread/OS
-pin_memory: True             
-persistent_workers: True     
-prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
+# # --- Training Optimizations --- 16 cpu
+# use_amp: True                
+# num_workers: 12              # 12 dedicated to data loading, 4 left for the main thread/OS
+# pin_memory: True             
+# persistent_workers: True     
+# prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
 
 # --- New Params for Unified State/Goal Prediction ---
 predict_goal_state: True

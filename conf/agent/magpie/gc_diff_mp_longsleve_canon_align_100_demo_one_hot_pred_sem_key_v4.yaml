@@ -1,4 +1,5 @@
 name: multi-primitive-diffusion
+device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 action_dim: 8
 obs_horizon: 1

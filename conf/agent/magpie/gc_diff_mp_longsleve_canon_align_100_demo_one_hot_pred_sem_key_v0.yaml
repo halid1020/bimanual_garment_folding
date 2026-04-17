@@ -1,4 +1,5 @@
 name: multi-primitive-diffusion
+device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 action_dim: 8
 obs_horizon: 1
@@ -24,6 +25,10 @@ demo_policy_config:
   overlay_goal_contour: True
   
 validation_interval: 1000
+val_interval: 100
+validate_training: True
+
+
 total_update_steps: 100000
 eval_checkpoint: -1
 debug: False
@@ -43,6 +48,7 @@ dataset_config:
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True
+  split_ratios: [0.0, 0.1, 0.9]
   obs_config:
     
     mask: 

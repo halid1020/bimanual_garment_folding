@@ -228,10 +228,12 @@ class GarmentEnv(Arena):
         
         self.default_camera = self.default_config['camera_name']
         self.camera_config = self.default_config['camera_params'][self.default_camera]
+
+        self.camera_config['cam_position'][1] = self.config.get('camera_height', self.camera_config['cam_position'][1])
         camera_pos = self.camera_config['cam_position'].copy()
         # swap y and z
         camera_pos[1], camera_pos[2] = camera_pos[2], camera_pos[1]
-        #print('camera_pos', camera_pos)
+    
         self.camera_height = camera_pos[2]
         camera_angle = self.camera_config['cam_angle'].copy()
         camera_angle[1], camera_angle[2] = camera_angle[2], camera_angle[1]

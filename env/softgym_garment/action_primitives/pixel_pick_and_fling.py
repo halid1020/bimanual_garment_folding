@@ -105,7 +105,7 @@ class PixelPickAndFling():
         
         self.affordance_score =  self._calculate_affordance(dist_0, dist_1)
 
-        if p0[0] > p1[0]:
+        if p0[1] > p1[1]:
             p0, p1 = p1, p0
         
         if env.apply_workspace and env.readjust_to_workspace:

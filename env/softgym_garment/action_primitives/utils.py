@@ -49,6 +49,7 @@ def check_trajectories_close(pre_pick_positions, pick_positions, place_positions
 
 def readjust_norm_pixel_pick(pick_point, mask):
     H, W = mask.shape
+    print('H, W', H, W)
     pixel_action = ((pick_point + 1)/2 * np.array([H, W])).astype(np.int32)
     pixel_action = np.clip(pixel_action, 0, [H-1, W-1])
     points = [(pixel_action[0], pixel_action[1])]

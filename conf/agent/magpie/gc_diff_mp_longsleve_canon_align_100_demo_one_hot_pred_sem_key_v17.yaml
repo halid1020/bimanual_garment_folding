@@ -27,7 +27,7 @@ validation_interval: 5000
 val_interval: 1000
 validate_training: True
 
-total_update_steps: 50000
+total_update_steps: 100000
 eval_checkpoint: -1
 debug: False
 add_all_demos: True
@@ -43,9 +43,9 @@ dataset_mode: "general"
 dataset_config:
   data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
   data_dir: "./data/datasets"
+  split_ratios: [0.0, 0.1, 0.9]
   seq_length: 1
   io_mode: "w"
-  split_ratios: [0.0, 0.1, 0.9]
   cache_in_memory: True
   obs_config:
     
@@ -94,10 +94,11 @@ primitive_integration: 'one-hot-encoding'
 primitive_classifier:
   hidden_dims: [256, 128]
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
-  dropout: 0.4            # 0.0 to disable
+  dropout: 0.5            # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [10.0, 1.0, 10.0]
+prim_class_weights: [2.5, 1.0, 1.0]
 prim_weight: 0.01
+use_random_oversampling: True
 
 ## Following is the parameter from the fast conditional decoupling paper
 batch_size: 256
@@ -120,10 +121,10 @@ mask_out_irrelavent_action_dim: false
 vision_encoder: 'original'
 obs_dim: 512
 
-# --- Training Optimizations --- 16 cpu
-use_amp: True                
-# num_workers: 4              # 12 dedicated to data loading, 4 left for the main thread/OS
-# pin_memory: False             
+# # --- Training Optimizations --- 16 cpu
+# use_amp: True                
+# num_workers: 12              # 12 dedicated to data loading, 4 left for the main thread/OS
+# pin_memory: True             
 # persistent_workers: True     
 # prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
 

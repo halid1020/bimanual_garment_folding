@@ -484,6 +484,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         
         val_prim_losses = []
         val_state_l2 = []
+        val_action_mse = []
         all_preds = []
         all_gts = []
         
@@ -501,7 +502,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     nbatch = self.data_augmenter(nbatch, train=False, device=self.device)
 
                 # ==========================================================
-                # --- ADDED: Reconstruct composite observation tensors ---
+                # --- Reconstruct composite observation tensors ---
                 # ==========================================================
                 if self.config.input_obs == 'rgbd':
                     nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
@@ -513,7 +514,6 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
                 if self.config.input_obs == 'rgb+goal_mask':
                     nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
-                # ==========================================================
 
                 B = nbatch[self.config.input_obs].shape[0]
                 input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
@@ -568,8 +568,60 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     preds = torch.argmax(prim_logits, dim=-1)
                     all_preds.extend(preds.cpu().numpy())
                     all_gts.extend(gt_prim_ids.cpu().numpy())
+                    
+                    # Create one-hot encoding for the diffusion condition
+                    # (Using predicted primitives for a true inference evaluation)
+                    prim_one_hot = nn.functional.one_hot(preds, num_classes=self.K).float()
+                    obs_cond_diff = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                    
+                    # The ground truth continuous action removes the first dim (primitive bin)
+                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
+                else:
+                    obs_cond_diff = obs_cond
+                    gt_action = nbatch['action'].to(self.device)
 
-        # 4. Aggregate and Log Metrics
+                # ==========================================================
+                # --- 4. Action Parameter Inference & Error Calculation ---
+                # ==========================================================
+                # Start from pure noise
+                eval_naction = torch.randn((B, self.config.pred_horizon, self.diffusion_dim), device=self.device)
+                loss_type = self.config.get('loss_type', 'diffusion')
+                
+                # Reverse Diffusion / Flow Matching Loop
+                if loss_type == 'ot_flow_match':
+                    num_steps = self.config.num_diffusion_iters
+                    dt = 1.0 / num_steps
+                    for i in range(num_steps):
+                        t_val = i / num_steps
+                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                        v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                        eval_naction = eval_naction + v_pred * dt
+                else:
+                    self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                    for k in self.noise_scheduler.timesteps:
+                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
+                        n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                        eval_naction = self.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+                
+                # Extract the continuous action parameters (ignore the state prediction part if joint diffusion)
+                pred_action = eval_naction[..., :self.network_action_dim]
+                
+                # Calculate Action Parameter MSE
+                if self.primitive_integration != 'none' and getattr(self, 'mask_out_irrelavent_action_dim', False):
+                    # Masking based on ground truth primitive to properly evaluate intended action parameters
+                    mask = torch.zeros((B, self.config.pred_horizon, self.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                    
+                    diff = (pred_action - gt_action) * mask
+                    valid_count = mask.sum().clamp(min=1.0)
+                    mse = (diff ** 2).sum() / valid_count
+                else:
+                    mse = nn.functional.mse_loss(pred_action, gt_action)
+                
+                val_action_mse.append(mse.item())
+
+        # 5. Aggregate and Log Metrics
         metrics = {}
         if val_state_l2:
             metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
@@ -589,6 +641,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.primitives]
                 )}
                 self.logger.log(confusion, step=self.update_step)
+
+        if val_action_mse:
+            metrics['val/action_mse'] = np.mean(val_action_mse)
 
         if metrics:
             self.logger.log(metrics, step=self.update_step)

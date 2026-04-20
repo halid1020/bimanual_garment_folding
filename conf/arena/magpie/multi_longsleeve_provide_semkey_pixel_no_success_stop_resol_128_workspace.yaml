@@ -22,17 +22,15 @@ provide_semkey_norm_pixel: true
 provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
 debug: false
-apply_workspace: true
+apply_workspace: false
 robot0_radius: [0.25, 0.9] #left
 robot1_radius:  [0.1, 0.85]  #right
-readjust_to_workspace: true
-add_final_goal_to_obs: True
-robot0_base: [-0.005, -0.717, 0] 
-robot1_base: [-0.005, 0.894, 0]
+robot0_base: [-0.005, -0.817, 0] 
+robot1_base: [-0.005, 0.794, 0]
 readjust_to_workspace: true
 add_final_goal_to_obs: True
 camera_height: 1.647
 
 
-field_of_view: [69, 72] # in degrees
+field_of_view: [69, 42] # in degrees
 camera_resolution: [1280, 720]

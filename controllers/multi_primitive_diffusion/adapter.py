@@ -283,7 +283,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             policy.init([info])
             info['reward'] = 0
             done = info['done']
-            #print('done', done)
+            print('done', done)
             while not done:
                 action = policy.single_act(info)
                 
@@ -376,7 +376,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         path='tmp',
                         filename="diffusion_demo"
                     )
-            if info['success'] or self.config.get('add_all_demos', False):
+            if info['success'] or self.config.get('add_all_demos', False) and not info['terminated']:
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')

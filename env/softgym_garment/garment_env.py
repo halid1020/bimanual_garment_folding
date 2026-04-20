@@ -483,7 +483,7 @@ class GarmentEnv(Arena):
         
         if out_of_view:
             is_terminated = True
-            is_truncated = False # Prioritize termination over truncation
+            is_truncated = is_truncated # Prioritize termination over truncation
         
         if task_related:
             info['evaluation'] = self.evaluate()
@@ -496,7 +496,7 @@ class GarmentEnv(Arena):
             info['success'] = self.success()
             if info['success'] and self.stop_on_success:
                 is_terminated = True
-                is_truncated = False # Prioritize termination if it succeeds on the exact last step
+                is_truncated = is_truncated # Prioritize termination if it succeeds on the exact last step
                 
             if info['evaluation'] != {}:
                 info['reward'] = self.task.reward(self.last_info, None, info)

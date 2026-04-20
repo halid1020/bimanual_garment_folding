@@ -7,14 +7,14 @@ def get_camera_matrix(cam_pos, cam_angle, cam_size, cam_fov):
     width, height = cam_size[0], cam_size[1]
     
     # cam_fov is [fov_x, fov_y] in radians
-    fov_x, fov_y = cam_fov[0], cam_fov[1]
+    fov_w, fov_h = cam_fov[0], cam_fov[1]
     
     # Calculate focal lengths independently
-    focal_length_x = (width / 2.0) / np.tan(fov_x / 2.0)
-    focal_length_y = (height / 2.0) / np.tan(fov_y / 2.0)
+    focal_length_x = (height / 2.0) / np.tan(fov_h / 2.0)
+    focal_length_y = (width / 2.0) / np.tan(fov_w / 2.0)
     
-    c_x = width / 2.0
-    c_y = height / 2.0
+    c_x = height / 2.0
+    c_y = width / 2.0
 
     cam_intrinsics = np.array([[focal_length_x, 0, c_x],
                                [0, focal_length_y, c_y],
@@ -88,6 +88,5 @@ def pixel2world(pixel_points, camera_intrinsic_matrix, camera_extrinsic_matrix, 
 def norm_pixel2world(norm_pixel_points, camera_size, camera_intrinsic_matrix, camera_extrinsic_matrix, depths):
     norm_pixel_points = np.atleast_2d(norm_pixel_points)
     norm_pixel_points[:, 0] = (norm_pixel_points[:, 0] + 1)/2 * camera_size[0]
-    norm_pixel_points[:, 1] = (norm_pixel_points[:, 1] + 1)/2 * camera_size[1]
-    #print('pixel_points:', norm_pixel_points)   
+    norm_pixel_points[:, 1] = (norm_pixel_points[:, 1] + 1)/2 * camera_size[1]   
     return pixel2world(norm_pixel_points, camera_intrinsic_matrix, camera_extrinsic_matrix, depths)

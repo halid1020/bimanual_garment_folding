@@ -49,11 +49,21 @@ def check_trajectories_close(pre_pick_positions, pick_positions, place_positions
 
 def readjust_norm_pixel_pick(pick_point, mask):
     H, W = mask.shape
-    print('H, W', H, W)
-    pixel_action = ((pick_point + 1)/2 * np.array([H, W])).astype(np.int32)
-    pixel_action = np.clip(pixel_action, 0, [H-1, W-1])
+    
+    # pick_point is [Y_norm, X_norm]. Map Y to H, X to W.
+    pixel_action = ((pick_point + 1) / 2 * np.array([H, W])).astype(np.int32)
+    
+    # Clip Y to H-1, X to W-1
+    pixel_action = np.clip(pixel_action, [0, 0], [H-1, W-1]) 
+    
+    # Pass as (y, x)
     points = [(pixel_action[0], pixel_action[1])]
-    pixel_action = (adjust_points(points, mask)[0][0]/np.array([H, W])) * 2 - 1
+    
+    adjusted_pts, _ = adjust_points(points, mask)
+    
+    # Map back to [Y_norm, X_norm]
+    pixel_action = (np.array(adjusted_pts[0]) / np.array([H, W])) * 2 - 1
+    
     dist = np.linalg.norm(pick_point - pixel_action)
     return pixel_action, dist
 
@@ -61,10 +71,10 @@ def adjust_points(points, mask, min_distance=2):
     """
     Adjust points to be at least min_distance pixels away from the mask border.
     
-    :param points: List of (x, y) coordinates
+    :param points: List of (y, x) coordinates
     :param mask: 2D numpy array where 0 is background and 1 is foreground
     :param min_distance: Minimum distance from the border (default: 2)
-    :return: List of adjusted (x, y) coordinates
+    :return: List of adjusted (y, x) coordinates
     """
 
     mask = (mask > 0).astype(np.uint8)
@@ -83,23 +93,21 @@ def adjust_points(points, mask, min_distance=2):
     
     if np.sum(eroded_mask) == 0:
         return points, mask
-   
-    # plt.imshow(eroded_mask.astype(np.float32))
-    # plt.savefig('tmp/eroded_mask.png')
 
     adjusted_points = []
-    for x, y in points:
-        #print('x, y', x, y)
-        if eroded_mask[x, y] == 0:  # If point is too close to border
-            # Find the nearest valid point
-            x_indices, y_indices = np.where(eroded_mask == 1)
+    for y, x in points:  # Unpack explicitly as y, x
+        if eroded_mask[y, x] == 0:  
+            # np.where returns (rows, cols) -> (y, x)
+            y_indices, x_indices = np.where(eroded_mask == 1)
             
+            # Compute distance cleanly
             distances = np.sqrt((x - x_indices)**2 + (y - y_indices)**2)
             nearest_index = np.argmin(distances)
-            new_x, new_y = x_indices[nearest_index], y_indices[nearest_index]
-            adjusted_points.append((new_x, new_y))
+            
+            new_y, new_x = y_indices[nearest_index], x_indices[nearest_index]
+            adjusted_points.append((new_y, new_x))
         else:
-            adjusted_points.append((x, y))
+            adjusted_points.append((y, x))
     
     return adjusted_points, eroded_mask
 
@@ -107,11 +115,8 @@ def pixel_to_world(p, depth, cam_intrinsics, cam_pose, cam_size):
     # Normalize pixel coordinates from [-1, 1] to [0, 1]
     p_norm = (p + 1) / 2
     
-    # swap y and x
-    p_norm = np.array([p_norm[1], p_norm[0]])
-
-    #print('cam_size:', cam_size)
-    # Convert to pixel coordinates
+    # Removed the axis swap here!
+    # p_norm is [X, Y], cam_size is [Width, Height]
     pixel_x = p_norm[0] * cam_size[0]
     pixel_y = p_norm[1] * cam_size[1]
 
@@ -120,7 +125,6 @@ def pixel_to_world(p, depth, cam_intrinsics, cam_pose, cam_size):
 
     # Convert to camera coordinates
     cam_coords = np.linalg.inv(cam_intrinsics) @ (depth * pixel_homogeneous)
-    #print('cam_coords:', cam_coords)
 
     # Convert to homogeneous coordinates
     cam_coords_homogeneous = np.append(cam_coords, 1)

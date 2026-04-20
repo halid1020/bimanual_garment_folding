@@ -168,13 +168,14 @@ class GarmentEnv(Arena):
         Pixels are projected to world coordinates (z=0 plane),
         then distances to robot bases are computed in the XY plane.
         """
-        W, H = resolution[0], resolution[1] # <--- FIXED UNPACKING
+        W, H = resolution[0], resolution[1]
 
         # ---- 1. Generate pixel grid ----
         u = np.arange(W)
         v = np.arange(H)
         uu, vv = np.meshgrid(u, v)
-        pixels = np.stack([uu.ravel(), vv.ravel(), np.ones(H * W)], axis=1)  # (N, 3)
+        # Stack vv (Y) first, then uu (X) to match the swapped intrinsic matrix
+        pixels = np.stack([vv.ravel(), uu.ravel(), np.ones(H * W)], axis=1)  # (N, 3)
 
         # ---- 2. Pixel → Camera ray ----
         K_inv = np.linalg.inv(self.camera_intrinsic_matrix)
@@ -819,16 +820,34 @@ class GarmentEnv(Arena):
         W_full, H_full = self.camera_size[0], self.camera_size[1]
         self.crop_size = min(H_full, W_full)
         
-        # Sim camera is perfectly centered. Don't add the real-world +70 offset here!
         offset_x = self.config.get('crop_offset_x', 0) 
-        self.x1 = W_full // 2 - self.crop_size // 2 + offset_x
-        self.y1 = H_full // 2 - self.crop_size // 2
+        self.x1 = W_full // 2 - self.crop_size // 2 + offset_x # axis 1
+        self.y1 = H_full // 2 - self.crop_size // 2 # axis 0
         x2, y2 = self.x1 + self.crop_size, self.y1 + self.crop_size
 
         # 2. Render FULL resolution and generate Full masks
         rgbd_full = self._render(mode='rgbd') # Don't pass resolution here!
         self.cloth_mask_full = rgbd_full[:, :, :3].sum(axis=2) > 0
         
+        # --- DEBUG: SAVE FULL RGB RENDER ---
+        # Make sure the directory exists
+        os.makedirs('tmp/env_debug', exist_ok=True)
+        
+        # Extract the RGB channels and ensure it is uint8
+        rgb_full = rgbd_full[:, :, :3].astype(np.uint8)
+        print('rgb_full shape', rgb_full.shape)
+        
+        # Convert RGB to BGR because cv2.imwrite expects BGR format
+        bgr_full = cv2.cvtColor(rgb_full, cv2.COLOR_RGB2BGR)
+        
+        # Save with the current action step to prevent overwriting
+        step_idx = getattr(self, 'action_step', 0)
+        cv2.imwrite(f'tmp/env_debug/full_rgb_render_step_{step_idx}.png', bgr_full)
+        # -----------------------------------
+        
+        # 3. Slice Un-resized Crop versions (High fidelity for primitive snapping)
+        rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
+
         # 3. Slice Un-resized Crop versions (High fidelity for primitive snapping)
         rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
         self.cloth_mask_crop = self.cloth_mask_full[self.y1:y2, self.x1:x2]
@@ -1016,15 +1035,16 @@ class GarmentEnv(Arena):
         proj = (camera_intrinsic_matrix @ cam_pts.T).T  # (N, 3)
         z = proj[:, 2]
         z_safe = np.where(z == 0, 1e-6, z)
-        pixels = proj[:, :2] / z_safe[:, None]  # (u, v) = (x/z, y/z)
+        pixels = proj[:, :2] / z_safe[:, None]  
 
         # ---- Visibility ----
         if resolution is None:
-            W, H = self.camera_size[0], self.camera_size[1] # <--- FIXED UNPACKING
+            W, H = self.camera_size[0], self.camera_size[1]
         else:
-            W, H = resolution[0], resolution[1]             # <--- FIXED UNPACKING
+            W, H = resolution[0], resolution[1]             
 
-        u, v = pixels[:, 0], pixels[:, 1]
+        # Because K is swapped, pixels[:, 0] is Y (v) and pixels[:, 1] is X (u)
+        v, u = pixels[:, 0], pixels[:, 1]
 
         # Rendered depth map (same size as camera)
         depth_img = self._render('depth', resolution=resolution).reshape(H, W)  # (H, W, 1)

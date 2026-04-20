@@ -116,9 +116,12 @@ class PixelPickAndFling():
         W, H = self.camera_size
         def to_full_norm(pt):
             if hasattr(env, 'x1') and hasattr(env, 'y1') and hasattr(env, 'crop_size'):
-                px_crop = (pt + 1.0) / 2.0 * env.crop_size
-                px_full = px_crop + np.array([env.x1, env.y1])
-                return (px_full / np.array([W, H])) * 2.0 - 1.0
+                # maps [-1, 1] to [0, 720]
+                px_crop = (pt + 1.0) / 2.0 * env.crop_size 
+                # shifts by x1 (offset) and y1
+                px_full = px_crop + np.array([env.y1, env.x1]) 
+                # normalizes against [1280, 720]
+                return (px_full / np.array([H, W])) * 2.0 - 1.0 
             return pt
 
         p0_full = to_full_norm(p0)
@@ -133,7 +136,7 @@ class PixelPickAndFling():
 
         # FIXED: Pass [W, H] instead of [H, W]
         convert_action = norm_pixel2world(
-                action_, np.asarray([W, H]),  
+                action_, np.asarray([H, W]),  
                 self.camera_intrinsics, self.camera_pose, depths) 
         convert_action = convert_action.reshape(2, 3)
 

@@ -159,27 +159,38 @@ class PixelPickAndPlace():
             pick_0_depth, pick_1_depth = pick_1_depth, pick_0_depth
             place_0_depth, place_1_depth = place_1_depth, place_0_depth
         
-        # --- NEW LOGIC: Readjust to workspace ---
+       # --- NEW LOGIC: Readjust to workspace ---
         # Must happen AFTER swap so we know which coords belong to which physical robot
         if env.apply_workspace and env.readjust_to_workspace:
-            print('Snap!!!')
-            # Snap Robot 0 (pick_0) to robot0_mask
-            pick_0, _ = readjust_norm_pixel_pick(pick_0, env.robot0_mask.copy())
-            place_0, _ = readjust_norm_pixel_pick(place_0, env.robot0_mask.copy())
-
             
-            # pick_0 = self._snap_to_mask(pick_0, env.robot0_mask.copy())
-            # place_0 = self._snap_to_mask(place_0, env.robot0_mask.copy())
+            if 'pick_1' not in action:
+                # --- SINGLE ARM LOGIC ---
+                # 1. Determine which workspace pick_0 belongs to
+                H, W = env.robot0_mask.shape[:2]
+                r_p0, c_p0 = norm_pixel_to_index(pick_0, (W, H))
+                r_p0, c_p0 = np.clip(r_p0, 0, H - 1), np.clip(c_p0, 0, W - 1)
+                
+                active_mask = None
+                if env.robot0_mask[r_p0, c_p0]:
+                    active_mask = env.robot0_mask
+                elif env.robot1_mask[r_p0, c_p0]:
+                    active_mask = env.robot1_mask
+                
+                # 2. If it belongs to a workspace, snap place_0 to that SAME workspace
+                if active_mask is not None:
+                    print('[PixelPickAndPlace] Single-arm: Snapping place_0 to active workspace.')
+                    place_0, _ = readjust_norm_pixel_pick(place_0, active_mask.copy())
+                # If active_mask is None, it belongs to neither. We don't snap, and step() will reject it.
 
-            # Snap Robot 1 (pick_1) to robot1_mask
-            # Only if we are not in single operator mode (checked via action/bounds check usually, 
-            # but picking safe logic here)
-            if 'pick_1' in action: 
-                # pick_1 = self._snap_to_mask(pick_1, env.robot1_mask.copy())
-                # place_1 = self._snap_to_mask(place_1, env.robot1_mask.copy())
+            else:
+                # --- DUAL ARM LOGIC ---
+                print('[PixelPickAndPlace] Dual-arm: Snapping to respective workspaces.')
+                pick_0, _ = readjust_norm_pixel_pick(pick_0, env.robot0_mask.copy())
+                place_0, _ = readjust_norm_pixel_pick(place_0, env.robot0_mask.copy())
 
                 pick_1, _ = readjust_norm_pixel_pick(pick_1, env.robot1_mask.copy())
                 place_1, _ = readjust_norm_pixel_pick(place_1, env.robot1_mask.copy())
+        # ----------------------------------------
 
         # ----------------------------------------
 
@@ -230,38 +241,60 @@ class PixelPickAndPlace():
 
         world_action_ , pixel_action = self.process(env, action)
 
-        if env.apply_workspace:
-            W, H = env.robot0_mask.shape[:2]
-
         reject = False
         if env.apply_workspace:
-            # -------- robot 0 --------
+            H, W = env.robot0_mask.shape[:2]
+            
+            # Extract indices for primary action (pick_0, place_0)
             r0p, c0p = norm_pixel_to_index(pixel_action[:2], (W, H))
             r0l, c0l = norm_pixel_to_index(pixel_action[4:6], (W, H))
-
-            if not env.robot0_mask[r0p, c0p]:
-                print('[PixelPickAndPlace] Reject: pick_0 outside robot0 workspace')
-                reject = True
-                info = {}
             
-            if not env.robot0_mask[r0l, c0l]:
-                print('[PixelPickAndPlace] Reject: place_0 outside robot0 workspace')
-                reject = True
-                info = {}
-    
-            # -------- robot 1 --------
-            r1p, c1p = norm_pixel_to_index(pixel_action[2:4], (W, H))
-            r1l, c1l = norm_pixel_to_index(pixel_action[6:8], (W, H))
-            
-            if not env.robot1_mask[r1p, c1p]:
-                print('[PixelPickAndPlace] Reject: pick_1 outside robot1 workspace')
-                reject = True
-                info = {}
+            # Clip coordinates to bounds to prevent IndexError
+            r0p, c0p = np.clip(r0p, 0, H - 1), np.clip(c0p, 0, W - 1)
+            r0l, c0l = np.clip(r0l, 0, H - 1), np.clip(c0l, 0, W - 1)
 
-            if not env.robot1_mask[r1l, c1l]:
-                print('[PixelPickAndPlace] Reject: place_1 outside robot1 workspace')
-                reject = True
-                info = {}
+            if 'pick_1' not in action:
+                # --- SINGLE ARM REJECTION LOGIC ---
+                in_robot0 = env.robot0_mask[r0p, c0p]
+                in_robot1 = env.robot1_mask[r0p, c0p]
+
+                if not (in_robot0 or in_robot1):
+                    print('[PixelPickAndPlace] Reject: Single-arm pick_0 does not belong to any workspace.')
+                    reject = True
+                    info = {}
+                else:
+                    # Validate that place_0 stayed in the same active workspace
+                    active_mask = env.robot0_mask if in_robot0 else env.robot1_mask
+                    if not active_mask[r0l, c0l]:
+                        print('[PixelPickAndPlace] Reject: Single-arm place_0 outside the active workspace.')
+                        reject = True
+                        info = {}
+            else:
+                # --- DUAL ARM REJECTION LOGIC ---
+                if not env.robot0_mask[r0p, c0p]:
+                    print('[PixelPickAndPlace] Reject: pick_0 outside robot0 workspace')
+                    reject = True
+                    info = {}
+                
+                if not env.robot0_mask[r0l, c0l]:
+                    print('[PixelPickAndPlace] Reject: place_0 outside robot0 workspace')
+                    reject = True
+                    info = {}
+        
+                r1p, c1p = norm_pixel_to_index(pixel_action[2:4], (W, H))
+                r1l, c1l = norm_pixel_to_index(pixel_action[6:8], (W, H))
+                r1p, c1p = np.clip(r1p, 0, H - 1), np.clip(c1p, 0, W - 1)
+                r1l, c1l = np.clip(r1l, 0, H - 1), np.clip(c1l, 0, W - 1)
+                
+                if not env.robot1_mask[r1p, c1p]:
+                    print('[PixelPickAndPlace] Reject: pick_1 outside robot1 workspace')
+                    reject = True
+                    info = {}
+
+                if not env.robot1_mask[r1l, c1l]:
+                    print('[PixelPickAndPlace] Reject: place_1 outside robot1 workspace')
+                    reject = True
+                    info = {}
             
         if not reject: 
             info = self.action_tool.step(env, world_action_)

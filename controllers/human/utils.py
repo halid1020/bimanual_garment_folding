@@ -12,6 +12,51 @@ else:
     SIM_DISPLAY =  ":0"
 
 
+import cv2
+import numpy as np
+
+def overlay_workspaces(rgb, state):
+    """
+    Overlays the workspace masks for robot0 and robot1 onto the provided RGB image.
+    """
+    H, W = rgb.shape[:2]
+    
+    if 'robot0_mask' in state['observation']:
+        mask0 = state['observation']['robot0_mask'].astype(bool)
+
+        if mask0.shape[:2] != (H, W):
+            mask0 = cv2.resize(
+                mask0.astype(np.uint8),
+                (W, H),
+                interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+
+        rgb = apply_workspace_shade(
+            rgb,
+            mask0,
+            color=(255, 0, 0),  # Blue in BGR
+            alpha=0.2
+        )
+
+    if 'robot1_mask' in state['observation']:
+        mask1 = state['observation']['robot1_mask'].astype(bool)
+
+        if mask1.shape[:2] != (H, W):
+            mask1 = cv2.resize(
+                mask1.astype(np.uint8),
+                (W, H),
+                interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+
+        rgb = apply_workspace_shade(
+            rgb,
+            mask1,
+            color=(0, 0, 255),  # Red in BGR
+            alpha=0.2
+        )
+        
+    return rgb
+
 def apply_workspace_shade(rgb, mask, color, alpha=0.35):
     """
     Shade pixels where mask == True with given BGR color.

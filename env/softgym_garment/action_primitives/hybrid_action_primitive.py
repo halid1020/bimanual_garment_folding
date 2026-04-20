@@ -88,8 +88,8 @@ class HybridActionPrimitive():
             info['applied_action'] = {
                 'norm-pixel-pick-and-fling': info['applied_action']
             }
-        elif 'norm-pixel-pick-and-place' in action:
-            action = action['norm-pixel-pick-and-place']
+        elif 'norm-pixel-dual-pick-and-place' in action:
+            action = action['norm-pixel-dual-pick-and-place']
             if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
                 dict_action = {
                     'pick_0': action[:2],
@@ -103,6 +103,18 @@ class HybridActionPrimitive():
             info = self.np_fold.step(env, action)
             info['applied_action'] = {
                 'norm-pixel-pick-and-place': info['applied_action']
+            }
+        elif 'norm-pixel-single-pick-and-place' in action:
+            action = action['norm-pixel-single-pick-and-place']
+            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
+                dict_action = {
+                    'pick_0': action[:2],
+                    'place_0': action[2:4],
+                }
+                action = dict_action
+            info = self.np_fold.step(env, action)
+            info['applied_action'] = {
+                'norm-pixel-single-pick-and-place': info['applied_action']
             }
         elif 'no-operation' in action:
             info = env.get_info(new=True)

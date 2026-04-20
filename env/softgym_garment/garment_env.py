@@ -136,7 +136,7 @@ class GarmentEnv(Arena):
         self._get_init_state_keys()
 
         self.evaluate_result = None
-        self.track_semkey_on_frames = self.config.track_semkey_on_frames
+        self.track_semkey_on_frames = self.config.get('track_semkey_on_frames', False)
         self.init_mode = self.config.get('init_mode', 'crumpled')
         self.action_step = 0
         self.last_info = None
@@ -362,10 +362,19 @@ class GarmentEnv(Arena):
         
         goal_particles = goal_particles @ rotation_matrix.T  # rotate
 
-        # Random displacement within ±0.5 range per axis
-        displacement = rng.uniform(-0.3, 0.3, size=3)
+        # Fetch the displacement range from config, defaulting to [-0.3, 0.3]
+        disp_range = self.config.get('random_displacement_range', [-0.3, 0.3])
+        
+        # Random displacement within the configured range per axis
+        displacement = rng.uniform(disp_range[0], disp_range[1], size=3)
         displacement[2] = 0
+
+        hard_shift_x = self.config.get('hard_shift_x', 0.0)
+        displacement[0] += hard_shift_x
+        
         goal_particles += displacement
+
+        
 
         self.set_mesh_particles_positions(goal_particles)
         self.wait_until_stable()
@@ -628,7 +637,6 @@ class GarmentEnv(Arena):
         new_picker_pos = self.pickers.step(signal, self)
         self._step_sim()
         
-        # ---> FINISH THE TODO: Save the low level meshes and PCs <---
         if getattr(self, 'is_recording_low_level', True):
             self.picker_poses.append(new_picker_pos)
             
@@ -707,7 +715,7 @@ class GarmentEnv(Arena):
         particles = self.get_particle_positions()
         return particles[:self.num_mesh_particles]
     
-    def get_canon_mesh_particles_positions(self):
+    def get_algn_mesh_particles_positions(self):
         return self.flattened_obs['observation']['particle_positions']
         
 
@@ -733,20 +741,21 @@ class GarmentEnv(Arena):
     def _step_sim(self):
         pyflex.step()
         
-
         if self.save_video:
-            #print('save')
-            #print('save here')
+            # print('save here')
             rgb = self._render('rgb', background=True, resolution=self.frame_resolution)
+            
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
                 particle_pos = self.get_mesh_particles_positions()          # (N, 3)
-                semkey2pid = self.task.semkey2pid                     # dict {name: pid}
+                semkey2pid = self.task.semkey2pid                           # dict {name: pid}
                 keypids = list(semkey2pid.values())
                 keynames = list(semkey2pid.keys())
 
-                key_particles = particle_pos[keypids]                 # (K, 3)
-                key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+                key_particles = particle_pos[keypids]                       # (K, 3)
+                
+                # FIX: Pass the frame_resolution here so coordinates scale correctly!
+                key_pixels, visibility = self.get_visibility(key_particles, resolution=self.frame_resolution)
 
                 # Assign unique colors to each keypoint (HSV evenly spaced)
                 K = len(keynames)
@@ -757,8 +766,10 @@ class GarmentEnv(Arena):
                 # Overlay keypoints
                 debug_frame = rgb.copy()
                 for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
+                    # Optional: Only draw if 'vis' (visibility) is True
+                    # if not vis: continue 
+                    
                     color = tuple(map(int, color))  # ensure int
-                    #print('v, u, name', v, u, name)
                     cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
                     cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
@@ -828,22 +839,6 @@ class GarmentEnv(Arena):
         # 2. Render FULL resolution and generate Full masks
         rgbd_full = self._render(mode='rgbd') # Don't pass resolution here!
         self.cloth_mask_full = rgbd_full[:, :, :3].sum(axis=2) > 0
-        
-        # --- DEBUG: SAVE FULL RGB RENDER ---
-        # Make sure the directory exists
-        os.makedirs('tmp/env_debug', exist_ok=True)
-        
-        # Extract the RGB channels and ensure it is uint8
-        rgb_full = rgbd_full[:, :, :3].astype(np.uint8)
-        print('rgb_full shape', rgb_full.shape)
-        
-        # Convert RGB to BGR because cv2.imwrite expects BGR format
-        bgr_full = cv2.cvtColor(rgb_full, cv2.COLOR_RGB2BGR)
-        
-        # Save with the current action step to prevent overwriting
-        step_idx = getattr(self, 'action_step', 0)
-        cv2.imwrite(f'tmp/env_debug/full_rgb_render_step_{step_idx}.png', bgr_full)
-        # -----------------------------------
         
         # 3. Slice Un-resized Crop versions (High fidelity for primitive snapping)
         rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
@@ -916,11 +911,11 @@ class GarmentEnv(Arena):
             keypids = list(semkey2pid.values())
             key_particles = particle_pos[keypids]                 
             
-            # Get pixels in FULL resolution
+            # Get pixels in FULL resolution. Returns as [Y, X]
             key_pixels_full, visibility = self.get_visibility(key_particles)  
             
-            # Shift to crop space
-            key_pixels_crop = key_pixels_full - np.array([self.x1, self.y1])
+            # Shift to crop space using [Y_offset, X_offset]
+            key_pixels_crop = key_pixels_full - np.array([self.y1, self.x1])
             
             # Normalize to [-1, 1] relative to the CROP SIZE
             norm_pixels = (key_pixels_crop / self.crop_size) * 2.0 - 1.0
@@ -936,7 +931,7 @@ class GarmentEnv(Arena):
             
             key_pixels_full, visibility = self.get_visibility(key_particles)  
             
-            key_pixels_crop = key_pixels_full - np.array([self.x1, self.y1])
+            key_pixels_crop = key_pixels_full - np.array([self.y1, self.x1])
             norm_pixels = (key_pixels_crop / self.crop_size) * 2.0 - 1.0
             
             obs['flattened_semkey_norm_pixel'] = norm_pixels.flatten()

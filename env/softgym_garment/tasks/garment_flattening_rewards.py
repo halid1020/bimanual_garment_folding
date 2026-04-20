@@ -22,11 +22,11 @@ def max_IoU_reward(last_info, action, info):
     """
     return info['evaluation']['max_IoU_to_flattened'] # 0-1
 
-def canon_IoU_reward(last_info, action, info):
+def algn_IoU_reward(last_info, action, info):
     """
         The reward function used in the original implementation.
     """
-    return info['evaluation']['canon_IoU_to_flattened'] # 0-1
+    return info['evaluation']['algn_IoU_to_flattened'] # 0-1
 
 def max_IoU_differance_reward(last_info, action, info):
     """
@@ -36,15 +36,15 @@ def max_IoU_differance_reward(last_info, action, info):
         last_info = info
     return info['evaluation']['max_IoU_to_flattened'] - last_info['evaluation']['max_IoU_to_flattened'] # -1 to 1
 
-def canon_IoU_differance_reward(last_info, action, info):
+def algn_IoU_differance_reward(last_info, action, info):
     """
         The reward function used in the original implementation.
     """
     if last_info is None:
         last_info = info
-    return info['evaluation']['canon_IoU_to_flattened'] - last_info['evaluation']['canon_IoU_to_flattened'] # -1 to 1
+    return info['evaluation']['algn_IoU_to_flattened'] - last_info['evaluation']['algn_IoU_to_flattened'] # -1 to 1
 
-def canon_l2_tanh_reward(last_info, action, info):
+def algn_l2_tanh_reward(last_info, action, info):
     cur_pos = info['observation']['particle_positions'][:, :2]
     goal_pos = info['flattened_obs']['observation']['particle_positions'][:, :2]
     flipped_goal_pos = goal_pos.copy()
@@ -120,8 +120,8 @@ def clothfunnel_reward(last_info, action, info):
     pre_rigid_distance = last_info['evaluation']['rigid_l2_distance']
     post_deform_distance = info['evaluation']['deform_l2_distance']
     post_rigid_distance = info['evaluation']['rigid_l2_distance']
-    pre_l2_distance = last_info['evaluation']['canon_l2_distance']
-    post_l2_distance = info['evaluation']['canon_l2_distance']
+    pre_l2_distance = last_info['evaluation']['algn_l2_distance']
+    post_l2_distance = info['evaluation']['algn_l2_distance']
     # print('cloth_area', cloth_area)
     # pre_weighted_distance, pre_deform_distance, pre_rigid_distance, pre_l2_distance, _ = \
     #     deformable_distance(

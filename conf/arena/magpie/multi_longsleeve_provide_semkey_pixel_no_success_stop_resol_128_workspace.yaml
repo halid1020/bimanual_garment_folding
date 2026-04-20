@@ -31,9 +31,11 @@ readjust_to_workspace: true
 add_final_goal_to_obs: True
 camera_height: 1.647
 crop_offset_x: 70
-
+random_displacement_range: [-0.1, 0.1]
+hard_shift_x: 0.1 # let the garment to be at the middle of intersecton.
 
 field_of_view: [69, 42] # in degrees
 camera_resolution: [1280, 720] 
+frame_resolution: [256, 148]
 # width, height for rendering, but the render return (height, width) as shape.
 # width is the horizontal axis, height is the vertical axis. 

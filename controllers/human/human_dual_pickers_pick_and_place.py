@@ -74,12 +74,12 @@ class HumanDualPickersPickAndPlace(Agent):
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
-            canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
+            algn_iou_flat = state['evaluation']['algn_IoU_to_flattened']
             
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
                 (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
-                (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
+                (f"Canon IoU(flat): {algn_iou_flat:.3f}", (255, 255, 255))
             ]
             if 'max_IoU' in state['evaluation'].keys():
                 max_iou_goal = state['evaluation']['max_IoU']

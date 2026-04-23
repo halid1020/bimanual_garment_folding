@@ -386,7 +386,15 @@ class GarmentEnv(Arena):
     
     def _initialise_trajecotry(self):
         if self.init_mode == 'flattened':
-            self.set_to_flatten()
+            #self.set_to_flatten()
+            particles = self.flattened_obs['observation']['particle_positions']
+            hard_shift_x = self.config.get('hard_shift_x', 0.0)
+            displacement = [hard_shift_x, 0, 0]
+            particles += displacement
+
+            self.set_mesh_particles_positions(particles)
+            self.wait_until_stable()
+
             self.last_flattened_step = 0
         elif self.init_mode == 'random_flattened':
             rng = np.random.RandomState(self.eid)

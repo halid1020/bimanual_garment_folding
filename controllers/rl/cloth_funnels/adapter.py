@@ -6,11 +6,13 @@ import time
 from actoris_harena import TrainableAgent
 import torch
 from itertools import product
+from actoris_harena.utilities.torch_utils import np_to_ts
 
-from .nets import MaximumValuePolicy
 from .utils import prepare_image, generate_primitive_cloth_mask,\
     generate_workspace_mask, transform, get_transform_matrix
-from actoris_harena.utilities.torch_utils import np_to_ts
+from .nets import MaximumValuePolicy
+from .keypoint_inference import KeypointDetector
+
 
 LOSS_NORMALIZATIONS = {
     'rigid':{
@@ -20,6 +22,43 @@ LOSS_NORMALIZATIONS = {
         'fling':{'manipulation':0.8, 'nocs':3}, 
         'place':{'manipulation':0.1, 'nocs':3}}
 }
+
+def shirt_folding_heuristic_2d(keypoint_positions):
+    """Calculates 2D pick and place waypoints for a shirt."""
+    top_midpoint = (keypoint_positions['top_right'] + keypoint_positions['top_left']) / 2
+    bottom_midpoint = (keypoint_positions['bottom_right'] + keypoint_positions['bottom_left']) / 2
+
+    alpha = 0.9
+    bottom_right_quarter = alpha * bottom_midpoint + (1 - alpha) * keypoint_positions['bottom_right']
+    bottom_left_quarter = alpha * bottom_midpoint + (1 - alpha) * keypoint_positions['bottom_left']
+
+    # 2D norms work perfectly here
+    right_arm_length = np.linalg.norm(keypoint_positions['right_shoulder'] - keypoint_positions['top_right'])
+    left_arm_length = np.linalg.norm(keypoint_positions['left_shoulder'] - keypoint_positions['top_left'])
+    arm_length = max([right_arm_length, left_arm_length])
+
+    right_vec = (bottom_right_quarter - keypoint_positions['right_shoulder'])
+    right_place = keypoint_positions['right_shoulder'] + (right_vec / (np.linalg.norm(right_vec) + 1e-6)) * arm_length
+
+    left_vec = (bottom_left_quarter - keypoint_positions['left_shoulder'])
+    left_place = keypoint_positions['left_shoulder'] + (left_vec / (np.linalg.norm(left_vec) + 1e-6)) * arm_length
+
+    right_double_pick = keypoint_positions['bottom_right'] + (keypoint_positions['right_shoulder'] - keypoint_positions['bottom_right']) * 0.95
+    left_double_pick = keypoint_positions['bottom_left'] + (keypoint_positions['left_shoulder'] - keypoint_positions['bottom_left']) * 0.95
+
+    right_axis_gap = keypoint_positions['right_shoulder'] - keypoint_positions['bottom_right']
+    left_axis_gap = keypoint_positions['left_shoulder'] - keypoint_positions['bottom_left']
+
+    right_double_place = keypoint_positions['bottom_right'] + left_axis_gap * 0.2
+    left_double_place = keypoint_positions['bottom_left'] + right_axis_gap * 0.2
+
+    # Group actions
+    return [
+        [{"pick": keypoint_positions['top_right'], "place": right_place}],
+        [{"pick": keypoint_positions['top_left'], "place": left_place}],
+        [{"pick": left_double_pick, "place": left_double_place},
+         {"pick": right_double_pick, "place": right_double_place}]
+    ]
 
 class ClothFunnelsAdapter(TrainableAgent):
 
@@ -31,8 +70,9 @@ class ClothFunnelsAdapter(TrainableAgent):
         self.device = config.device if torch.cuda.is_available() else 'cpu'
         self.config = config
         self.update_step = -1
+        self.debug = self.config.get('debug', False)
         self._init_network()
-        self._init_action_primitives()
+        
     
     def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
         super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
@@ -94,27 +134,10 @@ class ClothFunnelsAdapter(TrainableAgent):
             self.primitive_vmap_indices[primitive] = [None, None]
             self.primitive_vmap_indices[primitive][0] = indices[0] * len(self.scale_factors)
             self.primitive_vmap_indices[primitive][1] = (indices[-1]+1) * len(self.scale_factors)
-
-        # physical limit of dual arm system, TODO: we need to decouple the following
-        self.TABLE_WIDTH = 0.765 * 2
-        self.left_arm_base = np.array([0.765, 0, 0])
-        self.right_arm_base = np.array([-0.765, 0, 0])
-        self.reach_distance_limit = self.config.reach_distance_limit
-
-        render_dim = self.config.render_dim
-        pix_radius = int(render_dim * (self.reach_distance_limit/self.TABLE_WIDTH))
-
-        left_arm_reach = np.zeros((render_dim, render_dim))
-        left_arm_reach = cv2.circle(left_arm_reach, (render_dim//2, 0), pix_radius, (255, 255, 255), -1)
-
-        right_arm_reach = np.zeros((render_dim, render_dim))
-        right_arm_reach = cv2.circle(right_arm_reach, (render_dim//2, render_dim), pix_radius, (255, 255, 255), -1)
-
-        cv2.imwrite('tmp/left_arm_reach.png', left_arm_reach)
-        cv2.imwrite('tmp/right_arm_reach.png', right_arm_reach)
-
-        self.left_arm_mask = torch.tensor(left_arm_reach).bool().to(self.device)
-        self.right_arm_mask = torch.tensor(right_arm_reach).bool().to(self.device)
+        
+        if self.config.include_fold:
+            path = os.path.join(self.save_dir, self.config.keypoint_model_path)
+            self.keypoint_detector = KeypointDetector(path)
 
     
     def load(self, path = None) -> int:
@@ -158,8 +181,13 @@ class ClothFunnelsAdapter(TrainableAgent):
         return True
     
     def reset(self, arena_ids):
+        self._init_action_primitives()
         for arena_id in arena_ids:
-            self.internal_states[arena_id] = {}
+            self.internal_states[arena_id] = {
+                'step': 0,
+                'fold_action_queue': [],
+                'has_folded': False  # Add this flag
+            }
 
     def get_state(self):
         return self.internal_states
@@ -180,35 +208,16 @@ class ClothFunnelsAdapter(TrainableAgent):
         retval = {}
 
         ##GENERATE OBSERVATION
-        #print('rgb shape', info['observation']['rgb'].shape)
+
         H, W = info['observation']['rgb'].shape[:2]
         retval['prerot_rgb'] = info['observation']['rgb'].copy()
-        # from matplotlib import pyplot as plt
-        # cv2.imwrite('tmp/prerot_rgb.png', info['observation']['rgb'])
-        
-        # depth2plot = info['observation']['depth'].copy()
-        # depth2plot = (depth2plot - depth2plot.min()) / (depth2plot.max() - depth2plot.min())
-        # cv2.imwrite('tmp/depth.png', (depth2plot*255).astype(np.uint8))
-
-        # mask2plot = info['observation']['mask'].copy()
-        # cv2.imwrite('tmp/mask.png', mask2plot.astype(np.uint8)*255)
 
 
-        for key in ['rgb', 'depth', 'mask']:
+        for key in ['rgb', 'depth', 'mask', 'robot0_mask', 'robot1_mask']:
             assert key in info['observation'], f"Key {key} not found in observation"
             ## rotate the image clothwise 90 degrees
-            # originally the flip base is on the right side
-            # but my current environment is on the bottom side
             info['observation'][key] = np.rot90(info['observation'][key], 1)
 
-
-
-        #print('depth shape', info['observation']['depth'].shape)
-
-        
-       
-        #plt.imsave('tmp/rgb.png', info['observation']['rgb'])
-        #print('mask shape', info['observation']['mask'].shape)
 
         retval['pretransform_depth'] = info['observation']['depth'].copy()
         retval['pretransform_rgb'] = info['observation']['rgb'].copy()
@@ -235,9 +244,9 @@ class ClothFunnelsAdapter(TrainableAgent):
         #print('Transformed obs shape', retval['transformed_obs'].shape)
         
         mask = np_to_ts(info['observation']['mask'].copy(), self.device)
-        left_arm_mask = self.left_arm_mask.clone()
-        right_arm_mask = self.right_arm_mask.clone()
-
+        right_arm_mask =  torch.tensor(info['observation']['robot0_mask'].copy()).bool().to(self.device)
+        left_arm_mask =  torch.tensor(info['observation']['robot1_mask'].copy()).bool().to(self.device)
+                
         pretransform_mask = torch.stack([mask, left_arm_mask, right_arm_mask], dim=0)
         #print('Pretransform mask shape', pretransform_mask.shape)
         transformed_mask = prepare_image(
@@ -308,11 +317,9 @@ class ClothFunnelsAdapter(TrainableAgent):
             retval[f"{primitive}_workspace_mask"] = primitive_workspace_mask
             retval[f"{primitive}_mask"] = torch.logical_and(cloth_mask[primitive], primitive_workspace_mask)
         
-        for key in ['rgb', 'depth', 'mask']:
+        for key in ['rgb', 'depth', 'mask', 'robot0_mask', 'robot1_mask']:
             assert key in info['observation'], f"Key {key} not found in observation"
-            ## rotate the image clothwise 90 degrees
-            # originally the flip base is on the right side
-            # but my current environment is on the bottom side
+            ## rotate the image clothwise 90 degrees back
             info['observation'][key] = np.rot90(info['observation'][key], -1)
 
         #print('preproces keys', retval.keys())
@@ -327,35 +334,130 @@ class ClothFunnelsAdapter(TrainableAgent):
             rotations, self.adaptive_scale_factors))
 
     def single_act(self, info, update=False):
-        ## preprocess the info
+        aid = info['arena_id']
+
+        # =========================================================
+        # DEBUG BLOCK 0: Sanity Check Raw Input (Before Preprocessing)
+        # =========================================================
+        if getattr(self, 'debug', False):
+            os.makedirs('tmp/clothfunnels/', exist_ok=True)
+            raw_rgb = info['observation']['rgb'].copy()
+            r0_mask = info['observation']['robot0_mask'].copy()
+            r1_mask = info['observation']['robot1_mask'].copy()
+
+            # Overlay masks on the raw environment camera frame
+            overlay = raw_rgb.copy()
+            overlay[r0_mask.astype(bool)] = [255, 0, 0]  # Red: Robot 0
+            overlay[r1_mask.astype(bool)] = [0, 255, 0]  # Green: Robot 1
+            
+            sanity_img = cv2.addWeighted(overlay, 0.35, raw_rgb, 0.65, 0)
+            cv2.imwrite('tmp/clothfunnels/0_sanity_check_raw.png', cv2.cvtColor(sanity_img, cv2.COLOR_RGB2BGR))
+        
+        # 1. INTERCEPT: Are we currently executing a fold sequence?
+        if len(self.internal_states[aid].get('fold_action_queue', [])) > 0:
+            action = self.internal_states[aid]['fold_action_queue'].pop(0)
+            self.internal_states[aid]['step'] += 1
+            return action
+
         start_time = time.time()
         transformed_info = self._preporcess_info(info)
-        
 
-        ## Get the action tuple from the network
+        # 2. TRIGGER FOLD: Have we reached the step limit to start folding?
+        if (self.internal_states[aid].get('step', 0) >= self.config.flat_length - 1) \
+            and self.config.include_fold \
+            and not self.internal_states[aid]['has_folded']: # Check the flag
+            
+            fold_actions = self._generate_fold_actions(transformed_info)
+            self.internal_states[aid]['fold_action_queue'].extend(fold_actions)
+            self.internal_states[aid]['has_folded'] = True # Set the flag
+            
+            action = self.internal_states[aid]['fold_action_queue'].pop(0)
+            self.internal_states[aid]['step'] += 1
+            print('[ClothFunnels] action', action)
+            return action
+
+        # 3. NORMAL NETWORK POLICY
         action_tuple = self.network.act([transformed_info])[0]
 
-        if action_tuple is None:
-            return {
-                'no_op': True
-            }
-
-        ## Postprocess the action tuple
         action = self._postprocess_action_tuple(action_tuple, transformed_info)
+        self.internal_states[aid]['step'] += 1
+        
         duration = time.time() - start_time
         print(f"Arena {info.get('arena_id', 'Unknown')}: Action planned in {duration:.4f} seconds.")
+        print('[ClothFunnels] action', action)
         return action
 
-    def act(self, infos, updates=[]):
-        ret_actions = []
-        for info, up in zip(infos, updates):
-            
-            res_action = self.single_act(info, up)
-            
-            ret_actions.append(res_action)
+    def _generate_fold_actions(self, transformed_info):
+        keypoint_names = ['left_shoulder', 'right_shoulder', 'top_left', 'top_right', 'bottom_left', 'bottom_right']
+        
+        # Get the RGB image directly from your preprocessed dictionary
+        img = transformed_info['pretransform_rgb']
+        
+        # 1. Detect Keypoints
+        keypoint_coords = self.keypoint_detector.get_keypoints(img.astype(np.float32)/255)
+        pixel_keypoints = {k: v for k, v in zip(keypoint_names, keypoint_coords)}
 
-        return ret_actions
+        # =========================================================
+        # DEBUG BLOCK 4: Annotate Keypoints on Pretransform Image
+        # =========================================================
+        if getattr(self, 'debug', False):
+            import cv2
+            import os
+            os.makedirs('tmp/clothfunnels/', exist_ok=True)
+            
+            # Ensure image is 0-255 uint8 and BGR for OpenCV
+            debug_img = img.copy()
+            if debug_img.max() <= 1.0:
+                debug_img = (debug_img * 255).astype(np.uint8)
+            debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
+            
+            # Distinct colors for each keypoint
+            colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
+            
+            for (name, coord), color in zip(pixel_keypoints.items(), colors):
+                # Assuming coord is [y, x] based on your H, W normalization
+                x, y = int(coord[0]), int(coord[1])
+                cv2.circle(debug_img, (x, y), 5, color, -1)
+                cv2.putText(debug_img, name.replace('_', ' '), (x + 8, y), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                
+            cv2.imwrite('tmp/clothfunnels/4_keypoint_debug.png', debug_img)
+        # =========================================================
 
+        # 2. Generate Heuristic 2D actions
+        raw_actions = shirt_folding_heuristic_2d(pixel_keypoints)
+        
+        # 3. Setup Normalization based on image shape
+        H, W = img.shape[:2]
+        hw_array = np.array([H, W]) # Note: Make sure this aligns with (y, x) vs (x, y)
+        
+        def norm_coord(coord):
+            return (coord / hw_array) * 2 - 1
+
+        # 4. Format Action 1: Combine both single-arm folds into one dual-action
+        arm_fold_action = {
+            'norm-pixel-dual-pick-and-place': {
+                'pick_0': norm_coord(raw_actions[0][0]['pick']),
+                'place_0': norm_coord(raw_actions[0][0]['place']),
+                'pick_1': norm_coord(raw_actions[1][0]['pick']),
+                'place_1': norm_coord(raw_actions[1][0]['place'])
+            }
+        }
+        
+        # 5. Format Action 2: The bottom-up body fold
+        body_fold_action = {
+            'norm-pixel-dual-pick-and-place': {
+                'pick_0': norm_coord(raw_actions[2][0]['pick']),
+                'place_0': norm_coord(raw_actions[2][0]['place']),
+                'pick_1': norm_coord(raw_actions[2][1]['pick']),
+                'place_1': norm_coord(raw_actions[2][1]['place'])
+            }
+        }
+
+        # Return the sequence (queue) of actions
+        return [arm_fold_action, body_fold_action]
+    
+    
     def _postprocess_action_tuple(self, action_tuple, info):
 
         primitive = action_tuple['chosen_primitive']
@@ -365,7 +467,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             primitive = 'place'
    
         chosen_indices = action_tuple[primitive]['chosen_index']
-        # print(f"Max indices: {max_indices}")
 
         chosen_deformable_value = action_tuple[primitive]['chosen_deformable_value']
         chosen_rigid_value = action_tuple[primitive]['chosen_rigid_value']
@@ -385,190 +486,149 @@ class ClothFunnelsAdapter(TrainableAgent):
         num_scales = len(self.adaptive_scale_factors)
         rotation_idx = torch.div(x, num_scales, rounding_mode='floor')
         scale_idx = x - rotation_idx * num_scales
+        
         scale = self.adaptive_scale_factors[scale_idx]
-
         rotation = self.rotations[rotation_idx]
 
+        # 1. Get Reach Points in the 128x128 Transformed Space
         reach_points = np.array(self._get_action_params(
             action_primitive=primitive,
             max_indices=(x, y, z),
-            # cloth_mask = transform_cloth_mask
-            ))
-
+        ))
         p1, p2 = reach_points[:2]
 
         if (p1 is None) or (p2 is None):
             print("\n [SimEnv] Invalid pickpoints \n", primitive, p1, p2)
             raise ValueError("Invalid pickpoints")
 
-        action_kwargs = {
-            'observation': info['transformed_obs'][x],
-            'mask': info[f'{primitive}_mask'][x],
-            'workspace_mask': info[f'{primitive}_workspace_mask'][x],
-            'action_primitive': str(primitive),
-            'primitive': primitive,
-            'p1': p1,
-            'p2': p2,
-            'scale': scale,
-            'nonadaptive_scale': self.scale_factors[scale_idx],
-            'rotation': rotation,
-            'predicted_deformable_value': float(chosen_deformable_value),
-            'predicted_rigid_value': float(chosen_rigid_value),
-            'predicted_weighted_value': float(chosen_value),
-            'chosen_indices': np.array(chosen_indices),
-            'action_mask': action_mask,
-            'value_map': value_map,
-            'all_value_maps': all_value_maps,
-        }
-
-        ## plot p1 and p2 on observation
-
-        chosen_image = action_kwargs['observation'].detach().cpu().numpy()[:3]
-        chosen_image = (chosen_image.transpose(1, 2, 0)*255).astype(np.uint8)
-        # print('Chosen image shape', chosen_image.shape)
-        # print('p1', p1, 'p2', p2)
-        image_with_circles = chosen_image.copy()
-
-        # Draw the circles
-        cv2.circle(image_with_circles, (int(p1[1]), int(p1[0])), 5, (255, 0, 0), -1)
-        cv2.circle(image_with_circles, (int(p2[1]), int(p2[0])), 5, (0, 255, 0), -1)
-        cv2.imwrite('tmp/chosen_image.png', image_with_circles)
-
-        # reverse the chosen_image to original image, the rotation is given `rotation`, the scale is given `scale`
-
-        inverse_chosen_image = action_kwargs['observation']
-
-        # rotate by `rotation` degrees
-        inverse_chosen_image = transform(inverse_chosen_image, -rotation, 1.0/scale, inverse_chosen_image.shape[1])[:3].detach().cpu().numpy()
-        inverse_chosen_image = (inverse_chosen_image.transpose(1, 2, 0)*255).astype(np.uint8).copy()
-        # also do the inverse rotate and scale for p1 and p2
-        #print('rotation', rotation, 'scale', scale)
-        T2d = get_transform_matrix(inverse_chosen_image.shape[0], inverse_chosen_image.shape[0], -rotation, scale)
-
-        transform_pixels = np.concatenate((np.array([p1, p2]), np.ones((2, 1))), axis=1)
-        #print('transform_pixels', transform_pixels)
-        pixels = np.matmul(transform_pixels, T2d)[:, :2].astype(int)
-        #print('inverse pixels', pixels)
-        p1, p2 = pixels[0], pixels[1]
-
-        # Draw the circles
-        # print('inverse chosen image shape', inverse_chosen_image.shape)
-        # cv2.circle(inverse_chosen_image, (int(p1[1]), int(p1[0])), 5, (255, 0, 0), -1)
-        # cv2.circle(inverse_chosen_image, (int(p2[1]), int(p2[0])), 5, (0, 255, 0), -1)
-        # cv2.imwrite('tmp/inverse_chosen_image.png', inverse_chosen_image)
-
-        if action_tuple[primitive].get('raw_value_map') is not None:
-            action_kwargs['raw_value_maps'] = action_tuple[primitive]['raw_value_maps']
-
-
-        assert ((action_kwargs['p1'] is not None) and (action_kwargs['p2'] is not None))
-
-        action_kwargs.update({
-            'transformed_depth':
-            action_kwargs['observation'][3, :, :],
-            'transformed_rgb':
-            action_kwargs['observation'][:3, :, :],
-        })
-
-        #print('pix1', p1, 'pix2', p2)
-
-        # action_params = self.check_action(
-        #     info,
-        #     pixels=np.array([p1, p2]),
-        #     **action_kwargs)
-
-
-        # try:
-        #     reachable, left_or_right = self._check_action_reachability(
-        #         action=primitive,
-        #         p1=action_params['p1'],
-        #         p2=action_params['p2'])
-        # except ValueError as e:
-        #     raise ValueError("Reach pos none")
+        # --- Extract Masks for Debugging ---
+        # 1. Primitive Workspace (Transformed 128x128)
+        ws_mask = info[f'{primitive}_workspace_mask'][x].detach().cpu().numpy().astype(bool)
         
+        # 2. Left & Right Robot Workspaces (Pretransform 480x480)
+        left_arm_pre = info['pretransform_mask'][1].detach().cpu().numpy().astype(bool)
+        right_arm_pre = info['pretransform_mask'][2].detach().cpu().numpy().astype(bool)
 
-        # if primitive == 'place':
-        #     action_kwargs['left_or_right'] = left_or_right
+        # Calculate Transformation Matrices
+        pre_H, pre_W = info['pretransform_rgb'].shape[:2]
+        T2d = get_transform_matrix(
+            original_dim=pre_H, 
+            resized_dim=self.config.obs_dim, 
+            rotation=-rotation, 
+            scale=scale
+        )
+        M_pre = T2d.T[:2, :].astype(np.float32)            # Matrix: 128x128 -> 480x480
+        M_fwd = cv2.invertAffineTransform(M_pre)           # Matrix: 480x480 -> 128x128
 
 
-        # for k in ['valid_action',
-        #             'pretransform_pixels']:
-        #     del action_params[k]
+        # =========================================================
+        # DEBUG BLOCK 1: Plot on the Transformed Observation Space
+        # =========================================================
+        if getattr(self, 'debug', False):
+            os.makedirs('tmp/clothfunnels/', exist_ok=True)
+            chosen_image = info['transformed_obs'][x][:3].detach().cpu().numpy()
+            chosen_image = (chosen_image.transpose(1, 2, 0) * 255).astype(np.uint8).copy()
+            
+            # Warp Robot Workspaces forward to 128x128 space
+            left_arm_trans = cv2.warpAffine(left_arm_pre.astype(np.uint8), M_fwd, 
+                                            (self.config.obs_dim, self.config.obs_dim), 
+                                            flags=cv2.INTER_NEAREST).astype(bool)
+            right_arm_trans = cv2.warpAffine(right_arm_pre.astype(np.uint8), M_fwd, 
+                                             (self.config.obs_dim, self.config.obs_dim), 
+                                             flags=cv2.INTER_NEAREST).astype(bool)
+            
+            # Workspace Overlays
+            overlay = chosen_image.copy()
+            overlay[left_arm_trans] = [255, 0, 0]   # Red: Left Arm
+            overlay[right_arm_trans] = [0, 255, 0]  # Green: Right Arm
+            overlay[ws_mask] = [255, 0, 255]        # Magenta: Valid Primitive Action
+            
+            chosen_image = cv2.addWeighted(overlay, 0.35, chosen_image, 0.65, 0)
+            
+            cv2.circle(chosen_image, (int(p1[1]), int(p1[0])), 3, (255, 0, 0), -1)
+            cv2.circle(chosen_image, (int(p2[1]), int(p2[0])), 3, (0, 255, 0), -1)
+            cv2.imwrite('tmp/clothfunnels/1_transformed_space.png', cv2.cvtColor(chosen_image, cv2.COLOR_RGB2BGR))
 
-        # print('primitive', action_kwargs['action_primitive'])
-        # print('p1', p1, 'p2', p2)
-        ### rotation the pixel points 90 degrees anti-clockwise
-        T2d = get_transform_matrix(info['prerot_rgb'].shape[1], inverse_chosen_image.shape[1], 90, 1)
 
+        # =========================================================
+        # DEBUG BLOCK 2: Plot on the Pretransform Space
+        # =========================================================
         transform_pixels = np.concatenate((np.array([p1, p2]), np.ones((2, 1))), axis=1)
-        #print('transform_pixels', transform_pixels)
-        pixels = np.matmul(transform_pixels, T2d)[:, :2].astype(int)
-        #print('output pixels', pixels)
-        p1, p2 = pixels[0], pixels[1]
+        pixels_pre = np.matmul(transform_pixels, T2d)[:, :2].astype(int)
 
-        #print('p1', p1, 'p2', p2)
+        if getattr(self, 'debug', False):
+            pretransform_img = info['pretransform_rgb'].copy()
+            
+            # Un-warp Primitive WS to Pretransform 480x480 space
+            ws_mask_pre = cv2.warpAffine(ws_mask.astype(np.uint8), M_pre, 
+                                         (pre_W, pre_H), flags=cv2.INTER_NEAREST).astype(bool)
+            
+            # Workspace Overlays
+            overlay_pre = pretransform_img.copy()
+            overlay_pre[left_arm_pre] = [255, 0, 0]    # Red: Left Arm
+            overlay_pre[right_arm_pre] = [0, 255, 0]   # Green: Right Arm
+            overlay_pre[ws_mask_pre] = [255, 0, 255]   # Magenta: Valid Primitive Action
+            
+            pretransform_img = cv2.addWeighted(overlay_pre, 0.35, pretransform_img, 0.65, 0)
 
-        # draw_image = info['prerot_rgb'].copy()
-        # cv2.circle(draw_image, (int(p1[1]), int(p1[0])), 5, (255, 0, 0), -1)
-        # cv2.circle(draw_image, (int(p2[1]), int(p2[0])), 5, (0, 255, 0), -1)
-        # cv2.imwrite('tmp/output_action.png', draw_image)
+            cv2.circle(pretransform_img, (int(pixels_pre[0][1]), int(pixels_pre[0][0])), 5, (255, 0, 0), -1)
+            cv2.circle(pretransform_img, (int(pixels_pre[1][1]), int(pixels_pre[1][0])), 5, (0, 255, 0), -1)
+            cv2.imwrite('tmp/clothfunnels/2_pretransform_space.png', cv2.cvtColor(pretransform_img, cv2.COLOR_RGB2BGR))
 
-        # swap x and y
-        #p1, p2 = p1[::-1], p2[::-1]
 
-        ### pack and send the action
+        # =========================================================
+        # DEBUG BLOCK 3: Plot on the Absolute Original Image Space
+        # =========================================================
         H, W = info['prerot_rgb'].shape[:2]
-        chosen_primitive = 'norm-pixel-pick-and-place' if action_kwargs['action_primitive'] == 'place' else 'norm-pixel-pick-and-fling'
+        p_orig = np.zeros_like(pixels_pre)
+        
+        p_orig[:, 0] = pixels_pre[:, 1]                 
+        p_orig[:, 1] = (W - 1) - pixels_pre[:, 0]       
+        p_orig[:, 0] = np.clip(p_orig[:, 0], 0, H - 1)
+        p_orig[:, 1] = np.clip(p_orig[:, 1], 0, W - 1)
+        p1_final, p2_final = p_orig[0], p_orig[1]
+
+        if getattr(self, 'debug', False):
+            prerot_img = info['prerot_rgb'].copy()
+            
+            # Un-rotate Workspaces
+            left_arm_orig = np.rot90(left_arm_pre, -1)
+            right_arm_orig = np.rot90(right_arm_pre, -1)
+            ws_mask_orig = np.rot90(ws_mask_pre, -1)
+            
+            # Workspace Overlays
+            overlay_orig = prerot_img.copy()
+            overlay_orig[left_arm_orig] = [255, 0, 0]   # Red: Left Arm
+            overlay_orig[right_arm_orig] = [0, 255, 0]  # Green: Right Arm
+            overlay_orig[ws_mask_orig] = [255, 0, 255]  # Magenta: Valid Primitive Action
+            
+            prerot_img = cv2.addWeighted(overlay_orig, 0.35, prerot_img, 0.65, 0)
+
+            cv2.circle(prerot_img, (int(p1_final[1]), int(p1_final[0])), 6, (255, 0, 0), -1)
+            cv2.circle(prerot_img, (int(p2_final[1]), int(p2_final[0])), 6, (0, 255, 0), -1)
+            cv2.imwrite('tmp/clothfunnels/3_original_space.png', cv2.cvtColor(prerot_img, cv2.COLOR_RGB2BGR))
+
+
+        # 4. Normalize to [-1, 1] and Pack Action
+        chosen_primitive_name = 'norm-pixel-single-pick-and-place' if primitive == 'place' else 'norm-pixel-pick-and-fling'
+        
         chosen_primitive_params = {
-            'pick_0': p1/np.array([H, W]) * 2 - 1,
-            'pick_1': p2/np.array([H, W]) * 2 - 1,
+            'pick_0': p1_final / np.array([H, W]) * 2 - 1,
+            'pick_1': p2_final / np.array([H, W]) * 2 - 1,
         }
 
-        if action_kwargs['action_primitive'] == 'place':
+        if primitive == 'place':
             chosen_primitive_params['place_0'] = chosen_primitive_params['pick_1']
             del chosen_primitive_params['pick_1']
         
-        if self.config.place_only:
-            return np.stack([chosen_primitive_params['pick_0'], chosen_primitive_params['place_0']]).flatten()
+        # if self.config.place_only:
+        #     return np.stack([chosen_primitive_params['pick_0'], chosen_primitive_params['place_0']]).flatten()
 
-        action =  {
-            chosen_primitive: chosen_primitive_params
+        action = {
+            chosen_primitive_name: chosen_primitive_params
         }
 
-        #print('Action', action)
         return action
-
-    
-    ### TODO: this should be in the environment
-    def _check_action_reachability(
-            self, action: str, p1: np.array, p2: np.array):
-        if (p1 is None) or (p2 is None):
-           raise ValueError(f'[Invalid action] {action} reach points are None')
-        if action in ['fling','drag','stretchdrag']:
-            # right and left must reach each point respectively
-            return self._check_arm_reachability(self.left_arm_base, p1) \
-                and self._check_arm_reachability(self.right_arm_base, p2), None
-        elif action == 'drag' or action == 'place':
-            # either right can reach both or left can reach both
-            if self._check_arm_reachability(self.left_arm_base, p1) and\
-                    self._check_arm_reachability(self.left_arm_base, p2):
-                return True, 'left'
-            elif self._check_arm_reachability(self.right_arm_base, p1) and \
-                    self._check_arm_reachability(self.right_arm_base, p2):
-                return True, 'right'
-            else:
-                return False, None
-        raise NotImplementedError()
-    
-    def _check_arm_reachability(self, arm_base, reach_pos):
-        try:
-            return np.linalg.norm(arm_base - reach_pos) < self.reach_distance_limit
-        except Exception as e:
-            print(e)
-            print("[Check arm] Reachability error")
-            print("arm_base:", arm_base)
-            print("reach_pos:", reach_pos)
-            return False, None
     
     def _get_action_params(self, action_primitive, max_indices, cloth_mask=None):
         x, y, z = max_indices
@@ -580,11 +640,6 @@ class ClothFunnelsAdapter(TrainableAgent):
 
             p1[0] = p1[0] + self.config.pix_grasp_dist
             p2[0] = p2[0] - self.config.pix_grasp_dist
-
-        elif action_primitive == 'drag':
-            p1 = np.array([y, z])
-            p2 = p1.copy()
-            p2[0] += self.pix_drag_dist
         elif action_primitive == 'place':
             p1 = np.array([y, z])
             p2 = p1.copy()

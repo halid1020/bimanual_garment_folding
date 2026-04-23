@@ -23,7 +23,7 @@ class HybridActionPrimitive():
             print('[HybridActionPrimitive] ajust parametners!')
             kwargs['hang_pos_y'] = 0
             kwargs['fling_vel'] = 0.02
-            kwargs['fling_y'] = 0.3
+            kwargs['fling_y'] = 0.4
 
         self.np_pnf = PixelPickAndFling(**kwargs)
         kwargs['pregrasp_height'] = 0.2 # only difference from Pick and Place so far

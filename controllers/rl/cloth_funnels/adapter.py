@@ -244,8 +244,8 @@ class ClothFunnelsAdapter(TrainableAgent):
         #print('Transformed obs shape', retval['transformed_obs'].shape)
         
         mask = np_to_ts(info['observation']['mask'].copy(), self.device)
-        right_arm_mask =  torch.tensor(info['observation']['robot0_mask'].copy()).bool().to(self.device)
-        left_arm_mask =  torch.tensor(info['observation']['robot1_mask'].copy()).bool().to(self.device)
+        right_arm_mask =  torch.tensor(info['observation']['robot1_mask'].copy()).bool().to(self.device)
+        left_arm_mask =  torch.tensor(info['observation']['robot0_mask'].copy()).bool().to(self.device)
                 
         pretransform_mask = torch.stack([mask, left_arm_mask, right_arm_mask], dim=0)
         #print('Pretransform mask shape', pretransform_mask.shape)
@@ -429,22 +429,28 @@ class ClothFunnelsAdapter(TrainableAgent):
         
         # 3. Setup Normalization based on image shape
         H, W = img.shape[:2]
-        hw_array = np.array([H, W]) # Note: Make sure this aligns with (y, x) vs (x, y)
+        hw_array = np.array([H, W]) 
         
         def norm_coord(coord):
             return (coord / hw_array) * 2 - 1
 
-        # 4. Format Action 1: Combine both single-arm folds into one dual-action
-        arm_fold_action = {
-            'norm-pixel-dual-pick-and-place': {
+        # 4. Format Action 1: Single-arm fold for the Right Arm
+        right_arm_fold_action = {
+            'norm-pixel-single-pick-and-place': {
                 'pick_0': norm_coord(raw_actions[0][0]['pick']),
-                'place_0': norm_coord(raw_actions[0][0]['place']),
-                'pick_1': norm_coord(raw_actions[1][0]['pick']),
-                'place_1': norm_coord(raw_actions[1][0]['place'])
+                'place_0': norm_coord(raw_actions[0][0]['place'])
             }
         }
         
-        # 5. Format Action 2: The bottom-up body fold
+        # 5. Format Action 2: Single-arm fold for the Left Arm
+        left_arm_fold_action = {
+            'norm-pixel-single-pick-and-place': {
+                'pick_0': norm_coord(raw_actions[1][0]['pick']),
+                'place_0': norm_coord(raw_actions[1][0]['place'])
+            }
+        }
+        
+        # 6. Format Action 3: The bottom-up body fold (Dual arm)
         body_fold_action = {
             'norm-pixel-dual-pick-and-place': {
                 'pick_0': norm_coord(raw_actions[2][0]['pick']),
@@ -454,8 +460,8 @@ class ClothFunnelsAdapter(TrainableAgent):
             }
         }
 
-        # Return the sequence (queue) of actions
-        return [arm_fold_action, body_fold_action]
+        # Return the sequence (queue) of 3 actions instead of 2
+        return [right_arm_fold_action, left_arm_fold_action, body_fold_action]
     
     
     def _postprocess_action_tuple(self, action_tuple, info):

@@ -26,7 +26,7 @@ class PixelPickAndFling():
         fling_vel= 0.02, 
         release_vel=0.01,
         drag_vel=0.005,
-        lower_height=0.06,
+        lower_height=0.1,
         readjust_pick_poss=0.0,
         pick_lower_bound=[-1, -1],
         pick_upper_bound=[1, 1],

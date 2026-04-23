@@ -85,7 +85,7 @@ class GarmentEnv(Arena):
         self.frame_resolution = config.get("frame_resolution", [256, 256])
         self.obs_resolution =  config.get("image_resolution", [128, 128])
         self.stop_on_success = config.get('stop_on_success', True)
-        
+        self.hard_shift_x = self.config.get('hard_shift_x', 0.0)
         # Softgym Setup
         self._get_sim_config()
         self._setup_camera()

@@ -69,7 +69,7 @@ def load_cloth(path):
 
 
 def get_default_config(
-        particle_radius=0.014,
+        particle_radius=0.0175,
         cloth_stiffness = (0.75, .02, .02),
         scale=0.8,
         ):

@@ -88,7 +88,7 @@ action_primitives:
 - place
 - fling
 fling_only: False
-place_only: True
+place_only: False
 include_fold: True
 
 fold_finish: False

@@ -25,8 +25,8 @@ dump_network_inputs: False
 #logging
 record_task_config: False
 
-# render:
-debug: True
+
+debug: false
 
 # network:
 pos_deformable: False 

@@ -15,6 +15,7 @@ fling_only: False
 task_id: null
 kps_model: models/keypoint_model.pth
 
+debug: True
 eval: False
 episode_length: 8
 log_dir: experiments

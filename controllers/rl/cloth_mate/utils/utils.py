@@ -3,7 +3,7 @@ from torchvision import transforms
 from typing import Any, Dict, List, MutableMapping, Tuple
 from time import time
 from filelock import FileLock
-from clothmate.core.network import MaximumValuePolicy
+from ..network import MaximumValuePolicy
 # from clothmate.core.simEnv import SimEnv
 
 def get_dataset_size(path, pbar=None):

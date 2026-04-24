@@ -23,9 +23,19 @@ provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
 debug: false
 apply_workspace: true
-robot0_radius: [0.1, 0.9] #left
-robot1_radius: [0.1, 0.85] #right
-robot0_base: [0, -0.85, 0]
-robot1_base: [0, 0.85, 0]
+robot0_radius: [0.25, 0.9] #left
+robot1_radius:  [0.1, 0.85]  #right
+robot0_base: [-0.717, -0.005,  0] 
+robot1_base: [0.894, -0.005, 0]
 readjust_to_workspace: true
 add_final_goal_to_obs: True
+camera_height: 1.647
+crop_offset_x: 70 # let the intersection at the view centre.
+random_displacement_range: [-0.1, 0.1] # this is used for alignment target pos generation.
+hard_shift_x: 0.1 # let the garment to be at the middle of intersecton.
+
+field_of_view: [69, 42] # in degrees
+camera_resolution: [1280, 720] 
+frame_resolution: [256, 148]
+# width, height for rendering, but the render return (height, width) as shape.
+# width is the horizontal axis, height is the vertical axis. 

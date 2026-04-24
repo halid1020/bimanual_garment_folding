@@ -1,7 +1,7 @@
 from actoris_harena import Agent
 import numpy as np
 import cv2
-from .utils import apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
+from .utils import apply_workspace_shade, overlay_workspaces, CV2_DISPLAY, SIM_DISPLAY
 import os
 
 class HumanDualPickersPickAndPlace(Agent):
@@ -34,50 +34,15 @@ class HumanDualPickersPickAndPlace(Agent):
 
         if self.overlay_goal_contour:
             goal_mask = state['goal']['mask']
-
             goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
-
             contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
             rgb = cv2.drawContours(rgb, contours, -1, (0, 255, 255), 1)
-                    
 
         ## resize
         rgb = cv2.resize(rgb, (512, 512))
-        H, W = rgb.shape[:2]
-        if 'robot0_mask' in state['observation']:
-            mask0 = state['observation']['robot0_mask'].astype(bool)
-
-            if mask0.shape[:2] != (H, W):
-                mask0 = cv2.resize(
-                    mask0.astype(np.uint8),
-                    (W, H),
-                    interpolation=cv2.INTER_NEAREST
-                ).astype(bool)
-
-            rgb = apply_workspace_shade(
-                rgb,
-                mask0,
-                color=(255, 0, 0),  # Blue in BGR
-                alpha=0.2
-            )
-
-        if 'robot1_mask' in state['observation']:
-            mask1 = state['observation']['robot1_mask'].astype(bool)
-
-            if mask1.shape[:2] != (H, W):
-                mask1 = cv2.resize(
-                    mask1.astype(np.uint8),
-                    (W, H),
-                    interpolation=cv2.INTER_NEAREST
-                ).astype(bool)
-
-            rgb = apply_workspace_shade(
-                rgb,
-                mask1,
-                color=(0, 0, 255),  # Red in BGR
-                alpha=0.2
-            )
+        
+        # --- NEW: Apply workspaces using the utility function ---
+        rgb = overlay_workspaces(rgb, state)
 
         img = rgb.copy()
 
@@ -109,12 +74,12 @@ class HumanDualPickersPickAndPlace(Agent):
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
-            canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
+            algn_iou_flat = state['evaluation']['algn_IoU_to_flattened']
             
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
                 (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
-                (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
+                (f"Canon IoU(flat): {algn_iou_flat:.3f}", (255, 255, 255))
             ]
             if 'max_IoU' in state['evaluation'].keys():
                 max_iou_goal = state['evaluation']['max_IoU']

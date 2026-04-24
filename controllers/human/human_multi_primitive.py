@@ -2,10 +2,9 @@ from actoris_harena import Agent
 import numpy as np
 import cv2
 
-from .pick_and_place.pixel_human_two_picker import PixelHumanTwoPicker
 from .pick_and_fling.pixel_human import PixelHumanFling
-from .human_pick_and_drag import HumanPickAndDrag
 from .human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
+from .human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
 from .no_operation import NoOperation
 
 from .utils import draw_text_top_right, apply_workspace_shade
@@ -18,7 +17,8 @@ class HumanMultiPrimitive(Agent):
         super().__init__(config)
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
-            "norm-pixel-pick-and-place",
+            "norm-pixel-dual-pick-and-place",
+            "norm-pixel-single-pick-and-place",
             "no-operation"
         ]
         self.overlay_goal_contour = config.get('overlay_goal_contour', False)
@@ -26,6 +26,7 @@ class HumanMultiPrimitive(Agent):
         self.primitive_instances = [
             PixelHumanFling(config),
             HumanDualPickersPickAndPlace(config),
+            HumanSinglePickerPickAndPlace(config),
             NoOperation(config)
         ]
     
@@ -114,12 +115,12 @@ class HumanMultiPrimitive(Agent):
         if 'evaluation' in state.keys() and state['evaluation'] != {}:
             success = state['success']
             max_iou_flat = state['evaluation']['max_IoU_to_flattened']
-            canon_iou_flat = state['evaluation']['canon_IoU_to_flattened']
+            algn_iou_flat = state['evaluation']['algn_IoU_to_flattened']
             
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
                 (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
-                (f"Canon IoU(flat): {canon_iou_flat:.3f}", (255, 255, 255))
+                (f"Canon IoU(flat): {algn_iou_flat:.3f}", (255, 255, 255))
             ]
 
             if 'max_IoU' in state['evaluation'].keys():
@@ -183,9 +184,6 @@ class HumanMultiPrimitive(Agent):
                     print("Invalid choice. Please try again.")
             except ValueError:
                 print("Invalid input. Please enter a number.")
-
-        # Close OpenCV window once a valid choice is made
-        # cv2.destroyAllWindows()
 
         # Delegate action
         action = self.current_primitive.single_act(state)

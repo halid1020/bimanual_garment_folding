@@ -1,9 +1,11 @@
+# pip installl trimesh
+# pip install OpenEXR
 import os
 import numpy as np
 import torch
 
 # Relative imports to access core code
-from .utils import *
+from .utils.utils import *
 from .network import MaximumValuePolicy  
 from .keypoint.model import UNet
 from actoris_harena import TrainableAgent
@@ -13,6 +15,7 @@ class ClothMateAdapter(TrainableAgent):
     def __init__(self, config):
         super().__init__(config)
         self.name = 'cloth-mate'
+        self.debug = config.get('debug', False)
         self.action_primitives = config.get("action_primitives", ['fling', 'place', 'pick-and-stretch'])
         
         # Set up compute device
@@ -77,17 +80,13 @@ class ClothMateAdapter(TrainableAgent):
             # bilinear=config.get('bilinear', True)
         ).to(self.device)
 
-    def load_best(self, path=None):
-        """
-        Loads the provided checkpoint for the ClothMate policy and sets it to evaluation mode.
-        """
-        if path is None:
-            path = self.config.get('checkpoint_path', 'models/latest_ckpt.pth')
-            
-        print(f"[ClothMateAdapter] Loading checkpoint from {path}")
+    def load_best(self, path = None) -> int:
+        # Construct the path to load from
+        load_path = path if path is not None else self.save_dir
+        load_path = os.path.join(load_path, 'checkpoints', 'model_best.pth')
         
-        # Load weights
-        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        # --- FIX: Use 'load_path' here instead of 'path' ---
+        checkpoint = torch.load(load_path, map_location="cpu", weights_only=True)
         
         if self.policy is not None:
             # We don't need to strip the 'value_net.' prefix anymore because MaximumValuePolicy expects it!
@@ -96,14 +95,17 @@ class ClothMateAdapter(TrainableAgent):
             self.policy.eval()
             
         if self.keypoint_detector is not None:
-            kps_model_path = self.config.get('kps_model', 'models/keypoint_model.pth')
+            #kps_model_path = self.config.get('kps_model', 'models/keypoint_model.pth')
+            # Assuming you also want to load kps from the constructed directory:
+            kps_model_path = os.path.join(path if path is not None else self.save_dir, 'checkpoints', 'keypoint_model.pth')
+            
             if os.path.exists(kps_model_path):
                 kps_ckpt = torch.load(kps_model_path, map_location="cpu", weights_only=True)
                 self.keypoint_detector.load_state_dict(kps_ckpt.get('model_state_dict', kps_ckpt))
                 self.keypoint_detector.eval()
 
         return True
-
+    
     def rotate_point_back(self, x_rot, y_rot, orig_W, orig_H):
         x_orig = orig_W - 1 - y_rot
         y_orig = x_rot
@@ -120,14 +122,23 @@ class ClothMateAdapter(TrainableAgent):
         orig_H, orig_W = rgb.shape[:2]
         
         # 1. Rotate 90 deg CCW
-        rotated_rgb = np.rot90(rgb, k=1, axes=(0, 1))
-        transformed_obs = obs.copy()
-        transformed_obs['rgb'] = rotated_rgb
-        if 'depth' in obs: transformed_obs['depth'] = np.rot90(obs['depth'], k=1, axes=(0, 1))
-        if 'mask' in obs: transformed_obs['mask'] = np.rot90(obs['mask'], k=1, axes=(0, 1))
+        #rotated_rgb = np.rot90(rgb, k=1, axes=(0, 1))
+        #transformed_obs = obs.copy()
+        #transformed_obs['rgb'] = rotated_rgb
 
-        self.transformed_obs = self.generate_transformed_obs(transformed_obs) 
-        
+        # if 'depth' in obs: transformed_obs['depth'] = np.rot90(obs['depth'], k=1, axes=(0, 1))
+        # if 'mask' in obs: transformed_obs['mask'] = np.rot90(obs['mask'], k=1, axes=(0, 1))
+        prerot_rgb = rgb.copy()
+
+        for key in ['rgb', 'depth', 'mask', 'robot0_mask', 'robot1_mask']:
+            assert key in obs, f"Key {key} not found in observation"
+            ## rotate the image clothwise 90 degrees
+            # --- FIX: Add .copy() to force positive memory strides ---
+            obs[key] = np.rot90(obs[key], 1).copy()
+
+        self.transformed_obs = self.generate_transformed_obs(obs) 
+        self.transformed_obs['prerot_rgb'] = prerot_rgb
+
         # 2. Forward Pass
         action_primitive = None
         action_params = {}
@@ -151,8 +162,11 @@ class ClothMateAdapter(TrainableAgent):
                 
                 # Secondary validation: The U-Net classifier branch must also confidently 
                 # recognize the state before executing P&S.
+                # Secondary validation: The U-Net classifier branch must also confidently 
+                # recognize the state before executing P&S.
                 if pred_cls[0].item() >= 0.45:
-                    pred_coords = get_keypoints(pred_heatmap.cpu().numpy(), threshold=0.2)[0]
+                    
+                    pred_coords = get_keypoints(pred_heatmap.cpu().numpy(), threshold=0.2)
                     
                     if np.all(pred_coords != -1):
                         action_primitive = 'pick-and-stretch'
@@ -171,26 +185,49 @@ class ClothMateAdapter(TrainableAgent):
                             scale=scale
                         )
                         
+                        mat_xy = mat.copy()
+                        mat_xy[[0, 1], :] = mat_xy[[1, 0], :] 
+                        mat_xy[:, [0, 1]] = mat_xy[:, [1, 0]] 
+                        
                         coords_homo = np.concatenate((pred_coords, np.ones((4, 1))), axis=1)
-                        orig_kps = np.matmul(coords_homo, mat)[:, :2].astype(int)
+                        orig_kps = np.matmul(coords_homo, mat_xy)[:, :2].astype(int)
                         
                         tr, tl, br, bl = orig_kps[0], orig_kps[1], orig_kps[2], orig_kps[3]
                         
-                        # --- CRITICAL COMMENT: Heuristic P&S Strategy ---
-                        # The heuristic relies on comparing the horizontal deviation 
-                        # (width) of the top and bottom keypoints.
                         top_width = np.linalg.norm(tl - tr)
                         bottom_width = np.linalg.norm(bl - br)
                         
-                        # The algorithm selects the pair of keypoints with the largest 
-                        # horizontal deviation (the more wrinkled side).
+                        # =========================================================
+                        # FIX: Implement Trousers/Pants classification
+                        # =========================================================
+                        mask_np = (input_tensor[0].sum(dim=0) > 0).cpu().numpy()
+                        
+                        try:
+                            # Try to use their exact line-checking function if you have it
+                            from .keypoint.utils import is_line_all_ones
+                            is_pants = not is_line_all_ones(mask_np, pred_coords[2], pred_coords[3])
+                        except ImportError:
+                            is_pants = False
+                            
+                        # Fallback logic: Shirts usually have a bottom width > 1.6x the top width 
+                        # because the sleeves spread out. Pants have straight legs.
+                        if not is_pants:
+                            bot_px_width = np.linalg.norm(pred_coords[3] - pred_coords[2])
+                            top_px_width = np.linalg.norm(pred_coords[1] - pred_coords[0])
+                            if bot_px_width < top_px_width * 1.6:
+                                is_pants = True
+
+                        # =========================================================
+
                         if top_width < bottom_width:
                             pick_L, pick_R = tl, tr
                             anchor_L, anchor_R = bl, br
-                            # Safety constraint: Maximum stretching distance is limited 
-                            # (e.g., 1.15x or 1.2x) to prevent over-stretching garments 
-                            # lacking reliable bottom constraints, like trousers.
-                            target_width = bottom_width * 1.15
+                            
+                            # --- CRITICAL FIX: Protect the waistband! ---
+                            if is_pants:
+                                target_width = top_width * 1.15
+                            else:
+                                target_width = bottom_width * 1.15
                         else:
                             pick_L, pick_R = bl, br
                             anchor_L, anchor_R = tl, tr
@@ -199,8 +236,6 @@ class ClothMateAdapter(TrainableAgent):
                         midpoint = (pick_L + pick_R) / 2
                         anchor_mid = (anchor_L + anchor_R) / 2
                         
-                        # Stretching is executed by repositioning keypoints to symmetric 
-                        # target locations and applying vertical tension.
                         stretch_dir = (pick_L - pick_R) / (np.linalg.norm(pick_L - pick_R) + 1e-5)
                         tension_dir = (midpoint - anchor_mid) / (np.linalg.norm(midpoint - anchor_mid) + 1e-5)
                         tension_magnitude = orig_dim * 0.1  
@@ -214,6 +249,75 @@ class ClothMateAdapter(TrainableAgent):
                             'p3': place_L.astype(int),
                             'p4': place_R.astype(int)
                         }
+                        
+                        # =========================================================
+                        # DEBUG BLOCK: Keypoints & Pick-and-Stretch Visualization
+                        # =========================================================
+                        if self.debug:
+                            import cv2
+                            import os
+                            os.makedirs('tmp/clothmate_debug/', exist_ok=True)
+                            
+                            # --- 1. Transformed Space (128x128 U-Net Input) ---
+                            kp_img_ts = self.transformed_obs['transformed_obs'][40][:3].detach().cpu().numpy()
+                            kp_img_ts = (kp_img_ts.transpose(1, 2, 0) * 255).astype(np.uint8).copy()
+                            kp_img_ts = cv2.cvtColor(kp_img_ts, cv2.COLOR_RGB2BGR)
+                            
+                            colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)] # R, G, B, Y
+                            for i, coord in enumerate(pred_coords):
+                                cv2.circle(kp_img_ts, (int(coord[0]), int(coord[1])), 2, colors[i], -1)
+                            cv2.imwrite('tmp/clothmate_debug/4_kp_transformed_space.png', kp_img_ts)
+                            
+                            # --- 2. Pretransform Space (480x480) ---
+                            pre_img = self.transformed_obs['pretransform_rgb'].copy()
+                            pre_img = cv2.cvtColor(pre_img, cv2.COLOR_RGB2BGR)
+                            
+                            # Draw Original Keypoints (tl, tr, bl, br)
+                            cv2.circle(pre_img, (int(tr[0]), int(tr[1])), 4, (0, 0, 255), -1)   # tr: Red
+                            cv2.circle(pre_img, (int(tl[0]), int(tl[1])), 4, (0, 255, 0), -1)   # tl: Green
+                            cv2.circle(pre_img, (int(br[0]), int(br[1])), 4, (255, 0, 0), -1)   # br: Blue
+                            cv2.circle(pre_img, (int(bl[0]), int(bl[1])), 4, (0, 255, 255), -1) # bl: Yellow
+                            
+                            # Draw Action Points
+                            pick_color = (255, 0, 255)  # Magenta (Picks)
+                            place_color = (255, 255, 0) # Cyan (Anchors/Places)
+                            
+                            cv2.circle(pre_img, (int(pick_L[0]), int(pick_L[1])), 6, pick_color, -1)
+                            cv2.circle(pre_img, (int(pick_R[0]), int(pick_R[1])), 6, pick_color, -1)
+                            cv2.circle(pre_img, (int(place_L[0]), int(place_L[1])), 6, place_color, -1)
+                            cv2.circle(pre_img, (int(place_R[0]), int(place_R[1])), 6, place_color, -1)
+                            
+                            # Draw Arrows for Stretch Direction
+                            cv2.arrowedLine(pre_img, (int(pick_L[0]), int(pick_L[1])), (int(place_L[0]), int(place_L[1])), (255, 255, 255), 2)
+                            cv2.arrowedLine(pre_img, (int(pick_R[0]), int(pick_R[1])), (int(place_R[0]), int(place_R[1])), (255, 255, 255), 2)
+                            cv2.imwrite('tmp/clothmate_debug/5_kp_pretransform_space.png', pre_img)
+                            
+                            # --- 3. Absolute Original Space (Raw Camera) ---
+                            orig_img = self.transformed_obs['prerot_rgb'].copy()
+                            orig_img = cv2.cvtColor(orig_img, cv2.COLOR_RGB2BGR)
+                            
+                            # Helper to map points backwards
+                            def map_back(pt):
+                                x, y = self.rotate_point_back(pt[0], pt[1], orig_W, orig_H)
+                                return (int(x), int(y))
+                                
+                            # Draw Mapped Keypoints
+                            cv2.circle(orig_img, map_back(tr), 4, (0, 0, 255), -1)
+                            cv2.circle(orig_img, map_back(tl), 4, (0, 255, 0), -1)
+                            cv2.circle(orig_img, map_back(br), 4, (255, 0, 0), -1)
+                            cv2.circle(orig_img, map_back(bl), 4, (0, 255, 255), -1)
+                            
+                            # Draw Mapped Actions & Arrows
+                            cv2.circle(orig_img, map_back(pick_L), 6, pick_color, -1)
+                            cv2.circle(orig_img, map_back(pick_R), 6, pick_color, -1)
+                            cv2.circle(orig_img, map_back(place_L), 6, place_color, -1)
+                            cv2.circle(orig_img, map_back(place_R), 6, place_color, -1)
+                            
+                            cv2.arrowedLine(orig_img, map_back(pick_L), map_back(place_L), (255, 255, 255), 2)
+                            cv2.arrowedLine(orig_img, map_back(pick_R), map_back(place_R), (255, 255, 255), 2)
+                            cv2.imwrite('tmp/clothmate_debug/6_kp_original_space.png', orig_img)
+                        # =========================================================
+
                     else:
                         action_primitive = best_primitive
                         action_params = vmap_params
@@ -235,7 +339,7 @@ class ClothMateAdapter(TrainableAgent):
         for p in pts_rotated:
             x_orig, y_orig = self.rotate_point_back(p[0], p[1], orig_W, orig_H)
             norm_x, norm_y = self.normalize_pixel(x_orig, y_orig, orig_W, orig_H)
-            norm_pts.extend([norm_x, norm_y])
+            norm_pts.extend([norm_y, norm_x])
             
         norm_pts_array = np.array(norm_pts, dtype=np.float32)
         
@@ -244,11 +348,11 @@ class ClothMateAdapter(TrainableAgent):
         if action_primitive == 'fling':
             final_action['norm-pixel-pick-and-fling'] = norm_pts_array
         elif action_primitive == 'place':
-            final_action['norm-pixel-single-arm-pick-and-place'] = norm_pts_array
+            final_action['norm-pixel-single-pick-and-place'] = norm_pts_array
         elif action_primitive in ['pick-and-stretch', 'stretch']:
-            final_action['norm-pixel-pick-and-place'] = norm_pts_array
+            final_action['norm-pixel-dual-pick-and-place'] = norm_pts_array
         else:
-            final_action['no-operation'] = np.zeros(0) 
+            raise NotImplementedError 
             
         return final_action
 
@@ -259,9 +363,7 @@ class ClothMateAdapter(TrainableAgent):
         
         deformable_weight = self.config.get('deformable_weight', 0.65)
         
-        # --- CRITICAL COMMENT: Rigid & Deformable Value Combination ---
-        # The framework linearly combines rigid and deformable predictions to generate
-        # the final value map.
+        # --- 1. Find Highest Value Action ---
         for primitive in self.action_primitives:
             if primitive not in value_maps.get('rigid', {}): 
                 continue
@@ -271,8 +373,6 @@ class ClothMateAdapter(TrainableAgent):
             
             mask = self.transformed_obs[f'{primitive}_mask'].to(self.device)
             
-            # Workspace and reachability constraints are applied as masks, zeroing out 
-            # unreachable vertices (set to -inf).
             if mask.any():
                 vmap[~mask] = -float('inf')
                 
@@ -294,17 +394,22 @@ class ClothMateAdapter(TrainableAgent):
         pix_grasp_dist = self.config.get('pix_grasp_dist', 16)
         pix_place_dist = self.config.get('pix_place_dist', 10)
         
-        p1 = np.array([z, y]) 
-        p2 = np.array([z, y])
+        # --- 2. Apply Grasp Offsets ---
+        # Represent points as [col(X), row(Y)]
+        p1 = np.array([z, y], dtype=float) 
+        p2 = np.array([z, y], dtype=float)
         
+        # FIX: Offset axis 1 (the row) because the network expects vertical grasps 
+        # relative to the rotated bounding box.
         if best_primitive in ['fling', 'stretchdrag', 'pick-and-stretch']:
-            p1[0] += pix_grasp_dist
-            p2[0] -= pix_grasp_dist
+            p1[1] += pix_grasp_dist
+            p2[1] -= pix_grasp_dist
         elif best_primitive == 'place':
-            p2[0] += pix_place_dist
+            p2[1] += pix_place_dist
         elif best_primitive == 'drag':
-            p2[0] += self.config.get('pix_drag_dist', 16)
+            p2[1] += self.config.get('pix_drag_dist', 16)
             
+        # --- 3. Inverse Affine Mapping to Pretransform Space ---
         num_scales = len(self.adaptive_scale_factors)
         rotation_idx = x // num_scales
         scale_idx = x % num_scales
@@ -315,10 +420,7 @@ class ClothMateAdapter(TrainableAgent):
         orig_dim = self.transformed_obs['original_dim'] 
         resized_dim = 128 
         
-        # --- CRITICAL COMMENT: Inverse Affine Mapping ---
-        # Because the network evaluated the action on a transformed (rotated/scaled) 
-        # 128x128 observation stack, the extracted spatial coordinates (z, y) must be 
-        # inversely mapped back to the original input dimension.
+        # Get standard [Y, X] transformation matrix from your utils
         mat = get_transform_matrix(
             original_dim=orig_dim, 
             resized_dim=resized_dim, 
@@ -326,10 +428,94 @@ class ClothMateAdapter(TrainableAgent):
             scale=scale
         )
         
+        # Convert matrix to [X, Y] format to map our pixel coordinates correctly
+        mat_xy = mat.copy()
+        mat_xy[[0, 1], :] = mat_xy[[1, 0], :] # Swap rows
+        mat_xy[:, [0, 1]] = mat_xy[:, [1, 0]] # Swap cols
+        
         pixels = np.array([p1, p2])
         pixels_homo = np.concatenate((pixels, np.ones((2, 1))), axis=1)
-        orig_pixels = np.matmul(pixels_homo, mat)[:, :2].astype(int)
+        orig_pixels = np.matmul(pixels_homo, mat_xy)[:, :2].astype(int) # Points in 480x480 Pretransform space
         
+        # =========================================================
+        # DEBUG BLOCK: 3-Stage Visualization
+        # =========================================================
+        if self.debug:  # Set to True or pass via config
+            import cv2
+            import os
+            os.makedirs('tmp/clothmate_debug/', exist_ok=True)
+            
+            # --- Base Images ---
+            chosen_img_ts = self.transformed_obs['transformed_obs'][x][:3].detach().cpu().numpy()
+            chosen_img_ts = (chosen_img_ts.transpose(1, 2, 0) * 255).astype(np.uint8).copy()
+            chosen_img_ts = cv2.cvtColor(chosen_img_ts, cv2.COLOR_RGB2BGR) 
+            
+            pre_img = self.transformed_obs['pretransform_rgb'].copy()
+            pre_img = cv2.cvtColor(pre_img, cv2.COLOR_RGB2BGR)
+            pre_H, pre_W = pre_img.shape[:2]
+            
+            orig_img = self.transformed_obs['prerot_rgb'].copy()
+            orig_img = cv2.cvtColor(orig_img, cv2.COLOR_RGB2BGR)
+            orig_H, orig_W = orig_img.shape[:2] 
+            
+            # --- Masks ---
+            ws_mask = self.transformed_obs[f'{best_primitive}_workspace_mask'][x].detach().cpu().numpy().astype(bool)
+            left_arm_ts = self.transformed_obs['left_arm_mask'][x].detach().cpu().numpy().astype(bool)
+            right_arm_ts = self.transformed_obs['right_arm_mask'][x].detach().cpu().numpy().astype(bool)
+            
+            left_arm_pre = self.transformed_obs['pretransform_left_arm_mask'].detach().cpu().numpy().astype(bool)
+            right_arm_pre = self.transformed_obs['pretransform_right_arm_mask'].detach().cpu().numpy().astype(bool)
+            
+            M_pre = mat_xy.T[:2, :].astype(np.float32) 
+            
+            # --- Image 1: Transformed Space (128x128) ---
+            overlay_ts = chosen_img_ts.copy()
+            overlay_ts[left_arm_ts] = [0, 0, 255]     # Red: Left Arm
+            overlay_ts[right_arm_ts] = [0, 255, 0]    # Green: Right Arm
+            overlay_ts[ws_mask] = [255, 0, 255]       # Magenta: Workspace
+            
+            chosen_img_ts = cv2.addWeighted(overlay_ts, 0.35, chosen_img_ts, 0.65, 0)
+            cv2.circle(chosen_img_ts, (int(p1[0]), int(p1[1])), 3, (255, 0, 0), -1) 
+            cv2.circle(chosen_img_ts, (int(p2[0]), int(p2[1])), 3, (0, 255, 255), -1)
+            cv2.imwrite('tmp/clothmate_debug/1_transformed_space.png', chosen_img_ts)
+
+            # --- Image 2: Pretransform Space (480x480) ---
+            ws_mask_pre = cv2.warpAffine(ws_mask.astype(np.uint8), M_pre, (pre_W, pre_H), flags=cv2.INTER_NEAREST).astype(bool)
+            
+            overlay_pre = pre_img.copy()
+            overlay_pre[left_arm_pre] = [0, 0, 255]
+            overlay_pre[right_arm_pre] = [0, 255, 0]
+            overlay_pre[ws_mask_pre] = [255, 0, 255]
+            
+            pre_img = cv2.addWeighted(overlay_pre, 0.35, pre_img, 0.65, 0)
+            cv2.circle(pre_img, (int(orig_pixels[0][0]), int(orig_pixels[0][1])), 5, (255, 0, 0), -1)
+            cv2.circle(pre_img, (int(orig_pixels[1][0]), int(orig_pixels[1][1])), 5, (0, 255, 255), -1)
+            cv2.imwrite('tmp/clothmate_debug/2_pretransform_space.png', pre_img)
+
+            # --- Image 3: Absolute Original Space (Raw Vision) ---
+            ws_mask_orig = np.rot90(ws_mask_pre, -1)
+            left_arm_orig = np.rot90(left_arm_pre, -1)
+            right_arm_orig = np.rot90(right_arm_pre, -1)
+            
+            overlay_orig = orig_img.copy()
+            overlay_orig[left_arm_orig] = [0, 0, 255]
+            overlay_orig[right_arm_orig] = [0, 255, 0]
+            overlay_orig[ws_mask_orig] = [255, 0, 255]
+            
+            orig_img = cv2.addWeighted(overlay_orig, 0.35, orig_img, 0.65, 0)
+            
+            # Use your function to map points to the final image for visual confirmation
+            p1_final_x, p1_final_y = self.rotate_point_back(orig_pixels[0][0], orig_pixels[0][1], orig_W, orig_H)
+            p2_final_x, p2_final_y = self.rotate_point_back(orig_pixels[1][0], orig_pixels[1][1], orig_W, orig_H)
+            
+            cv2.circle(orig_img, (int(p1_final_x), int(p1_final_y)), 6, (255, 0, 0), -1)
+            cv2.circle(orig_img, (int(p2_final_x), int(p2_final_y)), 6, (0, 255, 255), -1)
+            cv2.imwrite('tmp/clothmate_debug/3_original_space.png', orig_img)
+        # =========================================================
+
+        # Return the action params mapped to Pretransform Space. 
+        # Your single_act function will handle translating these to Original Space 
+        # and normalizing them to [-1, 1].
         action_params = {
             'p1': orig_pixels[0],
             'p2': orig_pixels[1],
@@ -337,9 +523,14 @@ class ClothMateAdapter(TrainableAgent):
         }
         
         return best_primitive, action_params
-        
+
+
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
+        self.save_dir = logdir
+
     def generate_transformed_obs(self, obs_dict, input_dim=128, scale_factors=None, rotations=None):
-        from clothmate.utils.env_utils import prepare_image, generate_workspace_mask, generate_primitive_cloth_mask
+        from .utils.env_utils import prepare_image, generate_workspace_mask, generate_primitive_cloth_mask
         from itertools import product
         
         if scale_factors is None: scale_factors = self.adaptive_scale_factors
@@ -350,14 +541,15 @@ class ClothMateAdapter(TrainableAgent):
         
         obs_tensor = torch.cat((
             torch.tensor(rgb).float() / 255.0,
-            torch.tensor(depth).unsqueeze(2).float()
+            torch.tensor(depth).float()
         ), dim=2).permute(2, 0, 1)
         
         transformations = list(product(rotations, scale_factors))
         
         retval = {}
         retval['original_dim'] = rgb.shape[0] 
-        
+        retval['pretransform_rgb'] = rgb.copy()
+
         device = self.device
 
         retval['transformed_obs'] = prepare_image(
@@ -372,9 +564,13 @@ class ClothMateAdapter(TrainableAgent):
         
         cloth_mask_np = obs_dict.get('mask', rgb.sum(axis=-1) > 0)
         pretransform_cloth_mask = torch.tensor(cloth_mask_np).float()
-        pretransform_left_arm_mask = torch.ones_like(pretransform_cloth_mask)
-        pretransform_right_arm_mask = torch.ones_like(pretransform_cloth_mask)
+        # pretransform_left_arm_mask = torch.ones_like(pretransform_cloth_mask)
+        # pretransform_right_arm_mask = torch.ones_like(pretransform_cloth_mask)
         
+        pretransform_left_arm_mask =  torch.tensor(obs_dict['robot1_mask'].copy()).float()
+        pretransform_right_arm_mask =  torch.tensor(obs_dict['robot0_mask'].copy()).float()
+            
+
         pretransform_mask = torch.stack([
             pretransform_cloth_mask, 
             pretransform_left_arm_mask, 
@@ -395,6 +591,11 @@ class ClothMateAdapter(TrainableAgent):
         left_arm_mask = transformed_mask[:, 1]
         right_arm_mask = transformed_mask[:, 2]
         
+        retval['left_arm_mask'] = left_arm_mask
+        retval['right_arm_mask'] = right_arm_mask
+        retval['pretransform_left_arm_mask'] = pretransform_left_arm_mask
+        retval['pretransform_right_arm_mask'] = pretransform_right_arm_mask
+
         pix_place_dist = self.config.get("pix_place_dist", 10)
         pix_grasp_dist = self.config.get("pix_grasp_dist", 16)
         
@@ -434,9 +635,9 @@ class ClothMateAdapter(TrainableAgent):
         pass
 
     def set_eval(self):
-        self.policy.set_eval()
-        self.keypoint_detector.set_eval()
+        self.policy.eval()
+        self.keypoint_detector.eval()
     
     def set_train(self):#
-        self.policy.set_train()
-        self.keypoint_detector.set_train()
+        self.policy.train()
+        self.keypoint_detector.train()

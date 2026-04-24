@@ -1,0 +1,2143 @@
+### demo_eval.py
+
+from clothmate.utils.task_utils import TaskLoader
+from clothmate.utils.utils import setup_network
+from clothmate.core.simEnv import SimEnv, seed_all
+from omegaconf import DictConfig
+import hydra, os, h5py
+
+if __name__ == "__main__":
+    @hydra.main(version_base=None, config_path="../config", config_name="config")
+    def main(args : DictConfig):
+
+        args.load = f'models/latest_ckpt.pth'
+        args.action_primitives = ['fling']
+        args.log_dir = f"experiments/eval/{args.category}"
+        args.episode_length = 10
+        
+        seed_all(args.seed)
+
+        task_loader = TaskLoader(hdf5_path="asserts/tasks/train.hdf5",
+                                eval_hdf5_path="asserts/tasks/eval.hdf5",
+                                eval=args.eval,
+                                recreate_task_query=None,
+                                grid_search = False,
+                                category=args.category,)
+        
+        envs = SimEnv(replay_buffer_path=args.log_dir,
+                    get_task_fn=lambda: task_loader.get_next_task(),
+                    recreate_verts = None,
+                    demo = True,
+                    **args)
+        
+        transformed_obs, _ = envs.reset()
+        
+        policy, _, _ = setup_network(args, gpu=args.network_gpu)
+
+        if not os.path.exists(args.log_dir): os.makedirs(args.log_dir)
+
+        while True:
+
+            transformed_obs, _ = envs.step(policy.get_action_single(transformed_obs, explore=False))
+
+            if args.eval == True:
+
+                if envs.current_timestep == 0:
+                    id = 'latest'
+                else:
+                    id = str(envs.current_timestep)
+
+                with h5py.File(f"{args.log_dir}/result.hdf5", 'a') as file:
+
+                    if str(envs.current_task.get_config()['name']) not in file:
+                        task_group = file.create_group(str(envs.current_task.get_config()['name']))
+                    else:
+                        task_group = file[str(envs.current_task.get_config()['name'])]
+
+                    task_group.attrs[f'{id}_preaction_weighted_distance'] = envs.preaction_deformable_dict['weighted_distance']
+                    task_group.attrs[f'{id}_preaction_l2_distance'] = envs.preaction_deformable_dict['l2_distance']
+                    task_group.attrs[f'{id}_preaction_icp_distance'] = envs.preaction_deformable_dict['icp_distance']
+                    task_group.attrs[f'{id}_preaction_pointwise_distance'] = envs.preaction_deformable_dict['pointwise_distance']
+                    task_group.attrs[f'{id}_preaction_coverage'] = envs.preaction_deformable_dict['coverage']
+                    task_group.attrs[f'{id}_preaction_iou'] = envs.preaction_deformable_dict['iou']
+
+                    task_group.attrs[f'{id}_postaction_weighted_distance'] = envs.postaction_deformable_dict['weighted_distance']
+                    task_group.attrs[f'{id}_postaction_l2_distance'] = envs.postaction_deformable_dict['l2_distance']
+                    task_group.attrs[f'{id}_postaction_icp_distance'] = envs.postaction_deformable_dict['icp_distance']
+                    task_group.attrs[f'{id}_postaction_pointwise_distance'] = envs.postaction_deformable_dict['pointwise_distance']
+                    task_group.attrs[f'{id}_postaction_coverage'] = envs.postaction_deformable_dict['coverage']
+                    task_group.attrs[f'{id}_postaction_iou'] = envs.postaction_deformable_dict['iou']
+
+    main()
+
+
+
+
+### utils.utils.py
+
+import numpy as np, torch, imutils, os, h5py, ray, random
+from torchvision import transforms
+from typing import Any, Dict, List, MutableMapping, Tuple
+from time import time
+from filelock import FileLock
+from clothmate.core.network import MaximumValuePolicy
+# from clothmate.core.simEnv import SimEnv
+
+def get_dataset_size(path, pbar=None):
+    if not os.path.exists(path):
+        return 0
+    num = 0
+    with FileLock(path + ".lock"):
+        with h5py.File(path, "r") as file:
+            for category in file.values():
+                for instance in category.values():
+                    num += len(instance)
+            return num
+        
+def step_env(all_envs, ready_envs, ready_actions, remaining_observations, deterministic):
+    remaining_observations.extend([e.step_and_record.remote(a)
+                                   for e, a in zip(ready_envs, ready_actions)])
+    step_retval = []
+    start = time()
+    total_time = 0
+    while True:
+
+        if deterministic:
+            ready = ray.get(
+                remaining_observations)
+        else:
+            ready, remaining_observations = ray.wait(
+                remaining_observations, num_returns=1)
+
+        if len(ready) == 0:
+            continue
+        step_retval.extend(ready)
+        total_time = time() - start
+        if (total_time > 0.01 and len(step_retval) > 0)\
+                or len(step_retval) == len(all_envs):
+            break
+
+    observations = []
+    ready_envs = []
+
+    for obs, env_id in ray.get(step_retval):
+        observations.append(obs)
+        ready_envs.append(env_id['val'])
+
+    return ready_envs, observations, remaining_observations
+
+
+
+def flatten_dict(
+    d: MutableMapping, parent_key: str = "", sep: str = "."
+) -> Dict[str, Any]:
+    items: List[Tuple[str, Any]] = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, MutableMapping):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        elif isinstance(v, List) and isinstance(v[0], MutableMapping):
+            for idx in range(len(v)):
+                items.extend(flatten_dict(v[idx], f"{new_key}/{idx}", sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+def pixel_to_3d(depth_im, x, y,
+                pose_matrix,
+                fov=39.5978,
+                depth_scale=1):
+    intrinsics_matrix = compute_intrinsics(fov, depth_im.shape[0])
+    click_z = depth_im[y, x]
+    click_z *= depth_scale
+    click_x = (x-intrinsics_matrix[0, 2]) * \
+        click_z/intrinsics_matrix[0, 0]
+    click_y = (y-intrinsics_matrix[1, 2]) * \
+        click_z/intrinsics_matrix[1, 1]
+    if click_z == 0:
+        raise Exception('Invalid pick point')
+    # 3d point in camera coordinates
+    point_3d = np.asarray([click_x, click_y, click_z])
+    point_3d = np.append(point_3d, 1.0).reshape(4, 1)
+    # Convert camera coordinates to world coordinates
+    target_position = np.dot(pose_matrix, point_3d)
+    target_position = target_position[0:3, 0]
+    target_position[0] = - target_position[0]
+    return target_position
+
+def get_transform_matrix(original_dim, resized_dim, rotation, scale):
+    # resize
+    resize_mat = scale2d(original_dim/resized_dim)
+    # scale
+    scale_mat = np.matmul(
+        np.matmul(
+            translate2d(-np.ones(2)*(resized_dim//2)),
+            scale2d(scale),
+        ), translate2d(np.ones(2)*(resized_dim//2)))
+    # rotation
+    rot_mat = np.matmul(
+        np.matmul(
+            translate2d(-np.ones(2)*(resized_dim//2)),
+            rot2d(rotation),
+        ), translate2d(np.ones(2)*(resized_dim//2)))
+    return np.matmul(np.matmul(scale_mat, rot_mat), resize_mat)
+
+
+def compute_intrinsics(fov, image_size):
+    image_size = float(image_size)
+    focal_length = (image_size / 2)\
+        / np.tan((np.pi * fov / 180) / 2)
+    return np.array([[focal_length, 0, image_size / 2],
+                     [0, focal_length, image_size / 2],
+                     [0, 0, 1]])
+
+def translate2d(translation):
+    return np.array([
+        [1, 0, translation[0]],
+        [0, 1, translation[1]],
+        [0, 0, 1],
+    ]).T
+
+def scale2d(scale):
+    return np.array([
+        [scale, 0, 0],
+        [0, scale, 0],
+        [0, 0, 1],
+    ]).T
+
+def rot2d(angle, degrees=True):
+    if degrees:
+        angle = np.pi*angle/180
+    return np.array([
+        [np.cos(angle), np.sin(angle), 0],
+        [-np.sin(angle), np.cos(angle), 0],
+        [0, 0, 1],
+    ]).T
+
+
+def rigid_transform_3D(A, B):
+    assert A.shape == B.shape
+
+    num_rows, num_cols = A.shape
+    if num_rows != 3:
+        raise Exception(f"matrix A is not 3xN, it is {num_rows}x{num_cols}")
+
+    num_rows, num_cols = B.shape
+    if num_rows != 3:
+        raise Exception(f"matrix B is not 3xN, it is {num_rows}x{num_cols}")
+
+    # find mean column wise
+    centroid_A = np.mean(A, axis=1)
+    centroid_B = np.mean(B, axis=1)
+
+    # ensure centroids are 3x1
+    centroid_A = centroid_A.reshape(-1, 1)
+    centroid_B = centroid_B.reshape(-1, 1)
+
+    # subtract mean
+    Am = A - centroid_A
+    Bm = B - centroid_B
+
+    H = Am @ np.transpose(Bm)
+
+    # find rotation
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
+    # special reflection case
+    if np.linalg.det(R) < 0:
+        # print("det(R) < R, reflection detected!, correcting for it ...")
+        Vt[2,:] *= -1
+        R = Vt.T @ U.T
+
+    t = -R @ centroid_A + centroid_B
+
+    return R, t
+
+def superimpose(current_verts, goal_verts, indices=None, symmetric_goal=False):
+
+    current_verts = current_verts.copy()
+    goal_verts = goal_verts.copy()
+    # flipped_goal_verts = goal_verts.copy()
+    # flipped_goal_verts[:, 0] = 2*np.mean(flipped_goal_verts[:, 0]) - flipped_goal_verts[:, 0]
+
+    if indices is not None:
+        R, t = rigid_transform_3D(current_verts[indices].T, goal_verts[indices].T)
+    else:
+        R, t = rigid_transform_3D(current_verts.T, goal_verts.T)
+
+    icp_verts = (R @ current_verts.T + t).T
+
+    return icp_verts
+
+def generate_coordinate_map(dim, rotation, scale, normalize=False):
+
+    MAX_SCALE=5
+    scale = 1
+
+    coordinate_dim = int(dim * (MAX_SCALE/scale))
+    x, y = np.meshgrid(MAX_SCALE * np.linspace(-1 , 1, coordinate_dim), MAX_SCALE * np.linspace(-1 , 1, coordinate_dim), indexing="ij")
+    x, y = x.reshape(coordinate_dim, coordinate_dim, 1), y.reshape(coordinate_dim, coordinate_dim, 1)
+    xy = np.concatenate((x, y), axis=2)
+    xy = imutils.rotate(xy, rotation)
+    center = coordinate_dim/2
+
+    new_dim = int(center + center * scale/MAX_SCALE) - int(center - center * scale/MAX_SCALE)
+    offset = 0
+    if int(new_dim) != dim:  
+        offset = int(dim - new_dim)
+
+    xy = xy[int(center - center * scale/MAX_SCALE) : int(center + center * scale/MAX_SCALE) + offset, \
+         int(center - center * scale/MAX_SCALE):int(center + center * scale/MAX_SCALE) + offset, :]
+
+    return xy
+    
+
+# @profile
+def transform(img, rotation: float, scale: float, dim: int, constant_positional_encoding: bool = False):
+
+
+    #to adjust code
+    rotation *= -1 
+
+    img = transforms.functional.resize(img, (dim, dim))
+    img = transforms.functional.rotate(img, rotation, interpolation=transforms.InterpolationMode.BILINEAR)
+    
+    if scale < 1:
+        img = transforms.functional.center_crop(img, (int(dim * scale), int(dim * scale)))
+        img = transforms.functional.resize(img, (dim, dim))
+    else:
+        zeros = torch.zeros((img.shape[0], dim, dim), device=img.device)
+        img = transforms.functional.resize(img, (int(dim/scale), int(dim/scale)))
+
+        end = zeros.shape[-1]//2 + int(img.shape[-1])//2
+        begin = zeros.shape[-1]//2 - int(img.shape[-1])//2
+        if end - begin < img.shape[-1]:
+            end += 1        
+        
+        zeros[..., begin:end, begin:end] = img
+        img = zeros
+
+    coordinate_map = torch.tensor(generate_coordinate_map(dim, rotation, scale, normalize=constant_positional_encoding))
+    coordinate_map = coordinate_map.permute(2, 0, 1)
+    
+    img = torch.cat([img, coordinate_map], axis=0)
+
+    return img
+
+def seed_all(seed):
+    print(f"SEEDING WITH {seed}")
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def setup_network(args, gpu=0):
+    if(args.grid_search):
+        with h5py.File(args.recreate_buffer, "r") as dataset:
+            grid_search_params = {
+                'vmap_idx':args.grid_search_vmap_idx,
+                'primitive':args.grid_search_primitive,
+            }
+            print("[Policy] Grid search with params:", grid_search_params)
+        policy = MaximumValuePolicy(**args, gpu=gpu, grid_search_params=grid_search_params)
+    else:
+        policy = MaximumValuePolicy(**args, gpu=gpu)
+
+    optimizer = torch.optim.Adam(
+        policy.value_net.parameters(), lr=args.lr,
+        weight_decay=args.weight_decay)
+
+    dataset_path = args.dataset_path
+
+    checkpoint_path = None
+
+    if os.path.exists(f'{args.cont}/latest_ckpt.pth'):
+        checkpoint_path = f'{args.cont}/latest_ckpt.pth'
+        print("[Network Setup] Load checkpoint specified", checkpoint_path)
+
+    if args.load is not None:
+        print("[Network Setup] Load checkpoint specified", args.load)
+        checkpoint_path = args.load
+
+    if checkpoint_path is not None:
+        ckpt = torch.load(checkpoint_path, map_location=policy.device, weights_only=True)
+        policy.load_state_dict(ckpt['net'], strict=False)
+        if args.load is None:
+            optimizer.load_state_dict(ckpt[f'optimizer'])
+        else:
+            for name, param in policy.named_parameters():
+                if name in ckpt['net'].keys():
+                    param.requires_grad = False
+                else:
+                    param.requires_grad = True
+
+    print(f'\t[Network Setup] Action Exploration Probability: {policy.action_expl_prob.item():.4e}')
+    print(f'\t[Network Setup] Value Exploration Probability: {policy.value_expl_prob.item():.4e}')
+    print(f'\t[Network Setup] Train Steps: {policy.train_steps.item()}')
+
+    return policy, optimizer, dataset_path
+
+#### simEnv.py
+
+import torch, os, random, cv2, numpy as np, time
+import pathlib, imageio, tqdm, pyflex, ray, h5py
+from itertools import product
+from typing import Callable, List
+from clothmate.core.memory import Memory
+from clothmate.utils.task_utils import Task, TaskLoader
+from clothmate.utils.flex_utils import wait_until_stable, PickerPickPlace, set_scene, get_image
+from clothmate.utils.env_utils import generate_keypoints, deformable_distance, preprocess_obs, \
+    prepare_image, generate_workspace_mask, generate_primitive_cloth_mask, front_mask_and_pos_pixel, \
+    get_action_pixel_map, get_action_pos_map, get_cloth_mesh, blender_render_cloth
+from clothmate.utils.env_utils import compute_pose, pixels_to_3d_positions
+from keypoint.model import UNet
+from keypoint.utils import get_keypoints, visualize, is_line_all_ones
+
+KEYPOINT_NAMES = ['top_right', 'top_left', 'bottom_right', 'bottom_left']
+
+def seed_all(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def setup_envs(dataset, num_processes=16, **kwargs):
+    # original_visible_devices = os.environ['CUDA_VISIBLE_DEVICES']
+    # os.environ['CUDA_VISIBLE_DEVICES'] = ",".join(original_visible_devices.split(',')[1:])
+    # print("CUDA VISIBLE DEVICES BEFORE RAY SETUP", os.environ["CUDA_VISIBLE_DEVICES"])
+    recreate_replay_buffer = kwargs.get('recreate_buffer', None)
+    recreate_key = kwargs.get('recreate_key', None)
+    recreate_primitive = kwargs.get('recreate_primitive', None)
+    grid_search = kwargs.get('grid_search', False)
+
+    recreate_task_query = None
+    recreate_verts = None 
+
+    if recreate_replay_buffer is not None:
+        print(f"[Setup] Recreating {recreate_key} replay buffer {recreate_replay_buffer}")
+        with h5py.File(recreate_replay_buffer, 'r') as ds:
+            group = ds[recreate_key]
+            recreate_verts = np.array(group['preaction_verts'])
+            recreate_task_query = float(np.sum(group['init_verts']))
+        x_offset = float(kwargs.get('recreate_x_offset', 0))
+        y_offset = float(kwargs.get('recreate_y_offset', 0))
+        recreate_verts[:, 0] += x_offset
+        recreate_verts[:, 2] += y_offset
+    
+
+    task_loader = ray.remote(TaskLoader).remote(
+        hdf5_path=kwargs['tasks'],
+        eval_hdf5_path=kwargs['eval_tasks'],
+        eval=kwargs['eval'],
+        recreate_task_query=recreate_task_query,
+        grid_search = grid_search,
+        category=kwargs['category'],
+    )
+    
+    # print("CUDA_VISIBLE_DEVICES: {}".format(os.environ["CUDA_VISIBLE_DEVICES"]))
+
+    gpu_per_process = torch.cuda.device_count() / num_processes
+    envs = [ray.remote(SimEnv).options(
+        num_gpus=gpu_per_process,
+        num_cpus=0.2).remote(
+        replay_buffer_path=dataset,
+        get_task_fn=lambda: ray.get(task_loader.get_next_task.remote()),
+        recreate_verts = recreate_verts,
+        **kwargs)
+        for _ in range(num_processes)]
+    
+    ray.get([e.setup_ray.remote(e) for e in envs])
+
+    # os.environ['CUDA_VISIBLE_DEVICES'] = original_visible_devices
+    return envs, task_loader
+
+class MoveJointsException(Exception):
+    def __init__(self, message="Failed to reach target joints"):
+        self.message = message
+        super().__init__(self.message)
+
+class SimEnv:
+    def __init__(self,
+                 replay_buffer_path: str,
+                 obs_dim: int,
+                 init_dim: int,
+                 num_rotations: int,
+                 scale_factors: List[float],
+                 get_task_fn: Callable[[None], Task],
+                 action_primitives: List[str],
+                 pix_grasp_dist: int,
+                 pix_drag_dist: int,
+                 pix_place_dist: int,
+                 stretchdrag_dist: float,
+                 reach_distance_limit: float,
+                 fixed_fling_height: float,
+                 conservative_grasp_radius: int = 4,
+                 use_adaptive_scaling=False,
+                 dump_visualizations=False,
+                 parallelize_prepare_image=False,
+                 gui=False,
+                 grasp_height=0.02,
+                 fling_speed=8e-3,
+                 episode_length=10,
+                 render_dim=480,
+                 particle_radius=0.00625,
+                 render_engine='opengl',
+                 alpha=0,
+                 expert_demonstration=False,
+                 deformable_weight=None,
+                 adaptive_fling_momentum=1,
+                 orn_net_handle = None,
+                 nocs_mode = None,
+                 input_channel_types = None,
+                 dump_video_interval=29,
+                 constant_positional_enc=False,
+                 seed=0,
+                 recreate_verts = None,
+                 recreate_primitive = None,
+                 grid_search_params = None,
+                 fold_finish = False,
+                 record_task_config = False,
+                 save_dir=None,
+                 init_image_dim=None,
+                 demo=False,
+                 category=None,
+                 fling_only=False,
+                 **kwargs):
+        seed_all(seed)
+        # environment state variables
+        self.fling_only = fling_only
+        self.category = category
+        self.demo = demo
+        self.grasp_states = [False, False]
+        self.ray_handle = None
+        self.particle_radius = particle_radius
+        self.replay_buffer_path = replay_buffer_path
+        self.log_dir = self.replay_buffer_path
+        self.image_dim = render_dim  # what to render blender with
+        self.init_image_dim = init_image_dim
+        self.obs_dim = obs_dim  # what to resize to fit in net
+        self.init_dim = init_dim
+        self.episode_length = episode_length
+        self.render_engine = render_engine
+        self.alpha=alpha
+        self.expert_demonstration = expert_demonstration
+        self.action_primitives = action_primitives
+        self.adaptive_fling_momentum = adaptive_fling_momentum
+        self.nocs_mode = nocs_mode
+        self.render_dim = render_dim
+        self.constant_positional_enc = constant_positional_enc
+        self.input_channel_types = input_channel_types
+        self.fold_finish = fold_finish
+        self.network = kwargs.get('network')
+        self.keypoint_detector_path = kwargs.get('kps_model')
+
+        self.save_dir = save_dir
+
+        self.conservative_grasp_radius = conservative_grasp_radius
+        #place -180 to 167.5
+        #fling -90 to 90
+        assert num_rotations % 4 == 0
+        self.rotations = np.linspace(-180, 180, num_rotations + 1)
+
+        self.rotation_indices = {
+            'fling': np.where(np.logical_and(self.rotations >= -90, self.rotations <= 90)),
+            'place': np.where(np.logical_and(self.rotations >= -180, self.rotations <= 167.5)),
+        }
+
+        self.orn_net_handle = orn_net_handle
+        assert not(self.orn_net_handle is None and ('nocs' in input_channel_types and 'gt' not in input_channel_types))
+
+
+        self.scale_factors = np.array(scale_factors)
+        self.use_adaptive_scaling = use_adaptive_scaling
+        self.adaptive_scale_factors = self.scale_factors.copy()
+
+        # primitives parameters
+        self.grasp_height = grasp_height
+        self.pix_grasp_dist = pix_grasp_dist
+        self.pix_drag_dist = pix_drag_dist
+        self.pix_place_dist = pix_place_dist
+        self.stretchdrag_dist = stretchdrag_dist
+        self.fling_speed = fling_speed
+        self.default_speed = 1e-2
+        self.fixed_fling_height = fixed_fling_height
+
+        self.deformable_weight = deformable_weight
+        
+        self.grid_search_params = grid_search_params
+        self.recreate_primitive = recreate_primitive
+
+        # visualizations
+        self.dump_all_visualizations = dump_visualizations
+        self.dump_visualizations = dump_visualizations
+
+        self.parallelize_prepare_image = parallelize_prepare_image
+        if gui:
+            self.parallelize_prepare_image = True
+        self.gui = gui
+        self.gif_freq = 24
+        self.env_video_frames = {}
+
+        self.env_end_effector_positions = []
+        self.env_mesh_vertices = []
+
+        # physical limit of dual arm system
+        self.TABLE_WIDTH = 0.765 * 2
+        self.left_arm_base = np.array([0.765, 0, 0])
+        self.right_arm_base = np.array([-0.765, 0, 0])
+        self.reach_distance_limit = reach_distance_limit
+
+        pix_radius = int(render_dim * (reach_distance_limit/self.TABLE_WIDTH))
+
+        left_arm_reach = np.zeros((render_dim, render_dim))
+        left_arm_reach = cv2.circle(left_arm_reach, (render_dim//2, 0), pix_radius, (255, 255, 255), -1)
+
+        right_arm_reach = np.zeros((render_dim, render_dim))
+        right_arm_reach = cv2.circle(right_arm_reach, (render_dim//2, render_dim), pix_radius, (255, 255, 255), -1)
+
+        self.left_arm_mask = torch.tensor(left_arm_reach).bool()
+        self.right_arm_mask = torch.tensor(right_arm_reach).bool()
+
+        self.recreate_verts = recreate_verts
+        self.record_task_config = record_task_config
+    
+        # tasks
+        self.current_task = None
+        self.tri_v, self.tri_f = None, None
+        self.get_task_fn = get_task_fn
+        self.gui_render_freq = 2
+        self.gui_step = 0
+        self.setup_env()
+        self.action_handlers = {
+            'fling': self.pick_and_fling_primitive,
+            'place': self.pick_and_place_primitive
+        }
+
+        self.num_particles = 0
+        self.id = None
+        self.is_frame_empty = False
+
+        self.temp_deformable_data = None
+        self.init_deformable_data = None
+
+        self.cloth_mask = None
+
+        self.dump_video_interval = dump_video_interval
+        self.dump_video_counter = np.random.randint(0, self.dump_video_interval)
+
+        if self.dump_visualizations:
+            self.dump_video_interval = 1
+
+        # rotation angle in degrees, counter-clockwise
+        self.rotations = np.linspace(-180, 180, num_rotations + 1)
+        self.num_rotations = len(self.rotations)
+        self.rotation_indices = {
+            'fling': np.where(np.logical_and(self.rotations >= -90, self.rotations <= 90))[0],
+            'place': np.where(np.logical_and(self.rotations >= -180, self.rotations <= 167.5))[0],
+        }
+        self.primitive_vmap_indices = {}
+        for primitive, indices in self.rotation_indices.items():
+            self.primitive_vmap_indices[primitive] = [None, None]
+            self.primitive_vmap_indices[primitive][0] = indices[0] * len(scale_factors)
+            self.primitive_vmap_indices[primitive][1] = (indices[-1]+1) * len(scale_factors)
+
+        self.keypoint_detector = UNet(in_ch=3, out_ch=4).to('cuda')
+        checkpoint = torch.load(self.keypoint_detector_path, map_location="cpu", weights_only=True)
+        self.keypoint_detector.load_state_dict(checkpoint['model_state_dict'])
+        self.keypoint_detector.eval()
+
+    def setup_ray(self, id):
+        self.id = id
+        self.ray_handle = {"val": id}
+
+    # @profile
+    def reset(self):
+        
+        self.episode_memory = Memory()
+        self.episode_reward_sum = 0
+        self.current_timestep = 0
+        self.terminate = False
+        self.is_frame_empty = False
+        self.current_task = self.get_task_fn()
+    
+        self.init_direction = None
+        self.init_coverage = None
+        self.cloth_mask = None
+
+        self.tri_v, self.tri_f =  self.current_task.get_config()['mesh_verts'].reshape(-1, 3), \
+        self.current_task.get_config()['mesh_faces'].reshape(-1, 3)
+
+        self.num_particles = self.current_task.get_config()['mesh_verts'].shape[0] // 3
+
+        self.init_pos = self.current_task.get_state()['init_particle_pos'].reshape(-1, 4)[:self.num_particles, :3]
+        self.init_rgb = self.current_task.get_images()["init_rgb"]
+        self.mesh_faces = self.current_task.get_config()['mesh_faces']
+
+        try:
+            self.cloth_instance = self.current_task.get_config()['cloth_instance']
+            self.cloth_category = self.current_task.get_config()['cloth_category']
+            if '.pkl' not in self.cloth_instance:
+                raise Exception("[TaskLoader] Cloth instance must be a pickle file")
+        except:
+            print("[TaskLoader] Cloth instance name could not be found")
+            self.cloth_instance = 0
+
+        self.episode_memory.data['cloth_instance'] = self.cloth_instance
+        self.episode_memory.data['cloth_category'] = self.cloth_category
+
+        set_scene(
+            config=self.current_task.get_config(),
+            state=self.current_task.get_state())
+        
+        self.action_tool.reset([0.2, 0.5, 0.0])
+        self.reset_end_effectors()
+
+        self.step_simulation()
+        self.set_grasp(False)
+        self.env_video_frames = {}
+
+        obs = self.get_obs()
+
+        try:
+            self.terminate_if_empty(obs)
+        except Exception as e:
+            print("Exception in terminate_if_empty:", e)
+            return self.reset()    
+
+        self.transformed_obs = self.generate_transformed_obs(obs)
+        
+
+        self.init_keypoints = generate_keypoints(self.init_rgb, self.init_pos, self.mesh_faces)
+
+        return (self.transformed_obs, self.ray_handle)
+
+
+    def step_and_record(self, value_maps):
+        
+        self.preaction_positions = pyflex.get_positions().reshape(-1, 4)[:, :3]
+
+        self.preaction_deformable_dict = self.deformable_reward(log_prefix="preaction")
+        
+        self.visible_vertex_mask, self.current_pos_pixel = front_mask_and_pos_pixel(self.mesh_faces, self.current_pos, self.pretransform_depth)
+
+        self.episode_memory.add_value(
+            key='visible_vertex_mask', value=self.visible_vertex_mask)
+        self.episode_memory.add_value(
+            key='vertex_pixel_coords', value=self.current_pos_pixel)
+
+        action_pixel_map = get_action_pixel_map(rgb=self.pretransform_rgb,
+                                                scale_factors=self.adaptive_scale_factors,
+                                                rotations=self.rotations,
+                                                pix_grasp_dist=self.pix_drag_dist)
+
+        input_action_pos_map = get_action_pos_map(pos_to_coords=self.current_pos_pixel,
+                                                    pos_mask=self.visible_vertex_mask,
+                                                    mask=self.transformed_obs['fling_mask'],
+                                                    rgb=self.pretransform_rgb,
+                                                    action_pixel_map=action_pixel_map)
+        
+        self.episode_memory.add_value(
+            key='fling_mask', value=self.transformed_obs['fling_mask'])
+        self.episode_memory.add_value(
+            key='transformed_obs', value=self.transformed_obs['transformed_obs'])
+        self.episode_memory.add_value(
+            key='action_pos_map', value=input_action_pos_map)
+        self.episode_memory.add_value(
+            key='pretransform_rgb', value=self.pretransform_rgb)
+
+        try:
+            action_primitive, action = self.get_max_value_valid_action(value_maps)       
+        except Exception as e:
+            action_primitive = None
+            print("Exception in get_max_value_valid_action:", e)
+            return self.reset()
+
+        if action_primitive is not None and action is not None:
+            self.action_handlers[action_primitive](**action)
+            picked_particles = self.action_tool.picked_particles_temp            
+            if picked_particles is not None and len(picked_particles) == 2\
+                and np.all(np.array(picked_particles) != None)\
+                    and np.all(np.array(picked_particles) < self.num_particles):
+                self.episode_memory.add_value(
+                    key='p1', value=picked_particles[0])
+                self.episode_memory.add_value(
+                    key='p2', value=picked_particles[1])
+                
+        self.postaction()
+
+        obs = self.get_obs()
+        
+        try:
+            self.terminate_if_empty(obs)
+        except Exception as e:
+            print("Exception in terminate_if_empty:", e)
+            return self.reset()
+
+        self.postaction_deformable_dict = self.deformable_reward(log_prefix="postaction")
+        
+        self.current_timestep += 1
+        self.terminate = self.terminate or \
+            self.current_timestep >= self.episode_length or\
+                self.is_frame_empty
+
+        self.episode_memory.add_value(
+            key='is_terminal', value=float(self.terminate))
+        self.episode_memory.add_value(
+            key='deformable_weight', value=float(self.deformable_weight))
+
+        self.episode_memory.assert_length()
+
+        if self.terminate:
+            self.on_episode_end()
+            return self.reset()
+
+        self.transformed_obs = self.generate_transformed_obs(obs)
+
+        return (self.transformed_obs, self.ray_handle)
+    
+    def step(self, value_maps):
+        
+        self.preaction_positions = pyflex.get_positions().reshape(-1, 4)[:, :3]
+
+        self.preaction_deformable_dict = self.deformable_reward(log_prefix="preaction")
+
+        self.visible_vertex_mask, self.current_pos_pixel = front_mask_and_pos_pixel(self.mesh_faces, self.current_pos, self.pretransform_depth)
+
+        state, keypoints = self.keypoint_detect()
+
+        try:
+            action_primitive, action = self.get_max_value_valid_action(value_maps)       
+        except Exception as e:
+            action_primitive = None
+            print("Exception in get_max_value_valid_action:", e)
+
+        weigthed_distance = self.preaction_deformable_dict['weighted_distance']
+        l2_distance = self.preaction_deformable_dict['l2_distance']
+        icp_distance = self.preaction_deformable_dict['icp_distance']
+        coverage = self.preaction_deformable_dict['coverage']
+        iou = self.preaction_deformable_dict['iou']
+        print('coverage', coverage, 'weighted distance', weigthed_distance, 'iou', iou, 'l2 distance', l2_distance, 'icp distance', icp_distance)
+
+        if action_primitive is not None and action is not None:
+            # if weigthed_distance<0.04:
+            #     print(f'coverage is high, stop operation')
+            if state and len(keypoints) == 4 and not self.fling_only:
+                self.double_arm_pick_and_place(keypoints)
+            else:
+                self.action_handlers[action_primitive](**action)
+                    
+        elif not self.fling_only:
+            indices = np.where(self.visible_vertex_mask)
+            flattened_indices = np.ravel_multi_index(indices, self.visible_vertex_mask.shape) 
+            preaction_pos = self.current_pos[np.random.choice(flattened_indices)]
+            postaction_pos = np.array([0, preaction_pos[1], 0])
+            self.pick_and_place_primitive(preaction_pos, postaction_pos)
+
+        self.postaction()
+
+        obs = self.get_obs()
+        
+        try:
+            self.terminate_if_empty(obs)
+        except Exception as e:
+            print("Exception in terminate_if_empty:", e)
+            return self.reset()
+
+        self.postaction_deformable_dict = self.deformable_reward(log_prefix="postaction")
+        
+        self.current_timestep += 1
+        self.terminate = self.terminate or \
+            self.current_timestep >= self.episode_length or\
+                self.is_frame_empty
+
+        if self.terminate:
+            self.on_episode_end()
+            return self.reset()
+
+        self.transformed_obs = self.generate_transformed_obs(obs)
+
+        return (self.transformed_obs, self.ray_handle)
+    
+    def deformable_reward(self, log_prefix=None):
+        self.current_pos = pyflex.get_positions().reshape((-1, 4))[:self.num_particles, :3]
+        weighted_distance, l2_distance, icp_distance, real_l2_distance, _ = \
+            deformable_distance(self.init_pos, self.current_pos, self.current_task.get_config()["cloth_area"], self.deformable_weight)
+
+        task_image_dict = self.current_task.get_images()
+
+        init_img = task_image_dict["init_rgb"]
+        curr_img = np.array(self.pretransform_rgb).transpose(2, 0, 1)[:3]
+   
+        try:
+            self.init_mask = self.get_cloth_mask(init_img.transpose(2, 0, 1))
+        except:
+            print("[SimEnv] Init mask failed, using curr_img.")
+            self.init_mask = self.get_cloth_mask(curr_img)
+            
+        self.curr_mask = self.get_cloth_mask(curr_img)
+
+        intersection = np.logical_and(self.curr_mask, self.init_mask)
+        union = np.logical_or(self.curr_mask, self.init_mask)
+        iou = np.sum(intersection) / np.sum(union)
+
+        coverage = np.sum(self.curr_mask) / np.sum(self.init_mask)
+
+        deformable_dict = {
+            "weighted_distance": weighted_distance,
+            "l2_distance": l2_distance,
+            "icp_distance": icp_distance,
+            "pointwise_distance": real_l2_distance,
+            "coverage": coverage,
+            "iou": iou
+        }
+
+        if log_prefix is not None:
+            for k, v in deformable_dict.items():
+                if type(v) == float or type(v) == int \
+                    or type(v) == np.float64 or type(v) == np.float32:
+                    self.episode_memory.add_value(
+                        log_prefix + "_" + k, float(v))
+                elif type(v) == np.ndarray:
+                    self.episode_memory.add_value(
+                        log_prefix + "_" + k, v)
+
+        return deformable_dict
+    
+    def terminate_if_empty(self, obs):
+        assert len(obs.shape) == 3
+        self.is_frame_empty = obs[:3, :, :].sum() == 0
+        if self.is_frame_empty:
+            print("Frame is empty! This shouldn't happen too frequently")
+            raise ValueError("Frame is empty")
+        
+    # @profile
+    def get_obs(self):
+
+        self.hide_end_effectors()
+
+        rgb, d = self.render_cloth()
+
+        self.pretransform_depth = d
+        self.pretransform_rgb = rgb
+
+        # cloths are closer than 2.0 meters from camera plane
+        self.cloth_mask = self.get_cloth_mask(rgb.transpose(2, 0, 1))
+        x, y = np.where(self.cloth_mask)
+        dimx, dimy = self.pretransform_depth.shape
+        self.adaptive_scale_factors = self.scale_factors.copy()
+        if self.use_adaptive_scaling:
+            try:
+                # Minimum square crop
+                cropx = max(dimx - 2*x.min(), dimx - 2*(dimx-x.max()))
+                cropy = max(dimy - 2*y.min(), dimy - 2*(dimy-y.max()))
+                crop = max(cropx, cropy)
+                # Some breathing room
+                crop = int(crop*1.5)
+                if crop < dimx:
+                    self.adaptive_scale_factors *= crop/dimx
+
+            except Exception as e:
+                print(e)
+                print(self.current_task)
+        
+        obs = preprocess_obs(rgb.copy(), d.copy())
+
+        #combine obs and dot product map tensors
+        _, _, nocs_img = pyflex.render(uv=True)
+
+        if '_gtnocs' in self.input_channel_types:
+            nocs_img = nocs_img.reshape([480, 480, 3])
+            nocs_x = np.abs(nocs_img[..., 0] - 0.5) * (np.sum(nocs_img, axis=2) > 0)
+            nocs_z = nocs_img[..., 2]
+            nocs_img = np.stack([nocs_x, nocs_z], axis=2)
+            nocs_img = cv2.flip(cv2.resize(nocs_img, (self.image_dim, self.image_dim)), 0)
+            obs = torch.cat((obs, torch.tensor(nocs_img.transpose(2,0,1))), dim=0)
+
+        if '_fullgtnocs' in self.input_channel_types:
+            nocs_img = nocs_img.reshape([480, 480, 3])
+            nocs_img = cv2.flip(cv2.resize(nocs_img, (self.image_dim, self.image_dim)), 0)
+            obs = torch.cat((obs, torch.tensor(nocs_img.transpose(2,0,1))), dim=0)
+
+        self.reset_end_effectors()
+
+        return obs
+    
+    def postaction(self):
+        self.reset_end_effectors()
+        wait_until_stable(gui=self.gui)
+        postaction_positions = pyflex.get_positions().reshape(-1, 4)[:, :3]
+        deltas = np.linalg.norm(
+            np.abs(postaction_positions - self.preaction_positions), axis=1)
+        if deltas.max() < 5e-2:
+            # if didn't really move cloth then end early
+            self.terminate = True
+
+    def setup_env(self):
+        pyflex.init(
+            not self.gui,  # headless: bool.
+            True,  # render: bool
+            480, # camera dimensions: int x int
+            480,
+            0
+            )  
+        self.action_tool = PickerPickPlace(
+            num_picker=2,
+            particle_radius=self.particle_radius,
+            picker_radius=self.grasp_height,
+            picker_low=(-5, 0, -5),
+            picker_high=(5, 5, 5))
+        
+    def reset_end_effectors(self):
+        self.movep([[0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]], speed=8e-2)
+
+    def hide_end_effectors(self):
+        self.movep([[0.5, 0.5, -1], [-0.5, 0.5, -1]], speed=5e-2)
+
+    def step_simulation(self):
+
+        if self.record_task_config:
+            self.env_end_effector_positions.append(self.action_tool._get_pos()[0])
+            self.env_mesh_vertices.append(pyflex.get_positions().reshape((-1, 4))[:self.num_particles, :3])
+
+        pyflex.step()
+        self.gui_step += 1
+
+    def set_grasp(self, grasp):
+        if type(grasp) == bool:
+            self.grasp_states = [grasp] * len(self.grasp_states)
+        elif len(grasp) == len(self.grasp_states):
+            self.grasp_states = grasp
+        else:
+            raise Exception()
+        
+
+    # @profile(stream=fp)
+    def generate_transformed_obs(self, obs,
+                                 input_dim = None, 
+                                 scale_factors = None, 
+                                 rotations = None):
+        """
+        Generates transformed observations and masks
+        """
+        if all(x is not None for x in [input_dim, scale_factors, rotations]):
+            input_dim = input_dim
+            scale_factors = scale_factors
+            rotations = rotations
+            input_flag = True
+        else:
+            input_dim = self.obs_dim
+            scale_factors = self.adaptive_scale_factors
+            rotations = self.rotations
+            input_flag = False
+        retval = {}
+
+        ##GENERATE OBSERVATION
+
+        retval['transformed_obs'] = prepare_image(
+                        obs, 
+                        self.get_transformations(rotations, scale_factors), 
+                        input_dim,
+                        orientation_net = self.orn_net_handle,
+                        parallelize=self.parallelize_prepare_image,
+                        nocs_mode=self.nocs_mode,
+                        inter_dim=256,
+                        constant_positional_enc=self.constant_positional_enc,)   
+
+        ##GENERATE MASKS
+        pretransform_cloth_mask = self.get_cloth_mask(obs[:3])
+        if input_flag:
+            pretransform_left_arm_mask = torch.ones_like(self.get_cloth_mask(obs[:3]))
+            pretransform_right_arm_mask = torch.ones_like(self.get_cloth_mask(obs[:3])) 
+        else:
+            pretransform_left_arm_mask = self.left_arm_mask
+            pretransform_right_arm_mask = self.right_arm_mask 
+
+        pretransform_mask = torch.stack([pretransform_cloth_mask, 
+                                        pretransform_left_arm_mask, 
+                                        pretransform_right_arm_mask], 
+                                        dim=0)
+        
+        transformed_mask = prepare_image(
+                        pretransform_mask, 
+                        self.get_transformations(rotations, scale_factors), 
+                        input_dim,
+                        parallelize=self.parallelize_prepare_image,
+                        nocs_mode=self.nocs_mode,
+                        inter_dim=256,
+                        constant_positional_enc=self.constant_positional_enc,)   
+
+        cloth_mask = transformed_mask[:, 0]
+        left_arm_mask = transformed_mask[:, 1]
+        right_arm_mask = transformed_mask[:, 2]
+
+        workspace_mask = generate_workspace_mask(left_arm_mask, 
+                                                right_arm_mask, 
+                                                self.action_primitives, 
+                                                self.pix_place_dist, 
+                                                self.pix_grasp_dist)
+        
+        cloth_mask = generate_primitive_cloth_mask(
+                                cloth_mask,
+                                self.action_primitives,
+                                self.pix_place_dist,
+                                self.pix_grasp_dist)
+
+        for primitive in self.action_primitives:
+
+            GUARANTEE_OFFSET=6
+            offset = self.pix_grasp_dist if primitive == 'fling' else self.pix_place_dist + GUARANTEE_OFFSET
+            primitive_vmap_indices = self.primitive_vmap_indices[primitive]
+
+            if input_flag: primitive_vmap_indices = [0, cloth_mask[primitive].shape[0]]
+
+            valid_transforms_mask = torch.zeros_like(cloth_mask[primitive]).bool()
+            valid_transforms_mask[primitive_vmap_indices[0]:primitive_vmap_indices[1], 
+                        offset:-offset,
+                         offset:-offset] = True
+
+            table_mask = retval['transformed_obs'][:, 3] > 0
+            offset_table_mask_up = torch.zeros_like(table_mask).bool()
+            offset_table_mask_down = torch.zeros_like(table_mask).bool()
+            offset_table_mask_up[:, :-offset, :] = table_mask[:, offset:]
+            offset_table_mask_down[:, offset:, :] = table_mask[:, :-offset]
+            table_mask = offset_table_mask_up & offset_table_mask_down & table_mask
+
+            primitive_workspace_mask = torch.logical_and(workspace_mask[primitive], table_mask)
+            primitive_workspace_mask = torch.logical_and(primitive_workspace_mask, valid_transforms_mask)
+
+            retval[f"{primitive}_cloth_mask"] = cloth_mask[primitive]
+            retval[f"{primitive}_workspace_mask"] = primitive_workspace_mask
+            retval[f"{primitive}_mask"] = torch.logical_and(cloth_mask[primitive], primitive_workspace_mask)
+        return retval
+
+
+    # @profile
+    def on_episode_end(self, log=False):
+
+        if self.dump_visualizations:
+            name = self.current_task.get_config()['name']
+            vis_dir = self.log_dir
+            pathlib.Path(vis_dir).mkdir(parents=True, exist_ok=True)
+            for key, frames in self.env_video_frames.items():
+                if len(frames) == 0:
+                    continue
+                path = f"{vis_dir}/{name}.mp4"
+                with imageio.get_writer(path, mode='I', fps=24) as writer:
+                    for frame in (
+                        frames if not log
+                            else tqdm(frames, desc=f'Dumping {key} frames')):
+                        writer.append_data(frame)
+            print("[Episode video dumped]")
+        self.env_video_frames.clear()
+
+        if not self.demo:
+            self.episode_memory.dump(
+                self.replay_buffer_path)
+        self.episode_memory.clear()
+        del self.episode_memory
+        self.episode_memory = Memory()
+        self.dump_video_counter += 1
+
+        if self.recreate_verts is not None:
+            print("Recreation done!")
+
+
+    # @profile
+    def get_max_value_valid_action(self, action_tuple) -> dict:
+
+        # try:
+        if action_tuple['random_action'] is not None:
+            primitive = action_tuple['random_action']
+        else:
+            primitive = action_tuple['best_primitive']
+
+        if self.recreate_primitive:
+            primitive = self.recreate_primitive
+
+        max_indices = action_tuple[primitive]['max_index']
+
+        max_deformable_value = action_tuple[primitive]['max_deformable_value']
+        max_rigid_value = action_tuple[primitive]['max_rigid_value']
+        max_value = action_tuple[primitive]['max_value']
+
+        x, y, z = max_indices
+        self.episode_memory.add_value(
+            key='local_x', value=x)
+        self.episode_memory.add_value(
+            key='local_y', value=y)
+        self.episode_memory.add_value(
+            key='local_z', value=z)
+        self.episode_memory.add_value(
+            key='action_primitive', value=str(primitive))
+        self.episode_memory.add_value(
+            key='obs', value=self.transformed_obs['transformed_obs'][x])
+        self.episode_memory.add_value(
+            key='mask', value=self.transformed_obs[f'{primitive}_mask'][x])
+        
+        all_value_maps = action_tuple[primitive]['all_value_maps']
+        value_map = all_value_maps[x]
+        action_mask = torch.zeros(value_map.size())
+
+        try:
+            action_mask[y, z] = 1 
+        except:
+            print("Indices", max_indices)
+            exit(1)
+
+        num_scales = len(self.adaptive_scale_factors)
+        rotation_idx = torch.div(x, num_scales, rounding_mode='floor')
+        scale_idx = x - rotation_idx * num_scales
+        scale = self.adaptive_scale_factors[scale_idx]
+
+        rotation = self.rotations[rotation_idx]
+
+        reach_points = np.array(self.get_action_params(
+            action_primitive=primitive,
+            max_indices=(x, y, z),
+            # cloth_mask = transform_cloth_mask
+            ))
+
+        p1, p2 = reach_points[:2]
+
+        if (p1 is None) or (p2 is None):
+            print("\n [SimEnv] Invalid pickpoints \n", primitive, p1, p2)
+            raise ValueError("Invalid pickpoints")
+
+        action_kwargs = {
+            'observation': self.transformed_obs['transformed_obs'][x],
+            'mask': self.transformed_obs[f'{primitive}_mask'][x],
+            'workspace_mask': self.transformed_obs[f'{primitive}_workspace_mask'][x],
+            'action_primitive': str(primitive),
+            'primitive': primitive,
+            'p1': p1,
+            'p2': p2,
+            'scale': scale,
+            'nonadaptive_scale': self.scale_factors[scale_idx],
+            'rotation': rotation,
+            'predicted_deformable_value': float(max_deformable_value),
+            'predicted_rigid_value': float(max_rigid_value),
+            'predicted_weighted_value': float(max_value),
+            'max_indices': np.array(max_indices),
+            'action_mask': action_mask,
+            'value_map': value_map,
+            'info': None,
+            'all_value_maps': all_value_maps,
+        }
+
+        if action_tuple[primitive].get('raw_value_map') is not None:
+            action_kwargs['raw_value_maps'] = action_tuple[primitive]['raw_value_maps']
+
+
+        assert ((action_kwargs['p1'] is not None) and (action_kwargs['p2'] is not None))
+
+        action_kwargs.update({
+            'transformed_depth':
+            action_kwargs['observation'][3, :, :],
+            'transformed_rgb':
+            action_kwargs['observation'][:3, :, :],
+        })
+
+        if self.recreate_verts is not None:
+            for primitive in self.action_primitives:
+                action_kwargs[f'{primitive}_value_maps'] = action_tuple[primitive]['all_value_maps']
+                action_kwargs[f'{primitive}_raw_value_maps'] = action_tuple[primitive]['raw_value_maps']
+
+
+        action_params = self.check_action(
+            pixels=np.array([p1, p2]),
+            **action_kwargs)
+
+        try:
+            reachable, left_or_right = self.check_action_reachability(
+                action=primitive,
+                p1=action_params['p1'],
+                p2=action_params['p2'])
+        except ValueError as e:
+            raise ValueError("Reach pos none")
+
+        if primitive == 'place':
+            action_kwargs['left_or_right'] = left_or_right
+        
+        for k in ['valid_action',
+                    'pretransform_pixels',]:
+            del action_params[k]
+
+        return action_kwargs['action_primitive'], action_params
+
+    def keypoint_detect(self):
+        with torch.no_grad():
+            input = self.transformed_obs['transformed_obs'][40:41][:, :3]
+            pred_heatmap, pred_cls = self.keypoint_detector(input.cuda())
+            pred_coords = get_keypoints(pred_heatmap.cpu().numpy(), threshold=0.2)
+            cv2.imwrite('outputs/keypoints_detect.png', visualize(input[0].cpu().numpy().transpose(1,2,0), pred_coords))
+        
+        if pred_cls[0]<0.45:
+            return False, None
+
+        mask = input[0].sum(axis=0)>0
+        def max_min_abs_vals(lst): return max(lst), min(lst)
+        row = torch.argmax(torch.sum(mask, axis=1)).item()
+        max_col, min_col = max_min_abs_vals(torch.where(mask[row])[0])
+
+        num_scales = len(self.adaptive_scale_factors)
+        rotation_idx = torch.div(40, num_scales, rounding_mode='floor')
+        scale_idx = 40 - rotation_idx * num_scales
+        scale = self.adaptive_scale_factors[scale_idx]
+
+        def keypoint_product(pixel_coord):
+            reach_points = np.array(self.get_action_params(
+                action_primitive='place',
+                max_indices=(40, pixel_coord[1], pixel_coord[0])))
+            pick_point = reach_points[0]
+            self.transformed_obs['transformed_obs'][40]
+            return self.check_action(action_primitive='place',
+                                     pixels=np.array([pick_point, pick_point]),
+                                     transformed_depth=self.transformed_obs['transformed_obs'][40,3],
+                                     transformed_rgb=self.transformed_obs['transformed_obs'][40,:3],
+                                     scale=scale, rotation= self.rotations[rotation_idx])['p1']
+
+        self.bottom_keypoint = keypoint_product([min_col, row])
+        self.top_keypoint = keypoint_product([max_col, row])
+
+        keypoints = {KEYPOINT_NAMES[i]: {} for i in range(4)}
+
+        for i in range(4):
+            if np.all(pred_coords[i] != -1):
+                keypoints[KEYPOINT_NAMES[i]] = keypoint_product(pred_coords[i])
+            else:
+                return False, keypoints
+
+        self.pants = is_line_all_ones(mask.numpy(), pred_coords[2], pred_coords[3])
+
+        if self.pants == False:
+            if (keypoints[f"bottom_left"][0]- keypoints[f"bottom_right"][0])<\
+                (keypoints[f"top_left"][0]- keypoints[f"top_right"][0])*1.6:
+                self.pants = True
+        return True, keypoints
+
+    def movep(self, pos, speed=None, limit=1000, min_steps=None, eps=1e-4):
+        if speed is None:
+            if self.dump_visualizations:
+                speed = self.default_speed
+            else:
+                speed = 0.1
+        target_pos = np.array(pos)
+        for step in range(limit):
+            curr_pos = self.action_tool._get_pos()[0]
+            deltas = [(targ - curr)
+                      for targ, curr in zip(target_pos, curr_pos)]
+            dists = [np.linalg.norm(delta) for delta in deltas]
+            if all([dist < eps for dist in dists]) and\
+                    (min_steps is None or step > min_steps):
+                return
+            action = []
+            for targ, curr, delta, dist, gs in zip(
+                    target_pos, curr_pos, deltas, dists, self.grasp_states):
+                if dist < speed:
+                    action.extend([*targ, float(gs)])
+                else:
+                    delta = delta/dist
+                    action.extend([*(curr+delta*speed), float(gs)])
+            action = np.array(action)
+            self.action_tool.step(action, step_sim_fn=self.step_simulation)
+
+            if step % 4 == 0 and self.dump_visualizations:
+                if 'top' not in self.env_video_frames:
+                    self.env_video_frames['top'] = []
+
+                self.env_video_frames['top'].append(
+                    np.squeeze(np.array(get_image()[0])))
+
+        raise MoveJointsException
+    
+    def pick_and_fling_primitive(
+            self, p1, p2):
+
+        left_grasp_pos, right_grasp_pos = p1, p2
+
+        left_grasp_pos[1] = self.grasp_height
+        right_grasp_pos[1] = self.grasp_height
+
+        # grasp distance
+        dist = np.linalg.norm(
+            np.array(left_grasp_pos) - np.array(right_grasp_pos))
+        
+        APPROACH_HEIGHT = 0.3
+        pre_left_grasp_pos = (left_grasp_pos[0], APPROACH_HEIGHT, left_grasp_pos[2])
+        pre_right_grasp_pos = (right_grasp_pos[0], APPROACH_HEIGHT, right_grasp_pos[2])
+        
+        #approach from the top (to prevent collisions)
+        self.movep([pre_left_grasp_pos, pre_right_grasp_pos], speed=0.06)
+        self.movep([left_grasp_pos, right_grasp_pos], speed=0.005)
+
+        # only grasp points on cloth
+        self.grasp_states = [True, True]
+
+        PRE_FLING_HEIGHT = 0.7
+        
+        #lift up cloth
+        self.movep([[left_grasp_pos[0], PRE_FLING_HEIGHT, left_grasp_pos[2]],\
+             [right_grasp_pos[0], PRE_FLING_HEIGHT, right_grasp_pos[2]]], speed=9e-3)
+        # lift to prefling
+        self.movep([[dist/2, PRE_FLING_HEIGHT, -0.3], \
+            [-dist/2, PRE_FLING_HEIGHT, -0.3]], speed=6e-3)
+
+        fling_height = self.lift_cloth(
+            grasp_dist=dist, fling_height=PRE_FLING_HEIGHT)
+
+        dist = self.stretch_cloth(grasp_dist=dist, fling_height=fling_height)
+
+        wait_until_stable(100, tolerance=0.005)
+
+        positions = pyflex.get_positions().reshape((-1, 4))[:, :3]
+        heights = positions[:self.num_particles][:, 1]
+        cloth_height = heights.max() - heights.min()
+
+        self.fling_primitive(
+            dist=dist,
+            fling_height=fling_height,
+            fling_speed=self.fling_speed,
+            cloth_height=cloth_height,
+            )
+        
+    def pick_and_place_primitive(
+        self, p1, p2, lift_height=0.25):
+        # prepare primitive params
+        pick_pos, place_pos = p1.copy(), p2.copy()
+        pick_pos[1] += self.grasp_height
+        place_pos[1] += self.grasp_height + 0.05
+
+        prepick_pos = pick_pos.copy()
+        prepick_pos[1] = lift_height
+        preplace_pos = place_pos.copy()
+        preplace_pos[1] = lift_height
+
+        # execute action
+        self.movep([prepick_pos, [-0.2, 0.5, -0.5]], speed=8e-2)
+        self.movep([pick_pos, [-0.2, 0.3, -0.5]], speed=6e-3)
+        self.set_grasp(True)
+        self.movep([prepick_pos, [-0.2, 0.3, -0.5]], speed=1e-2)
+        self.movep([preplace_pos, [-0.2, 0.3, -0.5]], speed=2e-3)
+        self.movep([place_pos, [-0.2, 0.3, -0.5]], speed=2e-3)
+        self.set_grasp(False)
+        self.movep([preplace_pos, [-0.2, 0.3, -0.5]], speed=8e-3)
+        self.reset_end_effectors()
+
+    def render_cloth(self):
+        if self.render_engine == 'blender':
+            mesh = get_cloth_mesh(*self.current_task.cloth_size)
+            return blender_render_cloth(mesh, self.image_dim)
+        elif self.render_engine == 'opengl':
+            return get_image(self.image_dim, self.image_dim)
+        else:
+            raise NotImplementedError()
+        
+    def get_cloth_mask(self, rgb):
+        return rgb.sum(axis=0) > 0
+    
+
+    def get_transformations(self, rotations, 
+                            scale_factors = None):
+        if scale_factors is None:
+            scale_factors = self.adaptive_scale_factors
+        return list(product(
+            rotations, scale_factors))
+
+    def get_action_params(self, action_primitive, max_indices, cloth_mask=None):
+        x, y, z = max_indices
+        if action_primitive == 'fling' or\
+                action_primitive == 'stretchdrag':
+            center = np.array([x, y, z])
+            p1 = center[1:].copy()
+            p2 = center[1:].copy()
+
+            p1[0] = p1[0] + self.pix_grasp_dist
+            p2[0] = p2[0] - self.pix_grasp_dist
+
+        elif action_primitive == 'drag':
+            p1 = np.array([y, z])
+            p2 = p1.copy()
+            p2[0] += self.pix_drag_dist
+        elif action_primitive == 'place':
+            p1 = np.array([y, z])
+            p2 = p1.copy()
+            p2[0] += self.pix_place_dist
+        else:
+            raise Exception(
+                f'Action Primitive not supported: {action_primitive}')
+        if (p1 is None) or (p2 is None):
+            raise Exception(
+                f'None reach points: {action_primitive}')
+        return p1, p2
+    
+
+    def check_action(self, action_primitive, pixels,
+                     transformed_depth, transformed_rgb,
+                     scale, rotation,
+                     value_map=None, all_value_maps=None,
+                     **kwargs):
+        args = {
+            'pretransform_depth': self.pretransform_depth.copy(),
+            'pretransform_rgb': self.pretransform_rgb.copy(),
+            'transformed_depth': transformed_depth,
+            'transformed_rgb': transformed_rgb,
+            'scale': scale,
+            'rotation': rotation
+        }
+        retval = pixels_to_3d_positions(
+            transform_pixels=pixels,
+            pose_matrix=compute_pose(
+                pos=[0, 2, 0],
+                lookat=[0, 0, 0],
+                up=[0, 0, 1]), **args)
+
+        return retval
+
+    def check_action_reachability(
+            self, action: str, p1: np.array, p2: np.array):
+        if (p1 is None) or (p2 is None):
+           raise ValueError(f'[Invalid action] {action} reach points are None')
+        if action in ['fling','drag','stretchdrag']:
+            # right and left must reach each point respectively
+            return self.check_arm_reachability(self.left_arm_base, p1) \
+                and self.check_arm_reachability(self.right_arm_base, p2), None
+        elif action == 'drag' or action == 'place':
+            # either right can reach both or left can reach both
+            if self.check_arm_reachability(self.left_arm_base, p1) and\
+                    self.check_arm_reachability(self.left_arm_base, p2):
+                return True, 'left'
+            elif self.check_arm_reachability(self.right_arm_base, p1) and \
+                    self.check_arm_reachability(self.right_arm_base, p2):
+                return True, 'right'
+            else:
+                return False, None
+        raise NotImplementedError()
+    
+    def check_arm_reachability(self, arm_base, reach_pos):
+        try:
+            return np.linalg.norm(arm_base - reach_pos) < self.reach_distance_limit
+        except Exception as e:
+            print(e)
+            print("[Check arm] Reachability error")
+            print("arm_base:", arm_base)
+            print("reach_pos:", reach_pos)
+            return False, None
+
+    def lift_cloth(self,
+                   grasp_dist: float,
+                   fling_height: float = 0.7,
+                   increment_step: float = 0.03,
+                   max_height=0.7,
+                   height_offset : float = 0.1):
+        while True:
+            positions = pyflex.get_positions().reshape((-1, 4))[:, :3]
+            heights = positions[:, 1][:self.num_particles]
+
+            if heights.min() > height_offset + 0.05:
+                fling_height -= increment_step
+                
+            elif heights.min() < height_offset - 0.05:
+                fling_height += increment_step 
+
+            else: break
+
+            self.movep([[grasp_dist/2, fling_height, -0.3],
+                        [-grasp_dist/2, fling_height, -0.3]], speed=3e-3)
+            
+        return fling_height
+
+    def stretch_cloth(self,
+                      grasp_dist: float,
+                      fling_height: float = 0.7,
+                      max_grasp_dist: float = 0.7,
+                      increment_step=0.02):
+        # keep stretching until cloth is tight
+        # i.e.: the midpoint of the grasped region
+        # stops moving
+        left, right = self.action_tool._get_pos()[0]
+        left[1] = fling_height
+        right[1] = fling_height
+        midpoint = (left + right)/2
+        direction = left - right
+        direction = direction/np.linalg.norm(direction)
+        self.movep([left, right], speed=8e-4, min_steps=20)
+        stable_steps = 0
+        cloth_midpoint = 1e2
+        while True:
+            positions = pyflex.get_positions().reshape((-1, 4))[:, :3]
+            # get midpoints
+            high_positions = positions[positions[:, 1] > fling_height-0.1, ...]
+            if (high_positions[:, 0] < 0).all() or \
+                    (high_positions[:, 0] > 0).all():
+                # single grasp
+                return grasp_dist
+            positions = [p for p in positions]
+            positions.sort(
+                key=lambda pos: np.linalg.norm(pos[[0, 2]]-midpoint[[0, 2]]))
+            new_cloth_midpoint = positions[0]
+            stable = np.linalg.norm(
+                new_cloth_midpoint - cloth_midpoint) < 3e-2
+            if stable:
+                stable_steps += 1
+            else:
+                stable_steps = 0
+            stretched = stable_steps > 2
+            if stretched:
+                return grasp_dist
+            cloth_midpoint = new_cloth_midpoint
+            grasp_dist += increment_step
+            left = midpoint + direction*grasp_dist/2
+            right = midpoint - direction*grasp_dist/2
+            self.movep([left, right], speed=5e-4)
+            if grasp_dist > max_grasp_dist:
+                return max_grasp_dist
+            
+    def stretch_cloth_temp(self, fling_height: float = 0.7,
+                           max_grasp_dist: float = 0.7,
+                           increment_step=0.02,
+                           threshold=1e-3):
+        # keep stretching until cloth is tight
+        # i.e.: the midpoint of the grasped region
+        # stops moving
+        left, right = self.action_tool._get_pos()[0]
+        grasp_dist = np.linalg.norm(left-right)
+        left[1] = fling_height
+        right[1] = fling_height
+        midpoint = (left + right)/2
+        direction = left - right
+        direction = direction/np.linalg.norm(direction)
+        self.movep([left, right], speed=8e-4, min_steps=20)
+        stable_steps = 0
+        init_positions = pyflex.get_positions().reshape((-1, 4))[:, :3]
+            
+        while True:
+            positions = pyflex.get_positions().reshape((-1, 4))[:, :3]
+
+            positions = list(enumerate(positions))
+            positions.sort(key=lambda item: np.linalg.norm(item[1] - midpoint))
+
+            new_cloth_midpoint = positions[0][1]
+            original_index = positions[0][0]
+
+            # print(np.linalg.norm(new_cloth_midpoint[[0, 2]] - midpoint[[0, 2]]))
+            # print(new_cloth_midpoint[1]-init_positions[original_index][1])
+            stable = (new_cloth_midpoint[1]-init_positions[original_index][1])>threshold
+            
+            if stable:
+                stable_steps += 1
+            else:
+                stable_steps = 0
+            stretched = stable_steps > 2
+            if stretched:
+                return grasp_dist
+            
+            grasp_dist += increment_step
+            left = midpoint + direction*grasp_dist/2
+            right = midpoint - direction*grasp_dist/2
+            self.movep([left, right], speed=5e-4)
+
+            if grasp_dist > max_grasp_dist:
+                return max_grasp_dist
+
+    def fling_primitive(self, dist, fling_height, fling_speed, cloth_height):
+    
+        x = cloth_height/2
+
+        x_release = x * 0.9 * self.adaptive_fling_momentum
+        x_drag = x * self.adaptive_fling_momentum
+        # fling
+        self.movep([[dist/2, fling_height, -x],
+                    [-dist/2, fling_height, -x]], speed=fling_speed)
+        self.movep([[dist/2, fling_height, x],
+                    [-dist/2, fling_height, x]], speed=fling_speed)
+        # self.movep([[dist/2, fling_height, x],
+        #             [-dist/2, fling_height, x]], speed=1e-2, min_steps=4)
+        # lower
+        self.movep([[dist/2, self.grasp_height*2, -x_release],
+                    [-dist/2, self.grasp_height*2, -x_release]], speed=1e-2)
+        self.movep([[dist/2, self.grasp_height*2, -x_drag],
+                    [-dist/2, self.grasp_height*2, -x_drag]], speed=5e-3)
+        # release
+        self.set_grasp(False)
+        if self.dump_visualizations:
+            self.movep(
+                [[dist/2, self.grasp_height*2, -x_drag],
+                 [-dist/2, self.grasp_height*2, -x_drag]], min_steps=10)
+            
+        self.reset_end_effectors()
+
+    def double_arm_pick_and_place(self, keypoints, left_height=0.1):
+
+        if len(keypoints.keys()) == 4:
+            width = np.linalg.norm(self.top_keypoint-self.bottom_keypoint)
+            top = min(-width/2 + np.min([keypoints[f"top_left"][2], keypoints[f"top_right"][2]]) - self.top_keypoint[2], -width/3)
+            bottom = max(width/2 + np.max([keypoints[f"bottom_left"][2], keypoints[f"bottom_right"][2]]) - self.bottom_keypoint[2], width/3)  
+
+            max_grasp_dist = 1.3
+
+            if  abs(keypoints[f"top_left"][2]-top+\
+                abs(keypoints[f"top_right"][2]-top) > \
+                abs(keypoints[f"bottom_left"][2]-bottom)+\
+                abs(keypoints[f"bottom_right"][2]-bottom)):
+                left_pick_pos = keypoints[f"top_left"].copy()
+                right_pick_pos = keypoints[f"top_right"].copy()
+                target_y = top
+            else:
+                left_pick_pos = keypoints[f"bottom_left"].copy()
+                right_pick_pos = keypoints[f"bottom_right"].copy()
+                target_y = bottom
+                if self.pants:
+                    max_grasp_dist = (keypoints[f"top_left"][0]-\
+                                      keypoints[f"top_right"][0])*1.15
+
+            left_pick_pos[1] = self.grasp_height
+            right_pick_pos[1] = self.grasp_height
+
+            left_prepick_pos = np.array([left_pick_pos[0], left_height, left_pick_pos[2]])
+            right_prepick_pos = np.array([right_pick_pos[0], left_height, right_pick_pos[2]])
+
+            self.movep([left_prepick_pos, right_prepick_pos], speed=8e-2)
+            self.movep([left_pick_pos, right_pick_pos], speed=6e-3)
+            self.set_grasp(True)
+
+            distance = np.linalg.norm(left_prepick_pos - right_prepick_pos)
+
+            left_prepick_pos[2] = target_y
+            right_prepick_pos[2] = target_y
+            left_prepick_pos[0] = distance/2
+            right_prepick_pos[0] = -distance/2
+            self.movep([left_prepick_pos, right_prepick_pos], speed=3e-3)
+
+            self.stretch_cloth_temp(fling_height=0.15, max_grasp_dist=max_grasp_dist, threshold=1e-2)
+
+            left, right = self.action_tool._get_pos()[0]
+            left[1] = self.grasp_height + 0.05
+            right[1] = self.grasp_height + 0.05 
+            self.movep([left, right], speed=2e-3)
+            self.set_grasp(False)
+            left[1] = left_height
+            right[1] = left_height
+            self.movep([left, right], speed=8e-3)
+
+    def draw_iou(self):
+        init_img = self.current_task.get_images()["init_rgb"] 
+        curr_img = self.pretransform_rgb 
+        self.init_mask = self.get_cloth_mask(init_img.transpose(2, 0, 1))
+        self.curr_mask = self.get_cloth_mask(curr_img.transpose(2, 0, 1))
+        contour_image = cv2.cvtColor(curr_img, cv2.COLOR_RGB2BGR)
+        contours, _ = cv2.findContours(self.init_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        temp = np.zeros_like(curr_img)
+        cv2.drawContours(temp, contours, -1, (255, 255, 255), 3)
+        temp[self.curr_mask] = contour_image[self.curr_mask]
+        return temp
+
+
+##### netowrk.py
+import torch.nn as nn
+import torch, random, numpy as np, math
+from typing import List
+from time import time
+from clothmate.utils.net_utils import *
+
+torch.inf = math.inf
+
+class Factorized_UNet(nn.Module):
+    def __init__(self, 
+                n_channels, 
+                bilinear=False, 
+                action_primitives : List[str] = ['place', 'fling'] ,
+                primitive_vmap_indices=None, 
+                n_bins=1, 
+                deformable_pos=True, 
+                unfactorized_networks=False,
+                coverage_reward=False,
+                 **kwargs):
+        super(Factorized_UNet, self).__init__()
+
+        if unfactorized_networks:
+            print("[Network] Initializing unfactorized network")
+        else:
+            print("[Network] Initializing factorized network")
+
+        if not deformable_pos:
+            print("[Network] Not giving deformable network positional encoding")
+                # deformable network does not obtain positional encodings
+            self.n_channels = {
+                'rigid':n_channels,
+                'deformable':n_channels-2
+            }
+        else:
+            print("[Network] Giving deformable network positional encoding")
+            self.n_channels = {
+                'rigid':n_channels,
+                'deformable':n_channels
+            }
+
+        if coverage_reward:
+            print("[Network] Giving coverage reward")
+            self.n_channels = {
+                'rigid':n_channels - 2,
+                'deformable':n_channels - 2
+            }
+
+        self.n_bins = n_bins
+
+        self.action_primitives = action_primitives
+        DISTANCES = ['rigid', 'deformable']
+
+        self.DISTANCES = DISTANCES
+
+        self.bilinear = bilinear
+
+        FACTOR = 1/2
+        factor = 2 if bilinear else 1
+
+        self.encoders = nn.ModuleDict()
+        self.decoders = nn.ModuleDict()
+        self.nocs_decoders = nn.ModuleDict()
+
+        self.kwargs = kwargs
+        
+        for distance in DISTANCES:
+            self.decoders[distance] = nn.ModuleDict()
+            for action_primitive in self.action_primitives:
+                    if unfactorized_networks and distance != 'rigid':
+                        self.encoders[distance] = self.encoders['rigid']
+                        self.decoders[distance][action_primitive] = self.decoders['rigid'][action_primitive]
+                        continue
+                    #one encoder and nocs decoder per distance type
+                    self.encoders[distance] = nn.ModuleList([
+                        DoubleConv(self.n_channels[distance], int(64 * FACTOR)),
+                        Down(int(64 * FACTOR), int(128 * FACTOR)),
+                        Down(int(128 * FACTOR), int(256 * FACTOR)),
+                        Down(int(256 * FACTOR), int(512 * FACTOR)),
+                        Down(int(512 * FACTOR), int(1024 * FACTOR) // factor),
+                    ])
+                    self.decoders[distance][action_primitive] = nn.ModuleList([
+                        Up(int(1024 * FACTOR), int(512 * FACTOR) // factor, bilinear),
+                        Up(int(512 * FACTOR), int(256 * FACTOR) // factor, bilinear),
+                        Up(int(256 * FACTOR), int(128 * FACTOR) // factor, bilinear),
+                        Up(int(128 * FACTOR), int(64 * FACTOR), bilinear),
+                        OutConv(int(FACTOR *64), n_bins)
+                    ])
+
+    def decode(self, encodings, decoder):
+        encodings = encodings[::-1]
+        cur = encodings[0]
+        for i in range(1, len(encodings)):
+            cur = decoder[i-1](cur, encodings[i])
+        cur = decoder[-1](cur)
+        return cur
+
+    def encode(self, encoders, x, distance):
+        encoding = x[:, :self.n_channels[distance]]
+        encodings = []
+        for encoder in encoders:
+            encoding = encoder(encoding)
+            encodings.append(encoding)
+        return encodings
+
+    def forward_for_optimize(self, x, action_primitive):
+
+        out = {}
+        for distance in self.DISTANCES:
+            out[distance] = {}
+            encodings = self.encode(self.encoders[distance], x, distance)
+            for primitive in self.action_primitives:
+                if primitive == action_primitive:
+                    out[distance][primitive] =\
+                         self.decode(encodings, self.decoders[distance][primitive])
+
+        return out
+
+    def forward(self, x, use_random_value=False):
+
+        with torch.no_grad():
+            out = {}
+            for distance in self.DISTANCES:
+                out[distance] = {}
+                encodings = self.encode(self.encoders[distance], x, distance)
+                for primitive in self.action_primitives:
+                    if use_random_value and not (self.kwargs['network'] == 'online' and primitive == 'fling'):
+                        out[distance][primitive] = torch.rand((x.shape[0], 1, x.shape[2], x.shape[3]), device=torch.device('cuda'))
+                    else: 
+                        out[distance][primitive] = self.decode(encodings, self.decoders[distance][primitive])
+        return out
+        
+class SpatialValueNet(nn.Module):
+    def __init__(self, input_channel_types=None,
+                 steps=None, device='cuda', primitive_vmap_indices=None, **kwargs):
+        super().__init__()
+
+        self.device = device
+        self.kwargs = kwargs
+        self.input_channel_types = input_channel_types
+
+        assert(self.input_channel_types is not None)
+
+        channel_ids_dict = { 
+            'rgb': (0, 1, 2),
+            'rgb_pos': (0, 1, 2, 4, 5),
+            'rgb_pos_gtnocs': (0, 1, 2, 4, 5, 6, 7),
+            'rgb_pos_nocs': (0, 1, 2, 4, 5, 6, 7),
+            'rgb_pos_fullgtnocs': (0, 1, 2, 4, 5, 6, 7, 8),
+            'gray_pos': (0, 1, 2, 4, 5),
+            'bin_pos':(0, 1, 2, 4, 5),
+        }
+
+        self.mean = torch.tensor([0.5, 0.5, 0.5, 1.99, 0, 0, 0, 0, 0])
+        self.std = torch.tensor([0.5, 0.5, 0.5, 0.006, 1, 1, 1, 1, 1])
+
+        print(f"[Network] Initializing with inputs: {self.input_channel_types}")
+
+        self.channels_tuple = channel_ids_dict[self.input_channel_types]
+        self.n_input_channels = len(self.channels_tuple)
+        if self.input_channel_types in ['gray_pos', 'bin_pos']: self.n_input_channels -= 2
+        self.net = self.setup_net()
+
+    def setup_net(self):
+        return Factorized_UNet(n_channels=self.n_input_channels, bilinear=True, **self.kwargs)
+
+    def extract_obs(self, obs):
+        assert len(obs.size()) == 4
+        obs = obs[:, self.channels_tuple, :, :]
+        return obs
+
+    def preprocess_obs(self, obs):
+
+        mean = self.mean[self.channels_tuple,].reshape(1, -1, 1, 1)
+        std = self.std[self.channels_tuple,].reshape(1, -1, 1, 1)
+        obs = self.extract_obs(obs)
+
+        obs = (obs - mean.to(obs.device)) / std.to(obs.device)
+
+        if self.input_channel_types == 'gray_pos':
+            obs = torch.cat([0.114 * obs[:, 0:1] + 0.587 * obs[:, 1:2] + 0.299 * obs[:, 2:3], obs[:, 3:]], dim=1)
+
+        elif self.input_channel_types == 'bin_pos':
+            obs = torch.cat([obs[:, :3]>torch.min(obs[:, :3])-1, obs[:, 3:]], dim=1)
+
+        return obs.to(self.device)
+
+    def forward(self, x, use_random_value):
+        x = self.preprocess_obs(x)
+        out = self.net(x, use_random_value)
+        return out
+
+    def forward_for_optimize(self, x, action_primitive, preprocess=True):
+        if preprocess:
+            x = self.preprocess_obs(x)
+        out = self.net.forward_for_optimize(x, action_primitive)
+        return out
+
+
+class Policy:
+    def __init__(self,
+                 action_primitives: List[str],
+                 num_rotations: int,
+                 scale_factors: List[float],
+                 obs_dim: int,
+                 pix_grasp_dist: int,
+                 pix_drag_dist: int,
+                 pix_place_dist: int,
+                 deformable_weight: float,
+                #  network_gpu: List[int],
+                 **kwargs):
+        assert len(action_primitives) > 0
+        self.action_primitives = action_primitives
+        self.scale_factors = scale_factors
+        # self.num_transforms = len(self.rotations) * len(self.scale_factors)
+        self.obs_dim = obs_dim
+        self.pix_grasp_dist = pix_grasp_dist
+        self.pix_drag_dist = pix_drag_dist
+        self.pix_place_dist = pix_place_dist
+
+        self.deformable_weight = deformable_weight
+        # self.network_gpus = network_gpu
+
+        self.workspace_mask = None
+
+    def set_workspace_mask(self, workspace_mask):
+        self.workspace_mask = workspace_mask
+
+    def get_action_single(self, obs):
+        raise NotImplementedError()
+
+    def act(self, obs):
+        return (self.get_action_single(o) for o in obs)
+
+
+class MaximumValuePolicy(nn.Module, Policy):
+    def __init__(self,
+                 action_expl_prob: float,
+                 action_expl_decay: float,
+                 value_expl_prob: float,
+                 value_expl_decay: float,
+                 train_steps: int = 0,
+                 device=None,
+                 action_forward_size=4,
+                 gpu=0,
+                 grid_search_params=None,
+                 dump_visualizations=False,
+                 **kwargs):
+        super().__init__()
+        Policy.__init__(self, **kwargs)
+        
+        self.device = torch.device('cuda:' + str(gpu))
+
+        self.action_expl_prob = nn.parameter.Parameter(
+            torch.tensor(action_expl_prob).float(), requires_grad=False)
+        self.action_expl_decay = nn.parameter.Parameter(
+            torch.tensor(action_expl_decay).float(), requires_grad=False)
+        self.value_expl_prob = nn.parameter.Parameter(
+            torch.tensor(value_expl_prob).float(), requires_grad=False)
+        self.value_expl_decay = nn.parameter.Parameter(
+            torch.tensor(value_expl_decay).float(), requires_grad=False)
+        self.train_steps = nn.parameter.Parameter(
+            torch.tensor(train_steps).int(), requires_grad=False)
+        # one value net per action primitive
+        self.value_net = SpatialValueNet(
+            device=self.device, num_primitives=len(self.action_primitives), **kwargs).to(self.device)
+
+        self.should_explore_action = lambda: \
+            self.action_expl_prob > random.random()
+        self.should_explore_value = lambda: \
+            self.value_expl_prob > random.random()
+
+        self.pix_grasp_dist = kwargs['pix_grasp_dist']
+        self.action_forward_size =  action_forward_size
+        self.eval()
+
+        #for grid search mode
+        self.grid_search_params = grid_search_params
+        self.dump_visualizations = dump_visualizations
+
+
+    def decay_exploration(self, value_expl_halflife, action_expl_halflife, dataset_size, pts_per_update, is_eval=False):
+
+        value_expl_decay = torch.tensor(np.exp(np.log(0.5)/(value_expl_halflife)))
+        action_expl_decay = torch.tensor(np.exp(np.log(0.5)/(action_expl_halflife)))
+        update_step = torch.tensor(int(dataset_size/pts_per_update) * pts_per_update)
+
+        if not is_eval:
+            self.action_expl_prob = torch.nn.Parameter(torch.pow(action_expl_decay, update_step), requires_grad=False)
+            self.value_expl_prob = torch.nn.Parameter(torch.pow(value_expl_decay, update_step), requires_grad=False)
+        else:
+            self.action_expl_prob = torch.nn.Parameter(torch.tensor(0.0), requires_grad=False)
+            self.value_expl_prob = torch.nn.Parameter(torch.tensor(0.0), requires_grad=False)
+
+    # @profile
+    def get_action_single(self, state, explore=True):
+
+        if explore:
+            use_random_action = self.should_explore_action()
+            use_random_value = self.should_explore_value()
+        else:
+            use_random_action = False
+            use_random_value = False
+
+        if self.grid_search_params is not None:
+            use_random_action = True
+            use_random_value = True
+
+        obs = state['transformed_obs']
+
+        with torch.no_grad():
+            value_maps = self.value_net(obs, use_random_value=explore)
+
+        primitive_retval = {}
+
+        valid_action_dict = {}
+        vmap_dict = {}
+
+        for primitive in self.action_primitives:
+
+            primitive_retval[primitive] = {}
+
+            mask = state[f'{primitive}_mask']
+
+            vmap = (1-self.deformable_weight) * value_maps['rigid'][primitive].squeeze(1) + \
+                self.deformable_weight * value_maps['deformable'][primitive].squeeze(1)
+
+            if self.dump_visualizations:
+                raw_vmap = vmap.clone()
+                primitive_retval[primitive]['raw_value_maps'] = raw_vmap
+
+                        
+            valid_actions = mask.sum(-1).sum(-1).bool()
+            valid_action_dict[primitive] = valid_actions
+            vmap_dict[primitive] = vmap
+
+            if mask.any():
+                vmap[~mask] = -torch.inf
+                if use_random_value and primitive == 'place':
+                    random_value_transform_idx = np.random.choice(valid_action_dict[primitive].nonzero().squeeze(1))
+                    chosen_vmap = vmap_dict[primitive][random_value_transform_idx].unsqueeze(0)
+                    random_index = np.unravel_index(torch.argmax(chosen_vmap).item(), chosen_vmap.shape)
+                    max_index = (random_value_transform_idx, random_index[1], random_index[2])
+                    max_value = chosen_vmap[random_index]
+                else:
+                    max_flat_index = torch.argmax(vmap).item()
+                    max_index = np.unravel_index(max_flat_index, vmap.shape)
+                    max_value = vmap[max_index]
+            else:
+                max_index = None 
+                max_value = -torch.inf
+        
+            primitive_retval[primitive]['max_index'] = max_index
+            primitive_retval[primitive]['max_value'] = max_value
+            primitive_retval[primitive]['all_value_maps'] = vmap
+            primitive_retval[primitive]['max_deformable_value'] = (value_maps['deformable'][primitive].squeeze(1))[max_index]
+            primitive_retval[primitive]['max_rigid_value'] = (value_maps['rigid'][primitive].squeeze(1))[max_index]
+
+        valid_primitives = [primitive for primitive in self.action_primitives if primitive_retval[primitive]['max_index'] is not None]
+      
+        if len(valid_primitives) == 0:
+            print("[Policy] Error: no valid actions")
+            return None
+        if use_random_action:
+            if len(valid_primitives) == 2:
+                probabilities = [0.2, 0.8]
+            else:
+                probabilities = [1.0]
+            primitive_retval['random_action'] = np.random.choice(valid_primitives, p=probabilities)
+        else:
+            primitive_retval['random_action'] = None
+
+        if self.grid_search_params is not None:
+            primitive_retval['random_action'] = self.grid_search_params['primitive']
+
+        best_val = (-torch.inf, None, None)
+        for primitive in self.action_primitives:
+            if primitive_retval[primitive]['max_value'] > best_val[0]:
+                best_val = (primitive_retval[primitive]['max_value'], primitive, primitive_retval[primitive]['max_index'])
+        
+        primitive_retval['best_value'] = best_val[0]
+        primitive_retval['best_primitive'] = best_val[1]
+        primitive_retval['best_index'] = best_val[2]
+        primitive_retval['best_deformable_value'] = primitive_retval[best_val[1]]['max_deformable_value']
+        primitive_retval['best_rigid_value'] = primitive_retval[best_val[1]]['max_rigid_value']
+
+        return primitive_retval
+
+    def get_action(self, states, explore=True):
+        raise NotImplementedError()
+
+    def steps(self):
+        return sum([net.steps for net in self.value_nets.values()])
+
+    def forward(self, obs):
+        return self.act(obs)
+    
+    def act(self, obs, batch=False, explore=True):
+        batch=False
+        start = time()
+        print("Starting policy.act()")
+        r = [self.get_action_single(o, explore=explore) for o in obs]
+        end = time()
+        print("[Policy] Forward took: ", end - start, "with #obs: ", len(obs))
+        return r
+        # return [self.get_action_single(o) for o in obs]

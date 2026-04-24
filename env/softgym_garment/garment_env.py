@@ -85,7 +85,7 @@ class GarmentEnv(Arena):
         self.frame_resolution = config.get("frame_resolution", [256, 256])
         self.obs_resolution =  config.get("image_resolution", [128, 128])
         self.stop_on_success = config.get('stop_on_success', True)
-        
+        self.hard_shift_x = self.config.get('hard_shift_x', 0.0)
         # Softgym Setup
         self._get_sim_config()
         self._setup_camera()
@@ -136,7 +136,7 @@ class GarmentEnv(Arena):
         self._get_init_state_keys()
 
         self.evaluate_result = None
-        self.track_semkey_on_frames = self.config.track_semkey_on_frames
+        self.track_semkey_on_frames = self.config.get('track_semkey_on_frames', False)
         self.init_mode = self.config.get('init_mode', 'crumpled')
         self.action_step = 0
         self.last_info = None
@@ -168,13 +168,14 @@ class GarmentEnv(Arena):
         Pixels are projected to world coordinates (z=0 plane),
         then distances to robot bases are computed in the XY plane.
         """
-        H, W = resolution
+        W, H = resolution[0], resolution[1]
 
         # ---- 1. Generate pixel grid ----
         u = np.arange(W)
         v = np.arange(H)
         uu, vv = np.meshgrid(u, v)
-        pixels = np.stack([uu.ravel(), vv.ravel(), np.ones(H * W)], axis=1)  # (N, 3)
+        # Stack vv (Y) first, then uu (X) to match the swapped intrinsic matrix
+        pixels = np.stack([vv.ravel(), uu.ravel(), np.ones(H * W)], axis=1)  # (N, 3)
 
         # ---- 2. Pixel → Camera ray ----
         K_inv = np.linalg.inv(self.camera_intrinsic_matrix)
@@ -219,25 +220,43 @@ class GarmentEnv(Arena):
             (robot1_dist <= self.robot1_radius[1])
         )
 
-        # ---- 8. Reshape ----
-        self.robot0_mask = robot0_mask.reshape(H, W)
-        self.robot1_mask = robot1_mask.reshape(H, W)
+        # ---- 8. Reshape into Full Resolution Masks ----
+        self.robot0_mask_full = robot0_mask.reshape(H, W)
+        self.robot1_mask_full = robot1_mask.reshape(H, W)
+        
+        # Keep an alias for backwards compatibility
+        self.robot0_mask = self.robot0_mask_full
+        self.robot1_mask = self.robot1_mask_full
 
 
     def _setup_camera(self):
-        
         self.default_camera = self.default_config['camera_name']
         self.camera_config = self.default_config['camera_params'][self.default_camera]
+
+        self.camera_config['cam_position'][1] = self.config.get('camera_height', self.camera_config['cam_position'][1])
+        
+        # --- Update Resolution and 2D FOV ---
+        if 'camera_resolution' in self.config:
+            self.camera_config['cam_size'] = list(self.config.camera_resolution)
+            
+        if 'field_of_view' in self.config:
+            # Convert both horizontal [0] and vertical [1] FOVs to radians
+            fov_x_rad = self.config.field_of_view[0] * np.pi / 180.0
+            fov_y_rad = self.config.field_of_view[1] * np.pi / 180.0
+            self.camera_config['cam_fov'] = [fov_x_rad, fov_y_rad]
+        # ------------------------------------
+
         camera_pos = self.camera_config['cam_position'].copy()
         # swap y and z
         camera_pos[1], camera_pos[2] = camera_pos[2], camera_pos[1]
-        #print('camera_pos', camera_pos)
+    
         self.camera_height = camera_pos[2]
+        
         camera_angle = self.camera_config['cam_angle'].copy()
         camera_angle[1], camera_angle[2] = camera_angle[2], camera_angle[1]
         camera_angle[0] = np.pi + camera_angle[0]
         camera_angle[2] = 4*np.pi/2 - camera_angle[2]
-        #print('camera_angle', camera_angle)
+
         self.picker_initial_pos = self.config.picker_initial_pos
         self.camera_intrinsic_matrix, self.camera_extrinsic_matrix = \
             get_camera_matrix(
@@ -343,10 +362,19 @@ class GarmentEnv(Arena):
         
         goal_particles = goal_particles @ rotation_matrix.T  # rotate
 
-        # Random displacement within ±0.5 range per axis
-        displacement = rng.uniform(-0.3, 0.3, size=3)
+        # Fetch the displacement range from config, defaulting to [-0.3, 0.3]
+        disp_range = self.config.get('random_displacement_range', [-0.3, 0.3])
+        
+        # Random displacement within the configured range per axis
+        displacement = rng.uniform(disp_range[0], disp_range[1], size=3)
         displacement[2] = 0
+
+        hard_shift_x = self.config.get('hard_shift_x', 0.0)
+        displacement[0] += hard_shift_x
+        
         goal_particles += displacement
+
+        
 
         self.set_mesh_particles_positions(goal_particles)
         self.wait_until_stable()
@@ -358,7 +386,15 @@ class GarmentEnv(Arena):
     
     def _initialise_trajecotry(self):
         if self.init_mode == 'flattened':
-            self.set_to_flatten()
+            #self.set_to_flatten()
+            particles = self.flattened_obs['observation']['particle_positions']
+            hard_shift_x = self.config.get('hard_shift_x', 0.0)
+            displacement = [hard_shift_x, 0, 0]
+            particles += displacement
+
+            self.set_mesh_particles_positions(particles)
+            self.wait_until_stable()
+
             self.last_flattened_step = 0
         elif self.init_mode == 'random_flattened':
             rng = np.random.RandomState(self.eid)
@@ -455,7 +491,7 @@ class GarmentEnv(Arena):
         
         if out_of_view:
             is_terminated = True
-            is_truncated = False # Prioritize termination over truncation
+            is_truncated = is_truncated # Prioritize termination over truncation
         
         if task_related:
             info['evaluation'] = self.evaluate()
@@ -468,7 +504,7 @@ class GarmentEnv(Arena):
             info['success'] = self.success()
             if info['success'] and self.stop_on_success:
                 is_terminated = True
-                is_truncated = False # Prioritize termination if it succeeds on the exact last step
+                is_truncated = is_truncated # Prioritize termination if it succeeds on the exact last step
                 
             if info['evaluation'] != {}:
                 info['reward'] = self.task.reward(self.last_info, None, info)
@@ -609,7 +645,6 @@ class GarmentEnv(Arena):
         new_picker_pos = self.pickers.step(signal, self)
         self._step_sim()
         
-        # ---> FINISH THE TODO: Save the low level meshes and PCs <---
         if getattr(self, 'is_recording_low_level', True):
             self.picker_poses.append(new_picker_pos)
             
@@ -688,7 +723,7 @@ class GarmentEnv(Arena):
         particles = self.get_particle_positions()
         return particles[:self.num_mesh_particles]
     
-    def get_canon_mesh_particles_positions(self):
+    def get_algn_mesh_particles_positions(self):
         return self.flattened_obs['observation']['particle_positions']
         
 
@@ -714,20 +749,21 @@ class GarmentEnv(Arena):
     def _step_sim(self):
         pyflex.step()
         
-
         if self.save_video:
-            #print('save')
-            #print('save here')
+            # print('save here')
             rgb = self._render('rgb', background=True, resolution=self.frame_resolution)
+            
             if self.track_semkey_on_frames and self.task.semkey2pid:
                 # --- Track semantic keypoints ---
                 particle_pos = self.get_mesh_particles_positions()          # (N, 3)
-                semkey2pid = self.task.semkey2pid                     # dict {name: pid}
+                semkey2pid = self.task.semkey2pid                           # dict {name: pid}
                 keypids = list(semkey2pid.values())
                 keynames = list(semkey2pid.keys())
 
-                key_particles = particle_pos[keypids]                 # (K, 3)
-                key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
+                key_particles = particle_pos[keypids]                       # (K, 3)
+                
+                # FIX: Pass the frame_resolution here so coordinates scale correctly!
+                key_pixels, visibility = self.get_visibility(key_particles, resolution=self.frame_resolution)
 
                 # Assign unique colors to each keypoint (HSV evenly spaced)
                 K = len(keynames)
@@ -738,8 +774,10 @@ class GarmentEnv(Arena):
                 # Overlay keypoints
                 debug_frame = rgb.copy()
                 for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
+                    # Optional: Only draw if 'vis' (visibility) is True
+                    # if not vis: continue 
+                    
                     color = tuple(map(int, color))  # ensure int
-                    #print('v, u, name', v, u, name)
                     cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
                     cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
@@ -754,13 +792,6 @@ class GarmentEnv(Arena):
 
 
     def _process_info_(self, info):
-        #print('here process')
-        assert 'observation' in info.keys()
-        assert 'rgb' in info['observation'].keys()
-        H, W = self.observation_shape()['rgb'][0], self.observation_shape()['rgb'][1]
-        info['observation']['rgb'] = cv2.resize(info['observation']['rgb'], (H, W), interpolation=cv2.INTER_LINEAR).reshape(H, W, -1)
-        info['observation']['depth'] = cv2.resize(info['observation']['depth'], (H, W), interpolation=cv2.INTER_LINEAR).reshape(H, W, -1)
-        info['observation']['mask'] = self._get_cloth_mask(resolution=(H, W))
         
         #info['normalised_coverage'] = self._get_normalised_coverage()
         return info
@@ -803,43 +834,67 @@ class GarmentEnv(Arena):
     
     def _get_obs(self, flatten_obs=True):
         obs = {}
-        # print('get obs here')
-        rgbd = self._render(mode='rgbd', resolution=self.obs_resolution)
-        obs['rgb'] = rgbd[:, :, :3].astype(np.uint8)
+        
+        # 1. Properly define full resolution and calculate crop boundaries
+        W_full, H_full = self.camera_size[0], self.camera_size[1]
+        self.crop_size = min(H_full, W_full)
+        
+        offset_x = self.config.get('crop_offset_x', 0) 
+        self.x1 = W_full // 2 - self.crop_size // 2 + offset_x # axis 1
+        self.y1 = H_full // 2 - self.crop_size // 2 # axis 0
+        x2, y2 = self.x1 + self.crop_size, self.y1 + self.crop_size
+
+        # 2. Render FULL resolution and generate Full masks
+        rgbd_full = self._render(mode='rgbd') # Don't pass resolution here!
+        self.cloth_mask_full = rgbd_full[:, :, :3].sum(axis=2) > 0
+        
+        # 3. Slice Un-resized Crop versions (High fidelity for primitive snapping)
+        rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
+
+        # 3. Slice Un-resized Crop versions (High fidelity for primitive snapping)
+        rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
+        self.cloth_mask_crop = self.cloth_mask_full[self.y1:y2, self.x1:x2]
+        
+        if self.apply_workspace:
+            self.robot0_mask_crop = self.robot0_mask_full[self.y1:y2, self.x1:x2]
+            self.robot1_mask_crop = self.robot1_mask_full[self.y1:y2, self.x1:x2]
+
+        # 4. Create Resized versions ONLY for the NN observation output
+        rgbd_resized = cv2.resize(rgbd_crop, tuple(self.obs_resolution), interpolation=cv2.INTER_LINEAR)
+
+        obs['rgb'] = rgbd_resized[:, :, :3].astype(np.uint8)
         obs['image'] = obs['rgb']
-        obs['depth'] = rgbd[:, :, 3:]
-        obs['mask'] = obs['rgb'].sum(axis=2) > 0 #self._get_cloth_mask()
+        obs['depth'] = rgbd_resized[:, :, 3:]
+        
+        # Resize boolean masks safely using NEAREST interpolation
+        cloth_mask_uint8 = self.cloth_mask_crop.astype(np.uint8) * 255
+        obs['mask'] = cv2.resize(cloth_mask_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+        
+        if self.apply_workspace:
+            r0_uint8 = self.robot0_mask_crop.astype(np.uint8) * 255
+            r1_uint8 = self.robot1_mask_crop.astype(np.uint8) * 255
+            obs['robot0_mask'] = cv2.resize(r0_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+            obs['robot1_mask'] = cv2.resize(r1_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+
+        # Backwards compatibility aliases
+        obs['raw_rgb'] = rgbd_full[:, :, :3].astype(np.uint8)
+        self.cloth_mask = self.cloth_mask_crop
+
         if self.debug:
-            # We use local import here in case it's not at the top of your file
             from actoris_harena.utilities.save_utils import save_mask 
-            
             step_idx = getattr(self, 'action_step', 0)
             ep_id = getattr(self, 'eid', 'unknown')
             file_name = f"mask_ep{ep_id}_step{step_idx}"
+            save_mask(mask=obs['mask'], filename=file_name, directory="tmp/debug_garment_env")
             
-            save_mask(
-                mask=obs['mask'], 
-                filename=file_name, 
-                directory="tmp/debug_garment_env"
-            )
-            
-        self.cloth_mask = obs['mask']
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
 
         if self.config.get('collect_control_data', False):
-            # Get which particles are visible from the camera
             _, visible_mask = self.get_visibility(obs['particle_positions'])
             obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
-            
-            # If your init_state_params contains mesh faces, you can save them to rebuild the mesh later
             if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
                 obs['mesh_faces'] = self.init_state_params['mesh_faces']
-                
-        if self.apply_workspace:
-            #print('[GarmentEnv] add workspace')
-            obs['robot0_mask'] = self.robot0_mask
-            obs['robot1_mask'] = self.robot1_mask
         
         if flatten_obs and self.config.get("provide_semkey_pos", False) and obs['semkey2pid']:
             semkey_positions = []
@@ -857,37 +912,51 @@ class GarmentEnv(Arena):
                 semkey_positions.append(pos)
             obs['flattened_semkey_pos'] = np.concatenate(semkey_positions, axis=0).astype(np.float32)
 
+        # 5. Translate 2D keypoints into the cropped coordinate space
         if flatten_obs and self.config.get("provide_semkey_norm_pixel", False) and obs['semkey2pid']:
-            particle_pos = obs['particle_positions']          # (N, 3)
-            semkey2pid = obs['semkey2pid']                    # dict {name: pid}
+            particle_pos = obs['particle_positions']          
+            semkey2pid = obs['semkey2pid']                    
             keypids = list(semkey2pid.values())
-            key_particles = particle_pos[keypids]                 # (K, 3)
-            key_pixels, visibility = self.get_visibility(key_particles, resolution=self.obs_resolution)  # (K,2), (K,)
-            H, W = self.camera_size
-            norm_pixels = key_pixels/np.array(self.obs_resolution) * 2 - 1
+            key_particles = particle_pos[keypids]                 
+            
+            # Get pixels in FULL resolution. Returns as [Y, X]
+            key_pixels_full, visibility = self.get_visibility(key_particles)  
+            
+            # Shift to crop space using [Y_offset, X_offset]
+            key_pixels_crop = key_pixels_full - np.array([self.y1, self.x1])
+            
+            # Normalize to [-1, 1] relative to the CROP SIZE
+            norm_pixels = (key_pixels_crop / self.crop_size) * 2.0 - 1.0
+            
             obs['semkey_norm_pixel'] = norm_pixels.flatten()
-            obs['key_pixels'] = key_pixels
+            obs['key_pixels'] = key_pixels_crop
 
         if flatten_obs and self.config.get("provide_flattened_semkey_norm_pixel", False) and obs['semkey2pid']:
-            particle_pos = self.flattened_obs['observation']['particle_positions']          # (N, 3)
-            semkey2pid = obs['semkey2pid']                    # dict {name: pid}
+            particle_pos = self.flattened_obs['observation']['particle_positions']          
+            semkey2pid = obs['semkey2pid']                    
             keypids = list(semkey2pid.values())
-            key_particles = particle_pos[keypids]                 # (K, 3)
-            key_pixels, visibility = self.get_visibility(key_particles)  # (K,2), (K,)
-            H, W = self.camera_size
-            norm_pixels = key_pixels/np.array([H, W]) * 2 - 1
+            key_particles = particle_pos[keypids]                 
+            
+            key_pixels_full, visibility = self.get_visibility(key_particles)  
+            
+            key_pixels_crop = key_pixels_full - np.array([self.y1, self.x1])
+            norm_pixels = (key_pixels_crop / self.crop_size) * 2.0 - 1.0
+            
             obs['flattened_semkey_norm_pixel'] = norm_pixels.flatten()
-
 
         obs['action_step'] = self.action_step
 
         return obs
 
-    def _get_cloth_mask(self, camera_name='default_camera', resolution=None):
-        # print('cloth mask here')
+    def _get_cloth_mask(self, camera_name='default_camera', resolution=None, crop=True):
         rgb = self._render(camera_name=camera_name, mode='rgb', resolution=resolution)
+        mask = rgb.sum(axis=2) > 0
         
-        return rgb.sum(axis=2) > 0
+        # If requesting the cropped mask, apply the saved bounds
+        if crop and hasattr(self, 'x1'):
+            mask = mask[self.y1:self.y1+self.crop_size, self.x1:self.x1+self.crop_size]
+            
+        return mask
     
     def _get_init_keys_helper(self, hdf5_path, key_file, difficulties=['hard', 'easy']):
 
@@ -943,17 +1012,6 @@ class GarmentEnv(Arena):
         raise NotImplementedError
     
     def get_visibility(self, particle_positions, resolution=None):
-        """
-        Project world-space particle positions into image pixels
-        and check if each particle is visible in the current camera view.
-
-        Args:
-            particle_positions (np.ndarray): (N, 3) world-space particle positions
-
-        Returns:
-            pixels (np.ndarray): (N, 2) array of (u, v) pixel coordinates
-            visible (np.ndarray): (N,) boolean array, True if visible
-        """
         assert particle_positions.shape[1] == 3, "particle_positions must be (N, 3)"
 
         # ---- World → Camera ----
@@ -979,28 +1037,25 @@ class GarmentEnv(Arena):
             
         proj = (camera_intrinsic_matrix @ cam_pts.T).T  # (N, 3)
         z = proj[:, 2]
-        # avoid div by zero
         z_safe = np.where(z == 0, 1e-6, z)
-        pixels = proj[:, :2] / z_safe[:, None]  # (u, v) = (x/z, y/z)
+        pixels = proj[:, :2] / z_safe[:, None]  
 
         # ---- Visibility ----
         if resolution is None:
-            H, W = self.camera_size
-            
+            W, H = self.camera_size[0], self.camera_size[1]
         else:
-            H, W = resolution
-        # print('Visibility H, W', H, W)
-        u, v = pixels[:, 0], pixels[:, 1]
+            W, H = resolution[0], resolution[1]             
+
+        # Because K is swapped, pixels[:, 0] is Y (v) and pixels[:, 1] is X (u)
+        v, u = pixels[:, 0], pixels[:, 1]
 
         # Rendered depth map (same size as camera)
-        # print('vis here')
-        #print('resolution', resolution)
         depth_img = self._render('depth', resolution=resolution).reshape(H, W)  # (H, W, 1)
 
         # Conditions: in front of camera and inside image bounds
         visible = (z > 0) & (u >= 0) & (u < W) & (v >= 0) & (v < H)
 
-       # Convert (u,v) to integer pixel indices
+        # Convert (u,v) to integer pixel indices
         u_int = np.round(u).astype(int)
         v_int = np.round(v).astype(int)
         u_int = np.clip(u_int, 0, W - 1)
@@ -1009,7 +1064,6 @@ class GarmentEnv(Arena):
         # Depth from depth buffer (closest surface)
         depth_buffer = depth_img[v_int, u_int]
 
-        
         # Particle depth = Euclidean distance in world space
         cam_world_pos = self.camera_extrinsic_matrix[:3, 3]  # (3,)
         particle_depth = np.linalg.norm(particle_positions - cam_world_pos, axis=1)
@@ -1017,7 +1071,6 @@ class GarmentEnv(Arena):
         # Occlusion check: particle must not be behind depth buffer
         eps = 1e-6
         visible &= (particle_depth - self.particle_radius) < (depth_buffer - eps)
-
 
         return pixels, visible
     

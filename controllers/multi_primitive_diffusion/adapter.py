@@ -483,6 +483,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         self.nets.eval() # Switch to evaluation mode
         
         val_prim_losses = []
+        val_state_mse = []
         val_state_l2 = []
         val_action_mse = []
         all_preds = []
@@ -529,7 +530,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     goal_feature = self.nets['vision_encoder'](goal_rgb_part)
                     image_features = torch.cat([obs_feature, goal_feature], dim=-1)
                     obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
-                # (Add any other encoder variants you actively use here)
+                
+                # ==========================================================
+                # --- NEW: Apply MLP Projection ---
+                # ==========================================================
+                if getattr(self, 'use_projector', False):
+                    obs_features = self.nets['obs_projector'](obs_features)
 
                 if self.config.include_state:
                     vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
@@ -537,13 +543,17 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
                 obs_cond = obs_features.flatten(start_dim=1)
 
-                # 2. Validate Keypoint Precision (L2 Distance)
+                # 2. Validate Keypoint Precision (L2 Distance) and State Loss
                 if self.rep_learn == 'predict-state':
                     pred_combined = self.nets['state_predictor'](obs_features)
                     state_key = self.config.get('state_key', 'semkey_norm_pixel')
                     
+                    gt_tensors_val = []
+                    
+                    # 1. Evaluate Current State
                     if state_key in nbatch:
                         gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                        gt_tensors_val.append(gt_state)
                         
                         # Compute L2 norm across keypoint coordinates
                         state_dim = self.config.state_dim
@@ -553,6 +563,19 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         
                         l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
                         val_state_l2.append(l2_dist.item())
+                    
+                    # 2. Evaluate Goal State (if active)
+                    if getattr(self, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                            gt_tensors_val.append(gt_goal)
+                            
+                    # 3. Compute and store unified MSE loss
+                    if gt_tensors_val:
+                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
+                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
+                        val_state_mse.append(mse_loss.item())
 
                 # 3. Validate Primitive Classification Accuracy
                 if self.primitive_integration == 'one-hot-encoding':
@@ -625,7 +648,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
         metrics = {}
         if val_state_l2:
             metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
-            
+        
+        if val_state_mse:
+            metrics['val/state_pred_loss'] = np.mean(val_state_mse)
+
         if val_prim_losses:
             metrics['val/prim_loss'] = np.mean(val_prim_losses)
             acc = np.mean(np.array(all_preds) == np.array(all_gts))
@@ -788,14 +814,37 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                         param.requires_grad = False
                 print("[MultiPrimitiveDiffusion] Vision encoder and Transition model are frozen (except missing keys).")
         
+        # ==========================================================
+        # --- NEW: MLP Projection Block Setup ---
+        # ==========================================================
+        self.use_projector = self.config.get('use_projector', False)
+        self.effective_obs_dim = self.config.obs_dim  # Default to original
+
+        if self.use_projector:
+            proj_hidden = self.config.get('projector_hidden_dims', [])
+            proj_out = self.config.get('projector_out_dim', 128)
+            
+            layers = []
+            in_dim = self.config.obs_dim
+            for h in proj_hidden:
+                layers.append(nn.Linear(in_dim, h))
+                layers.append(nn.ReLU())
+                in_dim = h
+            layers.append(nn.Linear(in_dim, proj_out))
+            
+            self.obs_projector = nn.Sequential(*layers)
+            self.effective_obs_dim = proj_out
+            print(f"[MultiPrimitiveDiffusion] MLP Projector initialized. Mapping {self.config.obs_dim} -> {self.effective_obs_dim}")
+        else:
+            self.obs_projector = nn.Identity()
+
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
         if self.primitive_integration == 'one-hot-encoding':
-            self.prim_class_head = nn.Linear(self.config.obs_dim, self.K)
 
             cls_cfg = self.config.get("primitive_classifier", {}) # nn.Linear(self.config.obs_dim, self.K) by default
 
             self.prim_class_head = MLPClassifier(
-                input_dim=self.config.obs_dim,
+                input_dim=self.effective_obs_dim,
                 output_dim=self.K,
                 hidden_dims=cls_cfg.get("hidden_dims", []),
                 activation=cls_cfg.get("activation", "relu"),
@@ -804,10 +853,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             )
 
             # Increase global_cond_dim to accommodate the one-hot vector
-            global_cond_dim = (self.config.obs_dim + self.K) * self.config.obs_horizon
+            global_cond_dim = (self.effective_obs_dim + self.K) * self.config.obs_horizon
             self.log_prim_metrics_every = self.config.get('log_prim_metrics_every', 200)
         else:
-            global_cond_dim = self.config.obs_dim * self.config.obs_horizon
+            global_cond_dim = self.effective_obs_dim * self.config.obs_horizon
 
         # Determine the total dimension for diffusion
         self.diffusion_dim = self.network_action_dim
@@ -859,6 +908,9 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             'noise_pred_net': self.noise_pred_net
         }
 
+        if self.use_projector:
+            net_dict['obs_projector'] = self.obs_projector
+
         if self.vision_encoder_type == 'gc_rssm_dynamic':
             net_dict['transition_model'] = self.transition_model
         
@@ -884,7 +936,7 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
             # Unified MLP predicting both current and goal states
             self.nets['state_predictor'] = nn.Sequential(
-                nn.Linear(self.config.obs_dim, 256),
+                nn.Linear(self.effective_obs_dim, 256),
                 nn.ReLU(),
                 nn.Linear(256, out_dim)
             )
@@ -1000,7 +1052,10 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
 
                 latents = torch.cat([hidden[0], hidden[4]], dim=-1) # Cat belief and posterior
                 obs = latents.transpose(0, 1).reshape(B, T, -1) # Remove batch dim -> (T, deter+stoch)
-    
+
+            if getattr(self, 'use_projector', False):
+                obs = self.nets['obs_projector'](obs)
+
             if self.config.include_state:
                 vector_state = torch.zeros(
                     (1, self.config.obs_horizon, 
@@ -1207,6 +1262,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                     latents = torch.cat([beliefs, posterior_states], dim=-1)
                     obs_features = latents.transpose(0, 1) # (B, T, deter+stoch)
                 
+                # ==========================================================
+                # --- NEW: Apply MLP Projection ---
+                # ==========================================================
+                if getattr(self, 'use_projector', False):
+                    obs_features = self.nets['obs_projector'](obs_features)
+                    
                 #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 
                 rep_loss = torch.tensor(0.0, device=self.device)
@@ -1412,14 +1473,24 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
             self.ema.step(trainable_params)
 
             ## write loss value to tqdm progress bar
-            pbar.set_description(f"Training (loss: {actor_noise_loss.item():.4f})")
-            if self.rep_learn == 'auto-encoder':
-                self.logger.log({'train/recon_loss': recon_loss.item()}, step=self.update_step)
-            self.logger.log({'train/actor_noise_loss': actor_noise_loss.item()}, step=self.update_step)
-            self.logger.log({'train/total_loss': total_loss.item()}, step=self.update_step)
+            # --- UNIFIED LOGGING DICTIONARY ---
+            metrics_to_log = {
+                'train/actor_noise_loss': actor_noise_loss.item(),
+                'train/total_loss': total_loss.item()
+            }
+            
+            # Log State Prediction / Auto-Encoder Loss
+            if self.rep_learn in ['auto-encoder', 'predict-state']:
+                # rep_loss is calculated earlier in the loop
+                metrics_to_log['train/state_pred_loss'] = rep_loss.item()
+                
+            # Log Primitive Classification Losses
             if self.primitive_integration == 'one-hot-encoding':
-                self.logger.log({'train/prim_loss_raw': prim_loss.item(), 
-                                'train/prim_loss_weighted': (prim_loss * prim_weight).item()}, step=self.update_step)
+                metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
+                metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
+            
+            # Send everything to logger at once
+            self.logger.log(metrics_to_log, step=self.update_step)
             
             # ==========================================================
             # --- PERIODIC FULL DENOISING METRIC EVALUATION ---
@@ -1672,6 +1743,12 @@ class MultiPrimitiveDiffusionAdapter(TrainableAgent):
                 vector_state = torch.stack([x['vector_state'] \
                                             for x in self.obs_deque[info['arena_id']]])
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
+
+            # ==========================================================
+            # --- NEW: Apply MLP Projection ---
+            # ==========================================================
+            if getattr(self, 'use_projector', False):
+                obs_features = self.nets['obs_projector'](obs_features)
             
             # Initialize a variable to hold the probabilities for logging
             prim_probs_log = None 

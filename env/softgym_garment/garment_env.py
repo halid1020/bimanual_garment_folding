@@ -464,8 +464,15 @@ class GarmentEnv(Arena):
                 picker_poses = np.stack(self.picker_poses) #T, 2, 3
                 picker_poses = picker_poses[:, :, [0, 2, 1]].reshape(-1, 3)
                 picker_pixel_poses, _ = self.get_visibility(picker_poses)
-                H, W = self.camera_size
-                norm_pixels = picker_pixel_poses/np.array([H, W]) * 2 - 1
+                
+                # FIX: Map trajectories to the cropped observation space
+                if hasattr(self, 'crop_size') and hasattr(self, 'x1'):
+                    # picker_pixel_poses is [Y, X]
+                    picker_pixels_crop = picker_pixel_poses - np.array([self.y1, self.x1])
+                    norm_pixels = (picker_pixels_crop / self.crop_size) * 2.0 - 1.0
+                else:
+                    H, W = self.camera_size
+                    norm_pixels = picker_pixel_poses/np.array([H, W]) * 2 - 1
                 
                 info['observation']['picker_norm_pixel_pos'] = norm_pixels.reshape(-1, 2, 2)
             else: 
@@ -535,14 +542,13 @@ class GarmentEnv(Arena):
         return info
     
     def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
-        print('action', action)
         self.last_info = self.info
         self.evaluate_result = None
         
         self.picker_poses = []
         self.low_level_mesh_particles = []
         self.low_level_visible_pcs = []
-        self.is_recording_low_level = False
+        self.is_recording_low_level = True # <--- FIX: Enable recording
 
         self.overstretch = 0
         self.sim_step = 0

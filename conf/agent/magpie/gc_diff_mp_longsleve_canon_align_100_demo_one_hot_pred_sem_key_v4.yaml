@@ -91,7 +91,7 @@ primitive_classifier:
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
   dropout: 0.4            # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [10.0, 1.0, 10.0]
+prim_class_weights: [10.0, 1.0, 10.0, 10.0]
 prim_weight: 0.05
 
 optimiser_class: 'adamw'

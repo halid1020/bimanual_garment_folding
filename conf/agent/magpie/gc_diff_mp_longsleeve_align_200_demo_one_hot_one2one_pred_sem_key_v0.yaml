@@ -96,7 +96,7 @@ primitive_classifier:
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
   dropout: 0.4            # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [10.0, 1.0, 10.0]
+prim_class_weights: [10.0, 1.0, 10.0, 10.0]
 prim_weight: 0.05
 
 ## Following is the parameter from the fast conditional decoupling paper
@@ -134,4 +134,4 @@ predict_goal_state: True
 goal_state_dim: 30     # 15 keypoints * 2 coordinates
 goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3_goal_sem_key_no_rotate
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_no_rotate

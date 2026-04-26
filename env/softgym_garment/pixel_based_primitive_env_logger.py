@@ -141,12 +141,15 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
 
             step_text = f"Step {i+1}: "
-            if key == "norm-pixel-pick-and-place":
-                step_text += "Pick and Place"
+            if key == "norm-pixel-dual-pick-and-place":
+                # If there are 4 coordinates (pick0_x, pick0_y, pick1_x, pick1_y), it's dual.
+                step_text += "Dual Pick and Place"
+            elif key == "norm-pixel-single-pick-and-place":
+                step_text += "Single Pick and Place"
             elif key == "norm-pixel-pick-and-fling":
                 step_text += "Pick and Fling"
             elif key == "no-operation":
-                step_text += "No Operation"
+                step_text += "No operation"
             else:
                 step_text += key
 
@@ -154,18 +157,26 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
                 img,
                 step_text,
                 (10, TEXT_Y_STEP),
-                primitive_color
+                primitive_color,
+                scale=1,     # <--- ADDED: Lowers text size (default is usually ~1.0)
+                thickness=2    # <--- ADDED: Makes the thinner text look clean
             )
 
             # ================================
             #          FOLD / PICK-PLACE
             # ================================
-            if key == "norm-pixel-pick-and-place":
+            if key in ["norm-pixel-single-pick-and-place", "norm-pixel-dual-pick-and-place"]:
                 # ADDED BOUNDS CHECK
                 if i + 1 < len(result["information"]):
                     info_next = result["information"][i+1]
                     if 'applied_action' in info_next:
-                        applied_action = info_next['applied_action'].get('norm-pixel-pick-and-place')
+                        # Get the action using the current key
+                        applied_action = info_next['applied_action'].get(key)
+                        
+                        # Fallback just in case the environment still saves it under the old generic name
+                        if applied_action is None:
+                            applied_action = info_next['applied_action'].get('norm-pixel-pick-and-place')
+                            
                         if applied_action is not None:
                             img = draw_pick_and_place(img, applied_action)
 

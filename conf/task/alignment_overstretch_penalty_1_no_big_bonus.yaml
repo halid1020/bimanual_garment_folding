@@ -1,7 +1,7 @@
 num_goals: 1
 garment_type: longsleeve
 asset_dir: assets
-task_name: canonicalisation-alignment
+task_name: alignment
 randomise_goal: True
 debug: false
 alignment: simple_rigid

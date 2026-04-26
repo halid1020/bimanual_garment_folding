@@ -792,8 +792,6 @@ class GarmentEnv(Arena):
 
 
     def _process_info_(self, info):
-        
-        #info['normalised_coverage'] = self._get_normalised_coverage()
         return info
 
     

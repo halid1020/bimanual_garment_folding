@@ -292,59 +292,6 @@ def capture_samples(config, args):
     robot.home()
     return samples
 
-# --------------------------- Main calibration logic ---------------------------
-
-# def run_hand_eye(samples, args):
-#     R_gripper2base_list = [] 
-#     t_gripper2base_list = [] 
-#     R_target2cam_list = []   
-#     t_target2cam_list = []   
-
-#     for s in samples:
-#         # A: T_gripper^base
-#         T_base2gripper = pose_list_to_matrix(s['robot_pose'])
-#         T_gripper2base = invert_homogeneous_matrix(T_base2gripper)
-#         R_g, t_g = matrix_to_pose_lists(T_gripper2base)
-#         R_gripper2base_list.append(R_g)
-#         t_gripper2base_list.append(t_g)
-
-#         # B: T_camera^target
-#         rvec = np.asarray(s['rvec']).reshape(3,1)
-#         tvec = np.asarray(s['tvec']).reshape(3,1)
-#         R_tc, _ = cv2.Rodrigues(rvec)
-#         R_target2cam_list.append(R_tc)
-#         t_target2cam_list.append(tvec.reshape(3,))
-
-#     if len(R_gripper2base_list) < 3:
-#         raise RuntimeError('Need at least 3 valid samples.')
-
-#     print(f"Running calibration with {len(R_gripper2base_list)} samples...")
-    
-#     R_cam2base, t_cam2base = cv2.calibrateHandEye(
-#         R_gripper2base_list, t_gripper2base_list, 
-#         R_target2cam_list, t_target2cam_list, 
-#         method=cv2.CALIB_HAND_EYE_TSAI
-#     )
-
-#     X = np.eye(4)
-#     X[:3, :3] = R_cam2base
-#     X[:3, 3] = t_cam2base.reshape(3,)
-
-#     out = {
-#         'camera_to_base': {'matrix': X.tolist()},
-#         'meta': {'samples': len(samples), 'board_type': 'charuco'}
-#     }
-    
-#     # Save using the dynamically generated filename
-#     with open(args.output, 'w') as f:
-#         yaml.dump(out, f)
-
-#     np.set_printoptions(precision=6, suppress=True)
-#     print('\nCalibration Result (T_base^camera):\n')
-#     print(X)
-#     print(f'\nWrote calibration to {args.output}')
-#     return X
-
 def run_hand_eye(samples, args):
     R_gripper2base_list = [] 
     t_gripper2base_list = [] 

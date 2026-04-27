@@ -1,125 +1,104 @@
 import numpy as np
-from gym.spaces import Box
+from gym.spaces import Dict
 
 from .pixel_pick_and_fling import PixelPickAndFling
 from .pixel_pick_and_place import PixelPickAndPlace
-from .pixel_pick_and_drag import PixelPickAndDrag
-from gym.spaces import Dict, Discrete, Box
 
 class HybridActionPrimitive():
+    """
+    An orchestrator class that maps higher-level hybrid actions to specific 
+    underlying primitives (Pick & Place, Pick & Fling, or No Operation).
+    """
 
-    def __init__(self, 
-        #env,
-        # pick_lower_bound=[-1, -1],
-        # pick_upper_bound=[1, 1],
-        # place_lower_bound=[-1, -1],
-        # place_upper_bound=[1, 1],
-        # action_horizon=20,
-        **kwargs):
-        
-        ### Environment has to be WorldPickAndFlingWrapper
-        self.np_pnp = PixelPickAndPlace(**kwargs)
-        if kwargs['apply_workspace']:
-            print('[HybridActionPrimitive] ajust parametners!')
-            kwargs['hang_pos_y'] = 0
-            kwargs['fling_vel'] = 0.02
-            kwargs['fling_y'] = 0.4
-
-        self.np_pnf = PixelPickAndFling(**kwargs)
-        kwargs['pregrasp_height'] = 0.2 # only difference from Pick and Place so far
-        kwargs['post_pick_height'] = 0.2
-        kwargs['pre_place_height'] = 0.15
-        kwargs['place_height'] = 0.04
-        kwargs['lift_vel'] = 0.01
-        self.np_fold = PixelPickAndPlace(**kwargs)
-        #self.env = env
-
-        
+    def __init__(self, **kwargs):
         self.num_pickers = 2
-        # space_low = np.concatenate([pick_lower_bound, place_lower_bound]*self.num_pickers)\
-        #     .reshape(self.num_pickers, -1).astype(np.float32)
-        # space_high = np.concatenate([pick_upper_bound, place_upper_bound]*self.num_pickers)\
-        #     .reshape(self.num_pickers, -1).astype(np.float32)
-        #self.action_horizon = action_horizon
-        #self.action_step = 0
+        self.no_op = {'no-operation': True} # Initialised to prevent attribute errors
+
+        # 1. Standard Pick and Place
+        self.np_pnp = PixelPickAndPlace(**kwargs)
+
+        # 2. Pick and Fling
+        fling_kwargs = kwargs.copy() # Use .copy() to prevent polluting original kwargs
+        if fling_kwargs.get('apply_workspace', False):
+            print('[HybridActionPrimitive] Adjusting parameters for workspace!')
+            fling_kwargs.update({
+                'hang_pos_y': 0,
+                'fling_vel': 0.02,
+                'fling_y': 0.4
+            })
+        self.np_pnf = PixelPickAndFling(**fling_kwargs)
+
+        # 3. Folding (Pick and Place with specialized height/velocity constraints)
+        fold_kwargs = kwargs.copy()
+        fold_kwargs.update({
+            'pregrasp_height': 0.2, 
+            'post_pick_height': 0.2,
+            'pre_place_height': 0.15,
+            'place_height': 0.04,
+            'lift_vel': 0.01
+        })
+        self.np_fold = PixelPickAndPlace(**fold_kwargs)
     
     def get_no_op(self):
         return self.no_op
         
     def sample_random_action(self):
-        return self.action_space.sample()
+        return self.get_action_space().sample()
 
     def get_action_space(self):
-        ## combine the action space of np_pnp and np_pnf
-        pnp_action_space =  self.np_pnp.get_action_space()
+        # Combine the action spaces of the underlying primitives
+        pnp_action_space = self.np_pnp.get_action_space()
         
         action_space = Dict({
             'norm-pixel-pick-and-place': pnp_action_space,
+            # TODO: add the component of np_pnf
         })
-        ## TODO: add the componenet of np_pnf
         return action_space
-        
-    
-    # def get_action_horizon(self):
-    #     return self.action_horizon
     
     def reset(self, env):
+        # Reset the physical pickers out of view
         self.np_pnf.reset(env)
-        info = env.get_info()
-        #self.action_step = 0
-        return info
+        return env.get_info()
     
-    ## It accpet action has shape (num_picker, 2, 3), where num_picker can be 1 or 2
     def step(self, env, action):
-        #self.action_step += 1
-        #print('action', action)
-        #swap = action['swap'] if 'swap' in action else False
+        """
+        Accepts an action dictionary and routes it to the correct primitive.
+        If the sub-action is provided as a flat np.ndarray (num_picker, 2, 3), 
+        it formats it into the expected key-value pairs before passing it down.
+        """
         if 'norm-pixel-pick-and-fling' in action:
-            action = action['norm-pixel-pick-and-fling']
-            
-            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
-                dict_action = {
-                    'pick_0': action[:2],
-                    'pick_1': action[2:4]
-                }
-                action = dict_action
-            
-            info = self.np_pnf.step(env, action)
-            info['applied_action'] = {
-                'norm-pixel-pick-and-fling': info['applied_action']
-            }
+            act = action['norm-pixel-pick-and-fling']
+            if isinstance(act, np.ndarray):
+                act = {'pick_0': act[:2], 'pick_1': act[2:4]}
+                
+            info = self.np_pnf.step(env, act)
+            info['applied_action'] = {'norm-pixel-pick-and-fling': info['applied_action']}
+
         elif 'norm-pixel-dual-pick-and-place' in action:
-            action = action['norm-pixel-dual-pick-and-place']
-            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
-                dict_action = {
-                    'pick_0': action[:2],
-                    'pick_1': action[2:4],
-                    'place_0': action[4:6],
-                    'place_1': action[6:8]
+            act = action['norm-pixel-dual-pick-and-place']
+            if isinstance(act, np.ndarray):
+                act = {
+                    'pick_0': act[:2],  'pick_1': act[2:4],
+                    'place_0': act[4:6], 'place_1': act[6:8]
                 }
-                action = dict_action
-            #action['swap'] = swap
-            #print('[hybrid_action_primtive] action', action)
-            info = self.np_fold.step(env, action)
-            info['applied_action'] = {
-                'norm-pixel-pick-and-place': info['applied_action']
-            }
+                
+            info = self.np_fold.step(env, act)
+            # Retain original behavior: map back to generic pick-and-place key
+            info['applied_action'] = {'norm-pixel-pick-and-place': info['applied_action']}
+
         elif 'norm-pixel-single-pick-and-place' in action:
-            action = action['norm-pixel-single-pick-and-place']
-            if isinstance(action, np.ndarray):  # ✅ should be np.ndarray, not np.darray
-                dict_action = {
-                    'pick_0': action[:2],
-                    'place_0': action[2:4],
-                }
-                action = dict_action
-            info = self.np_fold.step(env, action)
-            info['applied_action'] = {
-                'norm-pixel-single-pick-and-place': info['applied_action']
-            }
+            act = action['norm-pixel-single-pick-and-place']
+            if isinstance(act, np.ndarray):
+                act = {'pick_0': act[:2], 'place_0': act[2:4]}
+                
+            info = self.np_fold.step(env, act)
+            info['applied_action'] = {'norm-pixel-single-pick-and-place': info['applied_action']}
+
         elif 'no-operation' in action:
             info = env.get_info(new=True)
             info['applied_action'] = action
+            
         else:
-            raise ValueError('Action not recognized')
+            raise ValueError(f'Action not recognized. Received keys: {list(action.keys())}')
 
         return info

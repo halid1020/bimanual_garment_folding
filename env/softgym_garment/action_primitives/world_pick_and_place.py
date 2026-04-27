@@ -1,11 +1,8 @@
 import numpy as np
-import logging
 from gym.spaces import Box
-import matplotlib.pyplot as plt
 
 from .world_position_with_velocity_and_grasping_control \
     import WorldPositionWithVelocityAndGraspingControl
-
 from .utils import check_trajectories_close
 
 class WorldPickAndPlace():
@@ -64,19 +61,9 @@ class WorldPickAndPlace():
     
     def get_action_horizon(self):
         return self.action_horizon
-    
-    # def _process_info(self, info):
-    #     info['no_op'] = self.ready_pos
-    #     info['action_space'] = self.action_space
-    #     #info['arena'] = self
-    #     return info
 
     def reset(self, env):
-        #self.action_step = 0
         return env.get_info()
-    
-    # def get_step(self):
-    #     return self.action_step
     
     def process(self, action):
         if 'tograsp_vel' not in action:
@@ -91,88 +78,6 @@ class WorldPickAndPlace():
             action['single_operator'] = False
         
         return action
-
-    # def step(self, env, action):
-    #     action = self.process(action)
-    #     self.camera_height = env.camera_height
-
-    #     pick_positions = np.stack([action['pick_0_position'], action['pick_1_position']])
-    #     place_positions = np.stack([action['place_0_position'], action['place_1_position']])
-
-    #     pre_pick_positions = pick_positions.copy()
-    #     pre_pick_positions[:, 2] = action['pregrasp_height']
-    #     post_pick_positions = pick_positions.copy()
-    #     post_pick_positions[:, 2] = action['post_pick_height']
-
-    #     pre_place_positions = place_positions.copy()
-    #     pre_place_positions[:, 2] = action['pre_place_height']
-
-    #     place_raise = place_positions.copy()
-    #     place_raise[:, 2] = 0.1
-
-
-    #     # ---- INTERSECTION CHECK ----
-    #     conflict, min_dist = check_trajectories_close(
-    #         pre_pick_positions.copy(), 
-    #         pick_positions.copy(), 
-    #         place_positions.copy())
-
-    #     if conflict:
-    #         # Run sequentially: each picker moves while the other stays frozen
-    #         pickers_position = env.get_picker_position()  # shape (2,3)
-    #         #print('pickers_position', pickers_position)
-
-    #         for i in range(2):
-    #             # Copy trajectory arrays so we can freeze the other picker
-    #             _pre = pre_pick_positions.copy()
-    #             _pick = pick_positions.copy()
-    #             _post = post_pick_positions.copy()
-    #             _pre_place = pre_place_positions.copy()
-    #             _place = place_positions.copy()
-    #             _raise = place_raise.copy()
-
-    #             # Freeze the other picker
-    #             other = 1 - i
-    #             _pre[other] = pickers_position[other]
-    #             _pick[other] = pickers_position[other]
-    #             _post[other] = pickers_position[other]
-    #             _pre_place[other] = pickers_position[other]
-    #             _place[other] = pickers_position[other]
-    #             _raise[other] = pickers_position[other]
-
-    #             # Execute trajectory only for picker i
-    #             self.action_tool.movep(env, _pre, self.no_cloth_vel)
-    #             self.action_tool.movep(env, _pick, action['tograsp_vel'])
-    #             self.action_tool.both_grasp(env)     # frozen picker will grasp in place
-    #             self.action_tool.movep(env, _post, action['lift_vel'])
-    #             self.action_tool.movep(env, _pre_place, action['drag_vel'])
-    #             self.action_tool.movep(env, _place, action['drag_vel'])
-    #             self.action_tool.open_both_gripper(env)
-    #             self.action_tool.movep(env, _raise, action['lift_vel'])
-    #             self.action_tool.open_both_gripper(env)
-
-    #     else:
-    #         # Run original dual trajectory
-    #         self.action_tool.movep(env, pre_pick_positions, self.no_cloth_vel)
-    #         self.action_tool.movep(env, pick_positions, action['tograsp_vel'])
-    #         self.action_tool.both_grasp(env)
-    #         env.is_recording_low_level = True
-    #         self.action_tool.movep(env, post_pick_positions, action['lift_vel'])
-    #         self.action_tool.movep(env, pre_place_positions, action['drag_vel'])
-    #         self.action_tool.movep(env, place_positions, action['drag_vel'])
-    #         self.action_tool.open_both_gripper(env)
-    #         self.action_tool.movep(env, place_raise, action['lift_vel'])
-    #         self.action_tool.open_both_gripper(env)
-    #         env.is_recording_low_level = False
-
-    #     # Return to ready pose
-    #     self.action_tool.movep(env, self.ready_pos, self.no_cloth_vel)
-
-    #     env.wait_until_stable()
-    #     #self.action_step += 1
-    #     #info['done'] = self.action_step >= self.action_horizon
-    #     return {} #self._process_info({})
-
 
     def step(self, env, action):
         action = self.process(action)
@@ -192,7 +97,6 @@ class WorldPickAndPlace():
         place_raise = place_positions.copy()
         place_raise[:, 2] = 0.1
 
-        # ---- INTERSECTION CHECK ----
         conflict, min_dist = check_trajectories_close(
             pre_pick_positions.copy(), 
             pick_positions.copy(), 

@@ -106,7 +106,49 @@ def get_default_config(
 
 
 
+def get_coverage(positions, particle_radius, resolution=500):
+    """
+    Fast approximate coverage estimation using vectorized rasterization.
+    Computes a binary mask of covered cells on a 2D grid.
+    """
+    pos2d = positions[:, [0, 2]]
 
+    min_x, max_x = np.min(pos2d[:, 0]), np.max(pos2d[:, 0])
+    min_y, max_y = np.min(pos2d[:, 1]), np.max(pos2d[:, 1])
+
+    # Slightly pad the area to include edge particles
+    pad = particle_radius * 1.1
+    min_x -= pad; max_x += pad
+    min_y -= pad; max_y += pad
+
+    grid_x = np.linspace(min_x, max_x, resolution)
+    grid_y = np.linspace(min_y, max_y, resolution)
+    dx = grid_x[1] - grid_x[0]
+    dy = grid_y[1] - grid_y[0]
+    cell_area = dx * dy
+
+    mask = np.zeros((resolution, resolution), dtype=bool)
+
+    # Convert particle positions to grid coordinates once
+    gx = ((pos2d[:, 0] - min_x) / (max_x - min_x) * (resolution - 1)).astype(int)
+    gy = ((pos2d[:, 1] - min_y) / (max_y - min_y) * (resolution - 1)).astype(int)
+    r_pix = int(np.ceil(particle_radius / dx))  # particle radius in pixels
+
+    # Only update local neighborhoods
+    for px, py in zip(gx, gy):
+        x_low = max(px - r_pix, 0)
+        x_high = min(px + r_pix + 1, resolution)
+        y_low = max(py - r_pix, 0)
+        y_high = min(py + r_pix + 1, resolution)
+
+        sub_x = np.arange(x_low, x_high)
+        sub_y = np.arange(y_low, y_high)
+        sx, sy = np.meshgrid(sub_x, sub_y, indexing='ij')
+
+        dist2 = (sx - px)**2 + (sy - py)**2
+        mask[x_low:x_high, y_low:y_high] |= dist2 <= r_pix**2
+
+    return np.sum(mask) * cell_area
 
 def set_scene(config,
               state=None,

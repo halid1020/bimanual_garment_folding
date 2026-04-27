@@ -78,19 +78,6 @@ class PixelPickAndPlace():
         r1_mask = getattr(env, 'robot1_mask_crop', env.robot1_mask) if env.apply_workspace else None
         cloth_mask = getattr(env, 'cloth_mask_crop', env.cloth_mask)
 
-        # # --- DEBUG: SAVE MASKS BEFORE READJUSTMENT ---
-        # debug_dir = 'tmp/env_debug/'
-        # os.makedirs(debug_dir, exist_ok=True)
-        # step_idx = getattr(env, 'action_step', 0)
-        
-        # if cloth_mask is not None:
-        #     cv2.imwrite(os.path.join(debug_dir, f'cloth_mask_step_{step_idx}.png'), (cloth_mask.astype(np.uint8) * 255))
-        # if r0_mask is not None:
-        #     cv2.imwrite(os.path.join(debug_dir, f'r0_mask_step_{step_idx}.png'), (r0_mask.astype(np.uint8) * 255))
-        # if r1_mask is not None:
-        #     cv2.imwrite(os.path.join(debug_dir, f'r1_mask_step_{step_idx}.png'), (r1_mask.astype(np.uint8) * 255))
-        # # ---------------------------------------------
-
         pick_0 = np.asarray(action['pick_0'])
         place_0 = np.asarray(action['place_0'])
 
@@ -121,8 +108,6 @@ class PixelPickAndPlace():
 
         self.affordance_score = self._calculate_affordance(dist_0, dist_1)
         
-        print('pick 0', pick_0)
-        print('pick 1', pick_1)
         if pick_0[1] > pick_1[1]:
             pick_0, pick_1 = pick_1, pick_0
             place_0, place_1 = place_1, place_0
@@ -167,8 +152,6 @@ class PixelPickAndPlace():
         place_1_full = to_full_norm(place_1)
 
         action_ = np.concatenate([pick_0_full, place_0_full, pick_1_full, place_1_full]).reshape(-1, 2)
-        # ----------------------------
-
         depths = np.array([pick_0_depth, place_0_depth, pick_1_depth, place_1_depth])
 
         convert_action = norm_pixel2world(

@@ -1,12 +1,14 @@
+# This file is adapted from the running script of clothfunnel repository: https://github.com/real-stanford/cloth-funnels
+
 import os
 import numpy as np
 import cv2
 import time
-
-from actoris_harena import TrainableAgent
 import torch
 from itertools import product
+
 from actoris_harena.utilities.torch_utils import np_to_ts
+from actoris_harena import TrainableAgent
 
 from .utils import prepare_image, generate_primitive_cloth_mask,\
     generate_workspace_mask, transform, get_transform_matrix
@@ -101,7 +103,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             self.network.value_net.parameters(), lr=self.config.lr,
             weight_decay=self.config.weight_decay)
         
-        # --- ADD THESE LINES HERE ---
         
         # 1. Total parameters for the ENTIRE network
         total_params = sum(p.numel() for p in self.network.parameters())
@@ -123,7 +124,6 @@ class ClothFunnelsAdapter(TrainableAgent):
         self.action_primitives = list(self.config.action_primitives)
         self.adaptive_scale_factors = list(self.config.scale_factors)
         self.rotations = np.linspace(-180, 180, self.config.num_rotations + 1)
-        # print("ALL ROTATIONS", self.rotations)
         self.rotation_indices = {
             'fling': np.where(np.logical_and(self.rotations >= -90, self.rotations <= 90)),
             'place': np.where(np.logical_and(self.rotations >= -180, self.rotations <= 167.5)),
@@ -144,7 +144,6 @@ class ClothFunnelsAdapter(TrainableAgent):
         load_path = path if path is not None else self.save_dir
         load_path = os.path.join(load_path, 'last_train.pth')
         checkpoint = torch.load(load_path)
-        #print(checkpoint.keys())
         self.network.load_state_dict(checkpoint['net'])
         self.optimiser.load_state_dict(checkpoint['optimizer'])
         if 'replay_buffer' in checkpoint:
@@ -160,7 +159,6 @@ class ClothFunnelsAdapter(TrainableAgent):
         load_path = path if path is not None else self.save_dir
         load_path = os.path.join(load_path, 'checkpoints', 'model_best.pth')
         checkpoint = torch.load(load_path)
-        #print(checkpoint.keys())
         self.network.load_state_dict(checkpoint['net'])
         self.optimiser.load_state_dict(checkpoint['optimizer'])
         if 'replay_buffer' in checkpoint:
@@ -192,15 +190,15 @@ class ClothFunnelsAdapter(TrainableAgent):
     def get_state(self):
         return self.internal_states
     
-    def init(self, information):
-        pass
-
     def set_eval(self):
         return self.network.eval()
     
     def set_train(self):
         return self.network.train()
     
+    def init(self, information):
+        pass
+
     def update(self, info, action):
         pass
 
@@ -228,8 +226,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             np_to_ts(masked_rgb, self.device).float()/255,
             np_to_ts(info['observation']['depth'].copy(), self.device).reshape(H, W, -1).float(),
         ], dim=2).permute(2, 0, 1)
-
-        #print('RGBD shape', rgbd.shape)
         
         retval['transformed_obs'] = prepare_image(
             rgbd, 
@@ -240,15 +236,12 @@ class ClothFunnelsAdapter(TrainableAgent):
             nocs_mode=self.config.nocs_mode,
             inter_dim=256,
             constant_positional_enc=self.config.constant_positional_enc,)
-    
-        #print('Transformed obs shape', retval['transformed_obs'].shape)
         
         mask = np_to_ts(info['observation']['mask'].copy(), self.device)
         right_arm_mask =  torch.tensor(info['observation']['robot1_mask'].copy()).bool().to(self.device)
         left_arm_mask =  torch.tensor(info['observation']['robot0_mask'].copy()).bool().to(self.device)
                 
         pretransform_mask = torch.stack([mask, left_arm_mask, right_arm_mask], dim=0)
-        #print('Pretransform mask shape', pretransform_mask.shape)
         transformed_mask = prepare_image(
             pretransform_mask, 
             self._get_transformations(self.rotations), 
@@ -259,9 +252,7 @@ class ClothFunnelsAdapter(TrainableAgent):
             constant_positional_enc=self.config.constant_positional_enc,)
         retval['pretransform_mask'] = pretransform_mask
         
-        #print('Transformed mask shape', transformed_mask.shape)
         cloth_mask = transformed_mask[:, 0]
-        #print('Cloth mask shape', cloth_mask.shape)
         left_arm_mask = transformed_mask[:, 1]
         right_arm_mask = transformed_mask[:, 2]
 
@@ -285,12 +276,9 @@ class ClothFunnelsAdapter(TrainableAgent):
             GUARANTEE_OFFSET=6
             offset = self.config.pix_grasp_dist if primitive == 'fling' else self.config.pix_place_dist + GUARANTEE_OFFSET
             offset = int(offset)
-            primitive_vmap_indices = self.primitive_vmap_indices[primitive] ## TODO: define this
-            #print('Primitive vmap indices', primitive_vmap_indices)
+            primitive_vmap_indices = self.primitive_vmap_indices[primitive]
 
             valid_transforms_mask = torch.zeros_like(cloth_mask[primitive]).bool()
-            #print('valid_transforms_mask shape', valid_transforms_mask.shape)
-            #print('vmp_idx dtype', type(primitive_vmap_indices[0]), type(primitive_vmap_indices[1]))
             id0s = torch.tensor(primitive_vmap_indices[0], device=self.device, dtype=torch.long)
             id1s = torch.tensor(primitive_vmap_indices[1], device=self.device, dtype=torch.long)
 
@@ -322,10 +310,7 @@ class ClothFunnelsAdapter(TrainableAgent):
             ## rotate the image clothwise 90 degrees back
             info['observation'][key] = np.rot90(info['observation'][key], -1)
 
-        #print('preproces keys', retval.keys())
         return retval
-
-
 
     def _get_transformations(self, rotations):
         #print('Rotations', rotations)
@@ -336,10 +321,7 @@ class ClothFunnelsAdapter(TrainableAgent):
     def single_act(self, info, update=False):
         aid = info['arena_id']
 
-        # =========================================================
-        # DEBUG BLOCK 0: Sanity Check Raw Input (Before Preprocessing)
-        # =========================================================
-        if getattr(self, 'debug', False):
+        if self.debug:
             os.makedirs('tmp/clothfunnels/', exist_ok=True)
             raw_rgb = info['observation']['rgb'].copy()
             r0_mask = info['observation']['robot0_mask'].copy()
@@ -397,10 +379,7 @@ class ClothFunnelsAdapter(TrainableAgent):
         keypoint_coords = self.keypoint_detector.get_keypoints(img.astype(np.float32)/255)
         pixel_keypoints = {k: v for k, v in zip(keypoint_names, keypoint_coords)}
 
-        # =========================================================
-        # DEBUG BLOCK 4: Annotate Keypoints on Pretransform Image
-        # =========================================================
-        if getattr(self, 'debug', False):
+        if self.debug:
             import cv2
             import os
             os.makedirs('tmp/clothfunnels/', exist_ok=True)
@@ -422,8 +401,7 @@ class ClothFunnelsAdapter(TrainableAgent):
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                 
             cv2.imwrite('tmp/clothfunnels/4_keypoint_debug.png', debug_img)
-        # =========================================================
-
+       
         # 2. Generate Heuristic 2D actions
         raw_actions = shirt_folding_heuristic_2d(pixel_keypoints)
         
@@ -527,10 +505,7 @@ class ClothFunnelsAdapter(TrainableAgent):
         M_fwd = cv2.invertAffineTransform(M_pre)           # Matrix: 480x480 -> 128x128
 
 
-        # =========================================================
-        # DEBUG BLOCK 1: Plot on the Transformed Observation Space
-        # =========================================================
-        if getattr(self, 'debug', False):
+        if self.debug:
             os.makedirs('tmp/clothfunnels/', exist_ok=True)
             chosen_image = info['transformed_obs'][x][:3].detach().cpu().numpy()
             chosen_image = (chosen_image.transpose(1, 2, 0) * 255).astype(np.uint8).copy()
@@ -556,9 +531,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             cv2.imwrite('tmp/clothfunnels/1_transformed_space.png', cv2.cvtColor(chosen_image, cv2.COLOR_RGB2BGR))
 
 
-        # =========================================================
-        # DEBUG BLOCK 2: Plot on the Pretransform Space
-        # =========================================================
         transform_pixels = np.concatenate((np.array([p1, p2]), np.ones((2, 1))), axis=1)
         pixels_pre = np.matmul(transform_pixels, T2d)[:, :2].astype(int)
 
@@ -582,9 +554,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             cv2.imwrite('tmp/clothfunnels/2_pretransform_space.png', cv2.cvtColor(pretransform_img, cv2.COLOR_RGB2BGR))
 
 
-        # =========================================================
-        # DEBUG BLOCK 3: Plot on the Absolute Original Image Space
-        # =========================================================
         H, W = info['prerot_rgb'].shape[:2]
         p_orig = np.zeros_like(pixels_pre)
         
@@ -594,7 +563,7 @@ class ClothFunnelsAdapter(TrainableAgent):
         p_orig[:, 1] = np.clip(p_orig[:, 1], 0, W - 1)
         p1_final, p2_final = p_orig[0], p_orig[1]
 
-        if getattr(self, 'debug', False):
+        if self.debug:
             prerot_img = info['prerot_rgb'].copy()
             
             # Un-rotate Workspaces
@@ -627,9 +596,6 @@ class ClothFunnelsAdapter(TrainableAgent):
             chosen_primitive_params['place_0'] = chosen_primitive_params['pick_1']
             del chosen_primitive_params['pick_1']
         
-        # if self.config.place_only:
-        #     return np.stack([chosen_primitive_params['pick_0'], chosen_primitive_params['place_0']]).flatten()
-
         action = {
             chosen_primitive_name: chosen_primitive_params
         }
@@ -798,11 +764,7 @@ class ClothFunnelsAdapter(TrainableAgent):
              
                 l2_error[distance][action_primitive]['manipulation'] = manipulation_loss
 
-                log_idx = 0
-                # visualizations[distance][action_primitive]['manipulation'] = value_pred_dense[log_idx].detach().cpu().numpy()
-                # visualizations[distance][action_primitive]['obs'] = obs[log_idx].detach().cpu().numpy()
-
-        #OPTIMIZE
+              
         loss = 0
 
         for distance in distance_types:

@@ -27,8 +27,8 @@
 ## 1. Prerequisites
 
 Before proceeding, please ensure you have already installed and tested the following:
-* The `py3.10` branch of the [`softgym`]([https://github.com/your-org/softgym](https://github.com/your-org/softgym)) repository (only required for simulation experiments).
-* The `develop` branch of the [`actoris_harena`]([https://github.com/your-org/actoris_harena](https://github.com/your-org/actoris_harena)) repository.
+* The `py3.10` branch of the [`softgym`](https://github.com/halid1020/softgym/tree/py3.10) repository (only required for simulation experiments).
+* The `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
 
 ---
 
@@ -54,6 +54,10 @@ pip install pycurl
 pip install segment_anything==1.0
 pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+cu121.html
 pip install torch_geometric
+
+# For enbale the running of ClothMate
+pip installl trimesh
+pip install OpenEXR
 ```
 
 ### Step 4: Setup Assets (only for simulation)

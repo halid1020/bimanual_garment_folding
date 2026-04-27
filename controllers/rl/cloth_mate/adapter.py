@@ -1,14 +1,12 @@
-# pip installl trimesh
-# pip install OpenEXR
+# This file is adapted from the running script of clothmate repository: https://github.com/chongchongjjj/clothmate
 import os
 import numpy as np
 import torch
+from actoris_harena import TrainableAgent
 
-# Relative imports to access core code
 from .utils.utils import *
 from .network import MaximumValuePolicy  
 from .keypoint.model import UNet
-from actoris_harena import TrainableAgent
 
 class ClothMateAdapter(TrainableAgent):
     
@@ -122,18 +120,10 @@ class ClothMateAdapter(TrainableAgent):
         orig_H, orig_W = rgb.shape[:2]
         
         # 1. Rotate 90 deg CCW
-        #rotated_rgb = np.rot90(rgb, k=1, axes=(0, 1))
-        #transformed_obs = obs.copy()
-        #transformed_obs['rgb'] = rotated_rgb
-
-        # if 'depth' in obs: transformed_obs['depth'] = np.rot90(obs['depth'], k=1, axes=(0, 1))
-        # if 'mask' in obs: transformed_obs['mask'] = np.rot90(obs['mask'], k=1, axes=(0, 1))
         prerot_rgb = rgb.copy()
 
         for key in ['rgb', 'depth', 'mask', 'robot0_mask', 'robot1_mask']:
             assert key in obs, f"Key {key} not found in observation"
-            ## rotate the image clothwise 90 degrees
-            # --- FIX: Add .copy() to force positive memory strides ---
             obs[key] = np.rot90(obs[key], 1).copy()
 
         self.transformed_obs = self.generate_transformed_obs(obs) 
@@ -197,9 +187,6 @@ class ClothMateAdapter(TrainableAgent):
                         top_width = np.linalg.norm(tl - tr)
                         bottom_width = np.linalg.norm(bl - br)
                         
-                        # =========================================================
-                        # FIX: Implement Trousers/Pants classification
-                        # =========================================================
                         mask_np = (input_tensor[0].sum(dim=0) > 0).cpu().numpy()
                         
                         try:
@@ -217,13 +204,11 @@ class ClothMateAdapter(TrainableAgent):
                             if bot_px_width < top_px_width * 1.6:
                                 is_pants = True
 
-                        # =========================================================
-
+                      
                         if top_width < bottom_width:
                             pick_L, pick_R = tl, tr
                             anchor_L, anchor_R = bl, br
                             
-                            # --- CRITICAL FIX: Protect the waistband! ---
                             if is_pants:
                                 target_width = top_width * 1.15
                             else:
@@ -250,9 +235,7 @@ class ClothMateAdapter(TrainableAgent):
                             'p4': place_R.astype(int)
                         }
                         
-                        # =========================================================
-                        # DEBUG BLOCK: Keypoints & Pick-and-Stretch Visualization
-                        # =========================================================
+     
                         if self.debug:
                             import cv2
                             import os
@@ -316,8 +299,7 @@ class ClothMateAdapter(TrainableAgent):
                             cv2.arrowedLine(orig_img, map_back(pick_L), map_back(place_L), (255, 255, 255), 2)
                             cv2.arrowedLine(orig_img, map_back(pick_R), map_back(place_R), (255, 255, 255), 2)
                             cv2.imwrite('tmp/clothmate_debug/6_kp_original_space.png', orig_img)
-                        # =========================================================
-
+                        
                     else:
                         action_primitive = best_primitive
                         action_params = vmap_params
@@ -399,7 +381,6 @@ class ClothMateAdapter(TrainableAgent):
         p1 = np.array([z, y], dtype=float) 
         p2 = np.array([z, y], dtype=float)
         
-        # FIX: Offset axis 1 (the row) because the network expects vertical grasps 
         # relative to the rotated bounding box.
         if best_primitive in ['fling', 'stretchdrag', 'pick-and-stretch']:
             p1[1] += pix_grasp_dist
@@ -437,9 +418,7 @@ class ClothMateAdapter(TrainableAgent):
         pixels_homo = np.concatenate((pixels, np.ones((2, 1))), axis=1)
         orig_pixels = np.matmul(pixels_homo, mat_xy)[:, :2].astype(int) # Points in 480x480 Pretransform space
         
-        # =========================================================
-        # DEBUG BLOCK: 3-Stage Visualization
-        # =========================================================
+
         if self.debug:  # Set to True or pass via config
             import cv2
             import os
@@ -511,8 +490,7 @@ class ClothMateAdapter(TrainableAgent):
             cv2.circle(orig_img, (int(p1_final_x), int(p1_final_y)), 6, (255, 0, 0), -1)
             cv2.circle(orig_img, (int(p2_final_x), int(p2_final_y)), 6, (0, 255, 255), -1)
             cv2.imwrite('tmp/clothmate_debug/3_original_space.png', orig_img)
-        # =========================================================
-
+       
         # Return the action params mapped to Pretransform Space. 
         # Your single_act function will handle translating these to Original Space 
         # and normalizing them to [-1, 1].
@@ -564,9 +542,6 @@ class ClothMateAdapter(TrainableAgent):
         
         cloth_mask_np = obs_dict.get('mask', rgb.sum(axis=-1) > 0)
         pretransform_cloth_mask = torch.tensor(cloth_mask_np).float()
-        # pretransform_left_arm_mask = torch.ones_like(pretransform_cloth_mask)
-        # pretransform_right_arm_mask = torch.ones_like(pretransform_cloth_mask)
-        
         pretransform_left_arm_mask =  torch.tensor(obs_dict['robot1_mask'].copy()).float()
         pretransform_right_arm_mask =  torch.tensor(obs_dict['robot0_mask'].copy()).float()
             
@@ -638,6 +613,6 @@ class ClothMateAdapter(TrainableAgent):
         self.policy.eval()
         self.keypoint_detector.eval()
     
-    def set_train(self):#
+    def set_train(self):
         self.policy.train()
         self.keypoint_detector.train()

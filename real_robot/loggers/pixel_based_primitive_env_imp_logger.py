@@ -170,11 +170,14 @@ class PixelBasedPrimitiveImpEnvLogger(VideoLogger):
                 mask1 = cv2.resize(robot1_masks[i].astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
                 img = apply_workspace_shade(img, mask1, color=(0, 0, 255), alpha=0.2)
 
-            primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
+            primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS.get("default", (255, 255, 255)))
 
             step_text = f"Step {i+1}: "
-            if key == "norm-pixel-pick-and-place":
-                step_text += "Pick and Place"
+            # UPDATED: Parse the new primitive names
+            if key == "norm-pixel-dual-pick-and-place":
+                step_text += "Dual Pick and Place"
+            elif key == "norm-pixel-single-pick-and-place":
+                step_text += "Single Pick and Place"
             elif key == "norm-pixel-pick-and-fling":
                 step_text += "Pick and Fling"
             elif key == "no-operation":
@@ -184,12 +187,12 @@ class PixelBasedPrimitiveImpEnvLogger(VideoLogger):
 
             draw_text_with_bg(img, step_text, (10, TEXT_Y_STEP), primitive_color)
 
-            if key == "norm-pixel-pick-and-place":
+            # UPDATED: Catch both P&P variations dynamically
+            if key in ["norm-pixel-dual-pick-and-place", "norm-pixel-single-pick-and-place"]:
                 if i + 1 < len(result["information"]):
                     info_next = result["information"][i+1]
                     if 'applied_action' in info_next:
-                        applied_action = info_next['applied_action']
-                        applied_action = applied_action.get('norm-pixel-pick-and-place')
+                        applied_action = info_next['applied_action'].get(key)
                         if applied_action is not None:
                             img = draw_pick_and_place(img, applied_action)
 

@@ -1,7 +1,8 @@
 import time
 import numpy as np
 from real_robot.utils.human_utils \
-    import click_points_pick_and_place, click_points_pick_and_fling
+    import click_points_pick_and_place, click_points_pick_and_fling, \
+    click_points_single_pick_and_place  # <-- Added new import here
 from real_robot.utils.save_utils import save_colour, save_mask
 import cv2
 
@@ -30,20 +31,24 @@ class RealWordHumanPolicy(Agent):
             arena_id = info['arena_id']
 
         while True:
-            cmd = input("\nSkill [1=pick-fling, 2=pick-place, 3=no-operation, q=quit]: ").strip().lower()
+            # <-- Updated prompt text to match the logic mapping below
+            cmd = input("\nSkill [1=pick-fling, 2=dual-pick-place, 3=single-pick-place, 4=no-operation, q=quit]: ").strip().lower()
             if cmd in ("q", "quit"):
                 return None
             elif cmd == "1":
                 prim_type = "pick_and_fling"
                 break
             elif cmd == "2":
-                prim_type = "pick_and_place"
+                prim_type = "dual_pick_and_place"
                 break
-            elif cmd == '3':
+            elif cmd == "3":
+                prim_type = "single_pick_and_place"
+                break
+            elif cmd == '4':
                 prim_type = "no_operation"
                 break
             else:
-                print("Invalid command. Please enter 1, 2, 3 or q.")
+                print("Invalid command. Please enter 1, 2, 3, 4 or q.")
 
         # Unpack scene info
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]
@@ -69,19 +74,18 @@ class RealWordHumanPolicy(Agent):
             
         h, w = rgb.shape[:2]
 
+        # Shared normalisation function
+        def norm_xy(pt):
+            y, x = pt
+            return ((x / w) * 2 - 1, (y / h) * 2 - 1)
+
         # -------------------------------
-        # Pick & Place
+        # Dual Pick & Place
         # -------------------------------
-        if prim_type == "pick_and_place":
+        if prim_type == "dual_pick_and_place":
             clicks = click_points_pick_and_place("Pick & Place", display_rgb, mask)
-            #clicks = click_points_pick_and_place("Pick & Place", display_rgb)
 
             pick_0, place_0, pick_1, place_1 = clicks
-
-            # Normalize pixel coordinates to [-1, 1]
-            def norm_xy(pt):
-                y, x = pt
-                return ((x / w) * 2 - 1, (y / h) * 2 - 1)
 
             pick_0_norm = norm_xy(pick_0)
             place_0_norm = norm_xy(place_0)
@@ -89,9 +93,24 @@ class RealWordHumanPolicy(Agent):
             place_1_norm = norm_xy(place_1)
 
             action = {
-                "norm-pixel-pick-and-place": \
+                "norm-pixel-dual-pick-and-place": \
                     np.concatenate([pick_0_norm, pick_1_norm, place_0_norm, place_1_norm])
-                
+            }
+
+        # -------------------------------
+        # Single Pick & Place (NEW BLOCK)
+        # -------------------------------
+        elif prim_type == "single_pick_and_place":
+            clicks = click_points_single_pick_and_place("Single Pick & Place", display_rgb, mask)
+
+            pick_0, place_0 = clicks
+
+            pick_0_norm = norm_xy(pick_0)
+            place_0_norm = norm_xy(place_0)
+
+            action = {
+                "norm-pixel-single-pick-and-place": \
+                    np.concatenate([pick_0_norm, place_0_norm])
             }
 
         # -------------------------------
@@ -102,10 +121,6 @@ class RealWordHumanPolicy(Agent):
 
             pick_0, pick_1 = clicks
 
-            def norm_xy(pt):
-                y, x = pt
-                return ((x / w) * 2 - 1, (y / h) * 2 - 1)
-
             pick_0_norm = norm_xy(pick_0)
             pick_1_norm = norm_xy(pick_1)
 
@@ -114,6 +129,9 @@ class RealWordHumanPolicy(Agent):
                     np.concatenate([pick_0_norm, pick_1_norm])
             }
 
+        # -------------------------------
+        # No Operation
+        # -------------------------------
         elif prim_type == 'no_operation':
             action = {"no-operation": np.zeros(8)}
 

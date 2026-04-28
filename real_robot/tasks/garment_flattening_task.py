@@ -18,7 +18,7 @@ class RealWorldGarmentFlatteningTask():
         self.ncs = []
         self.nis = []
         self.ious = []
-        self.canon_ious = []
+        self.algn_ious = []
         return {"goals": self.goals}
 
     def get_goals(self):
@@ -38,24 +38,24 @@ class RealWorldGarmentFlatteningTask():
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'normalised_improvement': self._get_normalised_improvement(arena),
-            'canon_IoU_to_flattened': self._get_canon_IoU_to_flattened(arena),
+            'algn_IoU_to_flattened': self._get_algn_IoU_to_flattened(arena),
         }
 
         if arena.action_step == len(self.ncs):
             self.ncs.append(eval_dict['normalised_coverage'])
             self.nis.append(eval_dict['normalised_improvement'])
             self.ious.append(eval_dict['max_IoU_to_flattened'])
-            self.canon_ious.append(eval_dict['canon_IoU_to_flattened'])
+            self.algn_ious.append(eval_dict['algn_IoU_to_flattened'])
 
         if arena.action_step < len(self.ncs):
             self.ncs[arena.action_step] = eval_dict['normalised_coverage']
             self.nis[arena.action_step] = eval_dict['normalised_improvement']
             self.ious[arena.action_step] = eval_dict['max_IoU_to_flattened']
-            self.canon_ious[arena.action_step] = eval_dict['canon_IoU_to_flattened']
+            self.algn_ious[arena.action_step] = eval_dict['algn_IoU_to_flattened']
 
         eval_dict.update({
             'maximum_trj_max_IoU_to_flattened': max(self.ious),
-            'maximum_trj_canon_IoU_to_flattened': max(self.canon_ious),
+            'maximum_trj_algn_IoU_to_flattened': max(self.algn_ious),
             'maximum_trj_normalised_coverage': max(self.ncs),
             'maximum_trj_normalised_improvement': max(self.nis),
         })
@@ -65,7 +65,7 @@ class RealWorldGarmentFlatteningTask():
         res = arena.coverage / arena.flatten_coverage
         return np.clip(res, 0, 1)
     
-    def _get_canon_IoU_to_flattened(self, arena):
+    def _get_algn_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
         goal_mask = arena.get_flattened_obs()['observation']['mask']
         IoU = calculate_iou(cur_mask, goal_mask)
@@ -94,7 +94,7 @@ class RealWorldGarmentFlatteningTask():
         return IoU
     
 
-    def _get_canon_IoU_to_flattened(self, arena):
+    def _get_algn_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
         goal_mask = arena.get_flattened_obs()['observation']['mask']
         IoU = calculate_iou(cur_mask, goal_mask)

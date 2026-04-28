@@ -12,10 +12,11 @@ RED  = (50, 50, 200)   # right picker
 MILD_RED = (120, 120, 220)  # soft red (B, G, R)
 
 PRIMITIVE_COLORS = {
-    "norm-pixel-pick-and-place": (255, 180, 80),          # orange
-    "norm-pixel-pick-and-fling": (80, 200, 255),# cyan
-    "no-operation": (255, 255, 255),             # gray
-    "default": (255, 255, 255),                  # white
+    "norm-pixel-dual-pick-and-place": (255, 180, 80),    # orange
+    "norm-pixel-single-pick-and-place": (255, 180, 80),  # orange
+    "norm-pixel-pick-and-fling": (80, 200, 255),         # cyan
+    "no-operation": (255, 255, 255),                     # gray
+    "default": (255, 255, 255),                          # white
 }
 
 # -------------------------------
@@ -113,7 +114,7 @@ def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20):
         size=30
     )
 
-def draw_text_with_bg(img, text, org, color, scale=1.2, thickness=4):
+def draw_text_with_bg(img, text, org, color, scale=1, thickness=3):
     (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
     x, y = org
     overlay = img.copy()
@@ -142,6 +143,8 @@ def draw_pick_and_place(img, action, rgb2bgr=True):
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
     H, W = img.shape[:2]
+    
+    # Dual Pick and Place
     if len(action) > 4:
         pick_0  = norm_to_px(action[:2], W, H)
         pick_1  = norm_to_px(action[2:4], W, H)
@@ -154,53 +157,30 @@ def draw_pick_and_place(img, action, rgb2bgr=True):
 
         (left_pick, left_place), (right_pick, right_place) = picks_sorted
         
+        cmap_left  = cv2.COLORMAP_COOL     # BLUE-ish
+        cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
+
+        draw_colored_line(img, left_pick, left_place, cmap_left, thickness=8, num_samples=20)
+        draw_colored_line(img, right_pick, right_place, cmap_right, thickness=8, num_samples=20)
+
+        BLUE_C = cv2.applyColorMap(np.uint8([[[0]]]), cmap_left)[0, 0].tolist()
+        RED_C  = cv2.applyColorMap(np.uint8([[[0]]]), cmap_right)[0, 0].tolist()
+        
+        cv2.circle(img, left_pick,  10, BLUE_C, 3)
+        cv2.circle(img, right_pick, 10, RED_C,  3)
+
+    # Single Pick and Place
     else:
-        left_pick  = norm_to_px(action[:2], W, H)
-        left_place = norm_to_px(action[2:4], W, H)
-
-   
-    # BLUE = left, RED = right
-
-    # ----- Draw arrows with SMALLER arrowheads -----
-    small_tip = 0.08    # << smaller arrowhead tip size
-
-    # Colormaps (same convention as fling)
-    cmap_left  = cv2.COLORMAP_COOL     # BLUE-ish
-    cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
-
-    draw_colored_line(
-        img,
-        left_pick,
-        left_place,
-        cmap_left,
-        thickness=8,
-        num_samples=20
-    )
-
-    if len(action) > 4:
-        draw_colored_line(
-            img,
-            right_pick,
-            right_place,
-            cmap_right,
-            thickness=8,
-            num_samples=20
-        )
-
-
-    BLUE = cv2.applyColorMap(
-        np.uint8([[[0]]]), cmap_left
-    )[0, 0].tolist()
-                    
-    RED = cv2.applyColorMap(
-        np.uint8([[[0]]]), cmap_right
-    )[0, 0].tolist()
-    
-    # ----- Hollow circles -----
-    cv2.circle(img, left_pick,  10, BLUE, 3)
-
-    if len(action) > 4:
-        cv2.circle(img, right_pick, 10, RED,  3)
+        pick  = norm_to_px(action[:2], W, H)
+        place = norm_to_px(action[2:4], W, H)
+        
+        # Use Green/Yellow gradient for Single-Arm to visually distinguish it
+        cmap_single = cv2.COLORMAP_SUMMER 
+        
+        draw_colored_line(img, pick, place, cmap_single, thickness=8, num_samples=20)
+        
+        SINGLE_COLOR = cv2.applyColorMap(np.uint8([[[0]]]), cmap_single)[0, 0].tolist()
+        cv2.circle(img, pick, 10, SINGLE_COLOR, 3)
 
     return img
 
@@ -284,8 +264,8 @@ def draw_pick_and_fling(img, action, traj_0=None, traj_1=None):
 
     # Extract solid colors for circles (start of colormap)
     # Using 255 here gets the start color, matching the logic in draw_gradient_path where 1.0 alpha maps to 0 value.
-    BLUE = cv2.applyColorMap(np.uint8([[[255]]]), cmap_left)[0, 0].tolist()
-    RED  = cv2.applyColorMap(np.uint8([[[255]]]), cmap_right)[0, 0].tolist()
+    BLUE_C = cv2.applyColorMap(np.uint8([[[255]]]), cmap_left)[0, 0].tolist()
+    RED_C  = cv2.applyColorMap(np.uint8([[[255]]]), cmap_right)[0, 0].tolist()
 
     # 4. Draw Trajectories (if provided)
     # Increase thickness slightly for better visibility against backgrounds
@@ -297,7 +277,7 @@ def draw_pick_and_fling(img, action, traj_0=None, traj_1=None):
 
     # 5. Draw Pick Circles (Hollow)
     # Calling swap() to convert (x,y) -> (y,x)
-    cv2.circle(img, left_pick, 10, BLUE, 3)
-    cv2.circle(img, right_pick, 10, RED, 3)
+    cv2.circle(img, left_pick, 10, BLUE_C, 3)
+    cv2.circle(img, right_pick, 10, RED_C, 3)
 
     return img

@@ -345,7 +345,7 @@ class DualArmArena(Arena):
         norm_pixels[:, [0, 1]] = norm_pixels[:, [1, 0]]
         action_type = list(action.keys())[0]
 
-        if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
+        if action_type in ['norm-pixel-dual-pick-and-place', 'norm-pixel-single-pick-and-place', 'norm-pixel-pick-and-fling']:
 
             points_crop = ((norm_pixels + 1) / 2 * self.crop_size).astype(np.int32)
             if self.snap_to_cloth_mask:
@@ -361,7 +361,16 @@ class DualArmArena(Arena):
 
                 snapped_points = []
                 for i, pt in enumerate(points_crop):
-                    if i < 2:
+                    # Dynamically determine if the point is a "pick" point
+                    should_snap = False
+                    if action_type == 'norm-pixel-dual-pick-and-place' and i < 2:
+                        should_snap = True
+                    elif action_type == 'norm-pixel-single-pick-and-place' and i == 0:
+                        should_snap = True
+                    elif action_type == 'norm-pixel-pick-and-fling':
+                        should_snap = True # Both points are picks
+                        
+                    if should_snap:
                         snapped_points.append(snap_to_mask(pt, target_mask))
                     else:
                         snapped_points.append(pt)
@@ -383,8 +392,9 @@ class DualArmArena(Arena):
                 if 0 <= x < w and 0 <= y < h:
                     return 1.0 if self.cloth_mask[y, x] > 0 else 0.0
                 return 0.0
-
-            if len(points_orig) == 4:
+            
+            # Processing for norm-pixel-dual-pick-and-place
+            if action_type == 'norm-pixel-dual-pick-and-place' and len(points_orig) == 4:
                 p0_orig, p1_orig = points_orig[0], points_orig[1]
                 l0_orig, l1_orig = points_orig[2], points_orig[3]
 
@@ -413,12 +423,70 @@ class DualArmArena(Arena):
                 angle_1 = get_grasp_rotation(self.cloth_mask, pt1_crop)
                 pick_angles = [angle_0, angle_1]
 
-                # Validity: check mask at the crop coordinates
                 valid_0 = check_validity(pt0_crop)
                 valid_1 = check_validity(pt1_crop)
                 valid_flags = [valid_0, valid_1]
 
-            elif len(points_orig) == 2:
+                # Setup skill action payload
+                full_action = np.concatenate([
+                    points_executed.copy(), 
+                    np.array(pick_angles),
+                    np.array(valid_flags)
+                ])
+
+            # Processing for norm-pixel-single-pick-and-place
+            elif action_type == 'norm-pixel-single-pick-and-place' and len(points_orig) == 2:
+                p_pick, p_place = points_orig[0], points_orig[1]
+                
+                # Automatically detect the appropriate arm based on workspace masks
+                x, y = int(p_pick[0]), int(p_pick[1])
+                h, w = full_mask_0.shape
+                x = np.clip(x, 0, w - 1)
+                y = np.clip(y, 0, h - 1)
+                
+                in_mask_0 = full_mask_0[y, x] > 0
+                in_mask_1 = full_mask_1[y, x] > 0
+                
+                # Auto-select arm: Match mask explicitly. Fallback to X coordinate (Robot 0 = Left)
+                if in_mask_0 and not in_mask_1:
+                    use_robot_0 = True
+                elif in_mask_1 and not in_mask_0:
+                    use_robot_0 = False
+                else:
+                    center_x = self.x1 + self.crop_size / 2
+                    use_robot_0 = p_pick[0] < center_x
+
+                if use_robot_0:
+                    final_pick_0 = snap_to_mask(p_pick, full_mask_0)
+                    final_place_0 = snap_to_mask(p_place, full_mask_0)
+                    final_pick_1, final_place_1 = final_pick_0.copy(), final_place_0.copy() # Dummy values
+                    
+                    points_executed = np.concatenate([final_pick_0, final_place_0])
+                    
+                    pt0_crop = final_pick_0 - np.array([self.x1, self.y1])
+                    pick_angles = [get_grasp_rotation(self.cloth_mask, pt0_crop), 0.0]
+                    valid_flags = [check_validity(pt0_crop), 0.0]
+                else:
+                    final_pick_1 = snap_to_mask(p_pick, full_mask_1)
+                    final_place_1 = snap_to_mask(p_place, full_mask_1)
+                    final_pick_0, final_place_0 = final_pick_1.copy(), final_place_1.copy() # Dummy values
+                    
+                    points_executed = np.concatenate([final_pick_1, final_place_1])
+                    
+                    pt1_crop = final_pick_1 - np.array([self.x1, self.y1])
+                    pick_angles = [0.0, get_grasp_rotation(self.cloth_mask, pt1_crop)]
+                    valid_flags = [0.0, check_validity(pt1_crop)]
+
+                # Setup skill action payload (Needs 12 params exactly for PickAndPlaceSkill)
+                full_action = np.concatenate([
+                    final_pick_0, final_pick_1,
+                    final_place_0, final_place_1,
+                    np.array(pick_angles),
+                    np.array(valid_flags)
+                ])
+
+            # Processing for norm-pixel-pick-and-fling
+            elif action_type == 'norm-pixel-pick-and-fling' and len(points_orig) == 2:
                 p0_orig, p1_orig = points_orig[0], points_orig[1]
 
                 if p0_orig[0] < p1_orig[0]:
@@ -439,13 +507,13 @@ class DualArmArena(Arena):
                 valid_1 = check_validity(pt1_crop)
                 valid_flags = [valid_0, valid_1]
 
-            # Concatenate: [coords, angles, flags]
-            # Size: 8 + 2 + 2 = 12 floats (for pick-place)
-            full_action = np.concatenate([
-                points_executed.copy(), 
-                np.array(pick_angles),
-                np.array(valid_flags)
-            ])
+                # Setup skill action payload
+                full_action = np.concatenate([
+                    points_executed.copy(), 
+                    np.array(pick_angles),
+                    np.array(valid_flags)
+                ])
+
            
         if self.measure_time:
             self.process_action_time.append(time.time() - start_time)
@@ -453,7 +521,9 @@ class DualArmArena(Arena):
 
         self.info = {}
         print(f'action step {self.action_step}')
-        if action_type == 'norm-pixel-pick-and-place':
+        
+        # Link both P&P actions to the same PickAndPlaceSkill driver 
+        if action_type in ['norm-pixel-dual-pick-and-place', 'norm-pixel-single-pick-and-place']:
             self.pick_and_place_skill.reset()
             self.pick_and_place_skill.step(full_action)
         elif action_type == 'norm-pixel-pick-and-fling':
@@ -476,11 +546,11 @@ class DualArmArena(Arena):
         if self.action_step % 5 == 0:
             self.dual_arm.restart_camera()
         
-        
         self.all_infos.append(self.info)
         self.info = self._process_info(self.info)
 
-        if action_type in ['norm-pixel-pick-and-place', 'norm-pixel-pick-and-fling']:
+        # Update logging array to explicitly catch all 3 expected action types 
+        if action_type in ['norm-pixel-dual-pick-and-place', 'norm-pixel-single-pick-and-place', 'norm-pixel-pick-and-fling']:
             applied_action = (1.0*points_executed.reshape(-1, 2) - np.array([self.x1, self.y1]))/self.crop_size * 2 - 1
             applied_action[:, [0, 1]] = applied_action[:, [1, 0]]
             self.info['applied_action'] = {

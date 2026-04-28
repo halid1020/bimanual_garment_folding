@@ -86,7 +86,7 @@ def click_points_pick_and_place(window_name, img, mask=None):
     cv2.imshow(window_name, canvas)
     cv2.setMouseCallback(window_name, mouse_cb)
 
-    print("--- PICK & PLACE ---")
+    print("--- DUAL PICK & PLACE ---")
     print("UI: Click 'UNDO' button to remove last point.")
     print("Order: PICK0 -> PLACE0 -> PICK1 -> PLACE1")
     print("Press 'q' to cancel.")
@@ -102,6 +102,53 @@ def click_points_pick_and_place(window_name, img, mask=None):
         raise RuntimeError(f"Expected 4 points, got {len(clicks)}")
 
     return clicks[0], clicks[1], clicks[2], clicks[3]
+
+def click_points_single_pick_and_place(window_name, img, mask=None):
+    """
+    Select 2 points with an UNDO button in a header bar for a single arm pick & place.
+    """
+    clicks = []
+    BTN_HEIGHT = 50
+
+    def mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # Check UI area
+            if y < BTN_HEIGHT:
+                if x < 110: # Inside Undo
+                    if clicks:
+                        clicks.pop()
+                        canvas = draw_ui(img, clicks, mask, BTN_HEIGHT)
+                        cv2.imshow(window_name, canvas)
+            else:
+                # Image area
+                img_y = y - BTN_HEIGHT
+                if len(clicks) < 2:
+                    clicks.append((x, img_y))
+                    canvas = draw_ui(img, clicks, mask, BTN_HEIGHT)
+                    cv2.imshow(window_name, canvas)
+
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720 + BTN_HEIGHT)
+    
+    canvas = draw_ui(img, clicks, mask, BTN_HEIGHT)
+    cv2.imshow(window_name, canvas)
+    cv2.setMouseCallback(window_name, mouse_cb)
+
+    print("--- SINGLE PICK & PLACE ---")
+    print("UI: Click 'UNDO' button to remove last point.")
+    print("Order: PICK -> PLACE")
+    print("Press 'q' to cancel.")
+    
+    while len(clicks) < 2:
+        if cv2.waitKey(20) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyWindow(window_name)
+    
+    if len(clicks) < 2:
+        raise RuntimeError("Expected 2 points, but they were not selected")
+    
+    return clicks[0], clicks[1]
 
 def click_points_pick_and_fling(window_name, img, mask=None):
     """
@@ -136,7 +183,8 @@ def click_points_pick_and_fling(window_name, img, mask=None):
 
     print("--- PICK & FLING ---")
     print("UI: Click 'UNDO' button to remove last point.")
-    print("Order: PICK -> PLACE")
+    print("Order: PICK_0 -> PICK_1")
+    print("Press 'q' to cancel.")
     
     while len(clicks) < 2:
         if cv2.waitKey(20) & 0xFF == ord('q'):

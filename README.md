@@ -1,3 +1,4 @@
+
 # MEGPIE: Multi-Primitive Bimanual Garment Folding from Crumpled States with Pixel-based Flow Matching Policies
 
 **Author:** Halid A. Kadi  
@@ -17,20 +18,20 @@
 1. [Prerequisites](#1-prerequisites)
 2. [Simulation Installation](#2-simulation-installation)
 3. [Testing the Installation](#3-testing-the-installation)
-4. [Adding a New Agent / Controller](#4-adding-a-new-agent--controller)
-5. [Configuring Experiments](#5-configuring-experiments)
-6. [Simulation Experiments](#6-simulation-experiments)
-7. [Real-World Experiments](#7-real-world-experiments)
+4. [Configuring Experiments](#4-configuring-experiments)
+5. [Simulation Experiments](#5-simulation-experiments)
+6. [Real-World Experiments](#6-real-world-experiments)
+7. [Adding a New Agent / Controller](#7-adding-a-new-agent--controller)
 
 ---
-TODO: add a section to explain the folders.
+> **TODO:** Add a section to explain the directory structure.
 
 ## 1. Prerequisites
 
 Before proceeding, please ensure you have already installed and tested the following:
 * Install the `py3.10` branch of the [`softgym`](https://github.com/halid1020/softgym/tree/py3.10) repository (only required for simulation experiments).
-* Checkout to the `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
-* Install `realsense-viewer` for real world experiments.
+* Checkout the `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
+* Install `realsense-viewer` for real-world experiments.
 
 ---
 
@@ -41,11 +42,12 @@ Before proceeding, please ensure you have already installed and tested the follo
 conda create -n magpie python=3.10 -y
 conda activate magpie
 ```
-If you need to reinstall the environment, delete the old environmet first
+If you need to reinstall the environment, delete the old environment first:
 ```bash
 conda deactivate
 conda remove -n magpie --all
 ```
+
 ### Step 2: Install the `actoris_harena` package
 Navigate to your `actoris_harena` directory and install it with the Torch dependencies:
 ```bash
@@ -58,24 +60,25 @@ Install the remaining dependencies required for this repository:
 ```bash
 pip install pycurl
 pip install segment_anything==1.0
-pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+cu121.html
+pip install torch-scatter torch-sparse -f [https://data.pyg.org/whl/torch-2.4.1+cu121.html](https://data.pyg.org/whl/torch-2.4.1+cu121.html)
 pip install torch_geometric
 
-# For enbale the running of ClothMate
+# To enable running ClothMate:
 pip install trimesh
 pip install OpenEXR
 ```
 
-### Step 4: Setup Assets (only for simulation)
-Download and unzip the [`assets.zip`]([https://link-to-your-assets.com/assets.zip](https://link-to-your-assets.com/assets.zip)) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes, goal and semantic keypoints configurations required for garment folding. **TODO: make the link effective by uploading asset**
+### Step 4: Setup Assets (Simulation Only)
+Download and unzip the [`assets.zip`](https://link-to-your-assets.com/assets.zip) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes, goal states, and semantic keypoint configurations required for garment folding. 
+> **TODO:** Make the link effective by uploading the assets.
 
 ---
 
 ## 3. Testing the Installation (Simulation)
 
-If you are installing for real-world experimet, please jump to section 7. Otherwise, follow the below instruction
+> **Note:** If you are installing for real-world experiments, please skip to [Section 7](#7-real-world-experiments). Otherwise, follow the instructions below.
 
-Run the following commands to verify your setup. This will execute a random policy on the multi-primitive setup in simulation.
+Run the following commands to verify your setup. This will execute a random policy on the multi-primitive setup in the simulation.
 
 ```bash
 cd <path-to-bimanual_garment_folding>
@@ -93,11 +96,11 @@ The evaluation results will be saved in the `./tmp` folder.
 
 ## 4. Configuring Experiments
 
-All experiment configurations are stored in the `conf/magpie` folder. This codebase uses **Hydra** for configuration management.
+All experiment configurations are stored in the `conf/magpie` directory. This codebase uses **Hydra** for configuration management.
 
 To create a new experiment, create a YAML file directly under the `conf` folder. This file serves as the entry point and should define the following parameters:
 
-* **`agent`**: The filename of the agent configuration (located in `conf/agent`). Inside that file, ensure the `name` matches the agent you registered in Step 4.
+* **`agent`**: The filename of the agent configuration (located in `conf/agent`). Inside that file, ensure the `name` matches the agent you registered in Section 4.
 * **`arena`**: The filename of the environment configuration (located in `conf/arena`). Ensure the arena name matches a registered arena.
 * **`task`**: The filename of the task configuration (located in `conf/task`), defining objectives like flattening or folding.
 * **`exp_name`**: The name of your experiment (this should match your YAML filename).
@@ -130,7 +133,7 @@ python tool/hydra_train.py --config-name magpie/gc_diff_mp_longsleeve_align_200_
 
 ### Re-evaluating a Job
 
-To re-evaluate an existing experiement in the background, use the evaluation script:
+To re-evaluate an existing experiment in the background, use the evaluation script:
 
 ```bash
 . ./setup.sh
@@ -146,59 +149,68 @@ To re-evaluate an existing experiement in the background, use the evaluation scr
 If you are on the login node of the University of York's Viking cluster, you can submit a training job by running:
 
 ```bash
-./job_scripts/generate_and_submit_viking_job.sh <sim-exp-config> -c 6 -m 18G -p gpu -t 48:00:00 # number of cpus, memory usage, partition and time
+./job_scripts/generate_and_submit_viking_job.sh <sim-exp-config> -c 6 -m 18G -p gpu -t 48:00:00 # number of cpus, memory usage, partition, and time
 ```
 
 ---
 
 ## 6. Real-World Experiments
 
-You do not need to install `softgym` for the real-world setup, but `actoris_harena` and the packages listed in Section 2 must be installed. Additionally, real-world experiments require the Segment Anything Model (SAM) weights.
+You do not need to install `softgym` for the real-world setup, but `actoris_harena` and the packages listed in Section 2 must be installed. Additionally, real-world experiments require the Segment Anything Model (SAM) weights. For a more detailed guide on operating the robots, please check the tutorial in `tutorials/RealWorld.md`.
 
 ### Step 1: Download SAM Weights
 Download [`sam_vit_h_4b8939.pth`](https://huggingface.co/HCMUE-Research/SAM-vit-h/blob/main/sam_vit_h_4b8939.pth) and place it inside the `real_robot/models` directory. *(Note: This is strictly required for real-world vision processing).*
 
 ### Step 2: Network Configuration
 1. Ensure the control machine (e.g., a GPU laptop) is connected to both robot arms via an Ethernet switch.
-2. Open a terminal in the contrl machine, set the IP address of the control machine:
+2. Open a terminal on the control machine and set its IP address:
    ```bash
-   sudo ip addr add 192.168.1.20/24 dev enp45s0 # Or any ip address you want.
+   sudo ip addr add 192.168.1.20/24 dev enp45s0 # Or your preferred IP address.
    ```
-3. Boot the two robot arms.
-3. Check the IP addresses of the robots to ensure they are consistent with the information defined in `real_robot/calibration/ur5e.yaml` and `real_robot/calibration/ur16e.yaml`. You can check and change the ip address of the robots in its paddle in the following pages `setting` page -> `system` tab -> `network` window. Please see the following figure for correct configuration. TODO: add the figure.
+3. Boot up the two robot arms.
+4. Check the IP addresses of the robots to ensure they match the configurations defined in `real_robot/calibration/ur5e.yaml` and `real_robot/calibration/ur16e.yaml`. You can check and change the IP address of the robots using their teach pendant by navigating to: `Settings` page $\rightarrow$ `System` tab $\rightarrow$ `Network` window. Please see the following figure for the correct configuration. 
+> **TODO:** Add the network configuration figure.
 
 ### Step 3: Camera and Calibration
-4. In the control machine, launch `realsense-viewer` and verify that the RGB-D images are displaying correctly. Two robot arms are at the side, the midpoint of the arms is at the centre of the camear-- the depth colour is evenly distrbuted. Please see the figure blow. TODO: insert the figure from tutorials/figures/realsense.png
+1. On the control machine, launch `realsense-viewer` and verify that the RGB-D images are displaying correctly. The two robot arms should be visible on the sides, with the midpoint between the arms at the center of the camera view. Ensure the depth color map is evenly distributed. Please see the figure below. 
+> **TODO:** Insert the figure from `tutorials/figures/realsense.png`.
 
-Then, close the realsense viewer.
+   Once verified, close the realsense viewer.
 
-5. **Conduct hand-eye calibration:**
-   * Have the UR5e robot arm grasp the printed ChArUco board (provided in `real_robot/calibration/calib.io_charuco_210x300_7x5_40_30_DICT_4X4.pdf`). Let the ChArUco faces towqrds the right side of the robot arm. You can control the gripper manually trhough the `OnRobot RG` plug-in on the top-right corner of the paddel.
-   * Make sure the robots are in `Remote Control` mode.
+2. **Conduct hand-eye calibration:**
+   * Have the UR5e robot arm grasp the printed ChArUco board (provided in `real_robot/calibration/calib.io_charuco_210x300_7x5_40_30_DICT_4X4.pdf`). Ensure the ChArUco board faces towards the right side of the robot arm. You can control the gripper manually through the `OnRobot RG` plug-in on the top-right corner of the teach pendant.
+   * Make sure both robots are in `Remote Control` mode.
    * Navigate to the calibration directory and run:
      ```bash
      cd real_robot/calibration
      python hand_to_eye_calib.py --config ur5e.yaml
      ```
-     if the camera pipeline complains some error, try to replug the all the usb connections of the camera along its cable.
+     *(Note: If the camera pipeline throws an error, try replugging all USB connections along the camera's cable.)*
    * Repeat this process for the UR16e robot. It takes approximately 2 minutes for each arm to calibrate.
 
 ### Step 4: Testing the Setup
-6. **Test with a human policy:**
+1. **Test with a human policy:**
    From the root directory of this repository, run:
    ```bash
    python tool/eval_real_world.py --config-name real_world_exp/real_world_human_alignment
    ```
-   *Instructions:* The program will guide you to provide the garment ID (e.g., `teen-brown-top`). Next, arrange the garment into its goal state so the system can record it, if required---if the garmet's goal collected before, it will skip this step. After that, crumple the garment into its initial state. The script will then guide you through providing primitive actions.
+   *Instructions:* The program will prompt you to provide the garment ID (e.g., `teen-brown-top`). Next, arrange the garment into its goal state so the system can record it (if this garment's goal was collected previously, it will skip this step). Afterward, crumple the garment into its initial state. The script will then guide you through providing primitive actions.
 
-   Try to finish the whole episode. The result will be saved to `~/project/garmetn_folding_data/real_world_human_alignment`
+   Try to complete the entire episode. The results will be saved to `~/project/garment_folding_data/real_world_human_alignment`.
 
-7. **Test neural controllers:**
-   TODO: this step will be polished in the near future.
+2. **Test neural controllers:**
+   > **TODO:** This step will be polished in the near future.
+   
    To evaluate a trained neural controller, run a command similar to:
    ```bash
    python tool/eval_real_world.py --config-name real_world_exp/eval_megpie_flow_matching_controller
    ```
    *(Alternatively, use the diffusion demo config: `real_world_exp/diffusion_multi_primitive_multi_longsleeve_canonicalisation_alignment_demo_100_snap_one_hot_rgb+goal_mask_predict_semkey`)*
 
-> **Important Note for Neural Controllers:** The configuration files for real-world experiments are located in `conf/real_world_exp` and share a similar structure to the simulation configs. In order to run neural controllers successfully, you must first place the correct network checkpoint file into the corresponding experiment log folder so the agent can load the weights correctly.
+> **Important Note for Neural Controllers:** The configuration files for real-world experiments are located in `conf/real_world_exp` and share a similar structure to the simulation configs. To run neural controllers successfully, you must first place the correct network checkpoint file into the corresponding experiment log folder so the agent can load the weights correctly.
+
+---
+
+## 7. Adding a New Agent / Controller
+
+> **TODO:** Add instructions on how to register and integrate a new agent or controller into the codebase.

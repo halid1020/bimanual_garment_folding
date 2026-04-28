@@ -10,3 +10,4 @@ overstretch_penalty_scale: 0
 overstretch_penalty_threshold: 0.1
 affordance_penalty_scale: 0
 big_success_bonus: False
+through_canon: True # bottom of the garmen is at the top

@@ -66,6 +66,7 @@ class GarmentFoldingTask(GarmentTask):
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
         self.goals = [] # This needs to be loaded  or generated
         self.has_succeeded = False
+        self.through_canon = config.get('through_canon', False)
         
         
 
@@ -85,6 +86,10 @@ class GarmentFoldingTask(GarmentTask):
 
         self.aligned_pairs = []
         self.has_succeeded = False
+
+        if self.through_canon:
+            arena.flattened_obs = None
+            arena.get_caon_flattened_obs()
 
         return {"goals": self.goals, "keypoints": self.semkey2pid}
 
@@ -182,7 +187,7 @@ class GarmentFoldingTask(GarmentTask):
             "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
-            'canon_IoU_to_flattened': self._get_canon_IoU_to_flattened(arena),
+            'algn_IoU_to_flattened': self._get_algn_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
         }
 
@@ -209,7 +214,7 @@ class GarmentFoldingTask(GarmentTask):
         
         return aligned_curr, aligned_goal
 
-    def _get_canon_IoU_to_flattened(self, arena):
+    def _get_algn_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
         goal_mask = arena.get_flattened_obs()['observation']['mask']
         IoU = calculate_iou(cur_mask, goal_mask)

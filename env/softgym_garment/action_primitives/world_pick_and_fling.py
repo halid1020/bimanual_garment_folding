@@ -205,8 +205,8 @@ class WorldPickAndFling():
         righ_x = grasp_dist/2 + env.hard_shift_x
 
         front_fling_pos = np.array([
-            [left_x, -fling_y, hang_height],
-            [righ_x, -fling_y, hang_height]
+            [left_x, -(fling_y+0.1), hang_height],
+            [righ_x, -(fling_y+0.1), hang_height]
         ])
         back_fling_pos = np.array([
             [left_x, fling_y-0.3, lower_height],
@@ -221,7 +221,7 @@ class WorldPickAndFling():
 
         # FIX: Drop the cloth at 90% of the distance, so there is room to drag it
         release_y = (fling_y-0.2) * self.adaptive_fling_momentum
-        drag_y = (fling_y-0.3) * self.adaptive_fling_momentum
+        drag_y = (fling_y-0.29) * self.adaptive_fling_momentum
         
         # # 1. Lower to the table at the closer release_y
         # self.action_tool.movep(env, [[left_x,  release_y, lower_height],

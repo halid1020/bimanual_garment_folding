@@ -10,7 +10,7 @@ class AlignmentTask(GarmentFlatteningTask):
     
     def __init__(self, config):
         super().__init__(config)
-        self.name = 'canonicalisation-alignment'
+        self.name = 'alignment'
         self.randomise_goal = config.get('randomise_goal', False)
     
     def reset(self, arena):

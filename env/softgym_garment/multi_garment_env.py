@@ -67,16 +67,18 @@ class MultiGarmentEnv(GarmentEnv):
         set_scene(config=init_state_params, state=init_state_params)
         
         self.pickers.reset(self.picker_initial_pos)
+        self.low_level_mesh_particles = []
+        self.low_level_visible_pcs = []
+
         self.action_tool.reset(self) # Get out of camera view and open the gripper
         self._step_sim()
 
         # State tracking resets
-        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
+        self.draw_fatten_contour = ('alignment' in self.task.name)
         self.sim_step = 0
         self.video_frames = []
         self.is_recording_low_level = False
-        self.low_level_mesh_particles = []
-        self.low_level_visible_pcs = []
+       
         self.picker_poses = []
         self.last_flattened_step = -100
         self.action_step = 0
@@ -90,7 +92,7 @@ class MultiGarmentEnv(GarmentEnv):
        
         # Task and trajectory initialization
         self.task.reset(self)
-        self._initialise_trajecotry() 
+        self._initialise_trajectory() 
         
         # Process initial info dictionary
         self.info = {}

@@ -120,7 +120,7 @@ class HumanMultiPrimitive(Agent):
             text_lines = [
                 (f"Success: {success}", (0, 255, 0) if success else (0, 0, 255)),
                 (f"Max IoU(flat): {max_iou_flat:.3f}", (255, 255, 255)),
-                (f"Canon IoU(flat): {algn_iou_flat:.3f}", (255, 255, 255))
+                (f"Align IoU(flat): {algn_iou_flat:.3f}", (255, 255, 255))
             ]
 
             if 'max_IoU' in state['evaluation'].keys():

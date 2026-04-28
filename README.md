@@ -60,7 +60,7 @@ Install the remaining dependencies required for this repository:
 ```bash
 pip install pycurl
 pip install segment_anything==1.0
-pip install torch-scatter torch-sparse -f [https://data.pyg.org/whl/torch-2.4.1+cu121.html](https://data.pyg.org/whl/torch-2.4.1+cu121.html)
+pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+cu121.html
 pip install torch_geometric
 
 # To enable running ClothMate:

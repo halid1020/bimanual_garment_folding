@@ -36,6 +36,7 @@ from controllers.rl.lagarnet.single_arm_mask_pick_and_place_mpc import SingleArm
 from controllers.rl.lagarnet.dual_arm_mask_pick_and_place_mpc import DualArmMaskPickAndPlaceMPC
 from controllers.rl.cloth_mate.adapter import ClothMateAdapter
 from controllers.rl.cloth_funnels.adapter import ClothFunnelsAdapter
+#from controllers.rl.unifolding.adapter import UniFoldingAdapter
 from controllers.rl.vcd.adapter import VCDAdapter
 import actoris_harena as athar
 

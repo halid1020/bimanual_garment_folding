@@ -203,7 +203,7 @@ class GarmentEnv(Arena):
         self.episode_config = episode_config
 
         init_state_params = self._get_init_state_params(self.eid)
-        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
+        self.draw_fatten_contour = ('alignment' in self.task.name)
         self.sim_step = 0
         self.video_frames = []
 
@@ -242,6 +242,31 @@ class GarmentEnv(Arena):
         pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
         self.wait_until_stable()
         self._get_particle_distance_matrix()
+
+        self.info = self._process_info({}, task_related=re_process_info, flatten_obs=False)
+        return self.info
+    
+    def set_to_canon_flatten(self, re_process_info=False):
+        self.set_to_flatten()
+        goal_particles = self.get_mesh_particles_positions()
+
+        theta = np.pi
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+        goal_particles = goal_particles @ rotation_matrix.T 
+
+        displacement = [0, 0, 0]
+        displacement[0] += self.config.get('hard_shift_x', 0.0)
+        
+        goal_particles += displacement
+        self.set_mesh_particles_positions(goal_particles)
+        self.wait_until_stable()
 
         self.info = self._process_info({}, task_related=re_process_info, flatten_obs=False)
         return self.info
@@ -455,6 +480,9 @@ class GarmentEnv(Arena):
     def get_random_flattened_obs(self):
         return self._compute_flattened_state(self.set_to_random_flatten)
 
+    def get_caon_flattened_obs(self):
+        return self._compute_flattened_state(self.set_to_canon_flatten)
+
     def get_no_op(self):
         return self.action_tool.get_no_op()
     
@@ -658,11 +686,11 @@ class GarmentEnv(Arena):
         obs['particle_positions'] = self.get_mesh_particles_positions()
         obs['semkey2pid'] = self.task.semkey2pid
 
-        if self.config.get('collect_control_data', False):
-            _, visible_mask = self.get_visibility(obs['particle_positions'])
-            obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
-            if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
-                obs['mesh_faces'] = self.init_state_params['mesh_faces']
+        # if self.config.get('collect_control_data', False):
+        _, visible_mask = self.get_visibility(obs['particle_positions'])
+        obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
+        if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
+            obs['mesh_faces'] = self.init_state_params['mesh_faces']
         
         if flatten_obs and obs['semkey2pid']:
             keypids = list(obs['semkey2pid'].values())

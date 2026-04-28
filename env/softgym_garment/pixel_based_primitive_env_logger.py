@@ -184,8 +184,8 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
             #        PICK & FLING
             # ================================
             elif key == "norm-pixel-pick-and-fling":
-                pick_0 = norm_to_px(val[:2], W, H)
-                pick_1 = norm_to_px(val[2:4], W, H)
+                # pick_0 = norm_to_px(val[:2], W, H)
+                # pick_1 = norm_to_px(val[2:4], W, H)
 
                 # ADDED BOUNDS CHECK
                 traj = None

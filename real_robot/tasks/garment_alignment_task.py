@@ -6,26 +6,13 @@ from .utils import *
 from real_robot.utils.mask_utils import calculate_iou
 from .garment_flattening_task import RealWorldGarmentFlatteningTask
 
-class RealWorldGarmentCanonicalisationAlignmentTask(RealWorldGarmentFlatteningTask):
+class RealWorldGarmentAlignmentTask(RealWorldGarmentFlatteningTask):
     
     def __init__(self, config):
         super().__init__(config)
-        self.name = 'canonicalisation-alignment'
+        self.name = 'algnicalisation-alignment'
         self.randomise_goal = config.get('randomise_goal', False)
     
-    # def reset(self, arena):
-    #     self.info = super().reset(arena)
-
-    #     flattened_goal = self.info['goals'][0][0]
-
-    #     # TODO: create a UI interface, 
-    #     # where the user can drag the goal cloth mask on the canvas.
-    #     # The canvase is composed of the workspace mask of the two arms.
-    #     # after user fix the goal position, self.goals are updated.
-
-       
-    #     return self.info
-
     def reset(self, arena):
         self.info = super().reset(arena)
 
@@ -137,7 +124,7 @@ class RealWorldGarmentCanonicalisationAlignmentTask(RealWorldGarmentFlatteningTa
     
     def success(self, arena):
         cur_eval = self.evaluate(arena)
-        IoU = cur_eval['canon_IoU_to_flattened']
+        IoU = cur_eval['algn_IoU_to_flattened']
         coverage = cur_eval['normalised_coverage']
         return IoU > IOU_FLATTENING_TRESHOLD and coverage > NC_FLATTENING_TRESHOLD
     
@@ -146,14 +133,14 @@ class RealWorldGarmentCanonicalisationAlignmentTask(RealWorldGarmentFlatteningTa
 
         # --- Compute averages for results_1 ---
         avg_nc_1 = mean([ep["normalised_coverage"][-1] for ep in results_1])
-        avg_iou_1 = mean([ep["canon_IoU_to_flattened"][-1] for ep in results_1])
-        avg_len_1 = mean([len(ep["canon_IoU_to_flattened"]) for ep in results_1])
+        avg_iou_1 = mean([ep["algn_IoU_to_flattened"][-1] for ep in results_1])
+        avg_len_1 = mean([len(ep["algn_IoU_to_flattened"]) for ep in results_1])
         score_1 = avg_nc_1 + avg_iou_1
 
         # --- Compute averages for results_2 ---
         avg_nc_2 = mean([ep["normalised_coverage"][-1] for ep in results_2])
-        avg_iou_2 = mean([ep["canon_IoU_to_flattened"][-1] for ep in results_2])
-        avg_len_2 = mean([len(ep["canon_IoU_to_flattened"]) for ep in results_2])
+        avg_iou_2 = mean([ep["algn_IoU_to_flattened"][-1] for ep in results_2])
+        avg_len_2 = mean([len(ep["algn_IoU_to_flattened"]) for ep in results_2])
         score_2 = avg_nc_2 + avg_iou_2
 
         # --- Both are very good → prefer shorter trajectory ---

@@ -1,4 +1,4 @@
-conda activate mp-fold
+conda activate magpie
 if [ -d "../softgym" ]; then
   cd ../softgym
   . ./setup.sh

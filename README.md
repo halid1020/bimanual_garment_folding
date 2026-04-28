@@ -23,12 +23,14 @@
 7. [Real-World Experiments](#7-real-world-experiments)
 
 ---
+TODO: add a section to explain the folders.
 
 ## 1. Prerequisites
 
 Before proceeding, please ensure you have already installed and tested the following:
-* The `py3.10` branch of the [`softgym`](https://github.com/halid1020/softgym/tree/py3.10) repository (only required for simulation experiments).
-* The `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
+* Install the `py3.10` branch of the [`softgym`](https://github.com/halid1020/softgym/tree/py3.10) repository (only required for simulation experiments).
+* Checkout to the `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
+* Install `realsense-viewer` for real world experiments.
 
 ---
 
@@ -39,7 +41,11 @@ Before proceeding, please ensure you have already installed and tested the follo
 conda create -n magpie python=3.10 -y
 conda activate magpie
 ```
-
+If you need to reinstall the environment, delete the old environmet first
+```bash
+conda deactivate
+conda remove -n magpie --all
+```
 ### Step 2: Install the `actoris_harena` package
 Navigate to your `actoris_harena` directory and install it with the Torch dependencies:
 ```bash
@@ -56,16 +62,18 @@ pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+c
 pip install torch_geometric
 
 # For enbale the running of ClothMate
-pip installl trimesh
+pip install trimesh
 pip install OpenEXR
 ```
 
 ### Step 4: Setup Assets (only for simulation)
-Download and unzip the [`assets.zip`]([https://link-to-your-assets.com/assets.zip](https://link-to-your-assets.com/assets.zip)) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes and goal configurations required for garment folding.
+Download and unzip the [`assets.zip`]([https://link-to-your-assets.com/assets.zip](https://link-to-your-assets.com/assets.zip)) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes, goal and semantic keypoints configurations required for garment folding. **TODO: make the link effective by uploading asset**
 
 ---
 
-## 3. Testing the Installation
+## 3. Testing the Installation (Simulation)
+
+If you are installing for real-world experimet, please jump to section 7. Otherwise, follow the below instruction
 
 Run the following commands to verify your setup. This will execute a random policy on the multi-primitive setup in simulation.
 
@@ -83,18 +91,9 @@ The evaluation results will be saved in the `./tmp` folder.
 
 ---
 
-## 4. Adding a New Agent / Controller
+## 4. Configuring Experiments
 
-1. **Create the Controller:**
-   Add your new controller script inside the `controllers` folder. Ensure it adheres to the `Agent` or `TrainableAgent` interface defined in the `actoris_harena` package. You can refer to the existing controllers in that folder for examples.
-2. **Register the Controller:**
-   Open `registration/agent.py` and add your new agent to the `register_agents` function. This makes it available to the training script.
-
----
-
-## 5. Configuring Experiments
-
-All experiment configurations are stored in the `conf` folder. This codebase uses **Hydra** for configuration management.
+All experiment configurations are stored in the `conf/magpie` folder. This codebase uses **Hydra** for configuration management.
 
 To create a new experiment, create a YAML file directly under the `conf` folder. This file serves as the entry point and should define the following parameters:
 
@@ -108,7 +107,7 @@ To create a new experiment, create a YAML file directly under the `conf` folder.
 
 ---
 
-## 6. Simulation Experiments
+## 5. Simulation Experiments
 
 ### Running on a Local or Remote Machine
 
@@ -152,30 +151,36 @@ If you are on the login node of the University of York's Viking cluster, you can
 
 ---
 
-## 7. Real-World Experiments
+## 6. Real-World Experiments
 
 You do not need to install `softgym` for the real-world setup, but `actoris_harena` and the packages listed in Section 2 must be installed. Additionally, real-world experiments require the Segment Anything Model (SAM) weights.
 
 ### Step 1: Download SAM Weights
-Download `sam_vit_h_4b8939.pth` and place it inside the `sam_vit` directory. *(Note: This is strictly required for real-world vision processing).*
+Download [`sam_vit_h_4b8939.pth`](https://huggingface.co/HCMUE-Research/SAM-vit-h/blob/main/sam_vit_h_4b8939.pth) and place it inside the `real_robot/models` directory. *(Note: This is strictly required for real-world vision processing).*
 
 ### Step 2: Network Configuration
 1. Ensure the control machine (e.g., a GPU laptop) is connected to both robot arms via an Ethernet switch.
-2. Set the IP address of the control machine:
+2. Open a terminal in the contrl machine, set the IP address of the control machine:
    ```bash
-   sudo ip addr add 192.168.1.20/24 dev enp45s0
+   sudo ip addr add 192.168.1.20/24 dev enp45s0 # Or any ip address you want.
    ```
-3. Check the IP addresses of the robots to ensure they are consistent with the information defined in `real_robot/calibration/ur5e.yaml` and `real_robot/calibration/ur16e.yaml`.
+3. Boot the two robot arms.
+3. Check the IP addresses of the robots to ensure they are consistent with the information defined in `real_robot/calibration/ur5e.yaml` and `real_robot/calibration/ur16e.yaml`. You can check and change the ip address of the robots in its paddle in the following pages `setting` page -> `system` tab -> `network` window. Please see the following figure for correct configuration. TODO: add the figure.
 
 ### Step 3: Camera and Calibration
-4. Launch `realsense-viewer` and verify that the RGB-D images are displaying correctly.
+4. In the control machine, launch `realsense-viewer` and verify that the RGB-D images are displaying correctly. Two robot arms are at the side, the midpoint of the arms is at the centre of the camear-- the depth colour is evenly distrbuted. Please see the figure blow. TODO: insert the figure from tutorials/figures/realsense.png
+
+Then, close the realsense viewer.
+
 5. **Conduct hand-eye calibration:**
-   * Have the UR5e robot arm grasp the printed ChArUco board (provided in `real_robot/calibration/calib.io_charuco_210x300_7x5_40_30_DICT_4X4.pdf`).
+   * Have the UR5e robot arm grasp the printed ChArUco board (provided in `real_robot/calibration/calib.io_charuco_210x300_7x5_40_30_DICT_4X4.pdf`). Let the ChArUco faces towqrds the right side of the robot arm. You can control the gripper manually trhough the `OnRobot RG` plug-in on the top-right corner of the paddel.
+   * Make sure the robots are in `Remote Control` mode.
    * Navigate to the calibration directory and run:
      ```bash
      cd real_robot/calibration
      python hand_to_eye_calib.py --config ur5e.yaml
      ```
+     if the camera pipeline complains some error, try to replug the all the usb connections of the camera along its cable.
    * Repeat this process for the UR16e robot. It takes approximately 2 minutes for each arm to calibrate.
 
 ### Step 4: Testing the Setup
@@ -184,9 +189,12 @@ Download `sam_vit_h_4b8939.pth` and place it inside the `sam_vit` directory. *(N
    ```bash
    python tool/eval_real_world.py --config-name real_world_exp/real_world_human_alignment
    ```
-   *Instructions:* The program will guide you to provide the garment ID. Next, arrange the garment into its goal state so the system can record it. After that, crumple the garment into its initial state. The script will then guide you through providing primitive actions.
+   *Instructions:* The program will guide you to provide the garment ID (e.g., `teen-brown-top`). Next, arrange the garment into its goal state so the system can record it, if required---if the garmet's goal collected before, it will skip this step. After that, crumple the garment into its initial state. The script will then guide you through providing primitive actions.
+
+   Try to finish the whole episode. The result will be saved to `~/project/garmetn_folding_data/real_world_human_alignment`
 
 7. **Test neural controllers:**
+   TODO: this step will be polished in the near future.
    To evaluate a trained neural controller, run a command similar to:
    ```bash
    python tool/eval_real_world.py --config-name real_world_exp/eval_megpie_flow_matching_controller

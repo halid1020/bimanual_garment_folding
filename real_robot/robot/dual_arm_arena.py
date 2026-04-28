@@ -530,3 +530,6 @@ class DualArmArena(Arena):
         rgb, _ = self.dual_arm.camera.take_rgbd()
         shaded = self.dual_arm.apply_workspace_mask(rgb)
         return shaded
+    
+    def compare(self, results1, results2):
+        return 0

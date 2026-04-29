@@ -85,7 +85,7 @@ class DiffusionTransform():
             ret_data[self.config.input_obs] = (ts_to_np(data[self.config.input_obs])*255.0).clip(0, 255).astype(np.uint8)
         return ret_data
 
-class MultiPrimitiveDiffusionAdapter(TrainableAgent):
+class MagpieAgent(TrainableAgent):
 
     def __init__(self, config):
         super().__init__(config)

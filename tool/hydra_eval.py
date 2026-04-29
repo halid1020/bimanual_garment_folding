@@ -3,7 +3,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import os
 import socket
-import actoris_harena.api as ag_ar
+import actoris_harena.api as athar
 
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
@@ -41,7 +41,7 @@ def main(cfg: DictConfig):
 
     # 3. Build Agent
     print(f"[hydra eval] Building Agent: {agent_name}")
-    agent = ag_ar.build_agent(
+    agent = athar.build_agent(
         agent_name, 
         cfg.agent,
         project_name=cfg.project_name,
@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     
     # 4. Build Arena
     print(f"[hydra eval] Building Arena: {arena_name}")
-    arena = ag_ar.build_arena(
+    arena = athar.build_arena(
         arena_name, 
         cfg.arena,
         project_name=cfg.project_name,
@@ -66,7 +66,7 @@ def main(cfg: DictConfig):
     arena.set_task(task)
 
     # 6. Run Evaluation
-    ag_ar.evaluate(
+    athar.evaluate(
         agent,
         arena,
         checkpoint=-2, # Load best checkpoint

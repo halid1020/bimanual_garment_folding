@@ -33,22 +33,12 @@ class HumanMultiPrimitive(Agent):
     def reset(self, arena_ids):
         self.internal_states = {arena_id: {} for arena_id in arena_ids}
         self.last_primitive = None
+    
     def init(self, infos):
         pass
 
     def update(self, infos, actions):
         pass
-
-    def act(self, info_list, update=False):
-        """
-        Pop up a window shows the RGB image, and user can click on the image to
-        produce normalised pick-and-place action ranges from [-1, 1]
-        """
-        actions = []
-        for info in info_list:
-            actions.append(self.single_act(info))
-        
-        return actions
     
 
     def single_act(self, state, update=False):

@@ -69,36 +69,102 @@ class Inference3D:
         self.args = args
 
     def transform_input(self, pts_xyz: np.ndarray, seed: int = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # --- NEW LOGGING: Print original shape ---
+        logger.info(f"[Inference3D] Original input point cloud shape: {pts_xyz.shape}")
+        
         rs = np.random.RandomState(seed=seed)
+
+        # Fallback if point cloud is completely empty
+        if pts_xyz.shape[0] == 0:
+            logger.warning("Empty point cloud received! Injecting a dummy point.")
+            pts_xyz = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
+
         all_idxs = np.arange(pts_xyz.shape[0])
-        # random select fixed number of points
+
+        # Random select fixed number of points
         if all_idxs.shape[0] >= self.num_pc_sample:
             selected_idxs = rs.choice(all_idxs, size=self.num_pc_sample, replace=False)
         else:
-            np.random.seed(seed)
-            np.random.shuffle(all_idxs)
-            res_num = len(all_idxs) - self.num_pc_sample
-            selected_idxs = np.concatenate([all_idxs, all_idxs[:res_num]], axis=0)
+            selected_idxs = rs.choice(all_idxs, size=self.num_pc_sample, replace=True)
+
         pc_xyz_slim = pts_xyz[selected_idxs, :]
 
-        # perform voxelization for Sparse ResUnet-3D
-        _, sel_pc_idxs = ME.utils.sparse_quantize(pc_xyz_slim / self.voxel_size, return_index=True)
+        # Perform voxelization to find UNIQUE voxels
+        unique_coords, sel_pc_idxs = ME.utils.sparse_quantize(pc_xyz_slim / self.voxel_size, return_index=True)
         origin_slim_pc_num = sel_pc_idxs.shape[0]
-        assert origin_slim_pc_num >= self.num_pc_sample_final
-        all_idxs = np.arange(origin_slim_pc_num)
-        rs = np.random.RandomState(seed=seed)
-        final_selected_idxs = rs.choice(all_idxs, size=self.num_pc_sample_final, replace=False)
-        sel_pc_idxs = sel_pc_idxs[final_selected_idxs]
-        assert sel_pc_idxs.shape[0] == self.num_pc_sample_final
-        # voxelized coords for MinkowskiEngine engine
-        coords = np.floor(pc_xyz_slim[sel_pc_idxs, :] / self.voxel_size)
-        feat = pc_xyz_slim[sel_pc_idxs, :]
+
+        # Guarantee Exactly 4000 Unique Voxels
+        if origin_slim_pc_num >= self.num_pc_sample_final:
+            # Normal case: we have enough unique voxels
+            final_selected_idxs = rs.choice(np.arange(origin_slim_pc_num), size=self.num_pc_sample_final, replace=False)
+            sel_pc_idxs = sel_pc_idxs[final_selected_idxs]
+
+            coords = np.floor(pc_xyz_slim[sel_pc_idxs, :] / self.voxel_size).astype(np.int32)
+            feat = pc_xyz_slim[sel_pc_idxs, :]
+            final_pc_xyz = pc_xyz_slim[sel_pc_idxs, :]
+        else:
+            # Crumpled case: "Thicken" the cloth into adjacent empty voxels
+            logger.warning(f"Only {origin_slim_pc_num} unique voxels. Thickening point cloud to reach {self.num_pc_sample_final}...")
+            
+            valid_coords = np.floor(pc_xyz_slim[sel_pc_idxs, :] / self.voxel_size).astype(np.int32)
+            valid_feat = pc_xyz_slim[sel_pc_idxs, :]
+            valid_pc_xyz = pc_xyz_slim[sel_pc_idxs, :]
+
+            # Track occupied space to prevent duplicates
+            occupied = set(tuple(c) for c in valid_coords)
+            needed = self.num_pc_sample_final - origin_slim_pc_num
+
+            # Create 26-way adjacency directions (all neighboring voxels)
+            dirs = []
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    for dz in [-1, 0, 1]:
+                        if not (dx == 0 and dy == 0 and dz == 0):
+                            dirs.append([dx, dy, dz])
+            directions = np.array(dirs, dtype=np.int32)
+
+            new_coords_arr = []
+            new_feat_arr = []
+            new_pc_xyz_arr = []
+
+            # Fast generation loop: Branch out into empty space
+            while needed > 0:
+                # Randomly select base points to branch off from
+                choices = rs.choice(len(valid_coords), size=needed * 2, replace=True)
+                base_c = valid_coords[choices]
+                base_f = valid_feat[choices]
+                base_p = valid_pc_xyz[choices]
+
+                # Apply random directions
+                dir_choices = directions[rs.choice(len(directions), size=len(choices), replace=True)]
+                cand_c = base_c + dir_choices
+
+                # Filter and add only if the voxel is empty
+                for i in range(len(cand_c)):
+                    tup = tuple(cand_c[i])
+                    if tup not in occupied:
+                        occupied.add(tup)
+                        new_coords_arr.append(cand_c[i])
+                        new_feat_arr.append(base_f[i])
+                        new_pc_xyz_arr.append(base_p[i])
+                        needed -= 1
+                        if needed == 0:
+                            break
+
+            coords = np.concatenate([valid_coords, np.array(new_coords_arr, dtype=np.int32)], axis=0)
+            feat = np.concatenate([valid_feat, np.array(new_feat_arr, dtype=valid_feat.dtype)], axis=0)
+            final_pc_xyz = np.concatenate([valid_pc_xyz, np.array(new_pc_xyz_arr, dtype=valid_pc_xyz.dtype)], axis=0)
+
         # create sparse-tensor batch
         coords, feat = ME.utils.sparse_collate([coords], [feat])
 
         coords = coords.to(self.model.device)
         feat = feat.to(self.model.device)
-        pts_xyz_batch = torch.from_numpy(pc_xyz_slim[sel_pc_idxs, :]).unsqueeze(0).to(self.model.device)
+        pts_xyz_batch = torch.from_numpy(final_pc_xyz).unsqueeze(0).to(self.model.device)
+
+        # --- NEW LOGGING: Print transformed shape ---
+        logger.info(f"[Inference3D] Transformed point cloud batch shape: {pts_xyz_batch.shape}")
+        
         return pts_xyz_batch, coords, feat
 
     def transform_output(self, 

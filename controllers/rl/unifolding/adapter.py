@@ -1,10 +1,3 @@
-# This file is adapted from the running script of unifolding repository
-# pip install autolab-core
-# pip install loguru>=0.7.0
-# pip install easydict
-# pip install pyrfuniverse==0.10.1 --> this leads to numpy incompatiblity for pybullet version of raven.
-# pip install rich
-# pip install pymongo
 import os
 import numpy as np
 import torch
@@ -31,8 +24,8 @@ class HarenaTransforms(ExperimentVirtualTransforms):
         This entirely bypasses UniFolding's attempt to load JSON files.
         """
         if self.option is not None:
-            machine_cfg = self.option.experiment.machine
-            cam_cfg = self.option.experiment.compat.camera
+            machine_cfg = self.option.machine
+            cam_cfg = self.option.compat.camera
             
             # 1. Set Robot Bases
             self.left_robot_base_pos = np.array(machine_cfg.left_robot_base)
@@ -76,7 +69,7 @@ class HarenaExperiment(ExperimentVirtual):
         OVERRIDE: Replaces the 'TODO'. Calculates if the distance 
         from the robot base to the pick point is within your ring limits.
         """
-        machine_cfg = self.option.experiment.machine
+        machine_cfg = self.option.machine  # <--- REMOVED .experiment here
         target_pos = pose.translation
         
         if is_left_robot:
@@ -93,13 +86,19 @@ class HarenaExperiment(ExperimentVirtual):
 
     def is_pose_within_workspace(self, pose: RigidTransform) -> bool:
         """OVERRIDE: Check if the AI's predicted point actually falls on your table"""
-        machine_cfg = self.option.experiment.machine
+        machine_cfg = self.option.machine  # <--- REMOVED .experiment here
         x, y, z = pose.translation
         
         in_x = machine_cfg.x_lim_m[0] <= x <= machine_cfg.x_lim_m[1]
         in_y = machine_cfg.y_lim_m[0] <= y <= machine_cfg.y_lim_m[1]
         
         return in_x and in_y
+    
+    def is_pose_safe(self, pose1: RigidTransform, pose2: RigidTransform) -> bool:
+        """OVERRIDE: Use the flattened config structure to find safe_distance_m"""
+        # Look directly in self.option.machine instead of self.option.compat.machine
+        dist = np.linalg.norm(pose1.translation - pose2.translation)
+        return dist > self.option.machine.safe_distance_m
 
 class UniFoldingAdapter(TrainableAgent):
     
@@ -108,33 +107,36 @@ class UniFoldingAdapter(TrainableAgent):
         self.name = 'unifolding'
         self.debug = config.get('debug', False)
         
-        # Instantiate your custom environment rules
-        self.experiment = HarenaExperiment(config)
+        # Save the config so we can access it later in set_log_dir
+        self.agent_config = config 
         
-        # Pass it to Inference3D so it filters out bad poses correctly
-        self.inference = Inference3D(experiment=self.experiment, **config.inference)
+        # Instantiate your custom environment rules
+        self.experiment = HarenaExperiment(config.experiment)
+        
+        # We do NOT initialize Inference3D here anymore because self.save_dir isn't assigned yet!
+        self.inference = None
 
 
     def load_best(self, path=None) -> int:
-        # Construct the path to load from
-        load_path = path if path is not None else self.save_dir
-        load_path = os.path.join(load_path, 'checkpoints', 'model_best.pth')
         
-        checkpoint = torch.load(load_path, map_location="cpu", weights_only=True)
+        # --- DYNAMIC MODEL PATH LOGIC ---
+        # 1. Grab the garment type (e.g., 'tshirt_long') from your config
+        garment_type = self.agent_config.experiment.compat.garment_type
         
-        if getattr(self, 'policy', None) is not None:
-            # We don't need to strip the 'value_net.' prefix anymore because MaximumValuePolicy expects it!
-            state_dict = checkpoint.get('net', checkpoint)
-            self.policy.load_state_dict(state_dict, strict=False)
-            self.policy.eval()
-            
-        if getattr(self, 'keypoint_detector', None) is not None:
-            kps_model_path = os.path.join(path if path is not None else self.save_dir, 'checkpoints', 'keypoint_model.pth')
-            
-            if os.path.exists(kps_model_path):
-                kps_ckpt = torch.load(kps_model_path, map_location="cpu", weights_only=True)
-                self.keypoint_detector.load_state_dict(kps_ckpt.get('model_state_dict', kps_ckpt))
-                self.keypoint_detector.eval()
+        # 2. Combine the dynamically generated save_dir and the garment_type
+        # Result: /media/hcv530/T71/.../unifolding_folding_from_crumpled/tshirt_long
+        dynamic_model_path = os.path.join(self.save_dir, garment_type)
+        
+        # 3. Override the placeholder model_path in the config
+        # We convert it to a standard dict to ensure we can modify it
+        inference_kwargs = dict(self.agent_config.inference)
+        inference_kwargs['model_path'] = dynamic_model_path
+        
+        # 4. Safely initialize Inference3D now that the path is absolute and correct!
+        self.inference = Inference3D(experiment=self.experiment, **inference_kwargs)
+        
+        if self.debug:
+            print(f"[Unifolding Adapter] Dynamically loaded model from: {dynamic_model_path}")
 
         return True
     
@@ -157,22 +159,47 @@ class UniFoldingAdapter(TrainableAgent):
             print(f"[Unifolding Adapter] Inference Exception: {err}")
 
         # ==========================================
-        # Action Conversion: UniFolding -> HybridActionPrimitive
+        # Action Conversion: 3D World -> 2D Normalized Pixel
         # ==========================================
         
-        # Helper to safely extract the 3D translation from a RigidTransform
-        def get_translation(transform):
-            return transform.translation if transform is not None else None
+        def get_translation_2d(transform):
+            if transform is None: return None
+            x, y, z = transform.translation
+            
+            # Fetch camera parameters from your config
+            cam_pos = self.agent_config.experiment.compat.camera.pos
+            fov_x, fov_y = self.agent_config.experiment.compat.camera.field_of_view
+            
+            # 1. Calculate distance from camera to the pick point (Z-depth)
+            depth = cam_pos[2] - z
+            
+            # 2. Calculate the physical width and height of the camera's view at this depth
+            half_w = depth * np.tan(np.deg2rad(fov_x) / 2.0)
+            half_h = depth * np.tan(np.deg2rad(fov_y) / 2.0)
+            
+            # 3. Normalize coordinates to [-1, 1]
+            norm_x = (x - cam_pos[0]) / half_w
+            
+            # Image Y (pixel rows) goes DOWN, while World Y goes UP. Invert it:
+            norm_y = -(y - cam_pos[1]) / half_h
+            
+            # Clip them just to be safe
+            norm_x = np.clip(norm_x, -1.0, 1.0)
+            norm_y = np.clip(norm_y, -1.0, 1.0)
+            
+            # The environment explicitly multiplies the action by np.array([H, W]).
+            # This mathematically implies it expects the layout as [Y, X] (row, col).
+            return np.array([norm_y, norm_x], dtype=np.float32)
 
         # If no valid action message or the action is terminal/failed, trigger no-op
         if action_message is None or action_message.action_type in [ActionTypeDef.DONE, ActionTypeDef.FAIL]:
             return {'no-operation': True}
 
-        # Extract points
-        p0 = get_translation(action_message.left_pick_pt)
-        p1 = get_translation(action_message.right_pick_pt)
-        l0 = get_translation(action_message.left_place_pt)
-        l1 = get_translation(action_message.right_place_pt)
+        # Extract 2D projected points
+        p0 = get_translation_2d(action_message.left_pick_pt)
+        p1 = get_translation_2d(action_message.right_pick_pt)
+        l0 = get_translation_2d(action_message.left_place_pt)
+        l1 = get_translation_2d(action_message.right_place_pt)
 
         act_type = action_message.action_type
         converted_action = {}
@@ -218,6 +245,12 @@ class UniFoldingAdapter(TrainableAgent):
     def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
         super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
+
+    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
+        self.save_dir = logdir
+        
+        
 
     def save(self):
         pass

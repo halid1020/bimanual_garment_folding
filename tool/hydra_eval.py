@@ -7,7 +7,7 @@ import actoris_harena.api as ag_ar
 
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
-from registration.task import build_task
+from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 
 
@@ -62,7 +62,7 @@ def main(cfg: DictConfig):
     
     # 5. Build Task
     # Ensure build_task can handle the DictConfig object
-    task = build_task(cfg.task)
+    task = build_sim_task(cfg.task)
     arena.set_task(task)
 
     # 6. Run Evaluation

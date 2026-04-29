@@ -7,11 +7,9 @@ from env.softgym_garment.tasks.garment_folding import GarmentFoldingTask
 from env.softgym_garment.tasks.garment_flattening import GarmentFlatteningTask
 from env.softgym_garment.tasks.alignment import AlignmentTask
 from env.softgym_garment.tasks.canonicalisation_alignment import CanonicalisationAlignmentTask
-from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
-from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
-from real_robot.tasks.garment_alignment_task import RealWorldGarmentAlignmentTask
 
-def build_task(task_cfg):
+
+def build_sim_task(task_cfg):
     # task
     if task_cfg.task_name == 'centre-sleeve-folding':
         demonstrator = HumanMultiPrimitive({"debug": False})
@@ -41,7 +39,18 @@ def build_task(task_cfg):
 
     elif task_cfg.task_name == 'dummy':
         task = None
-    elif task_cfg.task_name == 'real-world-garment-flattening':
+    
+    else:
+        raise NotImplementedError(f"Task {task_cfg.task_name} not supported")
+    
+    return task
+
+def build_real_task(task_cfg):
+    from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
+    from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
+    from real_robot.tasks.garment_alignment_task import RealWorldGarmentAlignmentTask
+
+    if task_cfg.task_name == 'real-world-garment-flattening':
         task = RealWorldGarmentFlatteningTask(task_cfg)
     elif task_cfg.task_name == 'real-world-garment-folding':
         demonstrator = RealWordHumanPolicy(DotMap())

@@ -31,6 +31,11 @@ inference:
       type: null                       # e.g., 'fling', 'fold1', 'pick_and_place'
 
 experiment:
+
+  strategy:
+    random_exploration:
+      enable: false
+
   compat:
     garment_type: 'tshirt_long'
     use_real_robots: false

@@ -137,7 +137,7 @@ class ExperimentVirtual(ExperimentBase):
         self.env.set_category_meta(meta_dict)
 
     def __del__(self):
-        self.env.close()
+        pass
 
     def assign_to_arm(self, pose1: RigidTransform, pose2: RigidTransform) -> Tuple[RigidTransform, RigidTransform]:
         """returns tuple with (left arm, right arm)"""

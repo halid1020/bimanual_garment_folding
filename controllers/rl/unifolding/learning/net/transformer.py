@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 from typing import Optional
 from torch import nn, Tensor
-from learning.components.mlp import MLP
-from learning.net.multihead_attention import MultiheadAttention
+from ...learning.components.mlp import MLP
+from ...learning.net.multihead_attention import MultiheadAttention
 
 
 class PositionEmbeddingLearned(nn.Module):

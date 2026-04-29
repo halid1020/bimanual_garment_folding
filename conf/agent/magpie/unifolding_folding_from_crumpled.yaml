@@ -3,6 +3,8 @@
 # ==========================================
 name: unifolding
 
+debug: True
+
 inference:
   # MUST UPDATE: Point this to the directory containing your 'checkpoints' folder
   model_path: "path/to/your/unifolding/longsleeve_model_dir" 

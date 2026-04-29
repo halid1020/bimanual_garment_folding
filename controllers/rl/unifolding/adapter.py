@@ -1,9 +1,11 @@
 import os
 import numpy as np
 import torch
+import cv2
+import open3d as o3d
 from actoris_harena import TrainableAgent
-import numpy as np
 from autolab_core import RigidTransform
+
 # Import the original UniFolding classes so we can inherit from them
 from .manipulation.experiment_virtual import ExperimentVirtual, ExperimentVirtualTransforms
 from .learning.inference_3d import Inference3D
@@ -69,7 +71,7 @@ class HarenaExperiment(ExperimentVirtual):
         OVERRIDE: Replaces the 'TODO'. Calculates if the distance 
         from the robot base to the pick point is within your ring limits.
         """
-        machine_cfg = self.option.machine  # <--- REMOVED .experiment here
+        machine_cfg = self.option.machine 
         target_pos = pose.translation
         
         if is_left_robot:
@@ -86,7 +88,7 @@ class HarenaExperiment(ExperimentVirtual):
 
     def is_pose_within_workspace(self, pose: RigidTransform) -> bool:
         """OVERRIDE: Check if the AI's predicted point actually falls on your table"""
-        machine_cfg = self.option.machine  # <--- REMOVED .experiment here
+        machine_cfg = self.option.machine
         x, y, z = pose.translation
         
         in_x = machine_cfg.x_lim_m[0] <= x <= machine_cfg.x_lim_m[1]
@@ -96,9 +98,9 @@ class HarenaExperiment(ExperimentVirtual):
     
     def is_pose_safe(self, pose1: RigidTransform, pose2: RigidTransform) -> bool:
         """OVERRIDE: Use the flattened config structure to find safe_distance_m"""
-        # Look directly in self.option.machine instead of self.option.compat.machine
         dist = np.linalg.norm(pose1.translation - pose2.translation)
         return dist > self.option.machine.safe_distance_m
+
 
 class UniFoldingAdapter(TrainableAgent):
     
@@ -116,7 +118,6 @@ class UniFoldingAdapter(TrainableAgent):
         # We do NOT initialize Inference3D here anymore because self.save_dir isn't assigned yet!
         self.inference = None
 
-
     def load_best(self, path=None) -> int:
         
         # --- DYNAMIC MODEL PATH LOGIC ---
@@ -124,11 +125,9 @@ class UniFoldingAdapter(TrainableAgent):
         garment_type = self.agent_config.experiment.compat.garment_type
         
         # 2. Combine the dynamically generated save_dir and the garment_type
-        # Result: /media/hcv530/T71/.../unifolding_folding_from_crumpled/tshirt_long
         dynamic_model_path = os.path.join(self.save_dir, garment_type)
         
         # 3. Override the placeholder model_path in the config
-        # We convert it to a standard dict to ensure we can modify it
         inference_kwargs = dict(self.agent_config.inference)
         inference_kwargs['model_path'] = dynamic_model_path
         
@@ -143,16 +142,25 @@ class UniFoldingAdapter(TrainableAgent):
     def single_act(self, info, update=False):
         obs = info['observation']
         
-        # Extract the point cloud
+        # Grab the environment instance to access exact camera matrices
+        env = info.get('arena', None)
+        
+        # Extract the point cloud (World Space)
         pointcloud = obs.get('visible_point_cloud', obs.get('particle_positions'))
         
-        # Wrap the numpy array in the expected ObservationMessage struct
-        obs_msg = ObservationMessage(pointcloud)
+        # ==========================================
+        # World Space -> Virtual Space Conversion
+        # ==========================================
+        w2v_matrix = self.experiment.transforms.world_to_virtual_transform
+        
+        N = pointcloud.shape[0]
+        pc_homogeneous = np.hstack((pointcloud, np.ones((N, 1))))
+        virtual_pointcloud = (w2v_matrix @ pc_homogeneous.T).T[:, :3].astype(np.float32)
 
-        # Get raw action type prediction
+        # Pass the Virtual pointcloud to the network
+        obs_msg = ObservationMessage(virtual_pointcloud)
+
         action_type = self.inference.predict_raw_action_type(obs_msg)
-
-        # Get the full action prediction (poses)
         prediction_message, action_message, err = self.inference.predict_action(obs_msg, action_type=action_type)
 
         if err is not None and self.debug:
@@ -166,91 +174,136 @@ class UniFoldingAdapter(TrainableAgent):
             if transform is None: return None
             x, y, z = transform.translation
             
-            # Fetch camera parameters from your config
-            cam_pos = self.agent_config.experiment.compat.camera.pos
-            fov_x, fov_y = self.agent_config.experiment.compat.camera.field_of_view
-            
-            # 1. Calculate distance from camera to the pick point (Z-depth)
-            depth = cam_pos[2] - z
-            
-            # 2. Calculate the physical width and height of the camera's view at this depth
-            half_w = depth * np.tan(np.deg2rad(fov_x) / 2.0)
-            half_h = depth * np.tan(np.deg2rad(fov_y) / 2.0)
-            
-            # 3. Normalize coordinates to [-1, 1]
-            norm_x = (x - cam_pos[0]) / half_w
-            
-            # Image Y (pixel rows) goes DOWN, while World Y goes UP. Invert it:
-            norm_y = -(y - cam_pos[1]) / half_h
-            
-            # Clip them just to be safe
-            norm_x = np.clip(norm_x, -1.0, 1.0)
-            norm_y = np.clip(norm_y, -1.0, 1.0)
-            
-            # The environment explicitly multiplies the action by np.array([H, W]).
-            # This mathematically implies it expects the layout as [Y, X] (row, col).
+            # Use SoftGym's EXACT intrinsic and extrinsic matrices if available
+            if env is not None and hasattr(env, 'camera_extrinsic_matrix'):
+                pt_h = np.array([[x, y, z, 1.0]], dtype=np.float32)
+                
+                # 1. World to Camera Frame
+                T_cam_world = np.linalg.inv(env.camera_extrinsic_matrix)
+                cam_pts = (T_cam_world @ pt_h.T).T[:, :3]
+                
+                # 2. Camera Frame to Image Pixels
+                proj = (env.camera_intrinsic_matrix @ cam_pts.T).T
+                z_cam = proj[0, 2]
+                if z_cam == 0: z_cam = 1e-6
+                pixels = proj[0, :2] / z_cam
+                
+                # SoftGym Swapped Intrinsic K means: index 0 is V (Y-axis), index 1 is U (X-axis)
+                pixel_y, pixel_x = pixels[0], pixels[1]
+                
+                # 3. Apply SoftGym's internal crop logic
+                pixel_x_crop = pixel_x - env.x1
+                pixel_y_crop = pixel_y - env.y1
+                
+                # 4. Normalize based on the cropped square bounds
+                norm_x = (pixel_x_crop / env.crop_size) * 2.0 - 1.0
+                norm_y = (pixel_y_crop / env.crop_size) * 2.0 - 1.0
+                
+            else:
+                print("[Unifolding Adapter] WARNING: Missing Softgym environment. Output will be broken.")
+                norm_y, norm_x = 0, 0
+                
             return np.array([norm_y, norm_x], dtype=np.float32)
 
-        # If no valid action message or the action is terminal/failed, trigger no-op
-        if action_message is None or action_message.action_type in [ActionTypeDef.DONE, ActionTypeDef.FAIL]:
-            return {'no-operation': True}
+        # Helper to safely extract 3D points for debugging
+        def get_3d(transform):
+            return transform.translation if transform is not None else None
 
-        # Extract 2D projected points
+        p0_3d = get_3d(action_message.left_pick_pt)
+        p1_3d = get_3d(action_message.right_pick_pt)
+
         p0 = get_translation_2d(action_message.left_pick_pt)
         p1 = get_translation_2d(action_message.right_pick_pt)
         l0 = get_translation_2d(action_message.left_place_pt)
         l1 = get_translation_2d(action_message.right_place_pt)
 
+        # ==========================================
+        # VISUALIZATION BLOCK (DEBUG)
+        # ==========================================
+        if self.debug:
+            os.makedirs('./tmp/unifolding', exist_ok=True)
+            
+            # --- 1. Save 3D Point Cloud ---
+            # 1a. Original garment (White)
+            pcd_garment = o3d.geometry.PointCloud()
+            pcd_garment.points = o3d.utility.Vector3dVector(pointcloud)
+            pcd_garment.paint_uniform_color([0.9, 0.9, 0.9]) 
+            
+            # 1b. Transformed Virtual garment (Green)
+            pcd_garment_v = o3d.geometry.PointCloud()
+            pcd_garment_v.points = o3d.utility.Vector3dVector(virtual_pointcloud)
+            pcd_garment_v.paint_uniform_color([0.0, 1.0, 0.0])
+            
+            combined_pcd = pcd_garment + pcd_garment_v
+            
+            pick_pts_3d = []
+            if p0_3d is not None: pick_pts_3d.append(p0_3d)
+            if p1_3d is not None: pick_pts_3d.append(p1_3d)
+            
+            if pick_pts_3d:
+                pick_arr = np.array(pick_pts_3d)
+                
+                # 1c. Original World action points (Red)
+                pcd_picks = o3d.geometry.PointCloud()
+                pcd_picks.points = o3d.utility.Vector3dVector(pick_arr)
+                pcd_picks.paint_uniform_color([1.0, 0.0, 0.0])
+                
+                # 1d. Transformed Virtual action points (Blue)
+                picks_homo = np.hstack((pick_arr, np.ones((len(pick_arr), 1))))
+                virtual_picks = (w2v_matrix @ picks_homo.T).T[:, :3]
+                
+                pcd_picks_v = o3d.geometry.PointCloud()
+                pcd_picks_v.points = o3d.utility.Vector3dVector(virtual_picks)
+                pcd_picks_v.paint_uniform_color([0.0, 0.0, 1.0])
+                
+                combined_pcd += pcd_picks + pcd_picks_v
+                
+            o3d.io.write_point_cloud('./tmp/unifolding/debug_before_3d.ply', combined_pcd)
+            
+            # --- 2. Save 2D RGB Image ---
+            rgb_img = obs.get('rgb')
+            if rgb_img is not None:
+                img_draw = rgb_img.copy()
+                if img_draw.dtype != np.uint8:
+                    img_draw = (img_draw * 255).astype(np.uint8)
+                
+                img_draw_bgr = cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR)
+                H, W = img_draw_bgr.shape[:2]
+                
+                def draw_2d_pick(pt_2d, name, color):
+                    if pt_2d is not None:
+                        py = int((pt_2d[0] + 1.0) / 2.0 * H)
+                        px = int((pt_2d[1] + 1.0) / 2.0 * W)
+                        cv2.circle(img_draw_bgr, (px, py), radius=4, color=color, thickness=-1)
+                        cv2.circle(img_draw_bgr, (px, py), radius=5, color=(255,255,255), thickness=1)
+                        cv2.putText(img_draw_bgr, name, (px + 6, py - 6), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+
+                draw_2d_pick(p0, 'L', (0, 0, 255)) 
+                draw_2d_pick(p1, 'R', (255, 0, 0))
+                
+                cv2.imwrite('./tmp/unifolding/debug_after_2d.png', img_draw_bgr)
+
+        # ==========================================
+        # Action Dictionary Assembly
+        # ==========================================
         act_type = action_message.action_type
         converted_action = {}
 
-        # 1. Fling
         if act_type == ActionTypeDef.FLING:
-            converted_action['norm-pixel-pick-and-fling'] = {
-                'pick_0': p0,
-                'pick_1': p1
-            }
-            
-        # 2. Dual-arm operations (Pick&Place, Folds, Drags)
-        elif act_type in [
-            ActionTypeDef.PICK_AND_PLACE, 
-            ActionTypeDef.FOLD_1, 
-            ActionTypeDef.FOLD_2, 
-            ActionTypeDef.DRAG, 
-            ActionTypeDef.DRAG_HYBRID
-        ]:
-            converted_action['norm-pixel-dual-pick-and-place'] = {
-                'pick_0': p0,
-                'pick_1': p1,
-                'place_0': l0,
-                'place_1': l1
-            }
-            
-        # 3. Single-arm operations
+            converted_action['norm-pixel-pick-and-fling'] = {'pick_0': p0, 'pick_1': p1}
+        elif act_type in [ActionTypeDef.PICK_AND_PLACE, ActionTypeDef.FOLD_1, ActionTypeDef.FOLD_2, ActionTypeDef.DRAG, ActionTypeDef.DRAG_HYBRID]:
+            converted_action['norm-pixel-dual-pick-and-place'] = {'pick_0': p0, 'pick_1': p1, 'place_0': l0, 'place_1': l1}
         elif act_type == ActionTypeDef.PICK_AND_PLACE_SINGLE:
-            converted_action['norm-pixel-single-pick-and-place'] = {
-                'pick_0': p0,
-                'place_0': l0  # Mapping place to left_place/0
-            }
-            
-        # 4. Fallback
+            converted_action['norm-pixel-single-pick-and-place'] = {'pick_0': p0, 'place_0': l0}
         else:
-            if self.debug:
-                print(f"[Unifolding Adapter] Unmapped ActionTypeDef: {act_type}. Defaulting to no-op.")
             converted_action['no-operation'] = True
 
         return converted_action
-
             
     def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
         super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
-
-    def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
-        super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
-        self.save_dir = logdir
-        
-        
 
     def save(self):
         pass

@@ -809,14 +809,14 @@ class GarmentEnv(Arena):
         v_int = np.clip(np.round(v).astype(int), 0, H - 1)
         depth_buffer = depth_img[v_int, u_int]
 
-        # Calculate actual Euclidean distance of the particle to the camera center
-        cam_world_pos = self.camera_extrinsic_matrix[:3, 3]
-        particle_depth = np.linalg.norm(particle_positions - cam_world_pos, axis=1)
+        # --- FIX 1: Use planar Z-depth (from step 2) instead of radial Euclidean distance ---
+        particle_depth = z
 
-        # If the particle distance is strictly greater than the depth buffer value,
-        # it means something else (another cloth layer) rendered in front of it.
-        eps = 1e-6
-        visible &= (particle_depth - self.particle_radius) < (depth_buffer - eps)
+        # --- FIX 2: Relax the epsilon tolerance to 0.015 to fix self-occlusion / Z-fighting ---
+        eps = 0.015
+        
+        # If the front of the particle is <= the depth buffer, it is visible!
+        visible &= (particle_depth - self.particle_radius) <= (depth_buffer + eps)
 
         return pixels, visible
     

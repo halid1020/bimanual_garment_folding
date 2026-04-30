@@ -9,7 +9,7 @@ SURFACE_HEIGHT = 0.04 #To calibrate: This has to be accurate
 FLING_LIFT_DIST = 0.1
 MOVE_SPEED = 3
 MOVE_ACC = 3
-DRAG_DIST = 0.3
+DRAG_DIST = 0.1
 
 def matrix_to_pose(T):
     """

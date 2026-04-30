@@ -1,5 +1,6 @@
 import time
 import numpy as np
+from termcolor import colored
 from real_robot.utils.human_utils \
     import click_points_pick_and_place, click_points_pick_and_fling, \
     click_points_single_pick_and_place  # <-- Added new import here
@@ -32,7 +33,7 @@ class RealWordHumanPolicy(Agent):
 
         while True:
             # <-- Updated prompt text to match the logic mapping below
-            cmd = input("\nSkill [1=pick-fling, 2=dual-pick-place, 3=single-pick-place, 4=no-operation, q=quit]: ").strip().lower()
+            cmd = input(colored("\n[RealWordHumanPolicy] Skill [1=pick-fling, 2=dual-pick-place, 3=single-pick-place, 4=no-operation, q=quit]: ", "green")).strip().lower()
             if cmd in ("q", "quit"):
                 return None
             elif cmd == "1":
@@ -48,7 +49,7 @@ class RealWordHumanPolicy(Agent):
                 prim_type = "no_operation"
                 break
             else:
-                print("Invalid command. Please enter 1, 2, 3, 4 or q.")
+                print(colored("[RealWordHumanPolicy] Invalid command. Please enter 1, 2, 3, 4 or q.", "red"))
 
         # Unpack scene info
         rgb, depth = info['observation']["rgb"], info['observation']["depth"]

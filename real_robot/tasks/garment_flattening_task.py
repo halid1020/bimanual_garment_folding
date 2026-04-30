@@ -72,7 +72,7 @@ class RealWorldGarmentFlatteningTask():
         return IoU
     
     def _get_normalised_improvement(self, arena):
-        print(f'current coverage {arena.coverage}, init coverage {arena.init_coverage}, flatten coverage {arena.flatten_coverage}')
+        #print(f'current coverage {arena.coverage}, init coverage {arena.init_coverage}, flatten coverage {arena.flatten_coverage}')
         
         # Cast to float to prevent unsigned integer underflow
         cov = float(arena.coverage)
@@ -83,7 +83,7 @@ class RealWorldGarmentFlatteningTask():
         res = (cov - init_cov) / (max(flat_cov - init_cov, 0.0) + 1e-3)
         
         res = np.clip(res, 0.0, 1.0)
-        print(f'normalised improvments', res)
+        #print(f'normalised improvments', res)
         
         return res
     

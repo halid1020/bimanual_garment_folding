@@ -48,7 +48,7 @@ def get_mask_v2(mask_generator, rgb,
     results = mask_generator.generate(rgb)
     mask_data = []
 
-    print(f"Found {len(results)} candidate masks.")
+    #print(f"Found {len(results)} candidate masks.")
 
     for idx, result in enumerate(results):
         mask = result['segmentation'].astype(np.uint8)

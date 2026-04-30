@@ -176,7 +176,8 @@ Download [`sam_vit_h_4b8939.pth`](https://huggingface.co/HCMUE-Research/SAM-vit-
 
 ### Step 3: Camera and Calibration
 1. On the control machine, launch `realsense-viewer` and verify that the RGB-D images are displaying correctly. The two robot arms should be visible on the sides, with the midpoint between the arms at the center of the camera view. Ensure the depth color map is evenly distributed. Please see the figure below. 
-> **TODO:** Insert the figure from `tutorials/figures/realsense.png`.
+
+![image](./tutorials/figures/realsense.png)
 
    Once verified, close the realsense viewer.
 
@@ -197,7 +198,7 @@ Download [`sam_vit_h_4b8939.pth`](https://huggingface.co/HCMUE-Research/SAM-vit-
    ```bash
    python tool/eval_real_world.py --config-name real_world_exp/real_world_human_alignment
    ```
-   *Instructions:* The program will prompt you to provide the garment ID (e.g., `teen-brown-top`). Next, arrange the garment into its goal state so the system can record it (if this garment's goal was collected previously, it will skip this step). Afterward, crumple the garment into its initial state. The script will then guide you through providing primitive actions.
+   *Instructions:* The program will prompt you to provide the garment ID (e.g., `teen-brown-top`). Next, arrange the garment into its goal state so the system can record it (if this garment's goal was collected previously, it will skip this step). Afterward, crumple the garment into its initial state. The script will then guide you through providing primitive actions. All the instructions from the program that requires user input will be highlighted in green.
 
    Try to complete the entire episode. The results will be saved to `~/project/garment_folding_data/real_world_human_alignment`.
 

@@ -5,6 +5,7 @@ import time
 import os
 import json
 import shutil
+from termcolor import colored
 
 from real_robot.robot.dual_arm_scene import DualArmScene
 from real_robot.robot.utils import get_grasp_rotation, snap_to_mask, process_depth
@@ -27,6 +28,7 @@ class DualArmArena(Arena):
         self.config = config
         self.draw_fatten_contour = False
         self.measure_time = config.get('measure_time', False)
+        self.roi_off_x = 60
 
         # Robot initialization
         dry_run = config.get("dry_run", False)
@@ -70,14 +72,14 @@ class DualArmArena(Arena):
         # Initialize flattened storage
         self.flattened_obs = None
         
-        print('Finished init DualArmArena')
+        print('[DualArmArena] Finished init DualArmArena')
 
     def reset(self, episode_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Reset the arena (move both arms home, open grippers, capture initial observation).
         """
         self.eid = episode_config.get("eid", np.random.randint(0, 9999)) if episode_config else 0
-        print(f"[Arena] Resetting episode {self.eid}")
+        print(f"[DualArmArena] Resetting episode {self.eid}")
 
         # Ensure we have the flattened observation (loaded or captured) before starting
         self.flattened_obs = None
@@ -91,7 +93,7 @@ class DualArmArena(Arena):
         self.draw_fatten_contour = ('canonicalisation' in self.task.name)
         self.task.reset(self)
         if self.init_from == 'crumpled':
-            input("Press [Enter] to finish resetting cloth state to a crumpled state...")
+            input(colored("Press [Enter] to finish resetting cloth state to a crumpled state...", "green"))
         
         self.info = {}
         self.all_infos = [self.info]
@@ -124,7 +126,7 @@ class DualArmArena(Arena):
         h, w = raw_rgb.shape[:2]
         crop_size = min(h, w)  
 
-        x1 = w // 2 - crop_size // 2 + 70 ## make sure the centre is approximately at the middle of intersection
+        x1 = w // 2 - crop_size // 2 + self.roi_off_x ## make sure the centre is approximately at the middle of intersection
         y1 = h // 2 - crop_size // 2
         x2, y2 = x1 + crop_size, y1 + crop_size
 
@@ -187,7 +189,7 @@ class DualArmArena(Arena):
         #print('input mask shape', input_mask_0.shape)
 
         self.coverage = np.sum(resized_mask)
-        print(f'Current Coverage {self.coverage}')
+        #print(f'Current Coverage {self.coverage}')
         if self.init_coverage is None: self.init_coverage = self.coverage
 
         info.update({
@@ -226,7 +228,7 @@ class DualArmArena(Arena):
             info['success'] =  self.success()
             
             if info['evaluation'] != {}:
-                print('evaluation', info['evaluation'])
+                print('[DualArmArena] evaluation', info['evaluation'])
                 info['reward'] = self.task.reward(self.last_info, None, info)
             
             goals = self.task.get_goals()
@@ -251,7 +253,7 @@ class DualArmArena(Arena):
     
     def get_flattened_obs(self):
         if self.flattened_obs is None:
-            self.garment_id = input("\n[Arena] Enter garment name (e.g. shirt_01): ").strip()
+            self.garment_id = input(colored("\n[DualArmArena] Enter garment name (e.g. shirt_01): ", "green")).strip()
             base_asset_dir = f"{os.environ.get('MP_FOLD_PATH', '.')}/assets"
             save_dir = os.path.join(base_asset_dir, 'real_garments', self.garment_id)
             
@@ -259,7 +261,7 @@ class DualArmArena(Arena):
             fn_info = os.path.join(save_dir, "info.json")
 
             if os.path.exists(save_dir) and os.path.exists(fn_info):
-                print(f"[Arena] Found cached observation folder for '{self.garment_id}'. Loading images...")
+                print(f"[DualArmArena] Found cached observation folder for '{self.garment_id}'. Loading images...")
                 try:
                     rgb = load_colour("rgb", save_dir)
                     raw_rgb = load_colour("raw_rgb", save_dir)
@@ -287,24 +289,24 @@ class DualArmArena(Arena):
                     }
                     
                     self.flatten_coverage = np.sum(mask)
-                    print(f"[Arena] Successfully loaded flattened state from PNGs/JSON, flatten coverage {self.flatten_coverage}.")
+                    print(f"[DualArmArena] Successfully loaded flattened state from PNGs/JSON, flatten coverage {self.flatten_coverage}.")
 
                 except Exception as e:
-                    print(f"[Arena] Error loading data: {e}. Will recapture manually.")
+                    print(f"[DualArmArena] Error loading data: {e}. Will recapture manually.")
                     self.flattened_obs = None
 
             if self.flattened_obs is None:
                 print("\n" + "=" * 60)
-                print(f"No valid data found in '{save_dir}'.")
-                print("Please prepare the flattened garment position manually.")
+                print(f"[DualArmArena] No valid data found in '{save_dir}'.")
+                print("[DualArmArena] Please prepare the flattened garment position manually.")
                 print("=" * 60)
-                input("Press [Enter] to capture the flattened cloth state...")
+                input(colored("[DualArmArena] Press [Enter] to capture the flattened cloth state...", "green"))
                 self.flattened_obs = {}
                 self.flattened_obs = self._process_info(self.flattened_obs, task_related=False, flattened_obs=False)
                 self.flatten_coverage = self.coverage
                 
                 obs = self.flattened_obs['observation']
-                print(f"[Arena] Saving human-readable observation to {save_dir}..., flatten coverage {self.flatten_coverage}")
+                print(f"[DualArmArena] Saving human-readable observation to {save_dir}..., flatten coverage {self.flatten_coverage}")
                 os.makedirs(save_dir, exist_ok=True)
                 
                 try:
@@ -326,9 +328,9 @@ class DualArmArena(Arena):
                     with open(fn_info, 'w') as f:
                         json.dump(meta_info, f, indent=4)
                         
-                    print("[Arena] Saved successfully.")
+                    print("[DualArmArena] Saved successfully.")
                 except Exception as e:
-                    print(f"[Arena] Warning: Could not save flattened obs: {e}")
+                    print(f"[DualArmArena] Warning: Could not save flattened obs: {e}")
 
                 print("=" * 60 + "\n")
         
@@ -354,7 +356,7 @@ class DualArmArena(Arena):
                 eroded_mask = cv2.erode(mask, kernel, iterations=5)
                 
                 if np.sum(eroded_mask) == 0:
-                    print("[Warning] Erosion removed entire mask. Using original mask.")
+                    print("[DualArmArena][Warning] Erosion removed entire mask. Using original mask.")
                     target_mask = mask
                 else:
                     target_mask = eroded_mask
@@ -520,7 +522,7 @@ class DualArmArena(Arena):
             start_time = time.time()
 
         self.info = {}
-        print(f'action step {self.action_step}')
+        # print(f'action step {self.action_step}')
         
         # Link both P&P actions to the same PickAndPlaceSkill driver 
         if action_type in ['norm-pixel-dual-pick-and-place', 'norm-pixel-single-pick-and-place']:
@@ -529,10 +531,10 @@ class DualArmArena(Arena):
         elif action_type == 'norm-pixel-pick-and-fling':
             self.pick_and_fling_skill.reset()
             traj = self.pick_and_fling_skill.step(full_action, record_debug=self.track_trajectory)
-            print('!!!len trj', len(traj))
+            #print('!!!len trj', len(traj))
             self.info['debug_trajectory'] = traj
         elif action_type == 'no-operation':
-            print('no operation!!!')
+            #print('no operation!!!')
             pass
         else:
             raise ValueError
@@ -595,7 +597,7 @@ class DualArmArena(Arena):
 
     def visualize_workspace(self):
         if self.dual_arm.dry_run:
-            print("[Dry-run] Visualization skipped.")
+            print("[DualArmArena][Dry-run] Visualization skipped.")
             return None
         rgb, _ = self.dual_arm.camera.take_rgbd()
         shaded = self.dual_arm.apply_workspace_mask(rgb)

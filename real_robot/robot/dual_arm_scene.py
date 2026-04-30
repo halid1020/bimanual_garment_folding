@@ -49,7 +49,7 @@ class DualArmScene:
             self.both_open_gripper()
             self.both_home()
         else:
-            print("[Dry-run] Skipping robot and camera init.")
+            print("[DualArmScene][Dry-run] Skipping robot and camera init.")
             self.ur5e = self.ur16e = self.camera = None
             self.intr = np.eye(3)
 
@@ -92,7 +92,7 @@ class DualArmScene:
 
         self.T_ur5e_ur16e = self.T_ur5e_cam @ np.linalg.inv(self.T_ur16e_cam)
 
-        print('Finished init RobotArm Scene')
+        print('[DualArmScene] Finished init RobotArm Scene')
 
     # ------------------------------------------------------------------
     # Helper: Coordinate Transformations
@@ -224,7 +224,7 @@ class DualArmScene:
         self.both_out_scene()
     
     def take_rgbd(self):
-        print('[DualArmScene] Take RGBD!!!')
+        #print('[DualArmScene] Take RGBD!!!')
         return self.camera.take_rgbd()
     
     def restart_camera(self):

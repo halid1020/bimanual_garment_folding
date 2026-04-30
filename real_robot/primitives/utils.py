@@ -97,7 +97,7 @@ def apply_local_z_rotation(axis_angle, angle_rad):
 def points_to_fling_path(
         right_point, left_point,
         width=None,   
-        swing_stroke=0.6, 
+        swing_stroke=0.7, 
         swing_angle=np.pi/4,
         lift_height=0.35,
         place_height=0.05):
@@ -105,7 +105,8 @@ def points_to_fling_path(
     tx_world_fling_base = tx_world_action.copy()
     tx_world_fling_base[2,3] = 0
     base_fling = get_base_fling_poses(
-        stroke=swing_stroke,
+        place_y=0,
+        stroke=swing_stroke, #swing_stroke,
         swing_angle=swing_angle,
         lift_height=lift_height,
         place_height=place_height)
@@ -160,14 +161,14 @@ def move_until_contact(robot, start_pose, max_dist=0.10, force_threshold=CONTACT
         if delta > force_threshold:
             robot.rtde_c.stopL(10.0) # Stop immediately
             contact_detected = True
-            print(f"Contact! Delta: {delta:.2f}N")
+            #print(f"Contact! Delta: {delta:.2f}N")
             break
             
         # Check if robot has actually reached the target (meaning no contact found)
         # We check simply if we are close to the target Z
         curr_pose = robot.get_tcp_pose()
         if abs(curr_pose[2] - target_pose[2]) < 0.005:
-            print("Reached target depth without contact.")
+            #print("Reached target depth without contact.")
             break
         
         time.sleep(0.002) # 500Hz check

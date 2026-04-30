@@ -43,11 +43,11 @@ class RealWorldGarmentFoldingTask():
         goal_obs = []
         actions = [] # List to store step-wise actions
         
-        print(f"\n*** ACTION REQUIRED ***")
-        print(f"Please manually flatten the garment in the simulation window.")
-        print(f"Ensure it is centered/aligned as desired.")
-        input(f"Press [Enter] when the garment is ready to start demonstration...")
-        print(f"[Goal Manager] Starting demonstrator collection...\n")
+        print(f"\n*** [RealWorldGarmentFoldingTask] ACTION REQUIRED ***")
+        print(f"[RealWorldGarmentFoldingTask] Please manually flatten the garment in the simulation window.")
+        print(f"[RealWorldGarmentFoldingTask] Ensure it is centered/aligned as desired.")
+        input(f"[RealWorldGarmentFoldingTask] Press [Enter] when the garment is ready to start demonstration...")
+        print(f"[RealWorldGarmentFoldingTask] Starting demonstrator collection...\n")
         
         measure_time = arena.measure_time
         arena.measure_time = False
@@ -61,7 +61,7 @@ class RealWorldGarmentFoldingTask():
         while step < self.goal_steps: 
             # Capture action from demonstrator
             #print('ask action!!!')
-            print(f'[Goal Manager] Current step {step}, goal_steps {self.goal_steps}')
+            print(f'[RealWorldGarmentFoldingTask] Current step {step}, goal_steps {self.goal_steps}')
             action = self.demonstrator.single_act(info) 
             actions.append(action)
             

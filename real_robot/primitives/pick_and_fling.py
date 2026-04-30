@@ -37,7 +37,7 @@ class PickAndFlingSkill:
         self.move_acc = 0.2
 
     def reset(self):
-        print("[PickAndFlingSkill] Resetting...")
+        #print("[PickAndFlingSkill] Resetting...")
         self.scene.both_home()
         self.scene.both_open_gripper()
         time.sleep(0.5)
@@ -50,7 +50,7 @@ class PickAndFlingSkill:
             accumulator['ur16e'].extend(traj['ur16e'])
 
     def step(self, action, record_debug=False):
-        print('recording ?', record_debug)
+        #print('recording ?', record_debug)
         # Initialize accumulator 
         full_trajectory = {'ur5e': [], 'ur16e': []}
 
@@ -204,7 +204,7 @@ class PickAndFlingSkill:
         lift_after_1 = final_pose_1[:3] + [0,0,FLING_LIFT_DIST]
 
         # 2. Centering & Aligning
-        print("Centering and Aligning grippers between robots...")
+        #print("Centering and Aligning grippers between robots...")
         p0_local = lift_after_0[:3]
         p1_local = transform_point(np.linalg.inv(self.scene.T_ur5e_ur16e), lift_after_1[:3])
         curr_width = np.linalg.norm(p1_local - p0_local)
@@ -251,7 +251,7 @@ class PickAndFlingSkill:
             stretch_max_speed=0.2, #0.15,
             stretch_max_width=STRETCH_MAX_WIDTH, 
             stretch_max_time=5,
-            swing_stroke=0.4,
+            swing_stroke=0.65,
             swing_height=0.45,
             swing_angle=np.pi/4,
             lift_height=HANG_HEIGHT,
@@ -375,8 +375,8 @@ class PickAndFlingSkill:
         start_width = self.scene.get_tcp_distance()
         safe_limit_width = max_width #min(max_width, start_width * 1.3) 
 
-        print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
-        print(f"[Stretch] Applying Init Force: {init_force}N, Steady Force: {force}N")
+        # print(f"[Stretch] Start Width: {start_width:.3f}, Limit: {safe_limit_width:.3f}")
+        # print(f"[Stretch] Applying Init Force: {init_force}N, Steady Force: {force}N")
 
         with self.scene.ur5e.start_force_mode() as right_force_guard:
             with self.scene.ur16e.start_force_mode() as left_force_guard:
@@ -396,11 +396,11 @@ class PickAndFlingSkill:
                     f5_mag = np.linalg.norm(f5[:3])
                     f16_mag = np.linalg.norm(f16[:3])
                     # We also print the Y component since that is the stretch direction
-                    print(f"[Stretch] Time: {elapsed:.2f}s | Force Mag: UR5e={f5_mag:.2f}N, UR16e={f16_mag:.2f}N | Y-Force: {f5[1]:.2f}, {f16[1]:.2f}")
+                    #print(f"[Stretch] Time: {elapsed:.2f}s | Force Mag: UR5e={f5_mag:.2f}N, UR16e={f16_mag:.2f}N | Y-Force: {f5[1]:.2f}, {f16[1]:.2f}")
                     # --------------------------------
                     
                     if elapsed >= max_time:
-                        print(f'[Stretch] elapsed time {elapsed} bigger than max time {max_time}, break')
+                        #print(f'[Stretch] elapsed time {elapsed} bigger than max time {max_time}, break')
                         break
                     
                     if elapsed < 0.2:
@@ -414,17 +414,17 @@ class PickAndFlingSkill:
                     r = right_force_guard.apply_force(task_frame, selection_vector, 
                         right_wrench, force_type, limits)
                     if not r: 
-                        print("[Stretch] not r is true for right, return.")
+                        #print("[Stretch] not r is true for right, return.")
                         return False
                     r = left_force_guard.apply_force(task_frame, selection_vector, 
                         left_wrench, force_type, limits)
                     if not r: 
-                        print("[Stretch] not r is true for left, return.")
+                        #print("[Stretch] not r is true for left, return.")
                         return False
                     
                     tcp_distance = self.scene.get_tcp_distance()
                     if tcp_distance >= safe_limit_width:
-                        print(f"[Stretch] Hit width limit: {tcp_distance:.3f}")
+                        #print(f"[Stretch] Hit width limit: {tcp_distance:.3f}")
                         break
 
                     l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
@@ -433,7 +433,7 @@ class PickAndFlingSkill:
                     
                     if elapsed > 0.5:
                         if actual_speed < speed_threshold:
-                            print(f"[Stretch] Stopped moving (Speed: {actual_speed:.4f}). Cloth taut.")
+                            #print(f"[Stretch] Stopped moving (Speed: {actual_speed:.4f}). Cloth taut.")
                             break
 
                     curr_time = time.time()
@@ -451,7 +451,7 @@ class PickAndFlingSkill:
         record_debug=False,
         full_trajectory_ref=None): 
         
-        print(f"[Release] Relaxing tension with {release_force}N...")
+        #print(f"[Release] Relaxing tension with {release_force}N...")
         task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
         selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
         force_type = 2
@@ -474,7 +474,7 @@ class PickAndFlingSkill:
                     elapsed = time.time() - start_time
                     
                     if elapsed >= max_time:
-                        print(f'[Release] Max time {max_time}s reached, tension relaxed.')
+                        #print(f'[Release] Max time {max_time}s reached, tension relaxed.')
                         break
                     
                     # Apply gentle inward wrench
@@ -489,7 +489,7 @@ class PickAndFlingSkill:
                     # Stop if they move too close together
                     tcp_distance = self.scene.get_tcp_distance()
                     if tcp_distance <= target_width_min:
-                        print(f"[Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
+                        #print(f"[Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
                         break
 
                     # Monitor speed to see if the arms have settled
@@ -500,7 +500,7 @@ class PickAndFlingSkill:
                     # Wait 0.5s before checking speed to allow initial acceleration
                     if elapsed > 0.5:
                         if actual_speed < speed_threshold:
-                            print(f"[Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                            #print(f"[Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
                             break
 
                     curr_time = time.time()
@@ -515,7 +515,7 @@ class PickAndFlingSkill:
         """
         Executes a rapid vertical shake to loosen folds in the fabric.
         """
-        print(f"[Shake] Executing {num_shakes} vertical shakes...")
+        #print(f"[Shake] Executing {num_shakes} vertical shakes...")
         
         # Get current starting poses for both robots
         start_pose5 = self.scene.ur5e.get_tcp_pose()

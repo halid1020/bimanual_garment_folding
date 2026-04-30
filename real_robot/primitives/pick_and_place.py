@@ -56,7 +56,7 @@ class PickAndPlaceSkill:
         # Ensure minimum clearance of 2cm so we don't drag
         adjusted_height = max(0.02, adjusted_height)
 
-        print('adjusted height!', adjusted_height)
+        #print('adjusted height!', adjusted_height)
 
         path = []
         for i in range(num_points):
@@ -169,7 +169,7 @@ class PickAndPlaceSkill:
     def _execute_single_arm(self, robot, pick_pt, place_pt, rot, force_threshold):
         # 1. Approach & Grasp
         approach_pick = np.concatenate([pick_pt + [0,0,APPROACH_DIST], rot])
-        robot.movel(approach_pick, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+        robot.movel(approach_pick, speed=MOVE_SPEED-1, acceleration=MOVE_ACC-1, blocking=True)
         
         grasp_pose = move_until_contact(robot, approach_pick, APPROACH_DIST+0.1, force_threshold=force_threshold)
         robot.close_gripper()
@@ -204,7 +204,7 @@ class PickAndPlaceSkill:
 
         # Retract
         approach_place = np.concatenate([place_pt + [0,0,APPROACH_DIST], rot])
-        robot.movel(approach_place, speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
+        robot.movel(approach_place, speed=MOVE_SPEED-2, acceleration=MOVE_ACC-2, blocking=True)
         if self.home_after:
              robot.home(speed=MOVE_SPEED, acceleration=MOVE_ACC, blocking=True)
 
@@ -215,7 +215,7 @@ class PickAndPlaceSkill:
         app_pick_0 = np.concatenate([p0_pick + [0,0,APPROACH_DIST], rot0])
         app_pick_1 = np.concatenate([p1_pick + [0,0,APPROACH_DIST], rot1])
         
-        self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED-0.5, acc=MOVE_ACC-0.5, blocking=True)
+        self.scene.both_movel(app_pick_0, app_pick_1, speed=MOVE_SPEED-1, acc=MOVE_ACC-1, blocking=True)
 
         # 2. Parallel Force Detection (Threaded Contact)
         # -------------------------------------------------------------------------
@@ -290,7 +290,7 @@ class PickAndPlaceSkill:
 
         app_place_0 = np.concatenate([p0_place + [0,0,APPROACH_DIST], rot0])
         app_place_1 = np.concatenate([p1_place + [0,0,APPROACH_DIST], rot1])
-        self.scene.both_movel(app_place_0, app_place_1, speed=self.move_speed, acc=self.move_acc, blocking=True)
+        self.scene.both_movel(app_place_0, app_place_1, speed=MOVE_SPEED-2, acc=MOVE_ACC-2, blocking=True)
         
         if self.home_after:
             self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
@@ -310,7 +310,7 @@ class PickAndPlaceSkill:
         # 15cm is a standard safe zone to avoid UR shoulder singularities
         SINGULARITY_THRESHOLD = 0.35
 
-        print(f"[PickAndPlace Release WARNING: Arm(s) to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
+        #print(f"[PickAndPlace Release WARNING: Arm(s) to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
 
         if dist5 < SINGULARITY_THRESHOLD or dist16 < SINGULARITY_THRESHOLD:
             print(f"[PickAndPlace Release] WARNING: Arm(s) too close to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
@@ -319,7 +319,7 @@ class PickAndPlaceSkill:
             return False
         # ----------------------------------------------
 
-        print(f"[PickAndPlace] Relaxing tension with {release_force}N...")
+        #print(f"[PickAndPlace] Relaxing tension with {release_force}N...")
         task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
         selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
         force_type = 2
@@ -340,7 +340,7 @@ class PickAndPlaceSkill:
                         elapsed = time.time() - start_time
                         
                         if elapsed >= max_time:
-                            print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
+                            #print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
                             break
                         
                         # Apply gentle inward wrench
@@ -355,7 +355,7 @@ class PickAndPlaceSkill:
                         # Stop if they move too close together
                         tcp_distance = self.scene.get_tcp_distance()
                         if tcp_distance <= target_width_min:
-                            print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
+                            #print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
                             break
 
                         # Monitor speed to see if the arms have settled
@@ -365,7 +365,7 @@ class PickAndPlaceSkill:
                         
                         if elapsed > 0.5:
                             if actual_speed < speed_threshold:
-                                print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
+                                #print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
                                 break
 
                         curr_time = time.time()

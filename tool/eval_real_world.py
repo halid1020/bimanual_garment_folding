@@ -11,7 +11,7 @@ import actoris_harena.api as ag_ar
 from registration.agent import register_agents
 from registration.real_arena import register_arenas
 # You were missing this import for the build_task function used later
-from registration.task import build_task 
+from registration.task import build_real_task 
 
 # -------------------------------------------------------------------------
 # Helper Functions
@@ -95,7 +95,7 @@ def main(cfg: DictConfig):
 
     # 5. Build Task
     print(f"[Building Task] {cfg.task.task_name}")
-    task = build_task(cfg.task)
+    task = build_real_task(cfg.task)
     arena.set_task(task)
 
     

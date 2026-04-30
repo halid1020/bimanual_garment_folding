@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 from statistics import mean
+from termcolor import colored
 
 from .utils import *
 from real_robot.utils.mask_utils import calculate_iou
@@ -59,9 +60,9 @@ class RealWorldGarmentAlignmentTask(RealWorldGarmentFlatteningTask):
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, drag_mouse_callback)
 
-        print("\n[Task] Please drag the GREEN cloth mask to the desired goal location.")
-        print("[Task] Use 'A' and 'D' keys to rotate.")
-        print("[Task] Press ENTER to confirm.\n")
+        print(colored("\n[RealWorldGarmentAlignmentTask] Please drag the GREEN cloth mask to the desired goal location.", "green"))
+        print(colored("[RealWorldGarmentAlignmentTask] Use 'A' and 'D' keys to rotate.", "green"))
+        print(colored("[RealWorldGarmentAlignmentTask] Press ENTER to confirm.\n", "green"))
 
         # Define center of rotation (center of the image)
         center = (w // 2, h // 2)
@@ -118,7 +119,7 @@ class RealWorldGarmentAlignmentTask(RealWorldGarmentFlatteningTask):
                 # INTER_NEAREST is strictly needed for depth to prevent floating point interpolation artifacts
                 obs['depth'] = cv2.warpAffine(obs['depth'], M_final, (w, h), flags=cv2.INTER_NEAREST)
                 
-            print(f"[Task] Goal updated. Offset X:{offset_x}, Y:{offset_y}, Angle: {current_angle} deg")
+            print(f"[RealWorldGarmentAlignmentTask] Goal updated. Offset X:{offset_x}, Y:{offset_y}, Angle: {current_angle} deg")
 
         return self.info
     

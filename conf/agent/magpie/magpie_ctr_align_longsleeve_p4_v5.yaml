@@ -41,7 +41,7 @@ state_key: semkey_norm_pixel
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
+  data_path: "multi_longsleeve_multi_primitive_alignment_human_demo"
   data_dir: "./data/datasets"
   split_ratios: [0.0, 0.1, 0.9]
   seq_length: 1

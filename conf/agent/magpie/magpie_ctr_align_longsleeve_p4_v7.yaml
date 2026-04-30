@@ -41,7 +41,7 @@ state_key: semkey_norm_pixel
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_alignment_human_demo"
+  data_path: "multi_longsleeve_multi_primitive_canonicalisation_alignment_human_demo"
   data_dir: "./data/datasets"
   split_ratios: [0.0, 0.1, 0.9]
   seq_length: 1
@@ -96,7 +96,7 @@ primitive_classifier:
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
   dropout: 0.4            # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [10.0, 1.0, 10.0, 10.0]
+prim_class_weights: [2.0, 1.0, 2.0, 2.0]
 prim_weight: 0.005
 
 ## Following is the parameter from the fast conditional decoupling paper
@@ -117,7 +117,7 @@ primitives:
     dim: 4 #params: [pick_0, pick_1, place_0, place_1]
   - name: no-operation
     dim: 0
-mask_out_irrelavent_action_dim: true
+mask_out_irrelavent_action_dim: false
 
 vision_encoder: 'original'
 obs_dim: 512
@@ -130,7 +130,7 @@ obs_dim: 512
 # prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
 
 use_projector: True
-projector_hidden_dims: [256, 256] # Can be empty [] for a direct linear mapping
+projector_hidden_dims: [256] # Can be empty [] for a direct linear mapping
 projector_out_dim: 128 
 
 # --- New Params for Unified State/Goal Prediction ---

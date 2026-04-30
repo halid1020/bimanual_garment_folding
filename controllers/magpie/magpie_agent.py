@@ -1867,7 +1867,7 @@ class MagpieAgent(TrainableAgent):
         if self.config.primitive_integration == 'none':
             out_action = action
         elif self.config.primitive_integration == 'bin_as_output':
-            prim_idx = int(((action[0] + 1)/2)*self.K - 1e-6)
+            prim_idx = int(np.clip(((action[0] + 1)/2)*self.K - 1e-6, 0, self.K - 1))
             prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
             action = action[1:]
             out_action = {prim_name: action}

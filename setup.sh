@@ -1,3 +1,6 @@
+# Set the active agent from the first passed argument (can be empty)
+export MEGPIE_ACTIVE_AGENT=$1
+
 conda activate magpie
 if [ -d "../softgym" ]; then
   cd ../softgym

@@ -1,4 +1,4 @@
-name: multi-primitive-diffusion
+name: magpie
 device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 action_dim: 8

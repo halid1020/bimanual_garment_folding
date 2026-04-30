@@ -33,6 +33,7 @@ Before proceeding, please ensure you have already installed and tested the follo
 * Checkout the `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
 * Install `realsense-viewer` for real-world experiments.
 
+Please put `softgym`, `actoris_harena` and this `bimanual_garment_foling` repository at the same level in parallel under the same direcotry.
 ---
 
 ## 2. Simulation Installation
@@ -51,12 +52,14 @@ conda remove -n magpie --all
 ### Step 2: Install the `actoris_harena` package
 Navigate to your `actoris_harena` directory and install it with the Torch dependencies:
 ```bash
-cd <path-to-agent-arena>
+cd <path-to-actoris-harena>
 pip install -e ".[torch]"
 ```
 
 ### Step 3: Install additional required packages
 Install the remaining dependencies required for this repository:
+> **TODO:** Make this part installation from toml with fine-grained installation control.
+
 ```bash
 pip install pycurl
 pip install segment_anything==1.0

@@ -9,13 +9,14 @@ import actoris_harena.api as ag_ar
 # from tool.utils import register_agent, register_arena, build_task
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
-from registration.task import build_task
+from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 
 from env.parallel import Parallel
 
 @hydra.main(config_path="../conf", version_base=None)
 def main(cfg: DictConfig):
+    os.environ['MEGPIE_ACTIVE_AGENT'] = cfg.agent.name
     register_agents()
     register_arenas()
 
@@ -33,7 +34,7 @@ def main(cfg: DictConfig):
     print("[tool.hydra_train] ---------------------")
 
     save_dir = os.path.join(cfg.save_root, cfg.exp_name)
-
+    
     agent = ag_ar.build_agent(
         cfg.agent.name, 
         cfg.agent,
@@ -52,7 +53,7 @@ def main(cfg: DictConfig):
             exp_name=cfg.exp_name,
             save_dir=save_dir)
             
-        task = build_task(cfg.task)
+        task = build_sim_task(cfg.task)
         arena.set_task(task)
 
         res = ag_ar.train_and_evaluate_single(
@@ -71,7 +72,7 @@ def main(cfg: DictConfig):
 
         train_arenas = [registered_arena[cfg.arena.name](cfg.arena) for _ in range(cfg.num_train_envs)]
         train_arenas = [Parallel(arn, "process") for arn in train_arenas]
-        task = build_task(cfg.task) #TODO: this needs to become part of agent-arena.
+        task = build_sim_task(cfg.task) #TODO: this needs to become part of agent-arena.
         for i, arn in enumerate(train_arenas):
             arn.set_task(task)
             arn.set_log_dir(save_dir)

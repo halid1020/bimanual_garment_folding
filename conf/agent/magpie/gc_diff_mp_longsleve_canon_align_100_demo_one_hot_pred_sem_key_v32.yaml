@@ -112,7 +112,7 @@ ema_power: 0.9999
 primitives:
   - name: norm-pixel-pick-and-fling
     dim: 4 # [pick_0, pick_1]
-  - name: norm-pixel-pick-and-place
+  - name: norm-pixel-dual-pick-and-place
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
   - name: no-operation
     dim: 0

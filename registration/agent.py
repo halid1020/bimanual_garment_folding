@@ -1,3 +1,4 @@
+import os
 from packaging import version
 import torch 
 
@@ -21,13 +22,11 @@ from controllers.random.noise_injected_policy import NoiseInjectedPolcy
 
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 
-
 from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC
 from controllers.rl.lagarnet.single_arm_mask_pick_and_place_mpc import SingleArmMaskPickAndPlaceMPC
 from controllers.rl.lagarnet.dual_arm_mask_pick_and_place_mpc import DualArmMaskPickAndPlaceMPC
 from controllers.rl.cloth_mate.adapter import ClothMateAdapter
 from controllers.rl.cloth_funnels.adapter import ClothFunnelsAdapter
-from controllers.rl.unifolding.adapter import UniFoldingAdapter
 
 import actoris_harena as athar
 
@@ -50,28 +49,37 @@ def register_agents():
     athar.register_agent('dual_arm_mask_pick_and_place_mpc', DualArmMaskPickAndPlaceMPC)
     athar.register_agent('clothmate', ClothMateAdapter)
     athar.register_agent('cloth-funnels', ClothFunnelsAdapter)
-    athar.register_agent('unifolding', UniFoldingAdapter)
     
     athar.register_agent('noise-injected-policy', NoiseInjectedPolcy)
     athar.register_agent('dual-arm-random-pick-and-place', DualArmRandomPickAndPlace)
 
+    active_agent = os.environ.get('MEGPIE_ACTIVE_AGENT', '')
+    
+    if active_agent == 'unifolding':
+        from controllers.rl.unifolding.adapter import UniFoldingAdapter
+        athar.register_agent('unifolding', UniFoldingAdapter)
+
+    
+
+    # PyTorch 2.0+ specific agents
     is_torch_2 = version.parse(torch.__version__) >= version.parse("2.0.0")
     if is_torch_2:
-        
         from controllers.vlm_based_stitching_policy import VLMBasedStitchingPolicy
         athar.register_agent('vlm-based-stitching-policy', VLMBasedStitchingPolicy)
 
         from controllers.gpt_fabric.adapter import GPTFabricAdapter
         athar.register_agent('gpt-fabric', GPTFabricAdapter)
 
-        from controllers.multi_primitive_diffusion.adapter import MultiPrimitiveDiffusionAdapter
-        athar.register_agent('multi-primitive-diffusion', MultiPrimitiveDiffusionAdapter)
-
+        from controllers.magpie.magpie_agent import MagpieAgent
+        athar.register_agent('magpie', MagpieAgent)
 
         from controllers.rl.lagarnet.gc_rssm import GC_RSSM
         from controllers.rl.lagarnet.rssm import RSSM
         athar.register_agent('lagarnet', GC_RSSM)
         athar.register_agent('rssm', RSSM)
 
-        from controllers.rl.vcd.adapter import VCDAdapter
-        athar.register_agent('vcd', VCDAdapter)
+        if active_agent == 'vcd':
+            from controllers.rl.vcd.adapter import VCDAdapter
+            athar.register_agent('vcd', VCDAdapter)
+
+        

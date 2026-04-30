@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "megpie"
+version = "0.1.0"
+description = "Multi-Primitive Bimanual Garment Folding from Crumpled States with Pixel-based Flow Matching Policies"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Halid A. Kadi" },
+    { name = "Houdeyfa Ajrou" },
+    { name = "Lucy Walsh" },
+    { name = "Ivan Kapelyukh" }
+]
+
+# --- BASE DEPENDENCIES ---
+# These are installed by default when someone runs `pip install -e .`
+dependencies = [
+    "pycurl",
+    "segment_anything==1.0",
+    "torch", # Base torch (can be <2.0.0 for standard agents)
+    "torch_geometric",
+    "torch-scatter",
+    "torch-sparse"
+]
+
+# --- OPTIONAL DEPENDENCIES (EXTRAS) ---
+# Installed via commands like `pip install -e ".[clothmate]"`
+[project.optional-dependencies]
+
+# Extra: ClothMate Agent
+clothmate = [
+    "trimesh",
+    "OpenEXR"
+]
+
+# Extra: Advanced / Torch 2.0+ Agents
+# This fulfills the `version.parse(torch.__version__) >= version.parse("2.0.0")` check
+# for VLM, GPT-Fabric, Multi-Primitive Diffusion, GC_RSSM, and VCD.
+advanced = [
+    "torch>=2.0.0"
+]
+
+# Extra: Install everything at once
+all = [
+    "trimesh",
+    "OpenEXR",
+    "torch>=2.0.0"
+]

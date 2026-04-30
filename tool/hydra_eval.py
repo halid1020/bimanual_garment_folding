@@ -15,6 +15,7 @@ from tool.utils import resolve_save_root
 @hydra.main(config_path="../conf", version_base=None)
 def main(cfg: DictConfig):
     
+    os.environ['MEGPIE_ACTIVE_AGENT'] = cfg.agent.name
     register_agents()
     register_arenas()
 

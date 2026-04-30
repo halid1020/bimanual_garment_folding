@@ -169,7 +169,15 @@ You do not need to install `softgym` for the real-world setup, but `actoris_hare
 For a more detailed guide on operating the robots, please check the tutorial in (`tutorials/RunRealWorld.md`)[./tutorials/RunRealWorld.md].
 
 
-**Test neural controllers:**
+### Step 1: Download SAM Weights
+Download [`sam_vit_h_4b8939.pth`](https://huggingface.co/HCMUE-Research/SAM-vit-h/blob/main/sam_vit_h_4b8939.pth) and place it inside the `real_robot/models` directory. *(Note: This is strictly required for real-world vision processing).*
+
+### Step 2: Follow the Tutorial
+
+Please check the tutorial in [`tutorials/RunRealWorld.md`](./tutorials/RunRealWorld.md).
+
+
+### Step 3: Test neural controllers
    > **TODO:** This step will be polished in the near future.
    
    To evaluate a trained neural controller, run a command similar to:
@@ -184,4 +192,4 @@ For a more detailed guide on operating the robots, please check the tutorial in 
 
 ## 7. Adding a New Agent / Controller
 
-> **TODO:** Add instructions on how to register and integrate a new agent or controller into the codebase.
+Follow the tutorial in [`tutorials/CreateNewAgent.md`](./tutorials/CreateNewAgent.md).

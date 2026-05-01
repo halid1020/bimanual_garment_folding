@@ -19,7 +19,6 @@ from controllers.human.human_multi_primitive import HumanMultiPrimitive
 from controllers.random.random_multi_primitive import RandomMultiPrimitive
 from controllers.random.dual_arm_random_pick_and_place import DualArmRandomPickAndPlace
 from controllers.random.noise_injected_policy import NoiseInjectedPolcy
-
 from controllers.iou_based_stitching_policy import IoUBasedStitchingPolicy
 
 from controllers.rl.lagarnet.cloth_mask_workspace_pick_and_place_mpc import ClothMaskWorkspacePickAndPlaceMPC

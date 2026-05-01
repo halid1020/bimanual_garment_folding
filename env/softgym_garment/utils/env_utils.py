@@ -69,8 +69,8 @@ def load_cloth(path):
 
 
 def get_default_config(
-        particle_radius=0.0175,
-        cloth_stiffness = (0.75, .02, .02),
+        particle_radius= 0.015, #0.0175,
+        cloth_stiffness = (0.8, 0.6, 0.8), #(0.75, .02, .02),
         scale=0.8,
         ):
     config = {
@@ -95,7 +95,7 @@ def get_default_config(
             'radius': particle_radius,
             'buoyancy': 0,
             'numExtraParticles': 20000,
-            'collisionDistance': 0.0006,
+            'collisionDistance': 0.0006, #0.001, #0.0006,
             'msaaSamples': 0,
         },
         'flip_mesh': 0,

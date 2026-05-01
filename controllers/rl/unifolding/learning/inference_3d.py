@@ -507,7 +507,7 @@ class Inference3D:
         right_robot.transform(self.experiment.transforms.right_robot_to_world_transform)
 
         # ==========================================
-        # INJECT DEBUG BLOCK 2: 3D RINGS
+        # INJECT DEBUG BLOCK 2: 3D RINGS & VIRTUAL FRAME
         # ==========================================
         debug_rings = []
         if self.args.debug and hasattr(self.experiment.option.experiment, 'machine'):
@@ -529,15 +529,50 @@ class Inference3D:
             l_base = self.experiment.transforms.left_robot_base_pos
             r_base = self.experiment.transforms.right_robot_base_pos
             
-            # Left robot rings (Green for min, Yellow for max)
+            # Left robot rings (Green/Yellow)
             debug_rings.append(create_ring(machine_cfg.left_workspace[0], l_base, [0, 1, 0]))
             debug_rings.append(create_ring(machine_cfg.left_workspace[1], l_base, [1, 1, 0]))
             
-            # Right robot rings (Green for min, Yellow for max)
+            # Right robot rings (Green/Yellow)
             debug_rings.append(create_ring(machine_cfg.right_workspace[0], r_base, [0, 1, 0]))
             debug_rings.append(create_ring(machine_cfg.right_workspace[1], r_base, [1, 1, 0]))
-        # ==========================================
-        
+
+            # Add Virtual Coordinate Frame to see the rotation visually
+            virtual_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.4)
+            virtual_frame.transform(self.experiment.transforms.virtual_to_world_transform)
+            debug_rings.append(virtual_frame)
+
+
+            # Draw the Physical Table Boundaries as a Wireframe Box
+            def create_wireframe_box(x_lim, y_lim, z_lim, color):
+                # 8 corners of the bounding box
+                corners = [
+                    [x_lim[0], y_lim[0], z_lim[0]], [x_lim[1], y_lim[0], z_lim[0]],
+                    [x_lim[1], y_lim[1], z_lim[0]], [x_lim[0], y_lim[1], z_lim[0]],
+                    [x_lim[0], y_lim[0], z_lim[1]], [x_lim[1], y_lim[0], z_lim[1]],
+                    [x_lim[1], y_lim[1], z_lim[1]], [x_lim[0], y_lim[1], z_lim[1]]
+                ]
+                # 12 edges connecting the corners
+                lines = [
+                    [0, 1], [1, 2], [2, 3], [3, 0], # Bottom face
+                    [4, 5], [5, 6], [6, 7], [7, 4], # Top face
+                    [0, 4], [1, 5], [2, 6], [3, 7]  # Vertical pillars
+                ]
+                box = o3d.geometry.LineSet()
+                box.points = o3d.utility.Vector3dVector(corners)
+                box.lines = o3d.utility.Vector2iVector(lines)
+                box.colors = o3d.utility.Vector3dVector([color for _ in range(len(lines))])
+                return box
+
+            table_wireframe = create_wireframe_box(
+                machine_cfg.x_lim_m, 
+                machine_cfg.y_lim_m, 
+                machine_cfg.z_lim_m, 
+                [1.0, 0.6, 0.0]  # Bright Orange
+            )
+            debug_rings.append(table_wireframe)
+   
+       
         grasp_point_list = []
         dir_point_list = []
         for key, transform in transforms.items():
@@ -562,7 +597,8 @@ class Inference3D:
             # end_sphere.paint_uniform_color([0., 0., 0.])  # black
             # dir_point_list.extend([start_sphere, end_sphere])
 
-        geometry_list = [world, left_robot, right_robot, input_pcd] + grasp_point_list + dir_point_list
+        geometry_list = [world, left_robot, right_robot, input_pcd] + grasp_point_list + dir_point_list + debug_rings
+        
         # add offset for all geometries (only for visualization)
         geometry_list = [geometry.translate(pc_offset) for geometry in geometry_list]
         return geometry_list

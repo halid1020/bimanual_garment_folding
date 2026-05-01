@@ -49,11 +49,12 @@ class HarenaTransforms(ExperimentVirtualTransforms):
             
             # 3. Maintain UniFolding's expected Virtual Frame rotation
             self.virtual_to_world_transform = np.array([
-                [0., 1., 0., 0.],
-                [-1., 0., 0., 0.],
-                [0., 0., 1., 0.],
-                [0., 0., 0., 1.]
-            ])
+                    [ 0., -1., 0., 0.],
+                    [ 1.,  0., 0., 0.],
+                    [ 0.,  0., 1., 0.],
+                    [ 0.,  0., 0., 1.]
+                ])
+        
             self.world_to_virtual_transform = np.linalg.inv(self.virtual_to_world_transform)
             self.virtual_to_camera_transform = self.world_to_camera_transform @ self.virtual_to_world_transform
             self.camera_to_virtual_transform = np.linalg.inv(self.virtual_to_camera_transform)
@@ -87,14 +88,15 @@ class HarenaExperiment(ExperimentVirtual):
         return min_r <= dist <= max_r
 
     def is_pose_within_workspace(self, pose: RigidTransform) -> bool:
-        """OVERRIDE: Check if the AI's predicted point actually falls on your table"""
+        """OVERRIDE: Check if the AI's predicted point actually falls on your table AND is above the surface."""
         machine_cfg = self.option.machine
         x, y, z = pose.translation
         
         in_x = machine_cfg.x_lim_m[0] <= x <= machine_cfg.x_lim_m[1]
         in_y = machine_cfg.y_lim_m[0] <= y <= machine_cfg.y_lim_m[1]
+        in_z = machine_cfg.z_lim_m[0] <= z <= machine_cfg.z_lim_m[1]
         
-        return in_x and in_y
+        return in_x and in_y and in_z
     
     def is_pose_safe(self, pose1: RigidTransform, pose2: RigidTransform) -> bool:
         """OVERRIDE: Use the flattened config structure to find safe_distance_m"""
@@ -223,19 +225,93 @@ class UniFoldingAdapter(TrainableAgent):
         if self.debug:
             os.makedirs('./tmp/unifolding', exist_ok=True)
             
-            # --- 1. Save 3D Point Cloud ---
-            # 1a. Original garment (White)
+            # --- Helper: Generate Dense Point Cloud Rings ---
+            def create_ring_pcd(center, radius, color, num_points=150):
+                angles = np.linspace(0, 2 * np.pi, num_points)
+                x = center[0] + radius * np.cos(angles)
+                y = center[1] + radius * np.sin(angles)
+                z = np.full_like(x, center[2])
+                pts = np.stack([x, y, z], axis=1)
+                
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(pts)
+                pcd.paint_uniform_color(color)
+                return pcd
+            
+            # --- Helper: Generate Dense Point Cloud Bounding Box ---
+            def create_box_pcd(x_lim, y_lim, z_lim, color, density=2000):
+                pts = []
+                # X edges
+                for x in np.linspace(x_lim[0], x_lim[1], density):
+                    pts.extend([[x, y_lim[0], z_lim[0]], [x, y_lim[1], z_lim[0]], 
+                                [x, y_lim[0], z_lim[1]], [x, y_lim[1], z_lim[1]]])
+                # Y edges
+                for y in np.linspace(y_lim[0], y_lim[1], density):
+                    pts.extend([[x_lim[0], y, z_lim[0]], [x_lim[1], y, z_lim[0]], 
+                                [x_lim[0], y, z_lim[1]], [x_lim[1], y, z_lim[1]]])
+                # Z edges
+                for z in np.linspace(z_lim[0], z_lim[1], int(density/2)):
+                    pts.extend([[x_lim[0], y_lim[0], z], [x_lim[1], y_lim[0], z], 
+                                [x_lim[0], y_lim[1], z], [x_lim[1], y_lim[1], z]])
+                
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(np.array(pts, dtype=np.float64))
+                pcd.paint_uniform_color(color)
+                return pcd
+
+            
+            machine_cfg = self.experiment.option.machine
+            
+            # --- 1. World Space Setup ---
             pcd_garment = o3d.geometry.PointCloud()
             pcd_garment.points = o3d.utility.Vector3dVector(pointcloud)
-            pcd_garment.paint_uniform_color([0.9, 0.9, 0.9]) 
+            pcd_garment.paint_uniform_color([0.8, 0.8, 0.8]) # Light Gray Garment
             
-            # 1b. Transformed Virtual garment (Green)
+            l_base = self.experiment.transforms.left_robot_base_pos
+            r_base = self.experiment.transforms.right_robot_base_pos
+            
+            # World Limits (Red/Pink hues)
+            w_rings = [
+                create_ring_pcd(l_base, machine_cfg.left_workspace[0], [1.0, 0.4, 0.4]), # L-Min
+                create_ring_pcd(l_base, machine_cfg.left_workspace[1], [0.8, 0.0, 0.0]), # L-Max
+                create_ring_pcd(r_base, machine_cfg.right_workspace[0], [1.0, 0.6, 0.8]),# R-Min
+                create_ring_pcd(r_base, machine_cfg.right_workspace[1], [0.8, 0.0, 0.4]) # R-Max
+            ]
+
+            # --- 2. Virtual Space Setup ---
             pcd_garment_v = o3d.geometry.PointCloud()
             pcd_garment_v.points = o3d.utility.Vector3dVector(virtual_pointcloud)
-            pcd_garment_v.paint_uniform_color([0.0, 1.0, 0.0])
+            pcd_garment_v.paint_uniform_color([0.0, 1.0, 0.0]) # Green Garment
             
+            # Transform Base Centers to Virtual Space
+            l_base_v = (w2v_matrix @ np.array([*l_base, 1.0]))[:3]
+            r_base_v = (w2v_matrix @ np.array([*r_base, 1.0]))[:3]
+            
+            # Virtual Limits (Blue/Cyan hues)
+            v_rings = [
+                create_ring_pcd(l_base_v, machine_cfg.left_workspace[0], [0.4, 0.8, 1.0]), # VL-Min
+                create_ring_pcd(l_base_v, machine_cfg.left_workspace[1], [0.0, 0.0, 0.8]), # VL-Max
+                create_ring_pcd(r_base_v, machine_cfg.right_workspace[0], [0.4, 1.0, 0.8]),# VR-Min
+                create_ring_pcd(r_base_v, machine_cfg.right_workspace[1], [0.0, 0.6, 0.6]) # VR-Max
+            ]
+
             combined_pcd = pcd_garment + pcd_garment_v
+            for ring in w_rings + v_rings:
+                combined_pcd += ring
+
+            table_box = create_box_pcd(
+                machine_cfg.x_lim_m, 
+                machine_cfg.y_lim_m, 
+                machine_cfg.z_lim_m, 
+                [1.0, 0.6, 0.0]  # Bright Orange
+            )
             
+            combined_pcd = pcd_garment + pcd_garment_v + table_box
+
+            for ring in w_rings + v_rings:
+                combined_pcd += ring
+            
+            # --- 3. Action Points ---
             pick_pts_3d = []
             if p0_3d is not None: pick_pts_3d.append(p0_3d)
             if p1_3d is not None: pick_pts_3d.append(p1_3d)
@@ -243,24 +319,22 @@ class UniFoldingAdapter(TrainableAgent):
             if pick_pts_3d:
                 pick_arr = np.array(pick_pts_3d)
                 
-                # 1c. Original World action points (Red)
                 pcd_picks = o3d.geometry.PointCloud()
                 pcd_picks.points = o3d.utility.Vector3dVector(pick_arr)
-                pcd_picks.paint_uniform_color([1.0, 0.0, 0.0])
+                pcd_picks.paint_uniform_color([1.0, 0.0, 0.0]) # Red World Picks
                 
-                # 1d. Transformed Virtual action points (Blue)
                 picks_homo = np.hstack((pick_arr, np.ones((len(pick_arr), 1))))
                 virtual_picks = (w2v_matrix @ picks_homo.T).T[:, :3]
                 
                 pcd_picks_v = o3d.geometry.PointCloud()
                 pcd_picks_v.points = o3d.utility.Vector3dVector(virtual_picks)
-                pcd_picks_v.paint_uniform_color([0.0, 0.0, 1.0])
+                pcd_picks_v.paint_uniform_color([0.0, 0.0, 1.0]) # Blue Virtual Picks
                 
                 combined_pcd += pcd_picks + pcd_picks_v
                 
             o3d.io.write_point_cloud('./tmp/unifolding/debug_before_3d.ply', combined_pcd)
             
-            # --- 2. Save 2D RGB Image ---
+            # --- 4. Save 2D RGB Image (Unchanged) ---
             rgb_img = obs.get('rgb')
             if rgb_img is not None:
                 img_draw = rgb_img.copy()

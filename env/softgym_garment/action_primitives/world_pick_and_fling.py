@@ -17,9 +17,9 @@ class WorldPickAndFling():
         pregrasp_height=0.3,
         pregrasp_vel=0.06,
         tograsp_vel=0.005,
-        prefling_height=0.7,#
+        hang_height=0.7,#
         prefling_vel=6e-3,
-        fling_y=0.5,
+        stroke=0.5,
         hang_pos_y=0,
         lift_vel=0.009,
         hang_adjust_vel=0.005,
@@ -28,7 +28,7 @@ class WorldPickAndFling():
         ready_pos = [[-1, 0, 0.6], [1, 0, 0.6]],
         no_cloth_vel = 0.3,
         adaptive_fling_momentum=1.3,
-        lower_height=0.015,
+        place_height=0.015,
         action_horizon=20,
 
         **kwargs):
@@ -44,7 +44,7 @@ class WorldPickAndFling():
         self.action_mode = 'world-pick-and-place'
         self.action_horizon = action_horizon
         self.logger_name = 'standard_logger'
-        self.fling_y = fling_y
+        self.stroke = stroke
 
 
         self.lowest_cloth_height = lowest_cloth_height
@@ -54,7 +54,7 @@ class WorldPickAndFling():
         self.pregrasp_height = pregrasp_height
         self.pregrasp_velocity = pregrasp_vel
         self.tograsp_velocity = tograsp_vel
-        self.prefling_height = prefling_height
+        self.hang_height = hang_height
         self.prefling_vel = prefling_vel
         self.hang_pos_y = hang_pos_y
         self.ready_pos = np.asarray(ready_pos)
@@ -63,7 +63,7 @@ class WorldPickAndFling():
         self.stretch_adjust_vel = stretch_adjust_vel
         self.no_cloth_vel = no_cloth_vel
         self.adaptive_fling_momentum = adaptive_fling_momentum
-        self.lower_height = lower_height
+        self.place_height = place_height
         self.num_picker = 2
         self.grasping = False
         # self.action_step = 0
@@ -96,20 +96,21 @@ class WorldPickAndFling():
        
         return {'pick_0_position': action['pick_0_position'],
                 'pick_1_position': action['pick_1_position'],
-                'fling_y': (action['fling_y'] if 'fling_y' in action.keys() else self.fling_y),
+                'stroke': (action['stroke'] if 'stroke' in action.keys() else self.stroke),
                 'fling_vel': (action['fling_vel'] if 'fling_vel' in action.keys() else self.fling_vel),
                 'pregrasp_height': (action['pregrasp_height'] if 'pregrasp_height' in action.keys() else self.pregrasp_height),
                 'pregrasp_vel': (action['pregrasp_vel'] if 'pregrasp_vel' in action.keys() else self.pregrasp_velocity),
                 'tograsp_vel': (action['tograsp_vel'] if 'tograsp_vel' in action.keys() else self.tograsp_velocity),
-                'prefling_height': (action['prefling_height'] if 'prefling_height' in action.keys() else self.prefling_height),
+                'hang_height': (action['hang_height'] if 'hang_height' in action.keys() else self.hang_height),
                 'prefling_vel': (action['prefling_vel'] if 'prefling_vel' in action.keys() else self.prefling_vel),
                 'hang_pos_y': (action['hang_pos_y'] if 'hang_pos_y' in action.keys() else self.hang_pos_y),
+                'drag_dist': (action['drag_dist'] if 'drag_dist' in action.keys() else self.drag_dist),
                 'lift_vel': (action['lift_vel'] if 'lift_vel' in action.keys() else self.lift_vel),
                 'hang_adjust_vel': (action['hang_adjust_vel'] if 'hang_adjust_vel' in action.keys() else self.hang_adjust_vel),
                 'stretch_adjust_vel': (action['stretch_adjust_vel'] if 'stretch_adjust_vel' in action.keys() else self.stretch_adjust_vel),
                 'release_vel': (action['release_vel'] if 'release_vel' in action.keys() else self.release_vel),
                 'drag_vel': (action['drag_vel'] if 'drag_vel' in action.keys() else self.drag_vel),
-                'lower_height': (action['lower_height'] if 'lower_height' in action.keys() else self.lower_height),
+                'place_height': (action['place_height'] if 'place_height' in action.keys() else self.place_height),
         }
     
     ## expect to recieve action as an dictionary with at least pick_0 and pick_1 positions
@@ -134,7 +135,7 @@ class WorldPickAndFling():
         pregrasp_positions[:, 2] = action['pregrasp_height']
  
         lift_positions = pick_positions.copy()
-        lift_positions[:, 2] = action['prefling_height']
+        lift_positions[:, 2] = action['hang_height']
       
         grasp_dist = np.linalg.norm(pick_positions[0, :2] - pick_positions[1, :2])
         prefling_positions = lift_positions.copy()
@@ -171,9 +172,11 @@ class WorldPickAndFling():
         
         info = env.wait_until_stable(max_wait_step=50)
 
-        self.fling(env, stretch_dist, hang_height, lower_height=action['lower_height'],
+        print('WorldPickAndFling', action)
+        self.fling(env, stretch_dist, action['hang_pos_y'], hang_height, place_height=action['place_height'],
                    fling_vel=action['fling_vel'], release_vel=action['release_vel'], 
-                   drag_vel=action['drag_vel'], fling_y=action['fling_y'])
+                   drag_vel=action['drag_vel'], stroke=action['stroke'], 
+                   drag_dist=action['drag_dist'])
 
         info = self.reset_pickers(env)
 
@@ -192,51 +195,58 @@ class WorldPickAndFling():
 
     ## ALERT!!! this cannot be done in real world, as it reqruiest the get the information of the cloth
     ## This mean this is a research direction.
-    def fling(self, env, grasp_dist, hang_height, lower_height, 
-              fling_vel=8e-3, release_vel=1e-2, drag_vel=5e-3, fling_y=0.3):
+    def fling(self, env, grasp_dist, hang_pos_y, hang_height, place_height, 
+              fling_vel=8e-3, release_vel=1e-2, drag_vel=5e-3, 
+              stroke=0.65, drag_dist=0.1):
         cloth_positions = env.get_particle_positions()
 
         # max height - min height
         cloth_height = np.max(cloth_positions[:, 2]) - np.min(cloth_positions[:, 2])
 
         # Fling the cloth
-        # fling_y = 0.3
+        # stroke = 0.3
         left_x = -grasp_dist/2 + env.hard_shift_x
         righ_x = grasp_dist/2 + env.hard_shift_x
 
+        back_pre_fling_pos = np.array([
+            [left_x, hang_pos_y+drag_dist, hang_height],
+            [righ_x, hang_pos_y+drag_dist, hang_height]
+        ])
+
         front_fling_pos = np.array([
-            [left_x, -(fling_y+0.1), hang_height],
-            [righ_x, -(fling_y+0.1), hang_height]
+            [left_x, hang_pos_y-stroke, hang_height],
+            [righ_x, hang_pos_y-stroke, hang_height]
         ])
         back_fling_pos = np.array([
-            [left_x, fling_y-0.3, lower_height],
-            [righ_x, fling_y-0.3, lower_height]
+            [left_x, hang_pos_y, place_height], #0.05
+            [righ_x, hang_pos_y, place_height]
         ])
         
         #print('fling_vel', fling_vel)
         #info = self.action_tool.movep(env, back_fling_pos, fling_vel/2)
+        info = self.action_tool.movep(env, back_pre_fling_pos, fling_vel)
         info = self.action_tool.movep(env, front_fling_pos, fling_vel)
-        info = self.action_tool.movep(env, back_fling_pos, fling_vel/2)
+        info = self.action_tool.movep(env, back_fling_pos, fling_vel)
         
 
-        # FIX: Drop the cloth at 90% of the distance, so there is room to drag it
-        release_y = (fling_y-0.2) * self.adaptive_fling_momentum
-        drag_y = (fling_y-0.29) * self.adaptive_fling_momentum
+        # # FIX: Drop the cloth at 90% of the distance, so there is room to drag it
+        # release_y = (stroke-0.2) * self.adaptive_fling_momentum
+        # drag_y = (stroke-0.29) * self.adaptive_fling_momentum
         
         # # 1. Lower to the table at the closer release_y
-        # self.action_tool.movep(env, [[left_x,  release_y, lower_height],
-        #             [righ_x, release_y, lower_height]], release_vel)
+        # self.action_tool.movep(env, [[left_x,  release_y, place_height],
+        #             [righ_x, release_y, place_height]], release_vel)
         
         # 2. Drag the cloth horizontally to drag_y to pull it taut and flatten it
-        self.action_tool.movep(env,[[left_x, drag_y, 0.01],
-                    [righ_x, drag_y, lower_height]], drag_vel)
+        self.action_tool.movep(env,[[left_x, drag_dist, place_height],
+                    [righ_x, drag_dist, place_height]], drag_vel)
         
         # release the cloth
         info = self.action_tool.open_both_gripper(env)
 
         # move up the picker a bit
-        self.action_tool.movep(env,[[left_x, drag_y, lower_height+0.1],
-                    [righ_x, drag_y, lower_height+0.1]], drag_vel)
+        self.action_tool.movep(env,[[left_x, drag_dist, place_height+0.1],
+                    [righ_x, drag_dist, place_height+0.1]], drag_vel)
         
         return info
 

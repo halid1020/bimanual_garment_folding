@@ -152,6 +152,11 @@ To re-evaluate an existing experiment in the background, use the evaluation scri
 
 > **Note:** Ensure that the log directory does not contain previously generated evaluation results before running this command.
 
+
+### Replicating Other 3rd Party Methods
+
+For UniFolding please follow our [`README.md](./controllers/rl/unifolding/README.md) of the method, which will create a new `unifold` conda envrionment that fits to our framework. For other methods, you can directly work on `magpie` enviornment.
+
 ### Submitting to the Viking Cluster (University of York)
 
 If you are on the login node of the University of York's Viking cluster, you can submit a training job by running:

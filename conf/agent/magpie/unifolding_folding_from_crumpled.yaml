@@ -58,8 +58,8 @@ experiment:
     right_robot_base: [0.894, -0.005, 0.0]  
 
     # Global Table Limits (Adjust to fit your physical table)
-    x_lim_m: [-0.9, 0.9]   
-    y_lim_m: [-0.7, 0.7]   
-    z_lim_m: [0.0, 0.3]    
+    x_lim_m: [-1, 1]   
+    y_lim_m: [-0.8, 0.8]   
+    z_lim_m: [0.0, 0.5]    
     
     safe_distance_m: 0.15

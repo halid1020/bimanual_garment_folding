@@ -15,10 +15,10 @@ class PixelPickAndFling():
         pregrasp_height=0.3,
         pregrasp_vel=0.1,
         tograsp_vel=0.05,
-        prefling_height=0.3, 
+        hang_height=0.35, 
         prefling_vel=0.01,
         hang_pos_y=0.3, 
-        fling_y=0.5, 
+        stroke=0.5, 
         lift_vel=0.02, 
         action_horizon=20,
         hang_adjust_vel=0.01,
@@ -26,13 +26,14 @@ class PixelPickAndFling():
         fling_vel= 0.02, 
         release_vel=0.01,
         drag_vel=0.005,
-        lower_height=0.1,
+        place_height=0.05,
         readjust_pick_poss=0.0,
         pick_lower_bound=[-1, -1],
         pick_upper_bound=[1, 1],
         place_lower_bound=[-1, -1],
         place_upper_bound=[1, 1],
         pick_height=0.025, 
+        drag_dist=0.15,
         readjust_to_workspace=False,
         **kwargs):
         
@@ -45,7 +46,7 @@ class PixelPickAndFling():
         self.pregrasp_height = pregrasp_height
         self.pregrasp_vel = pregrasp_vel
         self.tograsp_vel = tograsp_vel
-        self.prefling_height = prefling_height
+        self.hang_height = hang_height
         self.prefling_vel = prefling_vel
         self.hang_pos_y = hang_pos_y
         self.lift_vel = lift_vel
@@ -54,8 +55,9 @@ class PixelPickAndFling():
         self.stretch_adjust_vel = stretch_adjust_vel
         self.release_vel = release_vel
         self.drag_vel = drag_vel
-        self.lower_height = lower_height
-        self.fling_y = fling_y
+        self.place_height = place_height
+        self.stroke = stroke
+        self.drag_dist = drag_dist
 
         self.num_pickers = 2
         self.readjust_pick_poss = readjust_pick_poss
@@ -146,17 +148,18 @@ class PixelPickAndFling():
             'pregrasp_height': self.pregrasp_height,
             'pregrasp_vel': self.pregrasp_vel,
             'tograsp_vel': self.tograsp_vel,
-            'prefling_height': self.prefling_height,
+            'hang_height': self.hang_height,
             'prefling_vel': self.prefling_vel,
             'lift_vel': self.lift_vel,
             'hang_pos_y': self.hang_pos_y,
-            'fling_y': self.fling_y,
+            'stroke': self.stroke,
             'hang_adjust_vel': self.hang_adjust_vel, 
             'stretch_adjust_vel': self.stretch_adjust_vel, 
             'fling_vel': self.fling_vel, 
             'release_vel': self.release_vel, 
             'drag_vel': self.drag_vel, 
-            'lower_height': self.lower_height, 
+            'place_height': self.place_height, 
+            'drag_dist': self.drag_dist
         }
 
         pixel_action = np.stack([p0, p1]).flatten()

@@ -23,8 +23,13 @@ class HybridActionPrimitive():
             print('[HybridActionPrimitive] Adjusting parameters for workspace!')
             fling_kwargs.update({
                 'hang_pos_y': 0,
-                'fling_vel': 0.02,
-                'fling_y': 0.4
+                'fling_vel': 0.01,
+                'stroke': 0.65,
+                'hang_height': 0.35,
+                'place_height': 0.05,
+                'drag_dist': 0.1,
+                'drag_vel': 0.005
+                
             })
         self.np_pnf = PixelPickAndFling(**fling_kwargs)
 

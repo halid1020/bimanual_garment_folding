@@ -142,7 +142,7 @@ poses:
   
   # Scale (Z-Axis / Distance) - Modifying Shoulder and Elbow
   - [76.93, -36.11, 86.00, -170.43, 4.98, -130.66]  # 13.1 Closer
-  - [76.93, -56.11, 66.00, -170.43, 4.98, -130.66]  # 13.2 Further
+  # - [76.93, -56.11, 66.00, -170.43, 4.98, -130.66]  # 13.2 Further
   
   # Pitch (Wrist 1 Tilt) - Modifying Wrist 1 by +/- 15 deg
   - [76.93, -46.11, 76.00, -155.43, 4.98, -130.66]  # 13.3 Pitch Up

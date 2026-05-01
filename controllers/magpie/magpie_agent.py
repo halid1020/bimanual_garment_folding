@@ -1762,7 +1762,9 @@ class MagpieAgent(TrainableAgent):
                 prim_id = torch.argmax(prim_logits, dim=-1) # (1,)
                 cur_prim_id = prim_id[-1].cpu().detach().item()
                 
-                # --- FIX: Restore the obs_cond creation for one-hot-encoding ---
+                info['prim_name'] = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[cur_prim_id], dict) else self.primitives[cur_prim_id].name
+
+              
                 # Convert to one-hot encoding
                 prim_enc = nn.functional.one_hot(prim_id, num_classes=self.K).float()
                 

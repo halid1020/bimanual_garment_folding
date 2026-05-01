@@ -8,7 +8,7 @@ import actoris_harena.api as ag_ar
 
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
-from registration.task import build_task
+from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 
 @hydra.main(config_path="../conf", config_name="transfer_eval/comp_gc_diffusion", version_base=None)
@@ -83,7 +83,7 @@ def main(cfg: DictConfig):
         )
             
         # Build and set Task
-        task = build_task(task_cfg)
+        task = build_sim_task(task_cfg)
         arena.set_task(task)
 
         # 5. Run the evaluation

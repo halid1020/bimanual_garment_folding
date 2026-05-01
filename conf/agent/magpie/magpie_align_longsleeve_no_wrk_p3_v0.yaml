@@ -38,6 +38,7 @@ rep_weight: 0.5
 state_dim: 30
 state_key: semkey_norm_pixel
 
+constrain_action: 'bimanual_workspace_force'
 
 dataset_mode: "general"
 dataset_config:

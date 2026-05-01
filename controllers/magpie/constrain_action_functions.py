@@ -3,189 +3,238 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+# --- Configuration ---
+# Set to True if your network outputs [Y, X] (Row, Col). 
+# Set to False if your network outputs [X, Y] (Width, Height).
+IS_YX_ACTION_SPACE = False 
+
 # -----------------------------------------------------------------------------
-# Helper Functions
+# Helper Functions for Mathematics & Assignments
 # -----------------------------------------------------------------------------
 
 def _snap_to_nearest(points_bht, valid_points):
-    """
-    Helper function to snap predicted points to the nearest valid point.
-    points_bht: (Batch, Horizon, 2)
-    valid_points: (N, 2)
-    """
     if valid_points is None or valid_points.shape[0] == 0:
         return points_bht
-
     B, H, D = points_bht.shape
     flat_points = points_bht.reshape(-1, 2)
-    
-    # Calculate pairwise distance: (B*H, N)
     dists = torch.cdist(flat_points, valid_points)
-    
-    # Find index of nearest valid point
-    min_indices = torch.argmin(dists, dim=1) # (B*H,)
-    
-    # Gather coordinates
-    nearest_points = valid_points[min_indices] # (B*H, 2)
-    
-    return nearest_points.reshape(B, H, 2)
+    min_indices = torch.argmin(dists, dim=1)
+    return valid_points[min_indices].reshape(B, H, 2)
 
-def _visualize_constraint(mask, original_act, constrained_act, robot_name, step_idx):
-    """
-    Visualizes the before/after of the constraint.
-    mask: (H, W) numpy array (binary or float)
-    original_act: (Horizon, 4) -> [pick_u, pick_v, place_u, place_v]
-    constrained_act: (Horizon, 4) -> [pick_u, pick_v, place_u, place_v]
-    """
-    save_dir = "./tmp/constrain_debug"
-    os.makedirs(save_dir, exist_ok=True)
-    
-    H, W = mask.shape
-    
-    plt.figure(figsize=(6, 6))
-    
-    # 1. Plot Background Mask
-    plt.imshow(mask, cmap='gray_r', alpha=0.3)
-    plt.title(f"{robot_name} Constraint Step {step_idx}")
+def _get_restoring_force(points_bht, valid_points):
+    if valid_points is None or valid_points.shape[0] == 0:
+        return torch.zeros_like(points_bht)
+    nearest_points = _snap_to_nearest(points_bht, valid_points)
+    return nearest_points - points_bht
 
-    # Helper to denormalize [-1, 1] -> [0, W/H]
-    def to_pix(uv_coords):
-        # uv_coords: (N, 2)
-        u, v = uv_coords[:, 0], uv_coords[:, 1]
-        x = (u + 1) * W / 2
-        y = (v + 1) * H / 2
-        return y, x
+def _get_min_dist(points_bht, valid_points):
+    if valid_points is None or valid_points.shape[0] == 0:
+        return float('inf')
+    flat_points = points_bht.reshape(-1, 2)
+    dists = torch.cdist(flat_points, valid_points)
+    return torch.min(dists, dim=1)[0].mean().item()
 
-    # 2. Plot Pick (First 2 coords)
-    orig_px, orig_py = to_pix(original_act[:, 0:2])
-    new_px, new_py = to_pix(constrained_act[:, 0:2])
-    
-    plt.scatter(orig_px, orig_py, c='red', marker='x', s=40, label='Pick Init')
-    plt.scatter(new_px, new_py, c='lime', marker='o', s=40, edgecolors='black', label='Pick Snapped')
-    
-    # Draw connection lines
-    for i in range(len(orig_px)):
-        plt.plot([orig_px[i], new_px[i]], [orig_py[i], new_py[i]], 'g--', alpha=0.5, linewidth=1)
-
-    # 3. Plot Place (Next 2 coords)
-    orig_plx, orig_ply = to_pix(original_act[:, 2:4])
-    new_plx, new_ply = to_pix(constrained_act[:, 2:4])
-    
-    plt.scatter(orig_plx, orig_ply, c='orange', marker='x', s=40, label='Place Init')
-    plt.scatter(new_plx, new_ply, c='cyan', marker='o', s=40, edgecolors='black', label='Place Snapped')
-    
-    for i in range(len(orig_plx)):
-        plt.plot([orig_plx[i], new_plx[i]], [orig_ply[i], new_ply[i]], 'c--', alpha=0.5, linewidth=1)
-
-    plt.legend(loc='upper right', fontsize='small')
-    plt.axis('off') # Hide axes for cleaner image
-    
-    # Save with robot name and a counter/random ID to prevent overwrite
-    import random
-    plt.savefig(f"{save_dir}/deniose_step_{step_idx}_{robot_name}.png", bbox_inches='tight', pad_inches=0)
-    plt.close()
+def _get_dynamic_assignments(action_b, entities, valid_masks):
+    assignments = {} 
+    if len(entities) == 2 and 0 in valid_masks and 1 in valid_masks:
+        e0_pick = action_b[:, :, entities[0]['pick']]
+        e1_pick = action_b[:, :, entities[1]['pick']]
+        
+        d_e0_m0 = _get_min_dist(e0_pick, valid_masks[0])
+        d_e0_m1 = _get_min_dist(e0_pick, valid_masks[1])
+        d_e1_m0 = _get_min_dist(e1_pick, valid_masks[0])
+        d_e1_m1 = _get_min_dist(e1_pick, valid_masks[1])
+        
+        if (d_e0_m0 + d_e1_m1) <= (d_e0_m1 + d_e1_m0):
+            assignments = {0: 0, 1: 1}
+        else:
+            assignments = {0: 1, 1: 0}
+            
+    elif len(entities) == 1 and len(valid_masks) > 0:
+        e0_pick = action_b[:, :, entities[0]['pick']]
+        best_mask = min(valid_masks.keys(), key=lambda m: _get_min_dist(e0_pick, valid_masks[m]))
+        assignments = {0: best_mask}
+        
+    return assignments
 
 # -----------------------------------------------------------------------------
-# Main Constraint Functions
+# Debug Visualization
+# -----------------------------------------------------------------------------
+
+def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t):
+    save_dir = "tmp/debug_magpie"
+    os.makedirs(save_dir, exist_ok=True)
+
+    rgb = obs.get('rgb', None)
+    if rgb is None: return 
+        
+    if torch.is_tensor(rgb): rgb = rgb.detach().cpu().numpy()
+    if rgb.ndim == 4: rgb = rgb[0]
+    if rgb.shape[0] == 3: rgb = np.transpose(rgb, (1, 2, 0))
+    if rgb.max() > 2.0: rgb = rgb / 255.0
+
+    H, W = rgb.shape[:2]
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(rgb)
+    
+    t_val = t.item() if torch.is_tensor(t) else t
+    ax.set_title(f"Step: {t_val:.2f} | {prim_name}", fontsize=10)
+
+    def get_mask(m_key):
+        if m_key not in obs: return None
+        m = obs[m_key]
+        if torch.is_tensor(m): m = m.detach().cpu().numpy()
+        if m.ndim == 4: m = m[0]
+        if m.ndim == 3: m = m.squeeze(-1) if m.shape[-1] == 1 else m[0]
+        return m
+
+    m0 = get_mask('robot0_mask')
+    m1 = get_mask('robot1_mask')
+
+    if m0 is not None: ax.imshow(np.ma.masked_where(m0 < 0.5, m0), cmap='Blues', alpha=0.4)
+    if m1 is not None: ax.imshow(np.ma.masked_where(m1 < 0.5, m1), cmap='Reds', alpha=0.4)
+
+    def to_pix(uv_coords):
+        dim0, dim1 = uv_coords[:, 0], uv_coords[:, 1]
+        if IS_YX_ACTION_SPACE:
+            y, x = (dim0 + 1) * H / 2, (dim1 + 1) * W / 2
+        else:
+            x, y = (dim0 + 1) * W / 2, (dim1 + 1) * H / 2
+        return x, y
+
+    orig_act = original_action[0, 0].detach().cpu().numpy()
+    new_act = new_action[0, 0].detach().cpu().numpy()
+    colors = {0: 'blue', 1: 'red'}
+    
+    for e_idx, m_idx in assignments.items():
+        ent = entities[e_idx]
+        c = colors.get(m_idx, 'green')
+
+        # Plot PICK
+        if len(ent['pick']) == 2:
+            pu, pv = ent['pick']
+            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
+            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
+            
+            ax.plot(ox, oy, marker='x', color='yellow', markersize=8, label='Orig Pick' if e_idx==0 else "")
+            ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'Force Pick (R{m_idx})')
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
+                        arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+
+        # Plot PLACE
+        if len(ent['place']) == 2:
+            pu, pv = ent['place']
+            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
+            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
+            
+            ax.plot(ox, oy, marker='x', color='orange', markersize=8, label='Orig Place' if e_idx==0 else "")
+            ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'Force Place (R{m_idx})')
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
+                        arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    
+    plt.axis('off')
+    plt.savefig(os.path.join(save_dir, f"step_{t_val:05.1f}.png"), bbox_inches='tight')
+    plt.close(fig)
+
+# -----------------------------------------------------------------------------
+# Main Constraint Logic
 # -----------------------------------------------------------------------------
 
 def identity(action, info, t, debug=False):
     return action
 
-def constrain_bimanual_mask(action, info, t, debug=False):
-    """
-    Constrains Pick/Place coordinates to specific robot masks.
-    Expects action shape: (Batch, Horizon, ActionDim)
-    """
-    if t > 20:
-        return action
-        
-    if debug:
-        print(f'[constrain_bimanual_mask] noise action {t} dim {action.shape}, values {action}')
-        
-    # --- Config: Action Indices ---
-    r0_idx = [0, 1, 4, 5] 
-    r1_idx = [2, 3, 6, 7]
-
-    original_action = action.clone()
+def _apply_constraints_core(action, info, t, method, debug=False):
     device = action.device
     obs = info.get('observation', {})
+    original_action = action.clone() 
+    
+    prim_name = info.get('prim_name', 'norm-pixel-dual-pick-and-place')
+    
+    entities = []
+    if 'pick-and-fling' in prim_name:
+        entities.append({'pick': [0, 1], 'place': []})
+        entities.append({'pick': [2, 3], 'place': []})
+    elif 'dual-pick-and-place' in prim_name:
+        entities.append({'pick': [0, 1], 'place': [4, 5]})
+        entities.append({'pick': [2, 3], 'place': [6, 7]})
+    elif 'single-pick-and-place' in prim_name:
+        entities.append({'pick': [0, 1], 'place': [2, 3]})
+    elif 'no-operation' in prim_name:
+        return action
 
-    # --- 1. Robot 0 Constraint ---
-    if 'robot0_mask' in obs:
-        mask = obs['robot0_mask']
-        # if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
-        if mask.ndim == 3: mask = mask.squeeze(-1)
-        
-        xs, ys = np.where(mask > 0)
-        
-        if len(xs) > 0:
-            H, W = mask.shape
-            # Create valid points tensor
-            norm_u = (xs / W) * 2 - 1
-            norm_v = (ys / H) * 2 - 1
-            valid_r0 = torch.tensor(np.stack([norm_u, norm_v], axis=1), dtype=torch.float32, device=device)
+    # --- THE CRITICAL FIX: PROPER (ROWS, COLS) -> (Y, X) MAPPING ---
+    valid_masks = {}
+    for m_idx, key in enumerate(['robot0_mask', 'robot1_mask']):
+        if key in obs:
+            mask = obs[key]
+            if mask.ndim == 3: mask = mask.squeeze(-1)
             
-            # Snap Pick [0, 1]
-            action[:, :, r0_idx[0:2]] = _snap_to_nearest(action[:, :, r0_idx[0:2]], valid_r0)
-            # Snap Place [2, 3]
-            action[:, :, r0_idx[2:4]] = _snap_to_nearest(action[:, :, r0_idx[2:4]], valid_r0)
-
-    # --- 2. Robot 1 Constraint ---
-    if 'robot1_mask' in obs:
-        mask = obs['robot1_mask']
-        # if hasattr(mask, 'cpu'): mask = mask.cpu().numpy()
-        if mask.ndim == 3: mask = mask.squeeze(-1)
-        
-        xs, ys = np.where(mask > 0)
-        
-        if len(xs) > 0:
-            H, W = mask.shape
-            norm_u = (xs / W) * 2 - 1
-            norm_v = (ys / H) * 2 - 1
-            valid_r1 = torch.tensor(np.stack([norm_u, norm_v], axis=1), dtype=torch.float32, device=device)
+            # np.where returns (rows, columns) = (Axis 0, Axis 1)
+            rows, cols = np.where(mask > 0) 
             
-            # Snap Pick [7, 8]
-            action[:, :, r1_idx[0:2]] = _snap_to_nearest(action[:, :, r1_idx[0:2]], valid_r1)
-            # Snap Place [9, 10]
-            action[:, :, r1_idx[2:4]] = _snap_to_nearest(action[:, :, r1_idx[2:4]], valid_r1)
+            if len(rows) > 0:
+                H, W = mask.shape
+                norm_x = (cols / float(W)) * 2 - 1.0
+                norm_y = (rows / float(H)) * 2 - 1.0
+                
+                # Stack coordinates based on the network's output format
+                if IS_YX_ACTION_SPACE:
+                    valid_pts = np.stack([norm_y, norm_x], axis=1)
+                else:
+                    valid_pts = np.stack([norm_x, norm_y], axis=1)
+                    
+                valid_masks[m_idx] = torch.tensor(valid_pts, dtype=torch.float32, device=device)
 
-    # --- 3. Visualization (If Debug) ---
+    if not valid_masks:
+        return action
+
+    B = action.shape[0]
+    force_vector = torch.zeros_like(action) if method == 'force' else None
+    debug_assignments_b0 = {}
+
+    for b in range(B):
+        assignments = _get_dynamic_assignments(action[b:b+1], entities, valid_masks)
+        
+        if b == 0:
+            debug_assignments_b0 = assignments 
+            
+        for e_idx, m_idx in assignments.items():
+            ent = entities[e_idx]
+            pts = valid_masks[m_idx]
+            
+            if method == 'snap':
+                action[b:b+1, :, ent['pick']] = _snap_to_nearest(action[b:b+1, :, ent['pick']], pts)
+            elif method == 'force':
+                force_vector[b:b+1, :, ent['pick']] = _get_restoring_force(action[b:b+1, :, ent['pick']], pts)
+                
+            if len(ent['place']) > 0:
+                if method == 'snap':
+                    action[b:b+1, :, ent['place']] = _snap_to_nearest(action[b:b+1, :, ent['place']], pts)
+                elif method == 'force':
+                    force_vector[b:b+1, :, ent['place']] = _get_restoring_force(action[b:b+1, :, ent['place']], pts)
+
+    if method == 'force':
+        eta_dt = 0.5 
+        action = action + (eta_dt * force_vector)
+        
     if debug:
-        # We visualize only the first item in the batch (Batch index 0)
-        batch_idx = 0
-        step_idx = t
-
-        # Robot 0 Vis
-        if 'robot0_mask' in obs:
-            mask0 = obs['robot0_mask']
-            if hasattr(mask0, 'cpu'): mask0 = mask0.detach().cpu().numpy()
-            if mask0.ndim == 3: mask0 = mask0.squeeze(-1)
-            
-            # Get coords for Robot 0 (Pick U,V, Place U,V)
-            orig_act_r0 = original_action[batch_idx, :, r0_idx].detach().cpu().numpy()
-            new_act_r0 = action[batch_idx, :, r0_idx].detach().cpu().numpy()
-            
-            _visualize_constraint(mask0, orig_act_r0, new_act_r0, "Robot0", step_idx)
-
-        # Robot 1 Vis
-        if 'robot1_mask' in obs:
-            mask1 = obs['robot1_mask']
-            if hasattr(mask1, 'cpu'): mask1 = mask1.detach().cpu().numpy()
-            if mask1.ndim == 3: mask1 = mask1.squeeze(-1)
-            
-            orig_act_r1 = original_action[batch_idx, :, r1_idx].detach().cpu().numpy()
-            new_act_r1 = action[batch_idx, :, r1_idx].detach().cpu().numpy()
-            
-            _visualize_constraint(mask1, orig_act_r1, new_act_r1, "Robot1", step_idx)
-
+        _visualize_debug(original_action, action, obs, entities, debug_assignments_b0, prim_name, t)
+        
     return action
 
-# -----------------------------------------------------------------------------
-# Function Registry
-# -----------------------------------------------------------------------------
+def constrain_bimanual_mask(action, info, t, debug=False):
+    if t > 20: return action
+    return _apply_constraints_core(action, info, t, method='snap', debug=debug)
+
+def apply_workspace_force(action, info, t, debug=False):
+    return _apply_constraints_core(action, info, t, method='force', debug=debug)
 
 name2func = {
     'identity': identity,
-    'bimanual_mask': constrain_bimanual_mask,
+    'bimanual_mask_snap': constrain_bimanual_mask,
+    'bimanual_workspace_force': apply_workspace_force
 }

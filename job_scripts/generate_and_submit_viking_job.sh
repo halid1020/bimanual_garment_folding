@@ -8,6 +8,7 @@ CPUS=4
 PARTITION="gpu"
 GRES="gpu:1"
 PY_SCRIPT="hydra_train.py" # Default script to run
+CONFIG_DIR="sim_exp"       # Default config directory
 
 # --- Help Function ---
 usage() {
@@ -19,6 +20,7 @@ usage() {
     echo "  -p  Partition (Default: gpu)"
     echo "  -g  GRES/GPU config (Default: gpu:1)"
     echo "  -e  Run hydra_eval.py instead of hydra_train.py"
+    echo "  -r  Run hydra_transfer_eval.py (uses transfer_eval/ configs)"
     exit 1
 }
 
@@ -28,9 +30,13 @@ if [ -z "$1" ] || [[ "$1" == -* ]]; then
 fi
 
 EXP_NAME=$1
+# Smart parsing: strip prefixes just in case the user includes them in the path
+EXP_NAME=${EXP_NAME#sim_exp/}
+EXP_NAME=${EXP_NAME#transfer_eval/}
 shift
 
-while getopts "t:m:c:p:g:e" opt; do
+# Added 'r' to getopts
+while getopts "t:m:c:p:g:er" opt; do
   case $opt in
     t) 
       # Smart time parsing
@@ -47,7 +53,15 @@ while getopts "t:m:c:p:g:e" opt; do
     c) CPUS=$OPTARG ;;
     p) PARTITION=$OPTARG ;;
     g) GRES=$OPTARG ;;
-    e) PY_SCRIPT="hydra_eval.py" ;; # Switch to eval script
+    e) 
+      PY_SCRIPT="hydra_eval.py" 
+      CONFIG_DIR="sim_exp"
+      ;;
+    r) 
+      # Switch to transfer eval script and config directory
+      PY_SCRIPT="hydra_transfer_eval.py" 
+      CONFIG_DIR="transfer_eval"
+      ;; 
     *) usage ;;
   esac
 done
@@ -107,7 +121,8 @@ cd /users/hcv530/project/bimanual_garment_folding
 source ./setup.sh
 
 echo "Starting execution at \$(date)"
-python ./tool/${PY_SCRIPT} --config-name sim_exp/${EXP_NAME}
+# Updated to use the dynamic CONFIG_DIR variable
+python ./tool/${PY_SCRIPT} --config-name ${CONFIG_DIR}/${EXP_NAME}
 echo "Job completed at \$(date)"
 EOF
 
@@ -115,7 +130,8 @@ chmod +x "$SCRIPT_PATH"
 
 echo "------------------------------------------------"
 echo "Experiment: $EXP_NAME"
-echo "Target script: $PY_SCRIPT"
-echo "Config:     Time=${TIME_STRING}, Mem=${MEM}, Partition=${PARTITION}"
+echo "Target script: tool/$PY_SCRIPT"
+echo "Config Path:  ${CONFIG_DIR}/${EXP_NAME}"
+echo "Slurm Config: Time=${TIME_STRING}, Mem=${MEM}, Partition=${PARTITION}"
 echo "Submitting..."
 sbatch "$SCRIPT_PATH"

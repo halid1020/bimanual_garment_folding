@@ -90,7 +90,7 @@ class DualArmArena(Arena):
         
         # Reset robot to safe state
         self.init_coverage = None
-        self.draw_fatten_contour = ('canonicalisation' in self.task.name)
+        self.draw_fatten_contour = ('alignment' in self.task.name)
         self.task.reset(self)
         if self.init_from == 'crumpled':
             input(colored("Press [Enter] to finish resetting cloth state to a crumpled state...", "green"))

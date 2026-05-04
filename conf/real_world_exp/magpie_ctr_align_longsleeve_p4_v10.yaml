@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent/magpie@agent: magpie_ctr_align_longsleeve_p4_v10 
+  - /real_world_arena@arena: dual_arm_multi_primitives
+  - /task@task: real_world_alignment
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: magpie_ctr_align_longsleeve_p4_v10
+measure_time: True

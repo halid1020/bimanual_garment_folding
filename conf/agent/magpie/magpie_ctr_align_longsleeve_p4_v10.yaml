@@ -12,6 +12,7 @@ include_state: False
 num_demos: 100
 demo_horizon: 10
 
+constrain_action: 'bimanual_workspace_snap'
 disable_updown: True
 action_shape: [8]
 collect_on_success: False # This is important!
@@ -114,7 +115,7 @@ primitives:
   - name: norm-pixel-dual-pick-and-place
     dim: 8 #params: [pick_0, pick_1, place_0, place_1]
   - name: norm-pixel-single-pick-and-place
-    dim: 4 #params: [pick_0, pick_1, place_0, place_1]
+    dim: 4 #params: [pick_0, place_0]
   - name: no-operation
     dim: 0
 mask_out_irrelavent_action_dim: false

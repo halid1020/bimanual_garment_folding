@@ -61,7 +61,7 @@ def _get_dynamic_assignments(action_b, entities, valid_masks):
 # Debug Visualization
 # -----------------------------------------------------------------------------
 
-def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t):
+def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t, method):
     save_dir = "tmp/debug_magpie"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -78,7 +78,7 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
     ax.imshow(rgb)
     
     t_val = t.item() if torch.is_tensor(t) else t
-    ax.set_title(f"Step: {t_val:.2f} | {prim_name}", fontsize=10)
+    ax.set_title(f"Step: {t_val:.2f} | {prim_name} | Method: {method.upper()}", fontsize=10)
 
     def get_mask(m_key):
         if m_key not in obs: return None
@@ -106,6 +106,9 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
     new_act = new_action[0, 0].detach().cpu().numpy()
     colors = {0: 'blue', 1: 'red'}
     
+    # Dynamic prefix for the legend
+    lbl_prefix = "Snap" if method == 'snap' else "Force"
+    
     for e_idx, m_idx in assignments.items():
         ent = entities[e_idx]
         c = colors.get(m_idx, 'green')
@@ -117,7 +120,7 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
             nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
             
             ax.plot(ox, oy, marker='x', color='yellow', markersize=8, label='Orig Pick' if e_idx==0 else "")
-            ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'Force Pick (R{m_idx})')
+            ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Pick (R{m_idx})')
             ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
                         arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
 
@@ -128,7 +131,7 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
             nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
             
             ax.plot(ox, oy, marker='x', color='orange', markersize=8, label='Orig Place' if e_idx==0 else "")
-            ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'Force Place (R{m_idx})')
+            ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Place (R{m_idx})')
             ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
                         arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
 
@@ -137,7 +140,7 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
     ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
     
     plt.axis('off')
-    plt.savefig(os.path.join(save_dir, f"step_{t_val:05.1f}.png"), bbox_inches='tight')
+    plt.savefig(os.path.join(save_dir, f"step_{t_val:05.2f}.png"), bbox_inches='tight')
     plt.close(fig)
 
 # -----------------------------------------------------------------------------
@@ -222,19 +225,46 @@ def _apply_constraints_core(action, info, t, method, debug=False):
         action = action + (eta_dt * force_vector)
         
     if debug:
-        _visualize_debug(original_action, action, obs, entities, debug_assignments_b0, prim_name, t)
+        _visualize_debug(original_action, action, obs, entities, debug_assignments_b0, prim_name, t, method)
         
     return action
 
+def _get_t_val(t):
+    """Helper to safely extract a float value from t, whether it's a tensor or primitive."""
+    if torch.is_tensor(t):
+        # If it's a batched tensor of timesteps, take the first one
+        return t[0].item() if t.ndim > 0 else t.item()
+    return float(t)
+
 def constrain_bimanual_mask(action, info, t, debug=False):
-    if t > 20: return action
+    """Hard-snapping implementation."""
+    t_val = _get_t_val(t)
+    
+    # Assuming t goes 0 -> 1 (Noise -> Data). 
+    # Only apply the hard snap in the final 20% of the trajectory.
+    # (Adjust this logic if your solver integrates 1 -> 0 instead)
+    if t_val < 0.8: 
+        return action
+        
     return _apply_constraints_core(action, info, t, method='snap', debug=debug)
 
 def apply_workspace_force(action, info, t, debug=False):
+    """ODE Kinematic restoring force implementation (MEGPIE standard)."""
+    t_val = _get_t_val(t)
+    
+    # ODE forces are typically applied earlier and softer than hard snaps.
+    # Here we disable it only in the very earliest pure-noise phase (e.g. t < 0.2)
+    # if you find it destabilizes the initial vector field.
+    # if t_val < 0.2: 
+    #     return action
+        
     return _apply_constraints_core(action, info, t, method='force', debug=debug)
 
+# -----------------------------------------------------------------------------
+# Function Registry
+# -----------------------------------------------------------------------------
 name2func = {
     'identity': identity,
-    'bimanual_mask_snap': constrain_bimanual_mask,
+    'bimanual_workspace_snap': constrain_bimanual_mask,
     'bimanual_workspace_force': apply_workspace_force
 }

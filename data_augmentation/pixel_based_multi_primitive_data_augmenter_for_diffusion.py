@@ -53,7 +53,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 keepdim=True,
                 same_on_batch=True, 
             )
-            
+        
+        self.random_swap_actions = self.config.get("random_swap_actions", False)
+        self.swap_action_prob = self.config.get("swap_action_prob", 0.5)
+        raw_mapping = self.config.get("swap_action_mapping", {})
+        # Ensure keys are integers since JSON/YAML parsers often load them as strings
+        self.swap_action_mapping = {int(k): v for k, v in raw_mapping.items()}
+
         # --- Depth Processing Configs ---
         self.process_depth = self.config.get('depth_eval_process', False) 
         self.process_depth_for_eval = self.config.get('process_depth_for_eval', False)
@@ -353,6 +359,36 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             else:
                 pixel_actions = act[:, 1:] if self.K != 0 else act
                 orient_actions = None
+            
+            # ------------------------------------------------------------------
+            # NEW: Primitive-Specific Action Swapping
+            # ------------------------------------------------------------------
+            if self.random_swap_actions and self.K != 0:
+                # Extract the primitive ID for the current timestep
+                prim_acts_bt = act[:, 0]
+                prim_ids_bt = torch.clamp((((prim_acts_bt + 1) / 2) * self.K).long(), 0, self.K - 1)
+                
+                # Determine which sequences in the batch get swapped
+                T_act = act.shape[0] // BB
+                swap_mask_batch = (torch.rand(BB, device=device) < self.swap_action_prob)
+                swap_mask = swap_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
+
+                for prim_idx, (idx_A, idx_B) in self.swap_action_mapping.items():
+                    # Find actions that match the primitive AND are selected to be swapped
+                    mask = swap_mask & (prim_ids_bt == prim_idx)
+                    rows = mask.nonzero(as_tuple=True)[0]
+                    
+                    if len(rows) > 0:
+                        idx_A_t = torch.tensor(idx_A, device=device)
+                        idx_B_t = torch.tensor(idx_B, device=device)
+                        
+                        # Unsqueeze rows for PyTorch 2D advanced indexing broadcast
+                        rows = rows.unsqueeze(1) 
+                        
+                        # Perform the swap on the parameters
+                        temp = pixel_actions[rows, idx_A_t].clone()
+                        pixel_actions[rows, idx_A_t] = pixel_actions[rows, idx_B_t]
+                        pixel_actions[rows, idx_B_t] = temp
 
         # --- DEBUG: Plot Before (Geometric) Augmentation ---
         if self.debug:

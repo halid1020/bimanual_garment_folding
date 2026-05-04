@@ -130,6 +130,14 @@ Try to complete the entire episode using all different types of primitives. The 
 
 Once the system is verified with a human-controlled episode, you are ready to run our neural controller, Magpie.
 
+In the training machine's logging directory, zip the folder with its checkppints. For example, for the experiment example `magpie_ctr_align_longsleeve_p4_v10`.
+
+```
+zip -r magpie_ctr_align_longsleeve_p4_v10.zip magpie_ctr_align_longsleeve_p4_v10/checkpoints
+```
+
+Then, try to transfer this zip file to the robot control machine.
+
 **Test neural controllers:**
 > **TODO:** This step will be polished in the near future.
    

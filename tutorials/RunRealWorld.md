@@ -126,29 +126,48 @@ In this figure, the red and blue arcs represent the workspace of each arm, and t
 
 Try to complete the entire episode using all different types of primitives. The results will be saved to `~/project/garment_folding_data/real_world_human_alignment`.
 
+
 ## 7. Control with Neural Controllers
 
 Once the system is verified with a human-controlled episode, you are ready to run our neural controller, Magpie.
 
-In the training machine's logging directory, zip the folder with its checkppints. For example, for the experiment example `magpie_ctr_align_longsleeve_p4_v10`.
+On the training machine, navigate to the logging directory and zip the folder containing the model checkpoints. For example, using the experiment `magpie_ctr_align_longsleeve_p4_v10`:
 
-```
+```bash
 zip -r magpie_ctr_align_longsleeve_p4_v10.zip magpie_ctr_align_longsleeve_p4_v10/checkpoints
 ```
 
-Then, try to transfer this zip file to the robot control machine.
+Transfer this zip file to the robot control machine. Once transferred, unzip it into the control machine's logging directory:
 
-**Test neural controllers:**
-> **TODO:** This step will be polished in the near future.
-   
-To evaluate a trained neural controller, run a command similar to:
 ```bash
-python tool/eval_real_world.py --config-name real_world_exp/magpie_align_longsleeve_p4_final
+unzip magpie_ctr_align_longsleeve_p4_v10.zip 
 ```
-   
+
 > **Important Note for Neural Controllers:** The configuration files for real-world experiments are located in `conf/real_world_exp` and share a similar structure to the simulation configs. To run neural controllers successfully, you must first place the correct network checkpoint file into the corresponding experiment log folder so the agent can load the weights correctly.
 
-Ensure you securely save the evaluation results once finished.
+Next, create an experiment YAML file under `conf/real_world_exp` using the policy's experiment name (e.g., `magpie_ctr_align_longsleeve_p4_v10.yaml`) with the following content:
+
+```yaml
+# @package _global_
+defaults:
+  - /agent/magpie@agent: magpie_ctr_align_longsleeve_p4_v10 
+  - /real_world_arena@arena: dual_arm_multi_primitives
+  - /task@task: real_world_alignment
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: magpie_ctr_align_longsleeve_p4_v10
+measure_time: True
+```
+
+Finally, from the root directory of the repository, run the evaluation script:
+
+```bash
+. ./setup.sh
+python tool/eval_real_world.py --config-name real_world_exp/magpie_ctr_align_longsleeve_p4_v10
+```
+
+Ensure you securely save the evaluation results once the process is complete.
 
 ## 8. Shutting Down the Robots
 

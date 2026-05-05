@@ -34,6 +34,8 @@ crop_offset_x: 70 # let the intersection at the view centre.
 random_displacement_range: [-0.1, 0.1] # this is used for alignment target pos generation.
 hard_shift_x: 0.1 # let the garment to be at the middle of intersecton.
 
+num_train_trials: 200
+
 field_of_view: [69, 42] # in degrees
 camera_resolution: [1280, 720] 
 frame_resolution: [256, 148]

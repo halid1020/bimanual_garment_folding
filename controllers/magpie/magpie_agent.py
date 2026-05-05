@@ -278,7 +278,7 @@ class MagpieAgent(TrainableAgent):
             actions = {act_type: [] for act_type in train_dataset.action_types}
 
             policy.reset([arena.id])
-            print('[multi-primitive diffusion] reset episode id', episode_id)
+            print('magpie] reset episode id', episode_id)
             info = arena.reset(train_configs[episode_id])
             policy.init([info])
             info['reward'] = 0
@@ -380,7 +380,7 @@ class MagpieAgent(TrainableAgent):
                 #print('add to trajectory')
                 for k, v in observations.items():
                     #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
-                    print(f'[debug] k {k}')
+                    #print(f'[debug] k {k}')
                     observations[k] = np.stack(v)
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)

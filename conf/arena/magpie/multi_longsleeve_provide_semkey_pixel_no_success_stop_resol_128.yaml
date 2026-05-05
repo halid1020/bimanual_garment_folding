@@ -22,6 +22,7 @@ provide_semkey_norm_pixel: true
 provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
 debug: false
+num_train_trials: 200
 # apply_workspace: true
 # robot0_radius: [0.1, 0.9] #left
 # robot1_radius: [0.1, 0.85] #right

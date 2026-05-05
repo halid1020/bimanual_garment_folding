@@ -54,8 +54,8 @@ experiment:
     right_workspace: [0.1, 0.85]   
 
     # Your exact robot base positions in the world frame
-    left_robot_base: [-0.717, -0.005, 0.0]  
-    right_robot_base: [0.894, -0.005, 0.0]  
+    left_robot_base: [-0.8, 0,  0] 
+    right_robot_base: [0.8, 0, 0]
 
     # Global Table Limits (Adjust to fit your physical table)
     x_lim_m: [-1, 1]   

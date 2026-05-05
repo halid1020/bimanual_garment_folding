@@ -192,8 +192,20 @@ class GarmentEnv(Arena):
 
     def _get_sim_config(self):
         from .utils.env_utils import get_default_config
-        self.default_config = get_default_config()
-   
+        
+        # Extract variables from config, falling back to defaults if not present
+        p_radius = self.config.get('particle_radius', 0.0175)
+        c_stiffness = self.config.get('cloth_stiffness', [0.75, 0.02, 0.02])
+        scale = self.config.get('scale', 0.8)
+        c_distance = self.config.get('collisionDistance', 0.0006)
+        
+        self.default_config = get_default_config(
+            particle_radius=p_radius,
+            cloth_stiffness=c_stiffness,
+            scale=scale,
+            collision_distance=c_distance
+        )
+
     def reset(self, episode_config=None):
         if episode_config is None:
             episode_config = {'eid': None, 'save_video': False}

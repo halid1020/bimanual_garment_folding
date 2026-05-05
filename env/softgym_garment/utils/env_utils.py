@@ -69,23 +69,24 @@ def load_cloth(path):
 
 
 def get_default_config(
-        particle_radius= 0.015, #0.0175,
-        cloth_stiffness = (0.8, 0.6, 0.8), #(0.75, .02, .02),
+        particle_radius=0.015,
+        cloth_stiffness=(0.8, 0.6, 0.8),
         scale=0.8,
+        collision_distance=0.0006, # 1. Add this parameter
         ):
     config = {
-        'scale':scale,
+        'scale': scale,
         'cloth_pos': [0.0, 1.0, 0.0],
         'cloth_size': [int(0.6 / particle_radius),
                        int(0.368 / particle_radius)],
-        'cloth_stiff': cloth_stiffness,  # Stretch, Bend and Shear
+        'cloth_stiff': cloth_stiffness,  
         'camera_name': 'default_camera',
         'camera_params': {
             'default_camera':
                 {
                     'render_type': ['cloth'],
                     'cam_position': [0, 2.0, 0],
-                    'cam_angle': [0, -90 / 180. * np.pi, 0.], #[np.pi/2, -np.pi / 2, 0],
+                    'cam_angle': [0, -90 / 180. * np.pi, 0.],
                     'cam_size': [480, 480],
                     'cam_fov': [45 / 180 * np.pi, 45 / 180 * np.pi],
                 }
@@ -95,15 +96,13 @@ def get_default_config(
             'radius': particle_radius,
             'buoyancy': 0,
             'numExtraParticles': 20000,
-            'collisionDistance': 0.0006, #0.001, #0.0006,
+            'collisionDistance': collision_distance, # 2. Map it here
             'msaaSamples': 0,
         },
         'flip_mesh': 0,
-        #"picker_initial_pos": np.asarray([[0.2, 0.2, 0.2], [-0.2, 0.2, 0.2]]),
     }
 
     return config
-
 
 
 def get_coverage(positions, particle_radius, resolution=500):

@@ -18,7 +18,7 @@ class PixelPickAndFling():
         hang_height=0.35, 
         prefling_vel=0.01,
         hang_pos_y=0.3, 
-        stroke=0.5, 
+        stroke=0.65, 
         lift_vel=0.02, 
         action_horizon=20,
         hang_adjust_vel=0.01,
@@ -33,7 +33,7 @@ class PixelPickAndFling():
         place_lower_bound=[-1, -1],
         place_upper_bound=[1, 1],
         pick_height=0.025, 
-        drag_dist=0.15,
+        drag_dist=0.1,
         readjust_to_workspace=False,
         **kwargs):
         

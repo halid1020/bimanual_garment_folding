@@ -33,16 +33,16 @@ class HybridActionPrimitive():
             })
         self.np_pnf = PixelPickAndFling(**fling_kwargs)
 
-        # 3. Folding (Pick and Place with specialized height/velocity constraints)
-        fold_kwargs = kwargs.copy()
-        fold_kwargs.update({
+        # 3. Pick and Place with specialized height/velocity constraints)
+        pnp_kwargs = kwargs.copy()
+        pnp_kwargs.update({
             'pregrasp_height': 0.2, 
             'post_pick_height': 0.2,
             'pre_place_height': 0.15,
             'place_height': 0.04,
             'lift_vel': 0.01
         })
-        self.np_fold = PixelPickAndPlace(**fold_kwargs)
+        self.np_pnp = PixelPickAndPlace(**pnp_kwargs)
     
     def get_no_op(self):
         return self.no_op
@@ -87,7 +87,7 @@ class HybridActionPrimitive():
                     'place_0': act[4:6], 'place_1': act[6:8]
                 }
                 
-            info = self.np_fold.step(env, act)
+            info = self.np_pnp.step(env, act)
             # Retain original behavior: map back to generic pick-and-place key
             info['applied_action'] = {'norm-pixel-pick-and-place': info['applied_action']}
 
@@ -96,7 +96,7 @@ class HybridActionPrimitive():
             if isinstance(act, np.ndarray):
                 act = {'pick_0': act[:2], 'place_0': act[2:4]}
                 
-            info = self.np_fold.step(env, act)
+            info = self.np_pnp.step(env, act)
             info['applied_action'] = {'norm-pixel-single-pick-and-place': info['applied_action']}
 
         elif 'no-operation' in action:

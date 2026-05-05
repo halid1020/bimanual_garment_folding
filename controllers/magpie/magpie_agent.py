@@ -934,12 +934,43 @@ class MagpieAgent(TrainableAgent):
                 out_dim += self.goal_state_dim
                 print(f"[MultiPrimitiveDiffusion] state_predictor out_dim extended to {out_dim} (State + Goal)")
 
-            # Unified MLP predicting both current and goal states
-            self.nets['state_predictor'] = nn.Sequential(
-                nn.Linear(self.effective_obs_dim, 256),
-                nn.ReLU(),
-                nn.Linear(256, out_dim)
-            )
+            # --- Dynamic State Predictor Builder ---
+            # Fetch config with safe defaults matching your previous setup
+            pred_cfg = self.config.get('state_predictor_config', {})
+            hidden_dims = pred_cfg.get('hidden_dims', [256])
+            use_layernorm = pred_cfg.get('use_layernorm', False)
+            dropout_p = pred_cfg.get('dropout', 0)
+            activation_name = pred_cfg.get('activation', 'relu').lower()
+
+            layers = []
+            in_dim = self.effective_obs_dim
+
+            # Build hidden layers
+            for h_dim in hidden_dims:
+                layers.append(nn.Linear(in_dim, h_dim))
+                
+                if use_layernorm:
+                    layers.append(nn.LayerNorm(h_dim))
+                
+                if activation_name == 'relu':
+                    layers.append(nn.ReLU())
+                elif activation_name == 'gelu':
+                    layers.append(nn.GELU())
+                elif activation_name == 'silu':
+                    layers.append(nn.SiLU())
+                else:
+                    layers.append(nn.ReLU()) # Fallback
+                
+                if dropout_p > 0.0:
+                    layers.append(nn.Dropout(p=dropout_p))
+                    
+                in_dim = h_dim # Update input dimension for the next layer
+
+            # Add the final output layer
+            layers.append(nn.Linear(in_dim, out_dim))
+
+            # Assign the dynamically built sequence
+            self.nets['state_predictor'] = nn.Sequential(*layers)
 
         self._test_network()
 
@@ -1267,6 +1298,13 @@ class MagpieAgent(TrainableAgent):
                 # ==========================================================
                 if getattr(self, 'use_projector', False):
                     obs_features = self.nets['obs_projector'](obs_features)
+                
+                if self.nets.training:
+                    # Inject 1% Gaussian noise to regularize the MLPs
+                    noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
+                    obs_features = obs_features + noise
+                else:
+                    obs_features = obs_features
                     
                 #print(f'[diffusion] obs_features shape {obs_features.shape}, img_feature shape {image_features.shape}')
 

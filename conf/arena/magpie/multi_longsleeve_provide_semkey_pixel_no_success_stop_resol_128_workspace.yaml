@@ -37,5 +37,13 @@ hard_shift_x: 0.1 # let the garment to be at the middle of intersecton.
 field_of_view: [69, 42] # in degrees
 camera_resolution: [1280, 720] 
 frame_resolution: [256, 148]
+
+particle_radius: 0.015
+cloth_stiffness: [0.8, 0.6, 0.8]
+scale: 0.8
+collisionDistance: 0.0006
+
+
+
 # width, height for rendering, but the render return (height, width) as shape.
 # width is the horizontal axis, height is the vertical axis. 

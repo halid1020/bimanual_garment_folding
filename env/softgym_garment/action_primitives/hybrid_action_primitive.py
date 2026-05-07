@@ -27,7 +27,7 @@ class HybridActionPrimitive():
                 'stroke': 0.65,
                 'hang_height': 0.35,
                 'place_height': 0.05,
-                'drag_dist': 0.1,
+                'drag_dist': 0.2,
                 'drag_vel': 0.005
                 
             })

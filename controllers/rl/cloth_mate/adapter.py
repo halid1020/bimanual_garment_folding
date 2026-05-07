@@ -189,35 +189,47 @@ class ClothMateAdapter(TrainableAgent):
                         
                         mask_np = (input_tensor[0].sum(dim=0) > 0).cpu().numpy()
                         
+                        # --- 1. Pants Fallback Classification ---
                         try:
-                            # Try to use their exact line-checking function if you have it
                             from .keypoint.utils import is_line_all_ones
                             is_pants = not is_line_all_ones(mask_np, pred_coords[2], pred_coords[3])
                         except ImportError:
                             is_pants = False
-                            
-                        # Fallback logic: Shirts usually have a bottom width > 1.6x the top width 
-                        # because the sleeves spread out. Pants have straight legs.
+
                         if not is_pants:
                             bot_px_width = np.linalg.norm(pred_coords[3] - pred_coords[2])
                             top_px_width = np.linalg.norm(pred_coords[1] - pred_coords[0])
-                            if bot_px_width < top_px_width * 1.6:
+                            # Geometrically sound check for standard 2D space
+                            if bot_px_width > top_px_width * 1.2: 
                                 is_pants = True
 
-                      
-                        if top_width < bottom_width:
+                        # --- 2. Calculate Misalignment (Deviation) ---
+                        # In 2D space, we check the deviation along the vertical Y-axis (index 1)
+                        # to see which side is more "crooked" and needs flattening.
+                        top_y_avg = (tl[1] + tr[1]) / 2.0
+                        bottom_y_avg = (bl[1] + br[1]) / 2.0
+
+                        top_deviation = abs(tl[1] - top_y_avg) + abs(tr[1] - top_y_avg)
+                        bottom_deviation = abs(bl[1] - bottom_y_avg) + abs(br[1] - bottom_y_avg)
+
+                        # --- 3. Pick and Stretch Logic ---
+                        # Grasp the pair with the highest deviation from the bounding box
+                        if top_deviation > bottom_deviation:
+                            # Top is more wrinkled/deviated -> Grasp top
                             pick_L, pick_R = tl, tr
                             anchor_L, anchor_R = bl, br
-                            
-                            if is_pants:
-                                target_width = top_width * 1.15
-                            else:
-                                target_width = bottom_width * 1.15
+                            target_width = top_width * 1.15
                         else:
+                            # Bottom is more wrinkled/deviated -> Grasp bottom
                             pick_L, pick_R = bl, br
                             anchor_L, anchor_R = tl, tr
-                            target_width = top_width * 1.15
                             
+                            if is_pants:
+                                # Replicating original code's pants constraint: max_grasp_dist based on top keypoints
+                                target_width = top_width * 1.15 
+                            else:
+                                target_width = bottom_width * 1.15
+                                                    
                         midpoint = (pick_L + pick_R) / 2
                         anchor_mid = (anchor_L + anchor_R) / 2
                         

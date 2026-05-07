@@ -29,7 +29,7 @@ robot0_base: [-0.8, 0,  0]
 robot1_base: [0.8, 0, 0]
 readjust_to_workspace: true #true
 add_final_goal_to_obs: True
-camera_height: 2
+camera_height: 2 #clothmate, clothfunnel default
 crop_offset_x: 0 # let the intersection at the view centre.
 random_displacement_range: [-0.1, 0.1] # this is used for alignment target pos generation.
 hard_shift_x: 0 # let the garment to be at the middle of intersecton.
@@ -38,10 +38,10 @@ field_of_view: [69, 42] # in degrees
 camera_resolution: [1280, 720] 
 frame_resolution: [256, 148]
 
-particle_radius: 0.015
-cloth_stiffness: [0.8, 0.6, 0.8]
-scale: 0.8
-collisionDistance: 0.0006
+particle_radius: 0.014 #clothmate, clothfunnel default
+cloth_stiffness: [0.75, 0.02, 0.02] #clothmate, clothfunnel default
+scale: 0.8 #clothmate, clothfunnel default
+collisionDistance: 0.0006 #clothmate, clothfunnel default
 
 # width, height for rendering, but the render return (height, width) as shape.
 # width is the horizontal axis, height is the vertical axis. 

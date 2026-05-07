@@ -121,12 +121,12 @@ class ClothMateAdapter(TrainableAgent):
         
         # 1. Rotate 90 deg CCW
         prerot_rgb = rgb.copy()
-
+        in_obs = {}
         for key in ['rgb', 'depth', 'mask', 'robot0_mask', 'robot1_mask']:
             assert key in obs, f"Key {key} not found in observation"
-            obs[key] = np.rot90(obs[key], 1).copy()
+            in_obs[key] = np.rot90(obs[key].copy(), 1).copy()
 
-        self.transformed_obs = self.generate_transformed_obs(obs) 
+        self.transformed_obs = self.generate_transformed_obs(in_obs) 
         self.transformed_obs['prerot_rgb'] = prerot_rgb
 
         # 2. Forward Pass
@@ -334,7 +334,7 @@ class ClothMateAdapter(TrainableAgent):
         elif action_primitive in ['pick-and-stretch', 'stretch']:
             final_action['norm-pixel-dual-pick-and-place'] = norm_pts_array
         else:
-            raise NotImplementedError 
+            final_action['no-operation'] = []
             
         return final_action
 

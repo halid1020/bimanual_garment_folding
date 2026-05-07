@@ -343,8 +343,8 @@ class GarmentEnv(Arena):
     def get_episode_config(self):
         return self.episode_config
     
-    def get_num_episodes(self):
-        return 1 if self.mode in ['eval', 'train'] else NotImplementedError
+    # def get_num_episodes(self):
+    #     return 1 if self.mode in ['eval', 'train'] else NotImplementedError
 
     def get_info(self, new=False):
         if new:

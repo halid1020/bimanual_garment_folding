@@ -43,7 +43,7 @@ dataset_mode: "general"
 dataset_config:
   data_path: "multi_longsleeve_multi_primitive_alignment_human_demo"
   data_dir: "./data/datasets"
-  split_ratios: [0.0, 0.1, 0.9]
+  split_ratios: [0.0, 0.05, 0.95]
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True

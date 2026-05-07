@@ -199,54 +199,78 @@ class ClothMateAdapter(TrainableAgent):
                         if not is_pants:
                             bot_px_width = np.linalg.norm(pred_coords[3] - pred_coords[2])
                             top_px_width = np.linalg.norm(pred_coords[1] - pred_coords[0])
-                            # Geometrically sound check for standard 2D space
+                            # Pants typically have a wider bottom (ankles) than top (waistband) in standard 2D view
                             if bot_px_width > top_px_width * 1.2: 
                                 is_pants = True
 
-                        # --- 2. Calculate Misalignment (Deviation) ---
-                        # In 2D space, we check the deviation along the vertical Y-axis (index 1)
-                        # to see which side is more "crooked" and needs flattening.
+                        # --- 2. Calculate Bounding Box and Global Center ---
+                        # We use the raw cloth mask to find the true physical bounds and centerline of the garment
+                        y_indices, x_indices = np.where(mask_np)
+                        min_y, max_y = np.min(y_indices), np.max(y_indices)
+                        min_x, max_x = np.min(x_indices), np.max(x_indices)
+
+                        global_center_x = (min_x + max_x) / 2.0
+                        max_cloth_width = max_x - min_x
+
+                        # --- 3. Evaluate Wrinkle/Fold Deviation ---
+                        # Ideally, top keypoints sit near min_y, and bottom near max_y. 
+                        # A high deviation means the keypoints are folded deeply inward or highly asymmetrical.
+                        top_deviation = (tl[1] - min_y) + (tr[1] - min_y) + abs(tl[1] - tr[1])
+                        bottom_deviation = (max_y - bl[1]) + (max_y - br[1]) + abs(bl[1] - br[1])
+
+                        # --- 4. Select Target Keypoints ---
                         top_y_avg = (tl[1] + tr[1]) / 2.0
                         bottom_y_avg = (bl[1] + br[1]) / 2.0
 
                         top_deviation = abs(tl[1] - top_y_avg) + abs(tr[1] - top_y_avg)
                         bottom_deviation = abs(bl[1] - bottom_y_avg) + abs(br[1] - bottom_y_avg)
 
-                        # --- 3. Pick and Stretch Logic ---
-                        # Grasp the pair with the highest deviation from the bounding box
+                        # --- 2. Select Target Keypoints ---
                         if top_deviation > bottom_deviation:
-                            # Top is more wrinkled/deviated -> Grasp top
+                            # Grasp Top (Sleeves)
                             pick_L, pick_R = tl, tr
                             anchor_L, anchor_R = bl, br
                             target_width = top_width * 1.15
                         else:
-                            # Bottom is more wrinkled/deviated -> Grasp bottom
+                            # Grasp Bottom (Hems)
                             pick_L, pick_R = bl, br
                             anchor_L, anchor_R = tl, tr
                             
                             if is_pants:
-                                # Replicating original code's pants constraint: max_grasp_dist based on top keypoints
-                                target_width = top_width * 1.15 
+                                target_width = min(bottom_width * 1.15, top_width * 1.2)
                             else:
                                 target_width = bottom_width * 1.15
-                                                    
-                        midpoint = (pick_L + pick_R) / 2
-                        anchor_mid = (anchor_L + anchor_R) / 2
-                        
-                        stretch_dir = (pick_L - pick_R) / (np.linalg.norm(pick_L - pick_R) + 1e-5)
-                        tension_dir = (midpoint - anchor_mid) / (np.linalg.norm(midpoint - anchor_mid) + 1e-5)
-                        tension_magnitude = orig_dim * 0.1  
-                        
-                        place_L = midpoint + stretch_dir * (target_width / 2) + tension_dir * tension_magnitude
-                        place_R = midpoint - stretch_dir * (target_width / 2) + tension_dir * tension_magnitude
-                        
+
+                        # --- 3. Rotation-Invariant Vector Math ---
+                        # stretch_dir points horizontally across the garment
+                        stretch_vector = pick_L - pick_R
+                        stretch_dir = stretch_vector / (np.linalg.norm(stretch_vector) + 1e-5)
+
+                        pick_mid = (pick_L + pick_R) / 2.0
+                        anchor_mid = (anchor_L + anchor_R) / 2.0
+
+                        # tension_dir points vertically along the garment, from Anchor to Pick
+                        tension_vector = pick_mid - anchor_mid
+                        tension_dir = tension_vector / (np.linalg.norm(tension_vector) + 1e-5)
+                        tension_magnitude = orig_dim * 0.1  # 10% tension stretch
+
+                        # --- 4. The Center-Fix ---
+                        # Calculate an idealized target midpoint stretching straight up from the anchors.
+                        # This prevents a skewed sleeve from shifting the whole garment off-center.
+                        original_length = np.linalg.norm(tension_vector)
+                        ideal_target_mid = anchor_mid + tension_dir * (original_length + tension_magnitude)
+
+                        # Calculate final place positions symmetrically out from the ideal midpoint
+                        place_L = ideal_target_mid + stretch_dir * (target_width / 2.0)
+                        place_R = ideal_target_mid - stretch_dir * (target_width / 2.0)
+
                         action_params = {
                             'p1': pick_L.astype(int),
                             'p2': pick_R.astype(int),
                             'p3': place_L.astype(int),
                             'p4': place_R.astype(int)
                         }
-                        
+                                                
      
                         if self.debug:
                             import cv2

@@ -48,19 +48,19 @@ class HarenaTransforms(ExperimentVirtualTransforms):
             self.world_to_camera_transform = np.linalg.inv(self.camera_to_world_transform)
             
             # 3. Maintain UniFolding's expected Virtual Frame rotation
-            # self.virtual_to_world_transform = np.array([
-            #         [ 0., -1., 0., 0.],
-            #         [ 1.,  0., 0., 0.],
-            #         [ 0.,  0., 1., 0.],
-            #         [ 0.,  0., 0., 1.]
-            #     ])
-            
             self.virtual_to_world_transform = np.array([
-                    [ 0., 1., 0., 0.],
-                    [ -1.,  0., 0., 0.],
+                    [ 0., -1., 0., 0.],
+                    [ 1.,  0., 0., 0.],
                     [ 0.,  0., 1., 0.],
                     [ 0.,  0., 0., 1.]
                 ])
+            
+            # self.virtual_to_world_transform = np.array([
+            #         [ 0., 1., 0., 0.],
+            #         [ -1.,  0., 0., 0.],
+            #         [ 0.,  0., 1., 0.],
+            #         [ 0.,  0., 0., 1.]
+            #     ])
         
             self.world_to_virtual_transform = np.linalg.inv(self.virtual_to_world_transform)
             self.virtual_to_camera_transform = self.world_to_camera_transform @ self.virtual_to_world_transform

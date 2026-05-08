@@ -327,7 +327,7 @@ class MagpieAgent(TrainableAgent):
                                 print('[MultiPrimitiveDiffusionAdapter] k, v to save', k, v)
                 
                 add_action = action
-                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding']: 
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks']: 
                     # Unused dimenstions are zeros
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
@@ -577,8 +577,9 @@ class MagpieAgent(TrainableAgent):
                         mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
                         val_state_mse.append(mse_loss.item())
 
+                
                 # 3. Validate Primitive Classification Accuracy
-                if self.primitive_integration == 'one-hot-encoding':
+                if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                     prim_logits = self.nets['prim_class_head'](obs_cond)
                     
                     prim_bin = nbatch['action'][:, 0, 0].to(self.device)
@@ -592,12 +593,14 @@ class MagpieAgent(TrainableAgent):
                     all_preds.extend(preds.cpu().numpy())
                     all_gts.extend(gt_prim_ids.cpu().numpy())
                     
-                    # Create one-hot encoding for the diffusion condition
-                    # (Using predicted primitives for a true inference evaluation)
-                    prim_one_hot = nn.functional.one_hot(preds, num_classes=self.K).float()
-                    obs_cond_diff = torch.cat([obs_cond, prim_one_hot], dim=-1)
-                    
-                    # The ground truth continuous action removes the first dim (primitive bin)
+                    # Create one-hot encoding if needed
+                    if self.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.K).float()
+                        obs_cond_diff = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                    else:
+                        obs_cond_diff = obs_cond
+                        
+                    # Both modes require slicing off the primitive bin
                     gt_action = nbatch['action'][:, :, 1:].to(self.device)
                 else:
                     obs_cond_diff = obs_cond
@@ -606,7 +609,6 @@ class MagpieAgent(TrainableAgent):
                 # ==========================================================
                 # --- 4. Action Parameter Inference & Error Calculation ---
                 # ==========================================================
-                # Start from pure noise
                 eval_naction = torch.randn((B, self.config.pred_horizon, self.diffusion_dim), device=self.device)
                 loss_type = self.config.get('loss_type', 'diffusion')
                 
@@ -617,15 +619,40 @@ class MagpieAgent(TrainableAgent):
                     for i in range(num_steps):
                         t_val = i / num_steps
                         timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                        v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                        
+                        if self.primitive_integration == 'separate_networks':
+                            v_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.K):
+                                dim_k = self.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (preds == k) # Route based on PREDICTED primitive
+                                if mask_k.sum() > 0:
+                                    net_out = self.nets[f'noise_pred_net_{k}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond_diff[mask_k]
+                                    )
+                                    v_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                            
                         eval_naction = eval_naction + v_pred * dt
                 else:
                     self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
                     for k in self.noise_scheduler.timesteps:
                         timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
-                        n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                        
+                        if self.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for net_idx in range(self.K):
+                                mask_k = (preds == net_idx)
+                                if mask_k.sum() > 0:
+                                    n_pred[mask_k] = self.nets[f'noise_pred_net_{net_idx}'](
+                                        sample=eval_naction[mask_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond_diff[mask_k]
+                                    )
+                        else:
+                            n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond_diff)
+                            
                         eval_naction = self.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
-                
+
                 # Extract the continuous action parameters (ignore the state prediction part if joint diffusion)
                 pred_action = eval_naction[..., :self.network_action_dim]
                 
@@ -839,10 +866,9 @@ class MagpieAgent(TrainableAgent):
             self.obs_projector = nn.Identity()
 
         #self.obs_feature_dim = self.config.obs_dim * self.config.obs_horizon
-        if self.primitive_integration == 'one-hot-encoding':
-
-            cls_cfg = self.config.get("primitive_classifier", {}) # nn.Linear(self.config.obs_dim, self.K) by default
-
+        if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+            cls_cfg = self.config.get("primitive_classifier", {}) 
+            
             self.prim_class_head = MLPClassifier(
                 input_dim=self.effective_obs_dim,
                 output_dim=self.K,
@@ -852,43 +878,81 @@ class MagpieAgent(TrainableAgent):
                 use_layernorm=cls_cfg.get("use_layernorm", False),
             )
 
-            # Increase global_cond_dim to accommodate the one-hot vector
-            global_cond_dim = (self.effective_obs_dim + self.K) * self.config.obs_horizon
+            # Only one-hot-encoding appends to the global condition
+            if self.primitive_integration == 'one-hot-encoding':
+                global_cond_dim = (self.effective_obs_dim + self.K) * self.config.obs_horizon
+            else:
+                global_cond_dim = self.effective_obs_dim * self.config.obs_horizon
+                
             self.log_prim_metrics_every = self.config.get('log_prim_metrics_every', 200)
         else:
             global_cond_dim = self.effective_obs_dim * self.config.obs_horizon
 
         # Determine the total dimension for diffusion
+        # Determine the total dimension for diffusion
         self.diffusion_dim = self.network_action_dim
+        self.diffusion_dims = {} # Store individual dimensions for separate_networks
+        
+        extra_state_dim = 0
         if self.rep_learn == 'predict-state-with-action':
-            self.diffusion_dim += self.config.state_dim
-            
-            # --- NEW: Account for Goal State Dimension ---
+            extra_state_dim += self.config.state_dim
             self.predict_goal_state = self.config.get('predict_goal_state', False)
             if self.predict_goal_state:
                 self.goal_state_dim = self.config.get('goal_state_dim', 30)
-                self.diffusion_dim += self.goal_state_dim
-                
-            print(f"[MultiPrimitiveDiffusion] Joint Action+State Diffusion Active. Total dim: {self.diffusion_dim}")
+                extra_state_dim += self.goal_state_dim
+            print(f"[MultiPrimitiveDiffusion] Joint Action+State Diffusion Active.")
+            
+        self.diffusion_dim += extra_state_dim
+
+        for k in range(getattr(self, 'K', 1)):
+            if hasattr(self, 'action_dims'):
+                self.diffusion_dims[k] = self.action_dims[k] + extra_state_dim
+            else:
+                self.diffusion_dims[k] = self.diffusion_dim
 
         # Check config to decide which backbone to use (defaults to unet)
         backbone_type = self.config.get('noise_pred_net', 'unet')
 
-        if backbone_type == 'mlp':
-            self.noise_pred_net = ConditionalMLP1D(
-                input_dim=self.diffusion_dim,          # <--- Updated
-                global_cond_dim=global_cond_dim,
-                pred_horizon=self.config.pred_horizon,
-                hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
-                activation="relu",
-                dropout=0.1
-            )
+        if self.primitive_integration == 'separate_networks':
+            # Create K separate networks dynamically based on primitive dimension
+            for k in range(self.K):
+                dim_k = self.diffusion_dims[k]
+                if dim_k == 0:
+                    continue # Skip creating network if 0 dimension
+                    
+                if backbone_type == 'mlp':
+                    net = ConditionalMLP1D(
+                        input_dim=dim_k,         
+                        global_cond_dim=global_cond_dim,
+                        pred_horizon=self.config.pred_horizon,
+                        hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
+                        activation="relu",
+                        dropout=0.1
+                    )
+                else:
+                    net = ConditionalUnet1D(
+                        input_dim=dim_k,         
+                        global_cond_dim=global_cond_dim,
+                        diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
+                    )
+                setattr(self, f'noise_pred_net_{k}', net)
         else:
-            self.noise_pred_net = ConditionalUnet1D(
-                input_dim=self.diffusion_dim,          # <--- Updated
-                global_cond_dim=global_cond_dim,
-                diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
-            )
+            # Standard single network
+            if backbone_type == 'mlp':
+                self.noise_pred_net = ConditionalMLP1D(
+                    input_dim=self.diffusion_dim,         
+                    global_cond_dim=global_cond_dim,
+                    pred_horizon=self.config.pred_horizon,
+                    hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
+                    activation="relu",
+                    dropout=0.1
+                )
+            else:
+                self.noise_pred_net = ConditionalUnet1D(
+                    input_dim=self.diffusion_dim,         
+                    global_cond_dim=global_cond_dim,
+                    diable_updown=(self.config.disable_updown if 'disable_updown' in self.config else False),
+                )
 
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.config.num_diffusion_iters, # default value 100
@@ -905,8 +969,16 @@ class MagpieAgent(TrainableAgent):
 
         net_dict = {
             'vision_encoder': self.vision_encoder,
-            'noise_pred_net': self.noise_pred_net
         }
+
+        # Add the appropriate noise prediction network(s)
+        if self.primitive_integration == 'separate_networks':
+            for k in range(self.K):
+                # Only add the network if it was actually created (i.e., dim > 0)
+                if hasattr(self, f'noise_pred_net_{k}'):
+                    net_dict[f'noise_pred_net_{k}'] = getattr(self, f'noise_pred_net_{k}')
+        else:
+            net_dict['noise_pred_net'] = self.noise_pred_net
 
         if self.use_projector:
             net_dict['obs_projector'] = self.obs_projector
@@ -916,7 +988,7 @@ class MagpieAgent(TrainableAgent):
         
         self.nets = nn.ModuleDict(net_dict)
 
-        if self.primitive_integration == 'one-hot-encoding':
+        if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
             self.nets['prim_class_head'] = self.prim_class_head
 
         if self.rep_learn == 'auto-encoder':
@@ -1131,10 +1203,21 @@ class MagpieAgent(TrainableAgent):
 
             goal_cond = goal_cond.flatten(start_dim=1)
 
-            noise = self.nets['noise_pred_net'](
-                sample=noised_action,
-                timestep=diffusion_iter,
-                global_cond=goal_cond)
+            if self.primitive_integration == 'separate_networks':
+                # Find the first network that was actually created (dim > 0)
+                active_k = next(k for k, d in self.diffusion_dims.items() if d > 0)
+                active_net = self.nets[f'noise_pred_net_{active_k}']
+                dim_k = self.diffusion_dims[active_k]
+                noise = active_net(
+                    sample=noised_action[..., :dim_k],
+                    timestep=diffusion_iter,
+                    global_cond=goal_cond)
+            else:
+                active_net = self.nets['noise_pred_net']
+                noise = active_net(
+                    sample=noised_action,
+                    timestep=diffusion_iter,
+                    global_cond=goal_cond)
 
             # illustration of removing noise
             # the actual noise removal is performed by NoiseScheduler
@@ -1357,14 +1440,12 @@ class MagpieAgent(TrainableAgent):
                 obs_cond = obs_features.flatten(start_dim=1)
 
                 prim_loss = torch.tensor(0)
-                if self.primitive_integration == 'one-hot-encoding':
+                if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                     
                     # 1. Predict primitive ID from observation features
                     prim_logits = self.nets['prim_class_head'](obs_cond)
                     
-                    # 2. Extract ground truth primitive ID from the action encoding
-                    # Based on your _init_demo_policy_dataset, prim_id is encoded in action[0]
-                    # We decode it back to the class index (0 to K-1)
+                    # 2. Extract ground truth primitive ID
                     prim_bin = nbatch['action'][:, 0, 0] 
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.K - 1)
@@ -1397,17 +1478,16 @@ class MagpieAgent(TrainableAgent):
                         )}
                         self.logger.log(confusion, step=self.update_step)
                                     
-                    # 4. Create one-hot encoding for conditioning the Diffusion net
-                    # Use ground truth during training (Teacher Forcing)
-                    prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
-                    
-                    # 5. Concatenate to obs_cond
-                    obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                    # 4. Handle conditioning and action slicing based on mode
+                    if self.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                        
+                    # Both modes slice the bin selector off the action tensor
                     nbatch['action'] = nbatch['action'][:, :, 1:]
-                    # print(f'[MultiPrimitiveDiffusion, train] obs_cond shape {obs_cond.shape}')
 
                 # ==========================================================
-                # --- NEW LOGIC: Create Joint Target AFTER action is sliced
+                # -Create Joint Target AFTER action is sliced
                 # ==========================================================
                 if self.rep_learn == 'predict-state-with-action':
                     state_key = self.config.get('state_key', 'semkey_norm_pixel')
@@ -1440,9 +1520,22 @@ class MagpieAgent(TrainableAgent):
                     t_expand = t.view(B, 1, 1)
                     noisy_actions = (1 - t_expand) * noise + t_expand * x_1
                     target = x_1 - noise
-                    
                     timesteps = t * self.config.num_diffusion_iters
-                    noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+                    
+                    if self.primitive_integration == 'separate_networks':
+                        noise_pred = torch.zeros_like(noisy_actions)
+                        for k in range(self.K):
+                            dim_k = self.diffusion_dims[k]
+                            if dim_k == 0: continue
+                            mask_k = (gt_prim_ids == k)
+                            if mask_k.sum() > 0:
+                                net_out = self.nets[f'noise_pred_net_{k}'](
+                                    noisy_actions[mask_k][..., :dim_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
+                                )
+                                noise_pred[mask_k, :, :dim_k] = net_out
+                    else:
+                        noise_pred = self.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
+                        
                 else:
                     noise = torch.randn(diffusion_target.shape, device=self.device)
                     timesteps = torch.randint(
@@ -1451,16 +1544,25 @@ class MagpieAgent(TrainableAgent):
                     ).long()
                     
                     noisy_actions = self.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
-                    noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
                     target = noise
+                    
+                    if self.primitive_integration == 'separate_networks':
+                        noise_pred = torch.zeros_like(noisy_actions)
+                        for k in range(self.K):
+                            mask_k = (gt_prim_ids == k)
+                            if mask_k.sum() > 0:
+                                noise_pred[mask_k] = self.nets[f'noise_pred_net_{k}'](
+                                    noisy_actions[mask_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
+                                )
+                    else:
+                        noise_pred = self.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
 
+               
                 # --- MASKING LOGIC UPDATE ---
                 if self.primitive_integration != 'none' and self.mask_out_irrelavent_action_dim:
-                    actions = nbatch['action']
-                    prim_bin = actions[:, 0, 0] 
-                    prim_ids = (((prim_bin + 1) / 2) * self.K).long()
-                    prim_ids = torch.clamp(prim_ids, 0, self.K - 1).cpu().detach().numpy()
-                    B, T, _ = actions.shape
+                    # Safely reuse gt_prim_ids calculated before the action tensor was sliced
+                    prim_ids = gt_prim_ids.cpu().detach().numpy()
+                    B, T, _ = nbatch['action'].shape
                     
                     # Create base action mask
                     mask = torch.zeros((B, T, self.network_action_dim), device=self.device)
@@ -1542,22 +1644,53 @@ class MagpieAgent(TrainableAgent):
                     # Start from pure noise
                     eval_naction = torch.randn((B, self.config.pred_horizon, self.diffusion_dim), device=self.device)
                     
+                    # if self.primitive_integration == 'separate_networks':
+                    #     active_net = self.nets[f'noise_pred_net_{cur_prim_id}']
+                    # else:
+                    #     active_net = self.nets['noise_pred_net']
+
                     if loss_type == 'ot_flow_match':
                         num_steps = self.config.num_diffusion_iters
                         dt = 1.0 / num_steps
                         for i in range(num_steps):
                             t_val = i / num_steps
-                            # Create a batch-sized timestep tensor
                             timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                            v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                            if self.primitive_integration == 'separate_networks':
+                                v_pred = torch.zeros_like(eval_naction)
+                                for k in range(self.K):
+                                    dim_k = self.diffusion_dims[k]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == k)
+                                    if mask_k.sum() > 0:
+                                        net_out = self.nets[f'noise_pred_net_{k}'](
+                                            sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                        )
+                                        v_pred[mask_k, :, :dim_k] = net_out
+                            else:
+                                v_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                                
                             eval_naction = eval_naction + v_pred * dt
                     else:
                         self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                        for k in self.noise_scheduler.timesteps:
-                            # Create a batch-sized timestep tensor
-                            timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
-                            n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            eval_naction = self.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+                        for step_k in self.noise_scheduler.timesteps:
+                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
+                            
+                            if self.primitive_integration == 'separate_networks':
+                                n_pred = torch.zeros_like(eval_naction)
+                                for net_idx in range(self.K):
+                                    dim_k = self.diffusion_dims[net_idx]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == net_idx)
+                                    if mask_k.sum() > 0:
+                                        net_out = self.nets[f'noise_pred_net_{net_idx}'](
+                                            sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                        )
+                                        n_pred[mask_k, :, :dim_k] = net_out
+                            else:
+                                n_pred = self.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                                
+                            eval_naction = self.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
 
                     # Calculate and Log Metrics against ground truth
                     act_dim = self.network_action_dim
@@ -1596,7 +1729,7 @@ class MagpieAgent(TrainableAgent):
         """
         masks = {}
         start = None
-        if self.primitive_integration == 'one-hot-encoding':
+        if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
             start = 0
         elif self.primitive_integration == 'bin_as_output':
             start = 1
@@ -1788,27 +1921,22 @@ class MagpieAgent(TrainableAgent):
             if getattr(self, 'use_projector', False):
                 obs_features = self.nets['obs_projector'](obs_features)
             
-            # Initialize a variable to hold the probabilities for logging
             prim_probs_log = None 
-            if self.primitive_integration == 'one-hot-encoding':
+            if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                 prim_logits = self.nets['prim_class_head'](obs_features)
                 
-                # Calculate and capture probabilities
                 prim_probs = torch.softmax(prim_logits, dim=-1)
                 prim_probs_log = prim_probs.cpu().detach().numpy()
                 
                 prim_id = torch.argmax(prim_logits, dim=-1) # (1,)
                 cur_prim_id = prim_id[-1].cpu().detach().item()
-                
                 info['prim_name'] = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[cur_prim_id], dict) else self.primitives[cur_prim_id].name
 
-              
-                # Convert to one-hot encoding
-                prim_enc = nn.functional.one_hot(prim_id, num_classes=self.K).float()
-                
-                # Condition is [Obs Features + One-Hot Primitive ID]
-                obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
-                # ---------------------------------------------------------------
+                if self.primitive_integration == 'one-hot-encoding':
+                    prim_enc = nn.functional.one_hot(prim_id, num_classes=self.K).float()
+                    obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
+                else:
+                    obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
             else:
                 obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
                 
@@ -1828,42 +1956,60 @@ class MagpieAgent(TrainableAgent):
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
             
+            if self.primitive_integration == 'separate_networks':
+                active_net = self.nets[f'noise_pred_net_{cur_prim_id}']
+            else:
+                active_net = self.nets['noise_pred_net']
             loss_type = self.config.get('loss_type', 'diffusion')
             
-            if loss_type == 'ot_flow_match':
-                num_steps = self.config.num_diffusion_iters
-                dt = 1.0 / num_steps
-                noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
-                
-                for i in range(num_steps):
-                    t_val = i / num_steps
-                    timestep_tensor = torch.tensor([t_val * self.config.num_diffusion_iters], device=self.device, dtype=torch.float32)
-                    
-                    v_pred = self.nets['noise_pred_net'](sample=naction, timestep=timestep_tensor, global_cond=obs_cond)
-                    naction = naction + v_pred * dt
-                    
-                    if self.primitive_integration == 'one-hot-encoding':
-                        act_part = naction[..., :self.network_action_dim]
-                        state_part = naction[..., self.network_action_dim:]
-                        act_part = self.constrain_action(act_part, info, t=i, debug=self.debug)
-                        naction = torch.cat([act_part, state_part], dim=-1)
-                        
-                    noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
-                    
+            dim_k = self.diffusion_dims[cur_prim_id] if self.primitive_integration == 'separate_networks' else self.diffusion_dim
+            
+            if dim_k == 0:
+                # If the action dimension is exactly 0, no diffusion loop is needed. 
+                # Zero out the naction to avoid arbitrary noise outputs.
+                naction = torch.zeros_like(naction)
+                noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])] * (self.config.num_diffusion_iters + 1)
             else:
-                self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
-                for k in self.noise_scheduler.timesteps:
-                    noise_pred = self.nets['noise_pred_net'](sample=naction, timestep=k, global_cond=obs_cond)
-                    naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
+                if self.primitive_integration == 'separate_networks':
+                    active_net = self.nets[f'noise_pred_net_{cur_prim_id}']
+                else:
+                    active_net = self.nets['noise_pred_net']
+                
+                if loss_type == 'ot_flow_match':
+                    num_steps = self.config.num_diffusion_iters
+                    dt = 1.0 / num_steps
+                    noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
                     
-                    if self.primitive_integration == 'one-hot-encoding':
-                        act_part = naction[..., :self.network_action_dim]
-                        state_part = naction[..., self.network_action_dim:]
-                        act_part = self.constrain_action(act_part, info, t=k, debug=self.debug)
-                        naction = torch.cat([act_part, state_part], dim=-1)
+                    for i in range(num_steps):
+                        t_val = i / num_steps
+                        timestep_tensor = torch.tensor([t_val * self.config.num_diffusion_iters], device=self.device, dtype=torch.float32)
+                        
+                        v_pred = active_net(sample=naction[..., :dim_k], timestep=timestep_tensor, global_cond=obs_cond)
+                        naction[..., :dim_k] = naction[..., :dim_k] + v_pred * dt
+                        
+                        if self.primitive_integration == 'one-hot-encoding':
+                            act_part = naction[..., :self.network_action_dim]
+                            state_part = naction[..., self.network_action_dim:]
+                            act_part = self.constrain_action(act_part, info, t=i, debug=self.debug)
+                            naction = torch.cat([act_part, state_part], dim=-1)
+                            
+                        noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+                        
+                else:
+                    self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                    noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
+                    for k in self.noise_scheduler.timesteps:
+                        noise_pred = active_net(sample=naction[..., :dim_k], timestep=k, global_cond=obs_cond)
+                        denoised = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction[..., :dim_k]).prev_sample
+                        naction[..., :dim_k] = denoised
+                        
+                        if self.primitive_integration == 'one-hot-encoding':
+                            act_part = naction[..., :self.network_action_dim]
+                            state_part = naction[..., self.network_action_dim:]
+                            act_part = self.constrain_action(act_part, info, t=k, debug=self.debug)
+                            naction = torch.cat([act_part, state_part], dim=-1)
 
-                    noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+                        noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
 
             # Extract the final action portion from the joint tensor for execution
             final_action = naction[..., :self.network_action_dim]
@@ -1911,7 +2057,7 @@ class MagpieAgent(TrainableAgent):
             prim_name = self.primitives[prim_idx]['name'] if isinstance(self.primitives[prim_idx], dict) else self.primitives[prim_idx].name
             action = action[1:]
             out_action = {prim_name: action}
-        elif self.primitive_integration == 'one-hot-encoding':
+        elif self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
             prim_name = self.primitives[cur_prim_id]['name'] if isinstance(self.primitives[cur_prim_id], dict) else self.primitives[cur_prim_id].name
             out_action = {prim_name: action[:self.action_dims[cur_prim_id]]}
         else:

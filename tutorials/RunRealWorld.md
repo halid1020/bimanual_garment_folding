@@ -126,8 +126,19 @@ In this figure, the red and blue arcs represent the workspace of each arm, and t
 
 Try to complete the entire episode using all different types of primitives. The results will be saved to `~/project/garment_folding_data/real_world_human_alignment`.
 
+## 7. Human Control For Folding
 
-## 7. Control with Neural Controllers
+With the similar running logic above, the human control for folding tasks can be run as follow
+
+```bash
+. ./setup.sh
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_folding
+```
+
+*Instructions:* The program will prompt you to provide the garment ID (e.g., `teen-brown-top`). Next, it it will ask you to flatten the garment for collecting initial demonstration as a ground truth for evaluatoin. Afterwards, it will ask you to crumple the garment into its initial state. The script will then guide you through providing primitive actions. All instructions from the program that require user input will be highlighted in <span style="color: green;">green</span>.
+
+
+## 8. Control with Neural Controllers
 
 Once the system is verified with a human-controlled episode, you are ready to run our neural controller, Magpie.
 
@@ -169,6 +180,6 @@ python tool/eval_real_world.py --config-name real_world_exp/magpie_ctr_align_lon
 
 Ensure you securely save the evaluation results once the process is complete.
 
-## 8. Shutting Down the Robots
+## 9. Shutting Down the Robots
 
 When you finish your work, shutting down the robots is straightforward. Simply press the hard on/off button on the pendant, then press the `Discard Changes` virtual button on the interface. Ensure the robots are completely shut down whenever left unattended.

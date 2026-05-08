@@ -943,8 +943,7 @@ class UFONet(pl.LightningModule):
             self.forward(coords, feat, pc_xyz_batch)
 
         is_smoothing = False
-        logger.debug(
-            f'pred_is_folding_score : {torch.sigmoid(pred_is_folding_logits)}, pred_smoothed_score: {torch.sigmoid(pred_smoothed_logits)}')
+        print(f'[UFONet] pred_is_folding_score : {torch.sigmoid(pred_is_folding_logits)}, pred_smoothed_score: {torch.sigmoid(pred_smoothed_logits)}')
         if torch.sigmoid(pred_smoothed_logits) <= smoothed_cls_thr:
             # not fully smoothed yet
             if only_fling_during_smoothing:

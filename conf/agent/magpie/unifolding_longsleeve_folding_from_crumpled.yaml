@@ -1,0 +1,65 @@
+# ==========================================
+# UniFolding Adapter Inference Config (Longsleeve)
+# ==========================================
+name: unifolding
+
+debug: True
+
+inference:
+  # MUST UPDATE: Point this to the directory containing your 'checkpoints' folder
+  model_path: "path/to/your/unifolding/longsleeve_model_dir" 
+  model_version: "v7"
+  model_name: "last"
+  
+  remote_debug:
+    enable: false
+    endpoint: "http://127.0.0.1:8085"
+
+  args:
+    debug: True
+    smoothed_cls_thr: 0.1             # Prediction confidence threshold (use lower like 0.0001 for debugging weak models)
+    vis_action: True                 # Set to True to visualize predicted action via Open3D
+    vis_all_fling_pred: False         # Visualize all predicted grasp points of fling action
+    vis_pred_order: False             # Visualize grasp-point candidates sequentially
+    vis_pred_order_num: 8
+    vis_err_actin: True              # Visualize actions even if they trigger reachability errors
+    only_smoothing: false             # If true, only executes fling and pick_and_place actions
+    only_fling_during_smoothing: true
+    drag_for_best_fling_pick_pts: true # Fallback to drag if fling points are unreachable
+    drag_for_fold1: true               # Fallback to drag if fold1 points are unreachable
+    drag_for_fold2: true               # Fallback to drag if fold2 points are unreachable
+    action_type_override:
+      enable: false                    # Set to true to force a specific action type
+      type: null                       # e.g., 'fling', 'fold1', 'pick_and_place'
+
+experiment:
+
+  strategy:
+    random_exploration:
+      enable: false
+
+  compat:
+    garment_type: 'tshirt_long'
+    use_real_robots: false
+    
+    # Define your camera position here
+    camera:
+      pos: [0.0, 0.0, 2.0]
+      field_of_view: [69, 42]
+      resolution: [1280, 720]
+  
+  machine:
+    # Your ring-like limits [min_radius, max_radius]
+    left_workspace: [0.25, 0.9]    
+    right_workspace: [0.1, 0.85]   
+
+    # Your exact robot base positions in the world frame
+    left_robot_base: [-0.8, 0,  0] 
+    right_robot_base: [0.8, 0, 0]
+
+    # Global Table Limits (Adjust to fit your physical table)
+    x_lim_m: [-1, 1]   
+    y_lim_m: [-0.8, 0.8]   
+    z_lim_m: [0.0, 0.5]    
+    
+    safe_distance_m: 0.15

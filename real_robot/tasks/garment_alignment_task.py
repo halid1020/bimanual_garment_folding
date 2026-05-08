@@ -95,9 +95,9 @@ class RealWorldGarmentAlignmentTask(RealWorldGarmentFlatteningTask):
             if key == 13 or key == 27: 
                 break
             elif key == ord('a') or key == ord('A'):
-                current_angle += 5  # Rotate counter-clockwise 5 degrees
+                current_angle += 1  # Rotate counter-clockwise 5 degrees
             elif key == ord('d') or key == ord('D'):
-                current_angle -= 5  # Rotate clockwise 5 degrees
+                current_angle -= 1  # Rotate clockwise 5 degrees
                 
         cv2.destroyAllWindows()
 

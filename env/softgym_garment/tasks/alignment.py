@@ -14,9 +14,23 @@ class AlignmentTask(GarmentFlatteningTask):
         self.randomise_goal = config.get('randomise_goal', False)
     
     def reset(self, arena):
+        # Determine if we are in eval mode and specifically on episode 0
+        arena_mode = getattr(arena, 'mode', 'eval')
+        arena_eid = getattr(arena, 'eid', None)
+        is_eval_episode_zero = (arena_mode == 'eval' and arena_eid == 0)
+
         if self.randomise_goal:
+            # Always clear the old observation first
             arena.flattened_obs = None
-            arena.get_random_flattened_obs()
+            
+            if is_eval_episode_zero:
+                # Use canonical state: applies hard_shift_x predictably without randomness
+                # (Note: keeping the exact spelling 'get_caon_flattened_obs' from your GarmentEnv)
+                arena.get_caon_flattened_obs()
+            else:
+                # Use standard randomized state for all other episodes
+                arena.get_random_flattened_obs()
+            
         return super().reset(arena)
 
     def success(self, arena):

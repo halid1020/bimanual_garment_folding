@@ -9,3 +9,4 @@ snap_to_cloth_mask: True
 maskout_background: True
 use_sim_workspace: False
 track_trajectory: True
+num_eval_trials: 200

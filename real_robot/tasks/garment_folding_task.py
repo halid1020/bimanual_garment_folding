@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from statistics import mean
 
 from real_robot.utils.mask_utils import get_max_IoU
+from termcolor import colored
 
 from .utils import *
 from real_robot.utils.save_utils import *
@@ -24,8 +25,6 @@ class RealWorldGarmentFoldingTask():
         self.has_succeeded = False
 
         self.asset_dir = f"{os.environ['MP_FOLD_PATH']}/assets"
-        
-        
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""    
@@ -43,11 +42,11 @@ class RealWorldGarmentFoldingTask():
         goal_obs = []
         actions = [] # List to store step-wise actions
         
-        print(f"\n*** [RealWorldGarmentFoldingTask] ACTION REQUIRED ***")
-        print(f"[RealWorldGarmentFoldingTask] Please manually flatten the garment in the simulation window.")
-        print(f"[RealWorldGarmentFoldingTask] Ensure it is centered/aligned as desired.")
-        input(f"[RealWorldGarmentFoldingTask] Press [Enter] when the garment is ready to start demonstration...")
-        print(f"[RealWorldGarmentFoldingTask] Starting demonstrator collection...\n")
+        print(colored(f"\n*** [RealWorldGarmentFoldingTask] ACTION REQUIRED ***", "green"))
+        print(colored(f"[RealWorldGarmentFoldingTask] Please manually flatten the garment in the simulation window.", "green"))
+        print(colored(f"[RealWorldGarmentFoldingTask] Ensure it is centered/aligned as desired.", "green"))
+        input(colored(f"[RealWorldGarmentFoldingTask] Press [Enter] when the garment is ready to start demonstration...", "green"))
+        print(colored(f"[RealWorldGarmentFoldingTask] Starting demonstrator collection...\n", "green"))
         
         measure_time = arena.measure_time
         arena.measure_time = False
@@ -56,7 +55,6 @@ class RealWorldGarmentFoldingTask():
         self.demonstrator.reset([arena.id])
         
         goal_obs.append(info)
-        #print('Here!!!')
         step = 0
         while step < self.goal_steps: 
             # Capture action from demonstrator
@@ -75,12 +73,8 @@ class RealWorldGarmentFoldingTask():
         # Return both observations and actions
         return goal_obs, actions
 
-
-    
     def _load_or_generate_goals(self, arena, num_goals):
         goals = []
-        
-        # --- 1. Ask User for Garment ID ---
         
         self.garment_id = arena.garment_id
         if not self.garment_id:
@@ -97,8 +91,8 @@ class RealWorldGarmentFoldingTask():
             if not os.path.exists(goal_path):
                 print(f'Generating goal {i}...')
 
-                print(f"\n[Goal Manager] Cached goals NOT found for '{self.garment_id}'.")
-                print(f"[Goal Manager] Directory: {self.goal_dir}")
+                print(f"\n[RealWorldGarmentFoldingTask] Cached goals NOT found for '{self.garment_id}'.")
+                print(f"[RealWorldGarmentFoldingTask] Directory: {self.goal_dir}")
                 
                 
                 # Pass manual_init=True for the first goal (since user just flattened it)
@@ -147,7 +141,7 @@ class RealWorldGarmentFoldingTask():
 
             else:
                 # Load existing
-                if i == 0: print(f'[Goal Manager] Loading cached goals from {self.goal_dir}...')
+                if i == 0: print(f'[RealWorldGarmentFoldingTask] Loading cached goals from {self.goal_dir}...')
                 
                 goal = []
                 step_idx = 0
@@ -296,46 +290,7 @@ class RealWorldGarmentFoldingTask():
     
     def success(self, arena):
         return False
-        # trj_infos = arena.get_trajectory_infos()
-        # N = len(trj_infos)
-        # K = self.config.goal_steps
-        # #print('goal steps', K)
-        # if len(trj_infos) < K:
-        #     return False
-        
-        # # if has succeed, check the current cloth is messed up or not
-        # # if mess up, reset success and return False
-        # # else return True
-        # if self.has_succeeded:
-        #     mask = trj_infos[-1]['observation']['mask']
-        #     max_IoU = 0
-        #     for goal in self.goals:
-        #         goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0
-        #         IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-        #         max_IoU = max(IoU, max_IoU)
-        #     if max_IoU < IOU_TRESHOLDS[-1]:
-        #         self.has_succeeded = False
-        #         print('[folding task] Success is messed up!')
-        #         return False
-        #     else:
-        #         print('[folding task] Successful Step!')
-        #         return True
-        
-        # # if has not succeeded before, check consquent sub goals matches the trajecotry operation/
-        # for k in range(K):
-        #     mask  = trj_infos[N - K + k]['observation']['mask']
-        #     max_IoU = 0
-        #     for goal in self.goals:
-        #         goal_mask = goal[k]['observation']["rgb"].sum(axis=2) > 0
-        #         IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-        #         max_IoU = max(IoU, max_IoU)
-        #     #print(f'goal step {k}, current step {N - K + k}: max_IoU: {max_IoU}')
-        #     if max_IoU < IOU_TRESHOLDS[k]:
-        #         return False
-        # print('[folding task] Successful Step!')
-        # self.has_succeeded = True
-        # return True
-        
+
     def _get_max_IoU(self, arena):
         cur_mask = arena.cloth_mask
         max_IoU = 0

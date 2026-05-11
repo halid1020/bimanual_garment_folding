@@ -166,6 +166,11 @@ class UniFoldingAdapter(TrainableAgent):
         pc_homogeneous = np.hstack((pointcloud, np.ones((N, 1))))
         virtual_pointcloud = (w2v_matrix @ pc_homogeneous.T).T[:, :3].astype(np.float32)
 
+        print("[Unifolding] Virtual PCD Z-bounds:", np.min(virtual_pointcloud[:, 2]), np.max(virtual_pointcloud[:, 2]))
+
+        z_min = np.min(virtual_pointcloud[:, 2])
+        virtual_pointcloud[:, 2] -= z_min
+
         # Pass the Virtual pointcloud to the network
         obs_msg = ObservationMessage(virtual_pointcloud)
 

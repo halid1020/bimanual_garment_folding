@@ -11,13 +11,13 @@ from ..utils.keypoint_gui import KeypointGUI
 
 class GarmentTask(Task):
     def __init__(self, config):
-        if config.garment_type == 'all':
-            ## we assum the keypoints are generateld
-            pass
-        else:
+        # if config.garment_type == 'all':
+        #     ## we assum the keypoints are generateld
+        #     pass
+        # else:
            
-            self.keypoint_semantics = KEYPOINT_SEMANTICS[config.garment_type]
-            self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics)
+        #     self.keypoint_semantics = KEYPOINT_SEMANTICS[config.garment_type]
+        #     self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics)
 
         self.semkey2pid = None # This needs to be loaded or annotated
         self.asset_dir = config.asset_dir
@@ -28,6 +28,9 @@ class GarmentTask(Task):
 
     def _load_or_create_keypoints(self, arena):
         """Load semantic keypoints if they exist, otherwise ask user to assign them."""
+        self.keypoint_semantics = KEYPOINT_SEMANTICS[arena.garment_type]
+        self.keypoint_assignment_gui = KeypointGUI(self.keypoint_semantics)
+        
         mesh_id = arena.init_state_params['pkl_path'].split('/')[-1].split('.')[0]  
         keypoint_file = os.path.join(self.keypoint_dir, f"{mesh_id}.json")
         print('[GarmentTask] mesh id', mesh_id)

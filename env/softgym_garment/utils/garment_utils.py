@@ -42,7 +42,27 @@ KEYPOINT_SEMANTICS = {
         'left_hem',
         'right_hem',
         'centre_hem'
-    ]
+    ],
+
+    'dress':[
+        'left_collar',
+        'right_collar',
+        'centre_collar',
+        'left_shoulder',
+        'right_shoulder',
+        'higher_left_sleeve',
+        'higher_right_sleeve',
+        'lower_left_sleeve',
+        'lower_right_sleeve',
+        'left_armpit',
+        'right_armpit',
+        'centre',
+        'left_waistband',
+        'right_waistband',
+        'left_hem',
+        'right_hem',
+        'centre_hem'
+    ],
 }
 
 def rigid_transform_3D(A, B):

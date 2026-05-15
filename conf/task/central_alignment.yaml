@@ -1,5 +1,5 @@
 num_goals: 1
-garment_type: longsleeve
+# garment_type: longsleeve
 asset_dir: assets
 task_name: alignment
 randomise_goal: True

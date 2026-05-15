@@ -363,62 +363,66 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             # ------------------------------------------------------------------
             # NEW: Primitive-Specific Action Swapping
             # ------------------------------------------------------------------
-            if self.random_swap_actions and self.K != 0:
-                # Extract the primitive ID for the current timestep
-                prim_acts_bt = act[:, 0]
-                prim_ids_bt = torch.clamp((((prim_acts_bt + 1) / 2) * self.K).long(), 0, self.K - 1)
+            # if self.random_swap_actions and self.K != 0:
+            #     # Extract the primitive ID for the current timestep
+            #     prim_acts_bt = act[:, 0]
+            #     prim_ids_bt = torch.clamp((((prim_acts_bt + 1) / 2) * self.K).long(), 0, self.K - 1)
                 
-                # Determine which sequences in the batch get swapped
-                T_act = act.shape[0] // BB
-                swap_mask_batch = (torch.rand(BB, device=device) < self.swap_action_prob)
-                swap_mask = swap_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
+            #     # Determine which sequences in the batch get swapped
+            #     T_act = act.shape[0] // BB
+            #     swap_mask_batch = (torch.rand(BB, device=device) < self.swap_action_prob)
+            #     swap_mask = swap_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
 
-                for prim_idx, (idx_A, idx_B) in self.swap_action_mapping.items():
-                    # Find actions that match the primitive AND are selected to be swapped
-                    mask = swap_mask & (prim_ids_bt == prim_idx)
-                    rows = mask.nonzero(as_tuple=True)[0]
+            #     for prim_idx, (idx_A, idx_B) in self.swap_action_mapping.items():
+            #         # Find actions that match the primitive AND are selected to be swapped
+            #         mask = swap_mask & (prim_ids_bt == prim_idx)
+            #         rows = mask.nonzero(as_tuple=True)[0]
                     
-                    if len(rows) > 0:
-                        idx_A_t = torch.tensor(idx_A, device=device)
-                        idx_B_t = torch.tensor(idx_B, device=device)
+            #         if len(rows) > 0:
+            #             idx_A_t = torch.tensor(idx_A, device=device)
+            #             idx_B_t = torch.tensor(idx_B, device=device)
                         
-                        # Unsqueeze rows for PyTorch 2D advanced indexing broadcast
-                        rows = rows.unsqueeze(1) 
+            #             # Unsqueeze rows for PyTorch 2D advanced indexing broadcast
+            #             rows = rows.unsqueeze(1) 
                         
-                        # Perform the swap on the parameters
-                        temp = pixel_actions[rows, idx_A_t].clone()
-                        pixel_actions[rows, idx_A_t] = pixel_actions[rows, idx_B_t]
-                        pixel_actions[rows, idx_B_t] = temp
+            #             # Perform the swap on the parameters
+            #             temp = pixel_actions[rows, idx_A_t].clone()
+            #             pixel_actions[rows, idx_A_t] = pixel_actions[rows, idx_B_t]
+            #             pixel_actions[rows, idx_B_t] = temp
 
         # --- DEBUG: Plot Before (Geometric) Augmentation ---
         if self.debug:
-            n_show = min(4, B)
+            n_show = min(4, BB) # Iterate over the batch dimension BB, not flattened B
             for b in range(n_show):
-                pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
+                # Calculate the correct index for t=0 of the current sequence
+                img_idx = b * TT
+                act_idx = b * (TT - 1) if (TT - 1) > 0 else 0
+                
+                pa_cpu = pixel_actions[act_idx].cpu().numpy() if train else np.zeros((1,4))
                 print('[augmenter, debug] action', pa_cpu)
                 
                 # Extract orientation for debug if it exists
-                oa_cpu = orient_actions[b].cpu().numpy() if (train and self.has_orientation) else None
+                oa_cpu = orient_actions[act_idx].cpu().numpy() if (train and self.has_orientation) else None
                 
                 # --- NEW: Extract semantic keypoints for debug ---
-                sk_cpu = semkey_obs[b].cpu().numpy() if use_semkey else None
+                sk_cpu = semkey_obs[img_idx].cpu().numpy() if use_semkey else None
                 
                 if use_rgb:
-                    cpu_img = (rgb_obs[b].cpu().numpy()).astype(np.float32)
+                    cpu_img = (rgb_obs[img_idx].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_rgb", step=b)
 
                 # Save debug image for the goal
                 if self.use_goal and 'goal_rgb' in sample:
-                    cpu_goal_img = (goal_obs[b].cpu().numpy()).astype(np.float32)
+                    cpu_goal_img = (goal_obs[img_idx].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_goal", step=b)
 
                 # Save debug image for the goal mask
                 if self.use_goal and 'goal_mask' in sample:
-                    cpu_goal_mask = (goal_mask_obs[b].cpu().numpy()).astype(np.float32)
+                    cpu_goal_mask = (goal_mask_obs[img_idx].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_goal_mask", step=b)
                 
                 if 'mask' in sample:
-                    cpu_mask = (mask_obs[b].cpu().numpy()).astype(np.float32)
+                    cpu_mask = (mask_obs[img_idx].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_mask", step=b)
         
         # =========================
@@ -710,27 +714,30 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         # --- DEBUG: Plot After Augmentation ---
         if self.debug:
-            n_show = min(4, B)
+            n_show = min(4, BB)
             for b in range(n_show):
+                img_idx = b * TT
+                act_idx = b * (TT - 1) if (TT - 1) > 0 else 0
+
                 # Extract orientation for debug if it exists
-                oa_cpu = orient_actions[b].cpu().numpy() if (train and self.has_orientation) else None
+                oa_cpu = orient_actions[act_idx].cpu().numpy() if (train and self.has_orientation) else None
                 
                 # --- NEW: Extract semantic keypoints for debug ---
-                sk_cpu = semkey_obs[b].cpu().numpy() if use_semkey else None
+                sk_cpu = semkey_obs[img_idx].cpu().numpy() if use_semkey else None
 
                 if use_rgb:
-                    cpu_img = rgb_obs[b].permute(1, 2, 0).cpu().numpy() 
-                    pa_cpu = pixel_actions[b].cpu().numpy() if train else np.zeros((1,4))
+                    cpu_img = rgb_obs[img_idx].permute(1, 2, 0).cpu().numpy() 
+                    pa_cpu = pixel_actions[act_idx].cpu().numpy() if train else np.zeros((1,4))
                     self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_after_rgb", step=b)
 
                 if use_goal_rgb:
-                    cpu_goal_img = goal_obs[b].permute(1, 2, 0).cpu().numpy()
+                    cpu_goal_img = goal_obs[img_idx].permute(1, 2, 0).cpu().numpy()
                     self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_after_goal", step=b)
                 
                 if use_goal_mask:
-                    cpu_goal_mask = goal_mask_obs[b].permute(1, 2, 0).cpu().numpy()
+                    cpu_goal_mask = goal_mask_obs[img_idx].permute(1, 2, 0).cpu().numpy()
                     self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_after_goal_mask", step=b)
-                    
+                     
         # =========================
         #      RESHAPE BACK
         # =========================

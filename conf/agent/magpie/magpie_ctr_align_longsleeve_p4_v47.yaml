@@ -29,7 +29,7 @@ validate_training: True
 
 total_update_steps: 100000
 eval_checkpoint: -1
-debug: False
+debug: True
 add_all_demos: True
 
 ## it learns to predict the states from the obs embedding.

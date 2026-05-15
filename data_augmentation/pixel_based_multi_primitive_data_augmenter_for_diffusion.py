@@ -60,7 +60,6 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.random_swap_actions = self.config.get("random_swap_actions", False)
         self.swap_action_prob = self.config.get("swap_action_prob", 0.5)
         raw_mapping = self.config.get("swap_action_mapping", {})
-        # Ensure keys are integers since JSON/YAML parsers often load them as strings
         self.swap_action_mapping = {int(k): v for k, v in raw_mapping.items()}
 
         # --- Depth Processing Configs ---
@@ -92,9 +91,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
     def _unflatten_bt(self, x, B, T):
         return x.reshape(B, T, *x.shape[1:])
 
-    # ... _process_depth and postprocess remain unchanged ...
     def _process_depth(self, depth, mask=None, train=False):
-        # (Same as original code)
         B, T, C, H, W = depth.shape
         if self.config.get('depth_clip', False):
             depth = depth.clip(self.config.depth_clip_min, self.config.depth_clip_max)
@@ -163,24 +160,14 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             res['action'] = res['action'].clip(-1, 1)
         return res
 
-    
     def _save_debug_image(self, img, pts, orients=None, sem_keys=None, prefix="", step=0):
-        """
-        img: (H,W,C) float (cpu numpy). 
-        pts: (N, 4) -> [pick_y, pick_x, place_y, place_x]  OR (N, 2)
-        orients: (N, 1) -> normalized angle [-1, 1] (optional)
-        sem_keys: (N_points, 2) -> normalized semantic keypoints (optional)
-        """
         save_dir = "./tmp/augment_debug"
         os.makedirs(save_dir, exist_ok=True)
-        print('save !!!')
         if 'mask' in prefix:
-            print('save mask!!!')
             save_mask(img, f"{prefix}_step{step}", save_dir)
             return
 
         H, W, C = img.shape
-        # Ensure pts is 2D array
         pts = pts.reshape(-1, pts.shape[-1])
         
         plt.figure(figsize=(4, 4))
@@ -190,51 +177,34 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         else:
             plt.imshow(img)
             
-        # Helper to denormalize
         def to_pix(y_norm, x_norm):
             x = (x_norm + 1) * W / 2
             y = (y_norm + 1) * H / 2
             return x, y
 
-        # --- NEW: Plot Semantic Keypoints ---
         if sem_keys is not None:
             sem_keys = sem_keys.reshape(-1, 2)
             sk_xs, sk_ys = to_pix(sem_keys[:, 0], sem_keys[:, 1])
-            # Plot semantic keys in bright green
             plt.scatter(sk_xs, sk_ys, c='lime', s=15, edgecolors='black', marker='x', label='Sem Key')
 
-        # Logic for Pick (Orange) + Place (Red) + Orientation (Line)
-        # Note: Changed pick color to orange to differentiate from the green sem_keys
         if pts.shape[1] == 4:
-            # We have [y1, x1, y2, x2]
             pick_y, pick_x = pts[:, 0], pts[:, 1]
             place_y, place_x = pts[:, 2], pts[:, 3]
             
             px_start, py_start = to_pix(pick_y, pick_x)
             px_end, py_end = to_pix(place_y, place_x)
             
-            # Plot Pick
             plt.scatter(px_start, py_start, c='orange', s=25, edgecolors='black', label='Pick')
-            # Plot Place
             plt.scatter(px_end, py_end, c='red', s=25, edgecolors='black', label='Place')
             
-            # Plot Orientation Arrow on Place Point
             if orients is not None:
-                # orients is normalized [-1, 1] -> [-pi, pi]
                 thetas = orients.flatten() * np.pi
-                
-                arrow_len = min(H, W) * 0.1 # Arrow length is 10% of image size
-                
+                arrow_len = min(H, W) * 0.1
                 for i in range(len(px_end)):
-                    # Calculate arrow tip
                     dx = arrow_len * np.cos(thetas[i])
                     dy = arrow_len * np.sin(thetas[i])
-                    
-                    plt.plot([px_end[i], px_end[i] + dx], 
-                             [py_end[i], py_end[i] + dy], 
-                             color='cyan', linewidth=2)
+                    plt.plot([px_end[i], px_end[i] + dx], [py_end[i], py_end[i] + dy], color='cyan', linewidth=2)
         else:
-            # Fallback for simple (N, 2) points
             pts = pts.reshape(-1, 2)
             xs, ys = to_pix(pts[:, 0], pts[:, 1])
             plt.scatter(xs, ys, c='orange', s=12)
@@ -266,12 +236,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             sample['goal_rgb'] = sample['rgb-workspace-mask-goal'][:, :, :, :, 5:8]
         
         if self.use_goal and 'rgb+goal_rgb' in sample:
-            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] sample rgb+goal_rgb shape', sample['rgb+goal_rgb'].shape)
             sample['rgb'] = sample['rgb+goal_rgb'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb+goal_rgb'][:, :, :, :, 3:6]
         
         if self.use_goal and 'rgb+goal_mask' in sample:
-            #print('sample rgb+goal_rgb shape', sample['rgb+goal_rgb'].shape)
             sample['rgb'] = sample['rgb+goal_mask'][:, :, :, :, :3]
             sample['goal_mask'] = sample['rgb+goal_mask'][:, :, :, :, 3:4]
         
@@ -289,12 +257,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             if depth_t.ndim == 4: 
                 depth_t = depth_t.unsqueeze(-1)
             B, T, H, W, C  = depth_t.shape
-            
-            # Permute for process_depth expected input
             depth_t = depth_t.permute(0, 1, 4, 2, 3) 
-            mask_reshaped = None 
-            processed_depth = self._process_depth(depth_t, mask=mask_reshaped, train=do_process_depth)
-            
+            processed_depth = self._process_depth(depth_t, mask=None, train=do_process_depth)
             processed_depth = processed_depth.permute(0, 1, 3, 4, 2)
             depth_obs, BB, TT = self._flatten_bt(processed_depth) 
         
@@ -303,11 +267,8 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             goal_depth_t = sample['goal-depth'].float()
             if goal_depth_t.ndim == 4:
                 goal_depth_t = goal_depth_t.unsqueeze(-1)
-                
             goal_depth_t = goal_depth_t.permute(0, 1, 4, 2, 3) 
-            goal_mask_reshaped = None
-            processed_goal_depth = self._process_depth(goal_depth_t, mask=goal_mask_reshaped, train=do_process_depth)
-            
+            processed_goal_depth = self._process_depth(goal_depth_t, mask=None, train=do_process_depth)
             processed_goal_depth = processed_goal_depth.permute(0, 1, 3, 4, 2)
             goal_depth_obs, _, _ = self._flatten_bt(processed_goal_depth)
 
@@ -333,11 +294,24 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             goal_mask_obs = sample['goal_mask'].float()
             goal_mask_obs, _, _ = self._flatten_bt(goal_mask_obs)
         
+        # --- Extract Semantic Keypoints (Current) ---
         use_semkey = self.augment_sem_key and 'semkey_norm_pixel' in sample
         if use_semkey:
             semkey_obs = sample['semkey_norm_pixel'].float()
             semkey_obs, BB, TT = self._flatten_bt(semkey_obs)
-            # semkey_obs shape is now (BB*TT, N_points, 2)
+
+        # --- Extract Semantic Keypoints (Goal) ---
+        # Allow fallback depending on what key is saved in the dataset config
+        goal_semkey_key = None
+        if 'flattened_goal_semkey_norm_pixel' in sample:
+            goal_semkey_key = 'flattened_goal_semkey_norm_pixel'
+        elif 'flattened_semkey_norm_pixel' in sample:
+            goal_semkey_key = 'flattened_semkey_norm_pixel'
+            
+        use_goal_semkey = self.augment_sem_key and goal_semkey_key is not None
+        if use_goal_semkey:
+            goal_semkey_obs = sample[goal_semkey_key].float()
+            goal_semkey_obs, _, _ = self._flatten_bt(goal_semkey_obs)
 
         if self.use_workspace:
             robot0_mask = sample['robot0_mask'].float()
@@ -352,82 +326,36 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             action = sample["action"]
             act, _, _ = self._flatten_bt(action)
             
-            # Detect 5D action case: [PickY, PickX, PlaceY, PlaceX, Orientation]
             self.has_orientation = (self.K == 0 and act.shape[-1] == 5)
             
             if self.has_orientation:
-                # Split spatial coordinates from orientation
-                pixel_actions = act[:, :4]  # (B, 4) -> [y1, x1, y2, x2]
-                orient_actions = act[:, 4:] # (B, 1) -> [theta] in [-1, 1]
+                pixel_actions = act[:, :4] 
+                orient_actions = act[:, 4:]
             else:
                 pixel_actions = act[:, 1:] if self.K != 0 else act
                 orient_actions = None
             
-            # ------------------------------------------------------------------
-            # NEW: Primitive-Specific Action Swapping
-            # ------------------------------------------------------------------
-            # if self.random_swap_actions and self.K != 0:
-            #     # Extract the primitive ID for the current timestep
-            #     prim_acts_bt = act[:, 0]
-            #     prim_ids_bt = torch.clamp((((prim_acts_bt + 1) / 2) * self.K).long(), 0, self.K - 1)
-                
-            #     # Determine which sequences in the batch get swapped
-            #     T_act = act.shape[0] // BB
-            #     swap_mask_batch = (torch.rand(BB, device=device) < self.swap_action_prob)
-            #     swap_mask = swap_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
-
-            #     for prim_idx, (idx_A, idx_B) in self.swap_action_mapping.items():
-            #         # Find actions that match the primitive AND are selected to be swapped
-            #         mask = swap_mask & (prim_ids_bt == prim_idx)
-            #         rows = mask.nonzero(as_tuple=True)[0]
-                    
-            #         if len(rows) > 0:
-            #             idx_A_t = torch.tensor(idx_A, device=device)
-            #             idx_B_t = torch.tensor(idx_B, device=device)
-                        
-            #             # Unsqueeze rows for PyTorch 2D advanced indexing broadcast
-            #             rows = rows.unsqueeze(1) 
-                        
-            #             # Perform the swap on the parameters
-            #             temp = pixel_actions[rows, idx_A_t].clone()
-            #             pixel_actions[rows, idx_A_t] = pixel_actions[rows, idx_B_t]
-            #             pixel_actions[rows, idx_B_t] = temp
-
         # --- DEBUG: Plot Before (Geometric) Augmentation ---
         if self.debug:
-            n_show = min(4, BB) # Iterate over the batch dimension BB, not flattened B
+            n_show = min(4, BB)
             for b in range(n_show):
-                # Calculate the correct index for t=0 of the current sequence
                 img_idx = b * TT
                 act_idx = b * (TT - 1) if (TT - 1) > 0 else 0
                 
                 pa_cpu = pixel_actions[act_idx].cpu().numpy() if train else np.zeros((1,4))
-                print('[augmenter, debug] action', pa_cpu)
-                
-                # Extract orientation for debug if it exists
                 oa_cpu = orient_actions[act_idx].cpu().numpy() if (train and self.has_orientation) else None
-                
-                # --- NEW: Extract semantic keypoints for debug ---
                 sk_cpu = semkey_obs[img_idx].cpu().numpy() if use_semkey else None
+                gsk_cpu = goal_semkey_obs[img_idx].cpu().numpy() if use_goal_semkey else None
                 
                 if use_rgb:
                     cpu_img = (rgb_obs[img_idx].cpu().numpy()).astype(np.float32)
                     self._save_debug_image(cpu_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_rgb", step=b)
 
-                # Save debug image for the goal
                 if self.use_goal and 'goal_rgb' in sample:
                     cpu_goal_img = (goal_obs[img_idx].cpu().numpy()).astype(np.float32)
-                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_goal", step=b)
+                    # Pass the GOAL semantic keypoints to the goal image
+                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=gsk_cpu, prefix="aug_before_goal", step=b)
 
-                # Save debug image for the goal mask
-                if self.use_goal and 'goal_mask' in sample:
-                    cpu_goal_mask = (goal_mask_obs[img_idx].cpu().numpy()).astype(np.float32)
-                    self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_goal_mask", step=b)
-                
-                if 'mask' in sample:
-                    cpu_mask = (mask_obs[img_idx].cpu().numpy()).astype(np.float32)
-                    self._save_debug_image(cpu_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_before_mask", step=b)
-        
         # =========================
         #       RANDOM CROP
         # =========================
@@ -441,19 +369,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             top = random.randint(0, H - new_h)
             left = random.randint(0, W - new_w)
 
-            if use_rgb:
-                rgb_obs = rgb_obs[:, top:top+new_h, left:left+new_w, :]
-            if use_goal_rgb: 
-                goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
-            if self.use_workspace:
-                robot0_mask = robot0_mask[:, top:top+new_h, left:left+new_w, :]
-                robot1_mask = robot1_mask[:, top:top+new_h, left:left+new_w, :]
-            if use_depth:
-                depth_obs = depth_obs[:, top:top+new_h, left:left+new_w, :]
-            if use_goal_depth and self.use_goal:
-                goal_depth_obs = goal_depth_obs[:, top:top+new_h, left:left+new_w, :]
-
-            # Adjust Actions (Spatial Only)
+            if use_rgb: rgb_obs = rgb_obs[:, top:top+new_h, left:left+new_w, :]
+            if use_goal_rgb: goal_obs = goal_obs[:, top:top+new_h, left:left+new_w, :]
+            
+            # Adjust Actions
             B_act, A_act = pixel_actions.shape
             pixel_actions = pixel_actions.reshape(-1, 2)
             act_y_pixel = (pixel_actions[:, 0] + 1.0) * (H / 2.0)
@@ -464,21 +383,29 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             pixel_actions[:, 1] = act_x_pixel_new / (new_w / 2.0) - 1.0
             pixel_actions = torch.clamp(pixel_actions, -1 + 1e-6, 1.0-1e-6).reshape(B_act, A_act)
 
-            # --- NEW: Adjust Semantic Keypoints (Crop) ---
+            # --- Adjust Current Semantic Keypoints ---
             if use_semkey:
                 B_sk, N_sk, D_sk = semkey_obs.shape
                 semkey_obs = semkey_obs.reshape(-1, 2)
-                
                 sk_y_pixel = (semkey_obs[:, 0] + 1.0) * (H / 2.0)
                 sk_x_pixel = (semkey_obs[:, 1] + 1.0) * (W / 2.0)
-                
                 sk_y_pixel_new = sk_y_pixel - top
                 sk_x_pixel_new = sk_x_pixel - left
-                
                 semkey_obs[:, 0] = sk_y_pixel_new / (new_h / 2.0) - 1.0
                 semkey_obs[:, 1] = sk_x_pixel_new / (new_w / 2.0) - 1.0
-                
                 semkey_obs = torch.clamp(semkey_obs, -1 + 1e-6, 1.0-1e-6).reshape(B_sk, N_sk, D_sk)
+                
+            # --- Adjust Goal Semantic Keypoints ---
+            if use_goal_semkey:
+                B_gsk, N_gsk, D_gsk = goal_semkey_obs.shape
+                goal_semkey_obs = goal_semkey_obs.reshape(-1, 2)
+                gsk_y_pixel = (goal_semkey_obs[:, 0] + 1.0) * (H / 2.0)
+                gsk_x_pixel = (goal_semkey_obs[:, 1] + 1.0) * (W / 2.0)
+                gsk_y_pixel_new = gsk_y_pixel - top
+                gsk_x_pixel_new = gsk_x_pixel - left
+                goal_semkey_obs[:, 0] = gsk_y_pixel_new / (new_h / 2.0) - 1.0
+                goal_semkey_obs[:, 1] = gsk_x_pixel_new / (new_w / 2.0) - 1.0
+                goal_semkey_obs = torch.clamp(goal_semkey_obs, -1 + 1e-6, 1.0-1e-6).reshape(B_gsk, N_gsk, D_gsk)
 
         # =========================
         #       RESIZE & PERMUTE
@@ -489,29 +416,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             return F.interpolate(t, size=tuple(self.config.img_dim), mode=mode, align_corners=align)
         
         if use_rgb: rgb_obs = resize_tensor(rgb_obs)
+        if use_goal_rgb: goal_obs = resize_tensor(goal_obs)
         
-        if use_goal_rgb: 
-            goal_obs = resize_tensor(goal_obs)
-        if use_goal_mask:
-            goal_mask_obs = resize_tensor(goal_mask_obs, mode='nearest')
-        if self.use_workspace:
-            robot0_mask = resize_tensor(robot0_mask, mode='nearest')
-            robot1_mask = resize_tensor(robot1_mask, mode='nearest')
-        if use_depth:
-            depth_obs = resize_tensor(depth_obs, mode='nearest') 
-        if use_goal_depth and self.use_goal:
-            goal_depth_obs = resize_tensor(goal_depth_obs, mode='nearest')
-
         # =========================
         #   DETERMINE ROTATION MASK
         # =========================
         if train:
-            # Create a batch-level mask: True if we SHOULD rotate, False if we skip
             if self.K != 0 and len(self.not_rotate_primitives) > 0:
-                # Decode primitive ID from the first timestep of each sequence
-                prim_bin = sample["action"][:, 0, 0] # shape (BB,)
+                prim_bin = sample["action"][:, 0, 0] 
                 prim_ids = torch.clamp((((prim_bin + 1) / 2) * self.K).long(), 0, self.K - 1)
-                
                 rotate_mask_batch = torch.ones(BB, dtype=torch.bool, device=device)
                 for p in self.not_rotate_primitives:
                     rotate_mask_batch &= (prim_ids != p)
@@ -519,13 +432,12 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 rotate_mask_batch = torch.ones(BB, dtype=torch.bool, device=device)
 
         # =========================
-        #   SPATIAL TRANSFORMS (ROTATION & SCALING)
+        #   SPATIAL TRANSFORMS
         # =========================
         do_rotation = self.random_rotation and train
         do_scale = self.random_scale and train
 
         if do_rotation or do_scale:
-            # 1. Determine Scale Factors
             if do_scale:
                 scale_val = random.uniform(self.scale_range[0], self.scale_range[1])
                 S = torch.tensor(scale_val, device=device)
@@ -533,12 +445,11 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 S = torch.tensor(1.0, device=device)
             inv_S = 1.0 / S
 
-            # 2. Determine Rotation Matrices
             if do_rotation:
                 degree = self.config.rotation_degree * torch.randint(
                     int(360 / self.config.rotation_degree), size=(1,)
                 )
-                thetas = torch.deg2rad(degree) # Scalar tensor
+                thetas = torch.deg2rad(degree) 
                 cos_theta = torch.cos(thetas)
                 sin_theta = torch.sin(thetas)
 
@@ -547,23 +458,19 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 ], dim=0).to(device)
                 rot_inv = rot.transpose(-1, -2)
             else:
-                # Dummy placeholders if rotation is off but scaling is on
                 thetas = torch.zeros(1, device=device)
                 rot = torch.eye(2, device=device).unsqueeze(0)
                 rot_inv = torch.eye(2, device=device).unsqueeze(0)
 
-            # --- Spatial Action Transform (Combined Scale + Rotation) ---
+            # Spatial Action Transform
             B_act, A_act = pixel_actions.shape
             num_pts = A_act // 2  
-            
             T_act = B_act // BB
             rotate_mask_act = rotate_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
             rotate_mask_pts = rotate_mask_act.unsqueeze(1).expand(-1, num_pts).reshape(-1)
             
             pixel_actions_ = pixel_actions.reshape(-1, 1, 2).float()
             total_pts = pixel_actions_.shape[0]  
-            
-            # Base matrix scaled by S
             rot_action_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_pts, 2, 2).clone() * S
             
             if do_rotation:
@@ -574,65 +481,38 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             rotated_action = torch.bmm(pixel_actions_, rot_action_matrices).reshape(B_act, A_act)
             pixel_actions = rotated_action.clip(-1+1e-6, 1-1e-6)
             
-            # --- Orientation Transform (Unaffected by Scale) ---
             if self.has_orientation and do_rotation:
                 angle_rad = orient_actions * np.pi
                 rotation_rad = thetas.to(device)
-                
                 actual_rotation = torch.zeros_like(orient_actions)
                 actual_rotation[rotate_mask_act] = rotation_rad 
-                
                 angle_rad = angle_rad - actual_rotation
                 angle_rad = (angle_rad + np.pi) % (2 * np.pi) - np.pi
                 orient_actions = angle_rad / np.pi
 
-            # --- Image/Mask Transform (Affine Grid) ---
             B_img = BB * TT
             rotate_mask_img = rotate_mask_batch.unsqueeze(1).expand(BB, TT).reshape(BB * TT)
-
-            if use_rgb:
-                C_img, H_img, W_img = rgb_obs.shape[1:]
-            elif use_depth:
-                C_img, H_img, W_img = depth_obs.shape[1:]
-            else:
-                C_img, H_img, W_img = 1, self.config.img_dim[0], self.config.img_dim[1]
+            C_img, H_img, W_img = rgb_obs.shape[1:]
 
             affine_matrix = torch.zeros(B_img, 2, 3, device=device)
             affine_matrix[:, 0, 0] = inv_S
             affine_matrix[:, 1, 1] = inv_S
             
             if do_rotation:
-                # Apply combined affine rotation and scale ONLY where the mask is True
                 affine_matrix[rotate_mask_img, :2, :2] = (rot * inv_S).expand(rotate_mask_img.sum(), 2, 2)
             
             grid = F.affine_grid(affine_matrix, (B_img, C_img, H_img, W_img), align_corners=True)
-            
-            if use_rgb:
-                rgb_obs = F.grid_sample(rgb_obs, grid, align_corners=True)
-            
-            if self.use_workspace:
-                robot0_mask = F.grid_sample(robot0_mask, grid, mode='nearest', align_corners=True)
-                robot1_mask = F.grid_sample(robot1_mask, grid, mode='nearest', align_corners=True)
-            
-            if use_depth:
-                depth_obs = F.grid_sample(depth_obs, grid, mode='nearest', align_corners=True)
+            if use_rgb: rgb_obs = F.grid_sample(rgb_obs, grid, align_corners=True)
 
             if self.use_goal and self.goal_aug == "same_as_obs":
-                if use_goal_rgb:
-                    goal_obs = F.grid_sample(goal_obs, grid, align_corners=True)
-                if use_goal_depth:
-                    goal_depth_obs = F.grid_sample(goal_depth_obs, grid, mode='nearest', align_corners=True)
-                if use_goal_mask:
-                    goal_mask_obs = F.grid_sample(goal_mask_obs, grid, mode='nearest', align_corners=True)
+                if use_goal_rgb: goal_obs = F.grid_sample(goal_obs, grid, align_corners=True)
             
-            # --- Semantic Keypoint Transform ---
+            # --- Transform Current Semantic Keypoints ---
             if use_semkey:
                 B_sk, N_sk, D_sk = semkey_obs.shape
                 rotate_mask_sk = rotate_mask_img.unsqueeze(1).expand(-1, N_sk).reshape(-1)
-                
                 semkey_pts_ = semkey_obs.reshape(-1, 1, 2)
                 total_sk_pts = semkey_pts_.shape[0]
-                
                 rot_sk_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_sk_pts, 2, 2).clone() * S
                 
                 if do_rotation:
@@ -642,28 +522,31 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 
                 rotated_semkey = torch.bmm(semkey_pts_, rot_sk_matrices).reshape(B_sk, N_sk, D_sk)
                 semkey_obs = rotated_semkey.clip(-1+1e-6, 1-1e-6)
+                
+            # --- Transform Goal Semantic Keypoints ---
+            if use_goal_semkey and self.goal_aug == "same_as_obs":
+                B_gsk, N_gsk, D_gsk = goal_semkey_obs.shape
+                rotate_mask_gsk = rotate_mask_img.unsqueeze(1).expand(-1, N_gsk).reshape(-1)
+                gsemkey_pts_ = goal_semkey_obs.reshape(-1, 1, 2)
+                total_gsk_pts = gsemkey_pts_.shape[0]
+                rot_gsk_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_gsk_pts, 2, 2).clone() * S
+                
+                if do_rotation:
+                    num_masked_gsk = rotate_mask_gsk.sum().item()
+                    if num_masked_gsk > 0:
+                        rot_gsk_matrices[rotate_mask_gsk] = (rot_inv * S).expand(num_masked_gsk, 2, 2).float()
+                
+                rotated_gsemkey = torch.bmm(gsemkey_pts_, rot_gsk_matrices).reshape(B_gsk, N_gsk, D_gsk)
+                goal_semkey_obs = rotated_gsemkey.clip(-1+1e-6, 1-1e-6)
         
         # =========================
         #      VERTICAL FLIP
         # =========================
         if self.vertical_flip and (random.random() < 0.5) and train:
-            # Flip Images
             if use_rgb: rgb_obs = torch.flip(rgb_obs, [2])
-            if self.use_workspace:
-                robot0_mask = torch.flip(robot0_mask, [2])
-                robot1_mask = torch.flip(robot1_mask, [2])
-            if use_depth:
-                depth_obs = torch.flip(depth_obs, [2])
-            
             if self.use_goal and self.goal_aug == "same_as_obs":
-                if use_goal_rgb:
-                    goal_obs = torch.flip(goal_obs, [2])
-                if use_goal_depth:
-                    goal_depth_obs = torch.flip(goal_depth_obs, [2])
-                if use_goal_mask:
-                    goal_mask_obs = torch.flip(goal_mask_obs, [2])
+                if use_goal_rgb: goal_obs = torch.flip(goal_obs, [2])
 
-            # Flip Spatial Actions (Invert Y)
             pixel_actions = pixel_actions.reshape(-1, 2)
             pixel_actions[:, 0] = -pixel_actions[:, 0]
             pixel_actions = pixel_actions.reshape(BB*(TT-1), -1)
@@ -673,48 +556,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 semkey_obs = semkey_obs.reshape(-1, 2)
                 semkey_obs[:, 0] = -semkey_obs[:, 0]
                 semkey_obs = semkey_obs.reshape(B_sk, N_sk, D_sk)
+                
+            if use_goal_semkey and self.goal_aug == "same_as_obs":
+                B_gsk, N_gsk, D_gsk = goal_semkey_obs.shape
+                goal_semkey_obs = goal_semkey_obs.reshape(-1, 2)
+                goal_semkey_obs[:, 0] = -goal_semkey_obs[:, 0]
+                goal_semkey_obs = goal_semkey_obs.reshape(B_gsk, N_gsk, D_gsk)
             
-            # --- Flip Orientation ---
             if self.has_orientation:
                 orient_actions = -orient_actions
-            # ------------------------
-
-        # =========================
-        #   GOAL TRANSFORMATIONS
-        # =========================
-        if self.use_goal and train and (self.goal_rotation or self.goal_translation or do_scale) and self.goal_aug != "same_as_obs":
-            # Initialize with inv_S scale
-            aff_params = torch.zeros(1, 2, 3, device=device)
-            aff_params[:, 0, 0] = inv_S if do_scale else 1.0
-            aff_params[:, 1, 1] = inv_S if do_scale else 1.0
-
-            if self.goal_rotation:
-                k_rot = torch.randint(int(360 / self.config.rotation_degree), size=(1,), device=device)
-                goal_degree = self.config.rotation_degree * k_rot
-                theta_g = torch.deg2rad(goal_degree.float())
-                c_g, s_g = torch.cos(theta_g), torch.sin(theta_g)
-                # Overwrite diagonal to combine rotation and scaling
-                aff_params[:, 0, 0] = c_g * (inv_S if do_scale else 1.0)
-                aff_params[:, 0, 1] = -s_g * (inv_S if do_scale else 1.0)
-                aff_params[:, 1, 0] = s_g * (inv_S if do_scale else 1.0)
-                aff_params[:, 1, 1] = c_g * (inv_S if do_scale else 1.0)
-
-            if self.goal_translation:
-                r_min, r_max = self.goal_trans_range
-                mag = (r_max - r_min) * torch.rand(1, device=device) + r_min
-                angle = 2 * np.pi * torch.rand(1, device=device)
-                aff_params[:, 0, 2] = mag * torch.cos(angle)
-                aff_params[:, 1, 2] = mag * torch.sin(angle)
-
-            if 'goal_rgb' in sample:
-                current_aff = aff_params.expand(goal_obs.shape[0], -1, -1)
-                grid_g = F.affine_grid(current_aff, goal_obs.shape, align_corners=True)
-                goal_obs = F.grid_sample(goal_obs, grid_g, align_corners=True)
-
-            if use_goal_depth:
-                current_aff_d = aff_params.expand(goal_depth_obs.shape[0], -1, -1)
-                grid_gd = F.affine_grid(current_aff_d, goal_depth_obs.shape, align_corners=True)
-                goal_depth_obs = F.grid_sample(goal_depth_obs, grid_gd, mode='nearest', align_corners=True)
 
         # =========================
         #     COLOR JITTER & NOISE
@@ -748,11 +598,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 img_idx = b * TT
                 act_idx = b * (TT - 1) if (TT - 1) > 0 else 0
 
-                # Extract orientation for debug if it exists
                 oa_cpu = orient_actions[act_idx].cpu().numpy() if (train and self.has_orientation) else None
-                
-                # --- NEW: Extract semantic keypoints for debug ---
                 sk_cpu = semkey_obs[img_idx].cpu().numpy() if use_semkey else None
+                gsk_cpu = goal_semkey_obs[img_idx].cpu().numpy() if use_goal_semkey else None
 
                 if use_rgb:
                     cpu_img = rgb_obs[img_idx].permute(1, 2, 0).cpu().numpy() 
@@ -761,11 +609,7 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
                 if use_goal_rgb:
                     cpu_goal_img = goal_obs[img_idx].permute(1, 2, 0).cpu().numpy()
-                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_after_goal", step=b)
-                
-                if use_goal_mask:
-                    cpu_goal_mask = goal_mask_obs[img_idx].permute(1, 2, 0).cpu().numpy()
-                    self._save_debug_image(cpu_goal_mask, pa_cpu, orients=oa_cpu, sem_keys=sk_cpu, prefix="aug_after_goal_mask", step=b)
+                    self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=gsk_cpu, prefix="aug_after_goal", step=b)
                      
         # =========================
         #      RESHAPE BACK
@@ -774,44 +618,21 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             rgb_obs = self._unflatten_bt(rgb_obs, BB, TT)
             sample["rgb"] = rgb_obs
 
-        if use_depth:
-            sample['depth'] = self._unflatten_bt(depth_obs, BB, TT)
-        
-        if use_goal_depth:
-            sample['goal-depth'] = self._unflatten_bt(goal_depth_obs, BB, TT)
-        
-        if use_goal_mask:
-            sample['goal_mask'] = self._unflatten_bt(goal_mask_obs, BB, TT)
-
         if use_semkey:
             sample['semkey_norm_pixel'] = self._unflatten_bt(semkey_obs, BB, TT)
+            
+        if use_goal_semkey:
+            sample[goal_semkey_key] = self._unflatten_bt(goal_semkey_obs, BB, TT)
         
         if use_goal_rgb:
             sample['goal_rgb'] = self._unflatten_bt(goal_obs, BB, TT)
 
-        if self.use_workspace:
-            robot0_mask = self._unflatten_bt(robot0_mask, BB, TT)
-            robot1_mask = self._unflatten_bt(robot1_mask, BB, TT)
-            sample['robot0_mask'] = robot0_mask
-            sample['robot1_mask'] = robot1_mask
-        
-        if 'rgb-workspace-mask' in sample:
-            sample['rgb-workspace-mask'] = torch.cat([rgb_obs, robot0_mask, robot1_mask], dim=2)
-
         if 'rgb+goal_rgb' in sample:
-            if self.debug: print('[PixelBasedMultiPrimitiveDataAugmenterForDiffusion] reconcanation after augmentation!!!')
             sample['rgb+goal_rgb'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
-        
-        if 'rgb-workspace-mask-goal' in sample:
-            sample['rgb-workspace-mask-goal'] = torch.cat([rgb_obs, robot0_mask, robot1_mask, goal_obs], dim=2)
-    
-        if 'rgb+goal_mask' in sample:
-            sample['rgb+goal_mask'] = torch.cat([rgb_obs, sample['goal_mask']], dim=2)
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)
             
-            # --- Recombine Spatial + Orientation ---
             if self.has_orientation:
                 orient_actions = self._unflatten_bt(orient_actions, BB, TT-1)
                 full_action = torch.cat([pixel_actions, orient_actions], dim=-1)

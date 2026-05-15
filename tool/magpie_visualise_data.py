@@ -189,15 +189,15 @@ def format_image(img_data, img_size):
 def main():
     parser = argparse.ArgumentParser(description="Visualize saved trajectory dataset")
     parser.add_argument('--dataset_path', type=str, required=True, help="Path to the .zarr or .hdf5 dataset")
-    parser.add_argument('--num_episodes', type=int, default=10, help="Number of episodes to visualize")
-    parser.add_argument('--output_path', type=str, default='./tmp/dataset_visualization_goals.png', help="Output image path")
+    parser.add_argument('--num_episodes', type=int, default=100, help="Number of episodes to visualize")
+    parser.add_argument('--episodes_per_file', type=int, default=10, help="Max number of episodes per PNG image file")
+    parser.add_argument('--output_path', type=str, default='./tmp/dataset_visualization_goals.png', help="Output image base path")
     args = parser.parse_args()
 
     # 1. Load Dataset
     print(f"Loading dataset from: {args.dataset_path}")
     root = load_dataset(args.dataset_path)
 
-    # 2. Identify Trajectory Lengths
     if 'trajectory_lengths' not in root:
         print("ERROR: Could not find 'trajectory_lengths' in the dataset.")
         return
@@ -211,105 +211,104 @@ def main():
 
     traj_starts = np.concatenate(([0], np.cumsum(traj_lengths)[:-1]))
     num_episodes_to_vis = min(args.num_episodes, num_total_episodes)
-    print(f"Visualizing the first {num_episodes_to_vis} episodes...")
+    print(f"Visualizing {num_episodes_to_vis} episodes in chunks of {args.episodes_per_file}...")
 
-    # Data pointers
     obs_group = root['observation']
     rgb_arr = obs_group.get('rgb')
     goal_rgb_arr = obs_group.get('goal_rgb')
     semkey_arr = obs_group.get('semkey_norm_pixel')
-    
-    # --- CORRECTED KEY HERE ---
     goal_semkey_arr = obs_group.get('flattened_semkey_norm_pixel') 
-    
     act_arr = root['action']['default']
 
-    all_episode_rows = []
-    max_steps = 0
     img_size = 512
-
-    # 3. Process Data
-    for ep_idx in range(num_episodes_to_vis):
-        start_idx = traj_starts[ep_idx]
-        length = traj_lengths[ep_idx]
-        end_idx = start_idx + length
-        
-        max_steps = max(max_steps, length)
-        
-        # Slices
-        ep_rgb = rgb_arr[start_idx:end_idx]
-        ep_act = act_arr[start_idx:end_idx]
-        
-        ep_goal_rgb = goal_rgb_arr[start_idx:end_idx] if goal_rgb_arr is not None else None
-        ep_semkey = semkey_arr[start_idx:end_idx] if semkey_arr is not None else None
-        ep_goal_semkey = goal_semkey_arr[start_idx:end_idx] if goal_semkey_arr is not None else None
-        
-        row_images = []
-        for t in range(length):
-            # Format images
-            img_cur = format_image(ep_rgb[t], img_size)
-            
-            # Setup Goal Image
-            if ep_goal_rgb is not None:
-                img_goal = format_image(ep_goal_rgb[t], img_size)
-            else:
-                img_goal = np.zeros_like(img_cur)
-                
-            # Draw Keypoints
-            if ep_semkey is not None: draw_keypoints(img_cur, ep_semkey[t])
-            if ep_goal_semkey is not None: draw_keypoints(img_goal, ep_goal_semkey[t])
-
-            # Process Action (ignore the final padding step)
-            if t < length - 1:
-                action_vec = ep_act[t]
-                prim_name, params = decode_action_vector(action_vec)
-                
-                step_text = f"Step {t+1}: "
-                if prim_name == "norm-pixel-dual-pick-and-place": step_text += "Dual P&P"
-                elif prim_name == "norm-pixel-single-pick-and-place": step_text += "Single P&P"
-                elif prim_name == "norm-pixel-pick-and-fling": step_text += "Pick & Fling"
-                elif prim_name == "no-operation": step_text += "No-Op"
-                else: step_text += prim_name
-                
-                color = PRIMITIVE_COLORS.get(prim_name, PRIMITIVE_COLORS["default"])
-                
-                draw_action(img_cur, prim_name, params)
-                draw_text_with_bg(img_cur, step_text, (10, TEXT_Y_STEP), color, scale=1.0, thickness=2)
-            else:
-                draw_text_with_bg(img_cur, f"Step {t+1}: Done", (10, TEXT_Y_STEP), (0, 255, 0), scale=1.0, thickness=2)
-            
-            # Label the goal image to avoid confusion
-            draw_text_with_bg(img_goal, "Goal State", (10, TEXT_Y_STEP), (200, 200, 200), scale=1.0, thickness=2)
-
-            # --- Stack the Current frame on top of the Goal frame vertically ---
-            step_combined = cv2.vconcat([img_cur, img_goal])
-            row_images.append(step_combined)
-            
-        all_episode_rows.append(row_images)
-
-    # 4. Compile the Grid Image
-    print("Compiling grid...")
-    grid_rows = []
     
-    # Blank image needs to be twice as tall because each step is vertically stacked
-    blank_img = np.zeros((img_size * 2, img_size, 3), dtype=np.uint8)
-    
-    for ep_idx, row_images in enumerate(all_episode_rows):
-        if len(row_images) > 0:
-            draw_text_with_bg(row_images[0], f"Ep: {ep_idx}", (10, (img_size * 2) - 20), (255, 255, 0), scale=1.2, thickness=3)
-
-        while len(row_images) < max_steps:
-            row_images.append(blank_img.copy())
-            
-        row_concat = cv2.hconcat(row_images)
-        grid_rows.append(row_concat)
-        
-    final_grid = cv2.vconcat(grid_rows)
-    
-    # 5. Save
+    # Ensure output directory exists
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    cv2.imwrite(args.output_path, final_grid)
-    print(f"Visualization saved successfully to: {args.output_path}")
+    base_name, ext = os.path.splitext(args.output_path)
+
+    # 2. Chunking Logic
+    num_chunks = int(np.ceil(num_episodes_to_vis / args.episodes_per_file))
+
+    for chunk_idx in range(num_chunks):
+        chunk_start_ep = chunk_idx * args.episodes_per_file
+        chunk_end_ep = min((chunk_idx + 1) * args.episodes_per_file, num_episodes_to_vis)
+        
+        print(f"Processing part {chunk_idx + 1}/{num_chunks} (Episodes {chunk_start_ep} to {chunk_end_ep - 1})...")
+
+        chunk_episode_rows = []
+        chunk_max_steps = 0
+
+        # Process Episodes for this Chunk
+        for ep_idx in range(chunk_start_ep, chunk_end_ep):
+            start_idx = traj_starts[ep_idx]
+            length = traj_lengths[ep_idx]
+            end_idx = start_idx + length
+            
+            chunk_max_steps = max(chunk_max_steps, length)
+            
+            ep_rgb = rgb_arr[start_idx:end_idx]
+            ep_act = act_arr[start_idx:end_idx]
+            ep_goal_rgb = goal_rgb_arr[start_idx:end_idx] if goal_rgb_arr is not None else None
+            ep_semkey = semkey_arr[start_idx:end_idx] if semkey_arr is not None else None
+            ep_goal_semkey = goal_semkey_arr[start_idx:end_idx] if goal_semkey_arr is not None else None
+            
+            row_images = []
+            for t in range(length):
+                img_cur = format_image(ep_rgb[t], img_size)
+                img_goal = format_image(ep_goal_rgb[t], img_size) if ep_goal_rgb is not None else np.zeros_like(img_cur)
+                    
+                if ep_semkey is not None: draw_keypoints(img_cur, ep_semkey[t])
+                if ep_goal_semkey is not None: draw_keypoints(img_goal, ep_goal_semkey[t])
+
+                if t < length - 1:
+                    action_vec = ep_act[t]
+                    prim_name, params = decode_action_vector(action_vec)
+                    
+                    step_text = f"Step {t+1}: "
+                    if prim_name == "norm-pixel-dual-pick-and-place": step_text += "Dual P&P"
+                    elif prim_name == "norm-pixel-single-pick-and-place": step_text += "Single P&P"
+                    elif prim_name == "norm-pixel-pick-and-fling": step_text += "Pick & Fling"
+                    elif prim_name == "no-operation": step_text += "No-Op"
+                    else: step_text += prim_name
+                    
+                    color = PRIMITIVE_COLORS.get(prim_name, PRIMITIVE_COLORS["default"])
+                    
+                    draw_action(img_cur, prim_name, params)
+                    draw_text_with_bg(img_cur, step_text, (10, TEXT_Y_STEP), color, scale=1.0, thickness=2)
+                else:
+                    draw_text_with_bg(img_cur, f"Step {t+1}: Done", (10, TEXT_Y_STEP), (0, 255, 0), scale=1.0, thickness=2)
+                
+                draw_text_with_bg(img_goal, "Goal State", (10, TEXT_Y_STEP), (200, 200, 200), scale=1.0, thickness=2)
+
+                # Stack Current on top of Goal vertically
+                step_combined = cv2.vconcat([img_cur, img_goal])
+                row_images.append(step_combined)
+                
+            chunk_episode_rows.append(row_images)
+
+        # Compile Grid for this Chunk
+        grid_rows = []
+        blank_img = np.zeros((img_size * 2, img_size, 3), dtype=np.uint8)
+        
+        for ep_idx_in_chunk, row_images in enumerate(chunk_episode_rows):
+            global_ep_idx = chunk_start_ep + ep_idx_in_chunk
+            
+            if len(row_images) > 0:
+                draw_text_with_bg(row_images[0], f"Ep: {global_ep_idx}", (10, (img_size * 2) - 20), (255, 255, 0), scale=1.2, thickness=3)
+
+            # Pad short episodes
+            while len(row_images) < chunk_max_steps:
+                row_images.append(blank_img.copy())
+                
+            row_concat = cv2.hconcat(row_images)
+            grid_rows.append(row_concat)
+            
+        final_grid = cv2.vconcat(grid_rows)
+        
+        # Save Chunk
+        chunk_save_path = f"{base_name}_part{chunk_idx + 1:02d}{ext}"
+        cv2.imwrite(chunk_save_path, final_grid)
+        print(f"-> Saved: {chunk_save_path}")
 
 if __name__ == "__main__":
     main()

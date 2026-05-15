@@ -1956,10 +1956,6 @@ class MagpieAgent(TrainableAgent):
             start = self.config.obs_horizon - 1
             end = start + self.config.action_horizon
             
-            if self.primitive_integration == 'separate_networks':
-                active_net = self.nets[f'noise_pred_net_{cur_prim_id}']
-            else:
-                active_net = self.nets['noise_pred_net']
             loss_type = self.config.get('loss_type', 'diffusion')
             
             dim_k = self.diffusion_dims[cur_prim_id] if self.primitive_integration == 'separate_networks' else self.diffusion_dim

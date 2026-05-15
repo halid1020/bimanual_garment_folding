@@ -35,6 +35,9 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         self.rgb_noise_factor = self.config.get('rgb_noise_factor', 0.0)
         self.depth_noise_var = self.config.get('depth_noise_var', 0.1)
 
+        self.random_scale = config.get("random_scale", False)
+        self.scale_range = config.get("scale_range", [0.7, 1.0])
+
         if self.use_goal:
             self.goal_aug = self.config.get('goal_aug', 'none')
             self.goal_rotation = self.config.get('goal_rotation', False)
@@ -512,73 +515,95 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 rotate_mask_batch = torch.ones(BB, dtype=torch.bool, device=device)
 
         # =========================
-        #       RANDOM ROTATION
+        #   SPATIAL TRANSFORMS (ROTATION & SCALING)
         # =========================
-        if self.random_rotation and train:
-            degree = self.config.rotation_degree * torch.randint(
-                int(360 / self.config.rotation_degree), size=(1,)
-            )
-            thetas = torch.deg2rad(degree) # Scalar tensor
-            cos_theta = torch.cos(thetas)
-            sin_theta = torch.sin(thetas)
+        do_rotation = self.random_rotation and train
+        do_scale = self.random_scale and train
 
-            rot = torch.stack([
-                torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
-            ], dim=0).to(device)
-            rot_inv = rot.transpose(-1, -2)
+        if do_rotation or do_scale:
+            # 1. Determine Scale Factors
+            if do_scale:
+                scale_val = random.uniform(self.scale_range[0], self.scale_range[1])
+                S = torch.tensor(scale_val, device=device)
+            else:
+                S = torch.tensor(1.0, device=device)
+            inv_S = 1.0 / S
 
-            # --- Spatial Action Rotation (Masked) ---
+            # 2. Determine Rotation Matrices
+            if do_rotation:
+                degree = self.config.rotation_degree * torch.randint(
+                    int(360 / self.config.rotation_degree), size=(1,)
+                )
+                thetas = torch.deg2rad(degree) # Scalar tensor
+                cos_theta = torch.cos(thetas)
+                sin_theta = torch.sin(thetas)
+
+                rot = torch.stack([
+                    torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).reshape(2, 2)
+                ], dim=0).to(device)
+                rot_inv = rot.transpose(-1, -2)
+            else:
+                # Dummy placeholders if rotation is off but scaling is on
+                thetas = torch.zeros(1, device=device)
+                rot = torch.eye(2, device=device).unsqueeze(0)
+                rot_inv = torch.eye(2, device=device).unsqueeze(0)
+
+            # --- Spatial Action Transform (Combined Scale + Rotation) ---
             B_act, A_act = pixel_actions.shape
-            num_pts = A_act // 2  # Number of (x,y) pairs per action row
+            num_pts = A_act // 2  
             
-            # 1. Expand batch mask to match B_act (BB * Time_horizon)
             T_act = B_act // BB
             rotate_mask_act = rotate_mask_batch.unsqueeze(1).expand(BB, T_act).reshape(-1)
-            
-            # 2. Expand action mask to match the total number of coordinate pairs
             rotate_mask_pts = rotate_mask_act.unsqueeze(1).expand(-1, num_pts).reshape(-1)
             
             pixel_actions_ = pixel_actions.reshape(-1, 1, 2).float()
-            total_pts = pixel_actions_.shape[0]  # This is B_act * num_pts
+            total_pts = pixel_actions_.shape[0]  
             
-            # Default to Identity matrices (no rotation)
-            rot_action_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_pts, 2, 2).clone()
+            # Base matrix scaled by S
+            rot_action_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_pts, 2, 2).clone() * S
             
-            # Apply the rotation matrices ONLY where the mask is True
-            num_masked_pts = rotate_mask_pts.sum().item()
-            if num_masked_pts > 0:
-                rot_action_matrices[rotate_mask_pts] = rot_inv.expand(num_masked_pts, 2, 2).float()
+            if do_rotation:
+                num_masked_pts = rotate_mask_pts.sum().item()
+                if num_masked_pts > 0:
+                    rot_action_matrices[rotate_mask_pts] = (rot_inv * S).expand(num_masked_pts, 2, 2).float()
             
             rotated_action = torch.bmm(pixel_actions_, rot_action_matrices).reshape(B_act, A_act)
-            rotated_action = rotated_action.clip(-1+1e-6, 1-1e-6)
+            pixel_actions = rotated_action.clip(-1+1e-6, 1-1e-6)
             
-            # --- Orientation Rotation (Masked) ---
-            if self.has_orientation:
+            # --- Orientation Transform (Unaffected by Scale) ---
+            if self.has_orientation and do_rotation:
                 angle_rad = orient_actions * np.pi
                 rotation_rad = thetas.to(device)
                 
-                # 0 rotation where we ignore the primitive
                 actual_rotation = torch.zeros_like(orient_actions)
-                actual_rotation[rotate_mask_act] = rotation_rad  # orient_actions is [B_act, 1]
+                actual_rotation[rotate_mask_act] = rotation_rad 
                 
                 angle_rad = angle_rad - actual_rotation
                 angle_rad = (angle_rad + np.pi) % (2 * np.pi) - np.pi
                 orient_actions = angle_rad / np.pi
 
-            # --- Image/Mask Rotation (Masked) ---
-            if use_rgb:
-                B_img, C, H, W = rgb_obs.shape
-                rotate_mask_img = rotate_mask_batch.unsqueeze(1).expand(BB, TT).reshape(BB * TT)
+            # --- Image/Mask Transform (Affine Grid) ---
+            B_img = BB * TT
+            rotate_mask_img = rotate_mask_batch.unsqueeze(1).expand(BB, TT).reshape(BB * TT)
 
-                affine_matrix = torch.zeros(B_img, 2, 3, device=device)
-                affine_matrix[:, 0, 0] = 1.0  # Identity diagonal
-                affine_matrix[:, 1, 1] = 1.0  # Identity diagonal
-                
-                # Apply affine rotation ONLY where the mask is True
-                affine_matrix[rotate_mask_img, :2, :2] = rot.expand(rotate_mask_img.sum(), 2, 2)
-                
-                grid = F.affine_grid(affine_matrix, (B_img, C, H, W), align_corners=True)
-                
+            if use_rgb:
+                C_img, H_img, W_img = rgb_obs.shape[1:]
+            elif use_depth:
+                C_img, H_img, W_img = depth_obs.shape[1:]
+            else:
+                C_img, H_img, W_img = 1, self.config.img_dim[0], self.config.img_dim[1]
+
+            affine_matrix = torch.zeros(B_img, 2, 3, device=device)
+            affine_matrix[:, 0, 0] = inv_S
+            affine_matrix[:, 1, 1] = inv_S
+            
+            if do_rotation:
+                # Apply combined affine rotation and scale ONLY where the mask is True
+                affine_matrix[rotate_mask_img, :2, :2] = (rot * inv_S).expand(rotate_mask_img.sum(), 2, 2)
+            
+            grid = F.affine_grid(affine_matrix, (B_img, C_img, H_img, W_img), align_corners=True)
+            
+            if use_rgb:
                 rgb_obs = F.grid_sample(rgb_obs, grid, align_corners=True)
             
             if self.use_workspace:
@@ -596,26 +621,23 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 if use_goal_mask:
                     goal_mask_obs = F.grid_sample(goal_mask_obs, grid, mode='nearest', align_corners=True)
             
+            # --- Semantic Keypoint Transform ---
             if use_semkey:
                 B_sk, N_sk, D_sk = semkey_obs.shape
-                
-                # Expand image mask (BB*TT) to match number of keypoints
                 rotate_mask_sk = rotate_mask_img.unsqueeze(1).expand(-1, N_sk).reshape(-1)
                 
                 semkey_pts_ = semkey_obs.reshape(-1, 1, 2)
                 total_sk_pts = semkey_pts_.shape[0]
                 
-                rot_sk_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_sk_pts, 2, 2).clone()
+                rot_sk_matrices = torch.eye(2, device=device).unsqueeze(0).expand(total_sk_pts, 2, 2).clone() * S
                 
-                num_masked_sk = rotate_mask_sk.sum().item()
-                if num_masked_sk > 0:
-                    rot_sk_matrices[rotate_mask_sk] = rot_inv.expand(num_masked_sk, 2, 2).float()
+                if do_rotation:
+                    num_masked_sk = rotate_mask_sk.sum().item()
+                    if num_masked_sk > 0:
+                        rot_sk_matrices[rotate_mask_sk] = (rot_inv * S).expand(num_masked_sk, 2, 2).float()
                 
                 rotated_semkey = torch.bmm(semkey_pts_, rot_sk_matrices).reshape(B_sk, N_sk, D_sk)
                 semkey_obs = rotated_semkey.clip(-1+1e-6, 1-1e-6)
-                                                 
-            pixel_actions = rotated_action
-
         
         # =========================
         #      VERTICAL FLIP
@@ -656,15 +678,22 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         # =========================
         #   GOAL TRANSFORMATIONS
         # =========================
-        if self.use_goal and train and (self.goal_rotation or self.goal_translation) and self.goal_aug != "same_as_obs":
-            aff_params = torch.eye(2, 3, device=device).unsqueeze(0)
+        if self.use_goal and train and (self.goal_rotation or self.goal_translation or do_scale) and self.goal_aug != "same_as_obs":
+            # Initialize with inv_S scale
+            aff_params = torch.zeros(1, 2, 3, device=device)
+            aff_params[:, 0, 0] = inv_S if do_scale else 1.0
+            aff_params[:, 1, 1] = inv_S if do_scale else 1.0
+
             if self.goal_rotation:
                 k_rot = torch.randint(int(360 / self.config.rotation_degree), size=(1,), device=device)
                 goal_degree = self.config.rotation_degree * k_rot
                 theta_g = torch.deg2rad(goal_degree.float())
                 c_g, s_g = torch.cos(theta_g), torch.sin(theta_g)
-                aff_params[:, 0, 0] = c_g; aff_params[:, 0, 1] = -s_g
-                aff_params[:, 1, 0] = s_g; aff_params[:, 1, 1] = c_g
+                # Overwrite diagonal to combine rotation and scaling
+                aff_params[:, 0, 0] = c_g * (inv_S if do_scale else 1.0)
+                aff_params[:, 0, 1] = -s_g * (inv_S if do_scale else 1.0)
+                aff_params[:, 1, 0] = s_g * (inv_S if do_scale else 1.0)
+                aff_params[:, 1, 1] = c_g * (inv_S if do_scale else 1.0)
 
             if self.goal_translation:
                 r_min, r_max = self.goal_trans_range

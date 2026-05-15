@@ -912,6 +912,9 @@ class MagpieAgent(TrainableAgent):
 
         # Check config to decide which backbone to use (defaults to unet)
         backbone_type = self.config.get('noise_pred_net', 'unet')
+        
+        # --- NEW: Fetch MLP configuration dictionary ---
+        mlp_cfg = self.config.get('mlp_backbone_config', {})
 
         if self.primitive_integration == 'separate_networks':
             # Create K separate networks dynamically based on primitive dimension
@@ -925,9 +928,11 @@ class MagpieAgent(TrainableAgent):
                         input_dim=dim_k,         
                         global_cond_dim=global_cond_dim,
                         pred_horizon=self.config.pred_horizon,
-                        hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
-                        activation="relu",
-                        dropout=0.1
+                        hidden_dims=mlp_cfg.get('hidden_dims', [512, 512, 512]),
+                        activation=mlp_cfg.get('activation', 'relu'),
+                        dropout=mlp_cfg.get('dropout', 0.1),
+                        # If your ConditionalMLP1D supports layernorm, you can pass it here:
+                        # use_layernorm=mlp_cfg.get('use_layernorm', False)
                     )
                 else:
                     net = ConditionalUnet1D(
@@ -943,9 +948,10 @@ class MagpieAgent(TrainableAgent):
                     input_dim=self.diffusion_dim,         
                     global_cond_dim=global_cond_dim,
                     pred_horizon=self.config.pred_horizon,
-                    hidden_dims=self.config.get('mlp_hidden_dims', [512, 512, 512]),
-                    activation="relu",
-                    dropout=0.1
+                    hidden_dims=mlp_cfg.get('hidden_dims', [512, 512, 512]),
+                    activation=mlp_cfg.get('activation', 'relu'),
+                    dropout=mlp_cfg.get('dropout', 0.1),
+                    # use_layernorm=mlp_cfg.get('use_layernorm', False)
                 )
             else:
                 self.noise_pred_net = ConditionalUnet1D(

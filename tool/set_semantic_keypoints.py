@@ -23,7 +23,7 @@ def main():
     arena_cfg.provide_flattened_semkey_norm_pixel = True
     
     arena = ag_ar.build_arena(arena_cfg.name, arena_cfg)
-    arena.set_eval()
+    arena.set_train()
     
     task_conf_path = os.path.join('./conf/', "task", "flattening.yaml")
     task_cfg = OmegaConf.load(task_conf_path)

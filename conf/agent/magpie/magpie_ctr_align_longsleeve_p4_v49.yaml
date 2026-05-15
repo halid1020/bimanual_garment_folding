@@ -81,9 +81,9 @@ dataset_config:
       shape: [128, 128, 1]
       output_key: 'goal_mask'
 
-    flattened_semkey_norm_pixel:
-      shape: [15, 2]
-      output_key: 'flattened_goal_semkey_norm_pixel'
+    # flattened_semkey_norm_pixel:
+    #   shape: [15, 2]
+    #   output_key: 'flattened_goal_semkey_norm_pixel'
 
 
   act_config:
@@ -147,8 +147,8 @@ projector_out_dim: 128
 feature_noise_factor: 0.01
 
 # --- New Params for Unified State/Goal Prediction ---
-predict_goal_state: True
-goal_state_dim: 30     # 15 keypoints * 2 coordinates
-goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
+predict_goal_state: False
+# goal_state_dim: 30     # 15 keypoints * 2 coordinates
+# goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
 
 data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_with_all_rotate

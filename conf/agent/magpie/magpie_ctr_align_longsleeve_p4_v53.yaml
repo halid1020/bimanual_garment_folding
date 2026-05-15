@@ -104,6 +104,13 @@ primitive_classifier:
 prim_class_weights: [1.0, 1.0, 1.0, 1.0]
 prim_weight: 0.001
 
+noise_pred_net: 'mlp'
+mlp_backbone_config:
+  hidden_dims: [512, 512, 512]
+  activation: 'relu'      # relu | gelu | silu | tanh | leaky_relu
+  dropout: 0.1            # 0.0 to disable
+  use_layernorm: false    # If your network class supports it
+  
 ## Following is the parameter from the fast conditional decoupling paper
 batch_size: 256
 optimiser_class: 'adamw'

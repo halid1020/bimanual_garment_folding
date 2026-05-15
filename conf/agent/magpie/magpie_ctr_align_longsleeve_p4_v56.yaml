@@ -34,13 +34,13 @@ add_all_demos: True
 
 ## it learns to predict the states from the obs embedding.
 rep_learn: 'predict-state'
-rep_weight: 0.05
+rep_weight: 0.1
 state_dim: 30
 state_key: semkey_norm_pixel
 state_predictor_config:
-  hidden_dims: [256, 256]      # You can add more layers here, e.g., [256, 128]
+  hidden_dims: [256]      # You can add more layers here, e.g., [256, 128]
   use_layernorm: true     # Set to false to disable LayerNorm
-  dropout: 0.5            # 0.0 to disable dropout
+  dropout: 0.4            # 0.0 to disable dropout
   activation: 'relu'      # relu | gelu | silu
 
 dataset_mode: "general"
@@ -101,7 +101,7 @@ primitive_classifier:
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
   dropout: 0.5          # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [1.0, 1.0, 1.0, 1.0]
+prim_class_weights: [2.0, 1.0, 2.0, 2.0]
 prim_weight: 0.001
 
 ## Following is the parameter from the fast conditional decoupling paper

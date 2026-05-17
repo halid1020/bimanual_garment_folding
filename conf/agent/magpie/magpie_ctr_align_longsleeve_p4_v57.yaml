@@ -81,9 +81,9 @@ dataset_config:
       shape: [128, 128, 1]
       output_key: 'goal_mask'
 
-    # flattened_semkey_norm_pixel:
-    #   shape: [15, 2]
-    #   output_key: 'flattened_goal_semkey_norm_pixel'
+    flattened_semkey_norm_pixel:
+      shape: [15, 2]
+      output_key: 'flattened_goal_semkey_norm_pixel'
 
 
   act_config:

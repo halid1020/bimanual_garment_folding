@@ -294,6 +294,10 @@ class MultiGarmentEnv(GarmentEnv):
             key = keys[safe_eid]
 
             with h5py.File(hdf5_path, 'r') as init_states:
+                if key not in init_states:
+                    print('here!!')
+                    eid += 1
+                    continue
                 group = init_states[key]
                 episode_params = dict(group.attrs)
 

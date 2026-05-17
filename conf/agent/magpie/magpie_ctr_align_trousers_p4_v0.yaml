@@ -9,7 +9,7 @@ input_obs: 'rgb+goal_rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 200
+num_demos: 100
 demo_horizon: 10
 
 disable_updown: True

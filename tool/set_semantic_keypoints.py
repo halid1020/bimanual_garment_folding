@@ -12,7 +12,7 @@ def main():
     register_arenas()
 
     # Target the Dress environment specifically
-    arena_name = "magpie/multi_dress_provide_semkey_pixel_no_success_stop_resol_128_workspace"
+    arena_name = "magpie/multi_skirt_provide_semkey_pixel_no_success_stop_resol_128_workspace"
     
     print(f"Setting up environment: {arena_name}")
     

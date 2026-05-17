@@ -1,0 +1,24 @@
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: true
+rotation_degree: 0.1
+vertical_flip: true
+debug: false
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: true
+use_goal: True
+goal_aug: "same_as_obs"
+use_workspace: False
+K: 4
+not_rotate_primitives: [0]
+augment_sem_key: True
+
+random_scale: true
+scale_range: [0.5, 1.0]
+
+random_swap_actions: true
+swap_action_prob: 0.5  # 50% chance to trigger the swap on a given batch
+swap_action_mapping:
+  0: [[0, 1], [2, 3]]           # For primitive 0: swap indices (0, 1) with (2, 3)
+  1: [[0, 1, 4, 5], [2, 3, 6, 7]] # For primitive 1: swap (0, 1, 4, 5) with (2, 3, 6, 7)

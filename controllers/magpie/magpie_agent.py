@@ -377,11 +377,23 @@ class MagpieAgent(TrainableAgent):
                         filename="diffusion_demo"
                     )
             if info['success'] or self.config.get('add_all_demos', False) and not info['terminated']:
-                #print('add to trajectory')
+                
+                # 1. Defensively check for missing keys
+                missing_keys = []
                 for k, v in observations.items():
-                    #print(f'[MultiPrimitiveDiffusionAdapter] k {k}')
-                    #print(f'[debug] k {k}')
-                    observations[k] = np.stack(v)
+                    if len(v) == 0:
+                        missing_keys.append(k)
+                    else:
+                        observations[k] = np.stack(v)
+                
+                # 2. Alert the user exactly which keys caused the problem
+                if missing_keys:
+                    raise ValueError(
+                        f"Failed to stack trajectories. The following keys are expected by your "
+                        f"dataset_config but were NEVER returned by the environment in info['observation']: {missing_keys}. "
+                        f"Please remove them from your YAML obs_config or update the environment to output them."
+                    )
+
                 actions['default'] = np.stack(actions['default'])
                 #print('actions default shape', actions['default'].shape)
                 skip = False

@@ -1,4 +1,4 @@
-# longsleeve 68
+# longsleeve 62
 name: magpie
 device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function
@@ -35,13 +35,13 @@ add_all_demos: True
 
 ## it learns to predict the states from the obs embedding.
 rep_learn: 'predict-state'
-rep_weight: 0.5
+rep_weight: 0.05
 state_dim: 30
 state_key: semkey_norm_pixel
 state_predictor_config:
-  hidden_dims: [256]      # You can add more layers here, e.g., [256, 128]
+  hidden_dims: [256, 256]      # You can add more layers here, e.g., [256, 128]
   use_layernorm: true     # Set to false to disable LayerNorm
-  dropout: 0.4            # 0.0 to disable dropout
+  dropout: 0.5            # 0.0 to disable dropout
   activation: 'relu'      # relu | gelu | silu
 
 dataset_mode: "general"
@@ -96,14 +96,14 @@ dataset_config:
 loss_type: 'ot_flow_match'
 num_diffusion_iters: 10
 
-primitive_integration: 'separate_networks'
+primitive_integration: 'one-hot-encoding'
 primitive_classifier:
   hidden_dims: [128]
   activation: relu        # relu | gelu | silu | tanh | leaky_relu
   dropout: 0.5          # 0.0 to disable
   use_layernorm: true
-prim_class_weights: [2.0, 1.0, 2.0, 2.0]
-prim_weight: 0.001
+prim_class_weights: [1.0, 1.0, 1.0, 1.0]
+prim_weight: 0.01
 
 ## Following is the parameter from the fast conditional decoupling paper
 batch_size: 256
@@ -123,7 +123,7 @@ primitives:
     dim: 4 #params: [pick_0, place_0]
   - name: no-operation
     dim: 0
-mask_out_irrelavent_action_dim: false
+mask_out_irrelavent_action_dim: true
 
 vision_encoder: 'original'
 obs_dim: 512
@@ -136,13 +136,13 @@ obs_dim: 512
 # prefetch_factor: 4           # NEW: Tells each worker to prepare 4 batches in advance
 
 use_projector: True
-projector_hidden_dims: [256] # Can be empty [] for a direct linear mapping
+projector_hidden_dims: [256, 256] # Can be empty [] for a direct linear mapping
 projector_out_dim: 128 
-feature_noise_factor: 0.01
+feature_noise_factor: 0.08
 
 # --- New Params for Unified State/Goal Prediction ---
-predict_goal_state: False
-# goal_state_dim: 30     # 15 keypoints * 2 coordinates
-# goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
+predict_goal_state: true
+goal_state_dim: 30     # 15 keypoints * 2 coordinates
+goal_state_key: 'flattened_goal_semkey_norm_pixel' # Make sure your dataset_config outputs this key!
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_with_rotate_swap_index_random_scale_v1
+data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_with_rotate_swap_index_random_scale

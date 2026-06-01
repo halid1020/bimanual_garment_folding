@@ -1,4 +1,3 @@
-# longsleeve 68
 name: magpie
 device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function
@@ -139,7 +138,7 @@ use_projector: True
 projector_hidden_dims: [256] # Can be empty [] for a direct linear mapping
 projector_out_dim: 128 
 feature_noise_factor: 0.01
-
+constrain_action: 'bimanual_workspace_snap'
 # --- New Params for Unified State/Goal Prediction ---
 predict_goal_state: False
 # goal_state_dim: 30     # 15 keypoints * 2 coordinates

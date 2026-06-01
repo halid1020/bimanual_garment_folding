@@ -262,30 +262,36 @@ class MultiGarmentEnv(GarmentEnv):
             self.val_keys = eval_keys[:self.num_val_trials]
             self.eval_keys = eval_keys[self.num_val_trials:]
             
-            # Fallback if there aren't enough eval keys
+            self.val_uses_train_file = False
+            
+            # Fallback if there aren't enough eval keys: Prioritize Eval numbers, pull Val from Train
             if len(self.eval_keys) < self.num_eval_trials:
                 self.eval_keys = eval_keys[:self.num_eval_trials]
                 self.val_keys = self.train_keys[self.num_train_trials : self.num_train_trials + self.num_val_trials]
-                
+                self.val_uses_train_file = True  # Tell the params method to switch files
+
     def _get_init_state_params(self, eid):
-        """
-        [DIFFICULT LOGIC SECTION]:
-        Fetches the specific physical parameters (mesh vertices, cloth configuration, etc.) 
-        for a given episode ID. If a specific mesh is missing its .pkl file path, it skips 
-        to the next available episode dynamically.
-        """
         garment_type = self.config.garment_type
         if garment_type == 'all':
             # Determine which garment type this episode ID maps to
             garment_type = self.all_garment_types[eid % len(self.all_garment_types)]
 
-        # Select correct key pool based on current environment mode
-        if getattr(self, 'mode', 'eval') == 'train':
+        mode = getattr(self, 'mode', 'eval')
+        
+        # Select correct key pool and file path
+        if mode == 'train':
             keys = self.train_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
-        else:
-            keys = self.eval_keys if getattr(self, 'mode', 'eval') == 'eval' else self.val_keys
+        elif mode == 'eval':
+            keys = self.eval_keys
             hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
+        else: # mode == 'val'
+            keys = self.val_keys
+            # If the fallback grabbed train keys for val, we must open the train HDF5
+            if getattr(self, 'val_uses_train_file', False):
+                hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
+            else:
+                hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
 
         # Find the next valid configuration
         while True:
@@ -295,7 +301,7 @@ class MultiGarmentEnv(GarmentEnv):
 
             with h5py.File(hdf5_path, 'r') as init_states:
                 if key not in init_states:
-                    print('here!!')
+                    print(f'here!! {eid}, safe_eid {safe_eid}, len keys {len(keys)}')
                     eid += 1
                     continue
                 group = init_states[key]
@@ -303,7 +309,6 @@ class MultiGarmentEnv(GarmentEnv):
 
                 # Validation check: Ensure the state has an associated pkl_path
                 if 'pkl_path' not in episode_params:
-                    # Skip to the next item. If 'all', skip to the next item of THIS garment type
                     eid += 1 if garment_type != 'all' else len(self.all_garment_types)
                     continue
                 

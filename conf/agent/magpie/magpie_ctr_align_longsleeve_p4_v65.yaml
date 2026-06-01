@@ -1,3 +1,4 @@
+# longsleeve 65
 name: magpie
 device: 'cuda'
 oracle: False # TODO: fix this, I need to add this because of build_agent function

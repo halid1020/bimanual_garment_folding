@@ -349,9 +349,110 @@ class MagpieAgent(TrainableAgent):
         })
 
     def _process_info(self, info):
-        # [Move the existing 80 lines of _process_info data formatting here without modification]
-        # (Omitted in this block for brevity, but you simply paste your existing _process_info logic here)
-        pass
+        if 'depth' in info['observation'].keys():
+            depth = info['observation']['depth'] #get the view from first camera.
+
+            if len(depth.shape) == 2:
+                depth = np.expand_dims(depth, axis=-1)
+                info['observation']['depth'] = depth
+
+        if self.config.input_obs == 'rgbd':
+            info['observation']['rgbd'] = np.concatenate(
+                [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
+        
+        if self.config.input_obs == 'rgb+goal_rgb':
+            info['observation']['rgb+goal_rgb'] = np.concatenate(
+                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+
+        def resize_mask_to_rgb(mask):
+                H, W = rgb.shape[:2]
+
+                # Ensure numpy array (already true, but safe)
+                mask = np.asarray(mask)
+
+                # Remove channel if present
+                if mask.ndim == 3:
+                    mask = mask[..., 0]
+
+                # CRITICAL: cast dtype
+                if mask.dtype != np.uint8 and mask.dtype != np.float32:
+                    mask = mask.astype(np.float32)
+
+                mask = cv2.resize(
+                    mask,
+                    (W, H),                      # (width, height)
+                    interpolation=cv2.INTER_NEAREST
+                )
+
+                return mask[..., None]           # (H, W, 1)
+        
+        if self.config.input_obs == 'rgb-workspace-mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
+
+            m0 = resize_mask_to_rgb(info['observation']['robot0_mask'])
+            m1 = resize_mask_to_rgb(info['observation']['robot1_mask'])
+
+            info['observation']['rgb-workspace-mask'] = np.concatenate(
+                [rgb, m0, m1], axis=-1
+            )
+            
+        if self.config.input_obs == 'rgb-workspace-mask-goal':
+            rgb = info['observation']['rgb'].astype(np.float32)
+            goal = info['observation']['goal_rgb'].astype(np.float32)
+
+            m0 = resize_mask_to_rgb(info['observation']['robot0_mask'])
+            m1 = resize_mask_to_rgb(info['observation']['robot1_mask'])
+
+            info['observation']['rgb-workspace-mask-goal'] = np.concatenate(
+                [rgb, m0, m1, goal], axis=-1
+            )
+        
+        if self.config.input_obs == 'rgb+goal_mask':
+            rgb = info['observation']['rgb'].astype(np.float32)
+            mask = resize_mask_to_rgb(info['observation']['mask'])
+
+            info['observation']['rgb+goal_mask'] = np.concatenate(
+                [rgb, mask], axis=-1
+            )
+            if self.debug: print('input shape', info['observation']['rgb+goal_mask'].shape)
+
+        input_data = {
+            self.config.input_obs: info['observation'][self.config.input_obs]\
+                .reshape(1, 1, *info['observation'][self.config.input_obs].shape),
+        }
+        
+        if 'use_mask' in self.config and self.config.use_mask:
+            input_data['mask'] = info['observation']['mask']\
+                .reshape(1, 1, *info['observation']['mask'].shape, 1)
+            
+        if self.config.include_state:
+            input_data['vector_state'] = info['observation']['vector_state']\
+                .reshape(1, 1, *info['observation']['vector_state'].shape)
+
+        input_data = self.data_augmenter(input_data, train=False, device=self.device) 
+        
+        vis = input_data[self.config.input_obs].squeeze(0).squeeze(0)
+
+        obs = {
+            self.config.input_obs: vis,  
+        }
+
+        if 'use_mask' in self.config and self.config.use_mask:
+            mask = input_data['mask'].squeeze(0).squeeze(0)
+            obs['mask'] = mask
+
+        if self.config.include_state:
+            vector_state = input_data['vector_state'].squeeze(0).squeeze(0)
+            obs['vector_state'] = vector_state
+
+        input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
+
+        self.internal_states[info['arena_id']].update(
+            {'input_obs': input_obs.transpose(1,2,0),
+             'input_type': self.config.input_obs}
+        )
+        
+        return obs
 
     def set_eval(self): pass
     def set_train(self): pass

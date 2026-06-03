@@ -148,6 +148,17 @@ class MagpieTrainer:
                 done = info['done']
                 if self.agent.collect_on_success and info['success']: break
             
+            for k, v in info['observation'].items():
+                if k in observations.keys():
+                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_)
+                    elif k in ['mask', 'goal_mask']:
+                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_ > 0.9)
+                    else:
+                        observations[k].append(v)
+                        
             if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
                 for k, v in observations.items():
                     observations[k] = np.stack(v)
@@ -205,8 +216,20 @@ class MagpieTrainer:
 
                 obs_cond = obs_features.flatten(start_dim=1)
                 
-                # Setup targets and noise
-                gt_action = nbatch['action'][:, :, 1:].to(self.device) if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks'] else nbatch['action'].to(self.device)
+                # ---> RESTORED: Handle Validation Primitive Logic <---
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    preds = torch.argmax(prim_logits, dim=-1)
+                    
+                    if self.agent.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                        
+                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
+                else:
+                    gt_action = nbatch['action'].to(self.device)
+                # -----------------------------------------------------
+
                 eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
                 
                 # Reverse Diffusion Loop
@@ -307,6 +330,11 @@ class MagpieTrainer:
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
                     nbatch['action'] = nbatch['action'][:, :, 1:] # Slice off bin selector
+
+                    # ---> RESTORED: Append one-hot encoding to obs_cond <---
+                    if self.agent.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
                 diffusion_target = nbatch['action'].to(self.device)
                 loss_type = self.config.get('loss_type', 'diffusion')

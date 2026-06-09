@@ -858,6 +858,7 @@ class MagpieAgent(TrainableAgent):
         # ==========================================================
         self.use_projector = self.config.get('use_projector', False)
         self.effective_obs_dim = self.config.obs_dim  # Default to original
+        activation_name = self.config.get('projector_activation', 'relu')
 
         if self.use_projector:
             proj_hidden = self.config.get('projector_hidden_dims', [])
@@ -867,7 +868,14 @@ class MagpieAgent(TrainableAgent):
             in_dim = self.config.obs_dim
             for h in proj_hidden:
                 layers.append(nn.Linear(in_dim, h))
-                layers.append(nn.ReLU())
+
+                if activation_name == 'gelu':
+                    layers.append(nn.GELU())
+                elif activation_name == 'silu':
+                    layers.append(nn.SiLU())
+                else:
+                    layers.append(nn.ReLU())
+
                 in_dim = h
             layers.append(nn.Linear(in_dim, proj_out))
             

@@ -66,7 +66,7 @@ dataset_config:
       output_key: 'rgb'
 
     semkey_norm_pixel:
-      shape: [8, 2]
+      shape: [7, 2]
       output_key: 'semkey_norm_pixel'
 
     goal_rgb: 

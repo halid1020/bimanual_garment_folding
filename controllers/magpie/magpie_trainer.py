@@ -183,7 +183,14 @@ class MagpieTrainer:
             return
 
         self.agent.nets.eval() 
+        
+        # --- RESTORED: Logging Accumulators ---
+        val_prim_losses = []
+        val_state_mse = []
+        val_state_l2 = []
         val_action_mse = []
+        all_preds = []
+        all_gts = []
         
         print(f"--- Running Validation at Step {self.agent.update_step} ---")
         
@@ -197,6 +204,18 @@ class MagpieTrainer:
                     nbatch['action'] = action.reshape(*action.shape[:2], -1)
                     nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
 
+                # Construct Composite Observations
+                if self.config.input_obs == 'rgbd':
+                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask':
+                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask-goal':
+                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_rgb':
+                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_mask':
+                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+
                 B = nbatch[self.config.input_obs].shape[0]
                 input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
                 
@@ -205,7 +224,7 @@ class MagpieTrainer:
                     image_features = self.agent.nets['vision_encoder'](input_obs)
                     obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
                 else:
-                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) # Simplified for brevity
+                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) 
                 
                 if getattr(self.agent, 'use_projector', False):
                     obs_features = self.agent.nets['obs_projector'](obs_features)
@@ -216,10 +235,50 @@ class MagpieTrainer:
 
                 obs_cond = obs_features.flatten(start_dim=1)
                 
-                # ---> RESTORED: Handle Validation Primitive Logic <---
+                # --- RESTORED: Validate Keypoint Precision and State Loss ---
+                if self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features)
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors_val = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                        gt_tensors_val.append(gt_state)
+                        
+                        state_dim = self.config.state_dim
+                        num_kpts = state_dim // 2
+                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
+                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
+                        
+                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
+                        val_state_l2.append(l2_dist.item())
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                            gt_tensors_val.append(gt_goal)
+                            
+                    if gt_tensors_val:
+                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
+                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
+                        val_state_mse.append(mse_loss.item())
+
+                # Validation Primitive Logic
+                gt_prim_ids = None
                 if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     preds = torch.argmax(prim_logits, dim=-1)
+                    
+                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
+                    
+                    # --- RESTORED: Primitive Metric Accumulation ---
+                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
+                    val_prim_losses.append(loss.item())
+                    all_preds.extend(preds.cpu().numpy())
+                    all_gts.extend(gt_prim_ids.cpu().numpy())
                     
                     if self.agent.primitive_integration == 'one-hot-encoding':
                         prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
@@ -228,24 +287,89 @@ class MagpieTrainer:
                     gt_action = nbatch['action'][:, :, 1:].to(self.device)
                 else:
                     gt_action = nbatch['action'].to(self.device)
-                # -----------------------------------------------------
 
                 eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                loss_type = self.config.get('loss_type', 'diffusion')
                 
-                # Reverse Diffusion Loop
-                self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                for k in self.agent.noise_scheduler.timesteps:
-                    timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
-                    n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                    eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+                # Reverse Diffusion / Flow Matching Loop
+                if loss_type == 'ot_flow_match':
+                    num_steps = self.config.num_diffusion_iters
+                    dt = 1.0 / num_steps
+                    for i in range(num_steps):
+                        t_val = i / num_steps
+                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            v_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (preds == k) 
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{k}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    v_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = eval_naction + v_pred * dt
+                else:
+                    self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                    for k in self.agent.noise_scheduler.timesteps:
+                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for net_idx in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[net_idx]
+                                if dim_k == 0: continue
+                                mask_k = (preds == net_idx)
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    n_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
 
                 pred_action = eval_naction[..., :self.agent.network_action_dim]
-                mse = nn.functional.mse_loss(pred_action, gt_action)
+                
+                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
+                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                    
+                    diff = (pred_action - gt_action) * mask
+                    valid_count = mask.sum().clamp(min=1.0)
+                    mse = (diff ** 2).sum() / valid_count
+                else:
+                    mse = nn.functional.mse_loss(pred_action, gt_action)
+                
                 val_action_mse.append(mse.item())
 
+        # --- RESTORED: Metric Aggregation and wandb Integration ---
         metrics = {}
-        if val_action_mse:
-            metrics['val/action_mse'] = np.mean(val_action_mse)
+        if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
+        if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
+        if val_action_mse: metrics['val/action_mse'] = np.mean(val_action_mse)
+
+        if val_prim_losses:
+            metrics['val/prim_loss'] = np.mean(val_prim_losses)
+            acc = np.mean(np.array(all_preds) == np.array(all_gts))
+            metrics['val/prim_accuracy'] = acc
+            
+            import wandb
+            if wandb.run is not None and hasattr(self.agent, 'logger'):
+                confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=all_gts,
+                    preds=all_preds,
+                    class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                )}
+                self.agent.logger.log(confusion, step=self.agent.update_step)
 
         if metrics and hasattr(self.agent, 'logger'):
             self.agent.logger.log(metrics, step=self.agent.update_step)
@@ -284,20 +408,11 @@ class MagpieTrainer:
                 nbatch['action'] = action.reshape(*action.shape[:2], -1)
                 nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
 
-            # ==========================================================
-            # --- MISSING COMPOSITE OBSERVATION LOGIC RESTORED HERE ---
-            # ==========================================================
-            if self.config.input_obs == 'rgbd':
-                nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask':
-                nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask-goal':
-                nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_rgb':
-                nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_mask':
-                nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
-            # ==========================================================
+            if self.config.input_obs == 'rgbd': nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask': nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask-goal': nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_rgb': nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_mask': nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
 
             B = nbatch[self.config.input_obs].shape[0]
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
@@ -317,6 +432,29 @@ class MagpieTrainer:
                     noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
                     obs_features = obs_features + noise
 
+                # --- RESTORED: rep_loss tracking ---
+                rep_loss = torch.tensor(0.0, device=self.device)
+                
+                if self.agent.rep_learn == 'auto-encoder':
+                    reconstructed_obs = self.agent.nets['vision_decoder'](image_features)
+                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs.to(self.device))
+                elif self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features) 
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float() 
+                        gt_tensors.append(gt_state.to(self.device))
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float()
+                            gt_tensors.append(gt_goal.to(self.device))
+                    if gt_tensors:
+                        gt_combined = torch.cat(gt_tensors, dim=-1) 
+                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
+
                 if self.config.include_state:
                     vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device)
                     obs_features = torch.cat([obs_features, vector_state], dim=-1)
@@ -325,18 +463,59 @@ class MagpieTrainer:
 
                 # 2. Extract targets based on primitive integration
                 gt_prim_ids = None
+                prim_loss = torch.tensor(0.0, device=self.device)
+                
                 if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     prim_bin = nbatch['action'][:, 0, 0]
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
+                    
+                    # --- RESTORED: Training Primitive Logging ---
+                    weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
+                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
+                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
+
+                    # FIX: Fetch directly from config with a fallback default of 200
+                    log_every = self.config.get('log_prim_metrics_every', 200)
+                    
+                    if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
+                        metrics = compute_classification_metrics(prim_logits.detach(), gt_prim_ids.detach(), self.agent.K)
+                        wandb_metrics = {f"train/prim_{k}": v for k, v in metrics.items()}
+                        self.agent.logger.log(wandb_metrics, step=self.agent.update_step)
+                        
+                        import wandb
+                        if wandb.run is not None:
+                            confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                                probs=None, y_true=gt_prim_ids.cpu().numpy(),
+                                preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
+                                class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                            )}
+                            self.agent.logger.log(confusion, step=self.agent.update_step)
+
                     nbatch['action'] = nbatch['action'][:, :, 1:] # Slice off bin selector
 
-                    # ---> RESTORED: Append one-hot encoding to obs_cond <---
                     if self.agent.primitive_integration == 'one-hot-encoding':
                         prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
-                diffusion_target = nbatch['action'].to(self.device)
+                # --- RESTORED: Joint Diffusion Target (State Prediction via Diffusion) ---
+                if self.agent.rep_learn == 'predict-state-with-action':
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state, gt_goal], dim=-1)
+                        else:
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                    else:
+                        diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                else:
+                    diffusion_target = nbatch['action'].to(self.device)
+                    
                 loss_type = self.config.get('loss_type', 'diffusion')
 
                 # 3. Add Noise & Forward Diffusion (Handles both OT Flow Match and Standard Diffusion)
@@ -372,13 +551,25 @@ class MagpieTrainer:
                     mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
                     for b in range(B):
                         mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                        
+                    # Also unmask state target dims if doing joint diffusion
+                    if self.agent.rep_learn == 'predict-state-with-action':
+                        mask_extra_dim = self.config.state_dim
+                        if getattr(self.agent, 'predict_goal_state', False): mask_extra_dim += getattr(self.agent, 'goal_state_dim', 30)
+                        state_mask = torch.ones((B, self.config.pred_horizon, mask_extra_dim), device=self.device)
+                        mask = torch.cat([mask, state_mask], dim=-1)
+
                     diff = (noise_pred - target) * mask
                     valid_count = mask.sum().clamp(min=1.0)
                     actor_noise_loss = (diff ** 2).sum() / valid_count
                 else:
                     actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
                 
-                total_loss = actor_noise_loss
+                prim_weight = self.config.get('prim_weight', 1.0)
+                total_loss = actor_noise_loss + (prim_loss * prim_weight) 
+                
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
 
             # 4. Optimize
             total_loss.backward()
@@ -393,8 +584,79 @@ class MagpieTrainer:
             trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
             self.agent.ema.step(trainable_params)
 
+            # --- RESTORED: Unified Logging Dictionary ---
             if hasattr(self.agent, 'logger'):
-                self.agent.logger.log({'train/total_loss': total_loss.item()}, step=self.agent.update_step)
+                metrics_to_log = {
+                    'train/actor_noise_loss': actor_noise_loss.item(),
+                    'train/total_loss': total_loss.item()
+                }
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    metrics_to_log['train/state_pred_loss'] = rep_loss.item()
+                if self.agent.primitive_integration == 'one-hot-encoding':
+                    metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
+                    metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
+                    
+                self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
+
+            # --- RESTORED: Periodic Full Denoising Metric Evaluation ---
+            log_interval = self.config.get('log_state_eval_every', 500)
+            if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
+                with torch.no_grad():
+                    self.agent.nets.eval()
+                    eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                    
+                    if loss_type == 'ot_flow_match':
+                        num_steps = self.config.num_diffusion_iters
+                        dt = 1.0 / num_steps
+                        for i in range(num_steps):
+                            t_val = i / num_steps
+                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                v_pred = torch.zeros_like(eval_naction)
+                                for k in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[k]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == k)
+                                    if mask_k.sum() > 0:
+                                        v_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                                eval_naction = eval_naction + v_pred * dt
+                            else:
+                                v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                                eval_naction = eval_naction + v_pred * dt
+                    else:
+                        self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                        for step_k in self.agent.noise_scheduler.timesteps:
+                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                n_pred = torch.zeros_like(eval_naction)
+                                for net_idx in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[net_idx]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == net_idx)
+                                    if mask_k.sum() > 0:
+                                        n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{net_idx}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                            else:
+                                n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
+
+                    act_dim = self.agent.network_action_dim
+                    state_dim = self.config.state_dim
+                    num_kpts = state_dim // 2
+                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    
+                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
+                    if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.agent.update_step)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_dim = getattr(self.agent, 'goal_state_dim', 30)
+                        num_goal_kpts = goal_dim // 2
+                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
+                        if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.agent.update_step)
+
+                    self.agent.nets.train()
 
             if self.agent.validate_training and self.agent.update_step > 0 and self.agent.update_step % self.agent.val_interval == 0:
                 self.validate()

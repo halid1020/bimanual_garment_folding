@@ -41,7 +41,6 @@ def build_networks_and_optimizers(agent):
             activation_function=config.activation, batchnorm=config.encoder_batchnorm,
             residual=config.encoder_residual
         )
-        # Note: Dynamic transition logic/weight loading is handled in the main trainer if needed
     else:
         vision_encoder = nn.Identity()
 
@@ -123,9 +122,55 @@ def build_networks_and_optimizers(agent):
         prediction_type='epsilon'
     )
 
-    nets = nn.ModuleDict(net_dict).to(device)
+    # --- RESTORED: Representation Learning Networks (State Predictor / Auto-Encoder) ---
+    if agent.rep_learn == 'auto-encoder':
+        net_dict['vision_decoder'] = ResNetDecoder(
+            input_dim=512, 
+            output_channel=agent.input_channel
+        )
+    elif agent.rep_learn == 'predict-state':
+        agent.predict_goal_state = config.get('predict_goal_state', False)
+        agent.goal_state_dim = config.get('goal_state_dim', 30) 
+        
+        out_dim = config.state_dim
+        if agent.predict_goal_state:
+            out_dim += agent.goal_state_dim
+            print(f"[MultiPrimitiveDiffusion] state_predictor out_dim extended to {out_dim} (State + Goal)")
 
-    # 5. Optimizers
+        pred_cfg = config.get('state_predictor_config', {})
+        hidden_dims = pred_cfg.get('hidden_dims', [256])
+        use_layernorm = pred_cfg.get('use_layernorm', False)
+        dropout_p = pred_cfg.get('dropout', 0)
+        activation_name = pred_cfg.get('activation', 'relu').lower()
+
+        layers = []
+        in_dim = agent.effective_obs_dim
+
+        for h_dim in hidden_dims:
+            layers.append(nn.Linear(in_dim, h_dim))
+            if use_layernorm:
+                layers.append(nn.LayerNorm(h_dim))
+            
+            if activation_name == 'relu':
+                layers.append(nn.ReLU())
+            elif activation_name == 'gelu':
+                layers.append(nn.GELU())
+            elif activation_name == 'silu':
+                layers.append(nn.SiLU())
+            else:
+                layers.append(nn.ReLU())
+            
+            if dropout_p > 0.0:
+                layers.append(nn.Dropout(p=dropout_p))
+                
+            in_dim = h_dim 
+
+        layers.append(nn.Linear(in_dim, out_dim))
+        net_dict['state_predictor'] = nn.Sequential(*layers)
+
+    # 5. Initialization and Optimizers
+    nets = nn.ModuleDict(net_dict).to(device)
+    
     trainable_params = [p for p in nets.parameters() if p.requires_grad]
     ema = EMAModel(parameters=trainable_params, power=config.get('ema_power', 0.75))
     

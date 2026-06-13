@@ -231,10 +231,19 @@ class MagpieAgent(TrainableAgent):
             return self.nets['vision_encoder'](image)
         elif self.vision_encoder_type == 'vit':
             import torchvision.transforms.functional as TF
+            B = 1 # single_act operates unbatched
+            T = image.shape[0] if image.ndim == 4 else image.shape[1]
+
             rgb_resized = TF.resize(image[:, :3, :, :], [224, 224], antialias=True)
             goal_resized = TF.resize(image[:, 3:6, :, :], [224, 224], antialias=True)
-            return torch.cat([self.nets['vision_encoder'](rgb_resized.to(self.device)), 
-                              self.nets['vision_encoder'](goal_resized.to(self.device))], dim=-1)
+            
+            obs_feature = self.nets['vision_encoder'](rgb_resized.to(self.device))
+            goal_feature = self.nets['vision_encoder'](goal_resized.to(self.device))
+            
+            # Restored reshape logic to maintain (Batch, Time, Dim)
+            image_features = torch.cat([obs_feature, goal_feature], dim=-1)
+            return image_features.reshape(B, T, -1)
+            
         elif self.vision_encoder_type == 'gc_rssm_encoder':
             return torch.cat([self.nets['vision_encoder'](image[:, :3, :, :]), 
                               self.nets['vision_encoder'](image[:, 3:6, :, :])], dim=-1)
@@ -252,7 +261,7 @@ class MagpieAgent(TrainableAgent):
                 nonterminals=torch.ones(T, B, 1, device=self.device)
             )
             return torch.cat([hidden[0], hidden[4]], dim=-1).transpose(0, 1).squeeze(0)
-
+        
     def _process_primitives(self, obs_features, info):
         cur_prim_id = 0
         prim_probs_log = None
@@ -268,15 +277,19 @@ class MagpieAgent(TrainableAgent):
 
             if self.primitive_integration == 'one-hot-encoding':
                 prim_enc = torch.nn.functional.one_hot(prim_id, num_classes=self.K).float()
-                return torch.cat([obs_features, prim_enc], dim=-1), cur_prim_id, prim_probs_log
+                obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
+                # Ensure the one-hot appended tensor is flattened identically
+                return obs_cond.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
                 
         return obs_features.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
-
+    
     def _run_diffusion_loop(self, naction, obs_cond, cur_prim_id, info):
         start = self.config.obs_horizon - 1
         end = start + self.config.action_horizon
         dim_k = self.diffusion_dims[cur_prim_id] if self.primitive_integration == 'separate_networks' else self.diffusion_dim
-        noise_actions = []
+        
+        # RESTORED: Capture the very first fully-noised frame for debug visualizations
+        noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
 
         if dim_k == 0:
             naction = torch.zeros_like(naction)
@@ -305,7 +318,7 @@ class MagpieAgent(TrainableAgent):
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
                 
         return naction, noise_actions
-
+    
     def _apply_action_constraints(self, naction, info, timestep):
         act_part = naction[..., :self.network_action_dim]
         state_part = naction[..., self.network_action_dim:]

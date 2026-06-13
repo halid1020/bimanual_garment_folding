@@ -1857,6 +1857,7 @@ class MagpieAgent(TrainableAgent):
         print(f"[MultiPrimitiveDiffusion, load_best] Best checkpoint is loaded")
         return -2
 
+    @torch.no_grad()
     def single_act(self, info, update=False):
         start_time = time.time()
         if self.measure_time:
@@ -2252,17 +2253,12 @@ class MagpieAgent(TrainableAgent):
         vis = input_data[self.config.input_obs].squeeze(0).squeeze(0)
 
         obs = {
-            self.config.input_obs: vis,  
+            self.config.input_obs: vis.cpu(),  
         }
-
-
         if 'use_mask' in self.config and self.config.use_mask:
-            mask = input_data['mask'].squeeze(0).squeeze(0)
-            obs['mask'] = mask
-
+            obs['mask'] = mask.cpu()
         if self.config.include_state:
-            vector_state = input_data['vector_state'].squeeze(0).squeeze(0)
-            obs['vector_state'] = vector_state
+            obs['vector_state'] = vector_state.cpu()
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
         # print('self.internal_states', self.internal_states)

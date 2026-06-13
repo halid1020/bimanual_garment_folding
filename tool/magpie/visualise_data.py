@@ -8,6 +8,7 @@ semantic keypoints directly onto RGB observations.
 
 It stacks the current temporal observation with its corresponding goal state 
 to visually verify progression and alignment prior to VLA model training.
+It also displays domain (Sim/Real) and garment type metadata if present.
 
 Dependencies:
     - numpy
@@ -46,6 +47,13 @@ PRIMITIVE_COLORS: Dict[str, Tuple[int, int, int]] = {
     "norm-pixel-pick-and-fling": (80, 200, 255),        # Cyan
     "no-operation": (255, 255, 255),                    # White
     "default": (255, 255, 255),                         # White
+}
+
+GARMENT_MAP: Dict[int, str] = {
+    0: "Longsleeve",
+    1: "Trousers",
+    2: "Skirt",
+    3: "Dress"
 }
 
 # ==========================================
@@ -400,6 +408,11 @@ def main() -> None:
     goal_rgb_arr = obs_group.get('goal_rgb')
     semkey_arr = obs_group.get('semkey_norm_pixel')
     goal_semkey_arr = obs_group.get('flattened_semkey_norm_pixel') 
+    
+    # Metadata Arrays
+    garment_arr = obs_group.get('garment_type')
+    domain_arr = obs_group.get('domain')
+    
     act_arr = root['action']['default']
 
     img_size = 512
@@ -416,10 +429,10 @@ def main() -> None:
         
         print(f"Processing part {chunk_idx + 1}/{num_chunks} (Episodes {chunk_start_ep} to {chunk_end_ep - 1})...")
 
-        chunk_episode_rows = []
+        chunk_episode_data = []
         chunk_max_steps = 0
 
-        # Compile episode rows for the current chunk
+        # Compile episode rows and metadata for the current chunk
         for ep_idx in range(chunk_start_ep, chunk_end_ep):
             start_idx = traj_starts[ep_idx]
             length = traj_lengths[ep_idx]
@@ -433,6 +446,13 @@ def main() -> None:
             ep_goal_rgb = goal_rgb_arr[start_idx:end_idx] if goal_rgb_arr is not None else None
             ep_semkey = semkey_arr[start_idx:end_idx] if semkey_arr is not None else None
             ep_goal_semkey = goal_semkey_arr[start_idx:end_idx] if goal_semkey_arr is not None else None
+            
+            # Extract metadata (taking the first frame's value since it's constant per episode)
+            ep_garment = garment_arr[start_idx:end_idx] if garment_arr is not None else None
+            ep_domain = domain_arr[start_idx:end_idx] if domain_arr is not None else None
+            
+            g_id = int(ep_garment[0].item()) if ep_garment is not None else None
+            d_val = float(ep_domain[0].item()) if ep_domain is not None else None
             
             row_images = []
             
@@ -469,17 +489,40 @@ def main() -> None:
                 step_combined = cv2.vconcat([img_cur, img_goal])
                 row_images.append(step_combined)
                 
-            chunk_episode_rows.append(row_images)
+            chunk_episode_data.append({
+                'images': row_images,
+                'garment': g_id,
+                'domain': d_val
+            })
 
         # Assemble the final visual grid for the chunk
         grid_rows = []
         blank_img = np.zeros((img_size * 2, img_size, 3), dtype=np.uint8)
         
-        for ep_idx_in_chunk, row_images in enumerate(chunk_episode_rows):
+        for ep_idx_in_chunk, ep_data in enumerate(chunk_episode_data):
             global_ep_idx = chunk_start_ep + ep_idx_in_chunk
+            row_images = ep_data['images']
+            g_id = ep_data['garment']
+            d_val = ep_data['domain']
             
             if len(row_images) > 0:
-                draw_text_with_bg(row_images[0], f"Ep: {global_ep_idx}", (10, (img_size * 2) - 20), (255, 255, 0), scale=1.2, thickness=3)
+                base_y = (img_size * 2) - 20
+                
+                # Write Episode Number
+                draw_text_with_bg(row_images[0], f"Ep: {global_ep_idx}", (10, base_y), (255, 255, 0), scale=1.2, thickness=3)
+                
+                # Write Domain Type (if available)
+                if d_val is not None:
+                    base_y -= 40
+                    d_text = "Domain: Real" if d_val == 1.0 else "Domain: Sim"
+                    d_color = (100, 255, 100) if d_val == 1.0 else (255, 150, 50)
+                    draw_text_with_bg(row_images[0], d_text, (10, base_y), d_color, scale=1.0, thickness=2)
+                    
+                # Write Garment Type (if available)
+                if g_id is not None:
+                    base_y -= 40
+                    g_text = f"Type: {GARMENT_MAP.get(g_id, 'Unknown')}"
+                    draw_text_with_bg(row_images[0], g_text, (10, base_y), (200, 200, 255), scale=1.0, thickness=2)
 
             # Pad shorter episodes with blank images to ensure grid rectangle uniformity
             while len(row_images) < chunk_max_steps:

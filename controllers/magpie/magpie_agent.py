@@ -159,6 +159,8 @@ class MagpieAgent(TrainableAgent):
             
             if self.config.include_state:
                 vector_state = torch.stack([x['vector_state'] for x in self.obs_deque[arena_id]])
+                # MUST cast to device before concatenation!
+                vector_state = vector_state.to(self.device) 
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
 
             if getattr(self, 'use_projector', False):
@@ -226,9 +228,14 @@ class MagpieAgent(TrainableAgent):
         return state
 
     def _extract_vision_features(self, image, info):
+        # --- CRITICAL FIX: Push CPU deque tensor back to GPU ---
+        image = image.to(self.device)
+        
         # The logic here mirrors the existing vision branching
         if self.vision_encoder_type == 'original':
+            # Now `image` is on the GPU, matching the ResNet weights
             return self.nets['vision_encoder'](image)
+            
         elif self.vision_encoder_type == 'vit':
             import torchvision.transforms.functional as TF
             B = 1 # single_act operates unbatched
@@ -237,16 +244,16 @@ class MagpieAgent(TrainableAgent):
             rgb_resized = TF.resize(image[:, :3, :, :], [224, 224], antialias=True)
             goal_resized = TF.resize(image[:, 3:6, :, :], [224, 224], antialias=True)
             
-            obs_feature = self.nets['vision_encoder'](rgb_resized.to(self.device))
-            goal_feature = self.nets['vision_encoder'](goal_resized.to(self.device))
+            obs_feature = self.nets['vision_encoder'](rgb_resized)
+            goal_feature = self.nets['vision_encoder'](goal_resized)
             
-            # Restored reshape logic to maintain (Batch, Time, Dim)
             image_features = torch.cat([obs_feature, goal_feature], dim=-1)
             return image_features.reshape(B, T, -1)
             
         elif self.vision_encoder_type == 'gc_rssm_encoder':
             return torch.cat([self.nets['vision_encoder'](image[:, :3, :, :]), 
                               self.nets['vision_encoder'](image[:, 3:6, :, :])], dim=-1)
+                              
         elif self.vision_encoder_type == 'gc_rssm_dynamic':
             image_b = image.unsqueeze(0)
             B, T = image_b.shape[:2]
@@ -306,15 +313,20 @@ class MagpieAgent(TrainableAgent):
                 v_pred = active_net(sample=naction[..., :dim_k], timestep=t_tensor, global_cond=obs_cond)
                 naction[..., :dim_k] += v_pred * dt
                 if self.primitive_integration == 'one-hot-encoding':
-                    naction = self._apply_action_constraints(naction, info, i)
+                    # FIX: Pass the normalized t_val instead of i
+                    naction = self._apply_action_constraints(naction, info, t_val)
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
         else:
             self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+            # Fetch the total number of timesteps for normalization
+            total_ddpm_steps = self.noise_scheduler.config.num_train_timesteps 
             for k in self.noise_scheduler.timesteps:
                 noise_pred = active_net(sample=naction[..., :dim_k], timestep=k, global_cond=obs_cond)
                 naction[..., :dim_k] = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction[..., :dim_k]).prev_sample
                 if self.primitive_integration == 'one-hot-encoding':
-                    naction = self._apply_action_constraints(naction, info, k)
+                    # FIX: Invert and normalize the DDPM step (it counts down from ~1000 to 0)
+                    progress = 1.0 - (k.item() / total_ddpm_steps) 
+                    naction = self._apply_action_constraints(naction, info, progress)
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
                 
         return naction, noise_actions

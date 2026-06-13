@@ -1,0 +1,3537 @@
+==================================================
+FILE: single_garment_fixed_initial_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+import cv2
+import json
+
+from softgym.action_space.action_space import Picker
+from softgym.utils.env_utils import get_coverage
+import pyflex
+from actoris_harena import Arena
+from tqdm import tqdm
+
+
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
+from .utils.env_utils import set_scene
+from .utils.camera_utils import get_camera_matrix
+from .garment_env import GarmentEnv
+
+global ENV_NUM
+ENV_NUM = 0
+
+# @ray.remote
+class SingleGarmentFixedInitialEnv(GarmentEnv):
+    
+    def __init__(self, config):
+        config.name = f'single-garment-fixed-init-env-{config.garment_type}'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    ## TODO: if eid is out of range, we need to raise an error.   
+    def reset(self, episode_config=None):
+        if episode_config == None:
+            episode_config = {
+                'eid': None,
+                'save_video': False
+            }
+        if 'save_video' not in episode_config:
+            episode_config['save_video'] = False
+        
+        episode_config['eid'] = 0
+        self.eid = 0
+        init_state_params = self._get_init_state_params(episode_config['eid'])
+
+
+
+        self.sim_step = 0
+        self.video_frames = []
+        self.save_video = episode_config['save_video']
+
+        self.episode_config = episode_config
+
+        init_state_params['scene_config'] = self.scene_config
+        init_state_params.update(self.default_config)
+        set_scene(
+            config=init_state_params, 
+            state=init_state_params)
+        self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
+        self.init_state_params = init_state_params
+
+        
+        #print('set scene done')
+        #print('pciker initial pos', self.picker_initial_pos)
+        self.pickers.reset(self.picker_initial_pos)
+        #print('picker reset done')
+
+        self.init_coverae = self._get_coverage()
+        self.flattened_obs = None
+        self.get_flattened_obs()
+        #self.flatten_coverage = init_state_params['flatten_area']
+        
+        self.info = {}
+        self.last_info = None
+        self.action_tool.reset(self) # get out of camera view, and open the gripper
+        self._step_sim()
+        
+        self.last_flattened_step = -100
+        self.task.reset(self)
+        self.action_step = 0
+
+        self.evaluate_result = None
+        
+        
+        if self.init_mode == 'flattened':
+            self.set_to_flatten()
+          
+        
+        self.overstretch = 0
+        self.info = self._process_info({})
+        self.clear_frames()
+
+        
+        return self.info
+    
+    
+    def get_eval_configs(self):
+        eval_configs = [
+            {'eid': 0, 'tier': 0, 'save_video': True}
+            for eid in range(30)
+        ]
+        
+        return eval_configs
+
+    
+    def get_val_configs(self):
+        return [
+            {'eid': 0, 'tier': 0, 'save_video': True}
+        ]
+
+    def get_train_configs(self):
+        return [
+            {'eid': 0, 'tier': 0, 'save_video': False}
+        ]
+
+
+    def _get_init_state_keys(self):
+        
+        path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        #train_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-train.hdf5')
+
+        key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
+        #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')
+
+
+        self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
+        
+        # print len of keys
+        self.num_trials = 1
+
+    def _get_init_state_params(self, eid):
+            
+        hdf5_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        key = self.keys[eid]
+        with h5py.File(hdf5_path, 'r') as init_states:
+
+            group = init_states[key]
+            
+            episode_params = dict(group.attrs)
+            #print('episode_params', episode_params)
+            
+            for dataset_name in group.keys():
+                episode_params[dataset_name] = group[dataset_name][()]
+
+            self.episode_params = episode_params
+
+        return episode_params
+
+
+==================================================
+FILE: single_garment_vectorised_fold_prim_env.py
+==================================================
+
+import numpy as np
+
+from .single_garment_fixed_initial_env import SingleGarmentFixedInitialEnv
+
+global ENV_NUM
+ENV_NUM = 0
+
+# @ray.remote
+class SingleGarmentVectorisedFoldPrimEnv(SingleGarmentFixedInitialEnv):
+    
+    def __init__(self, config):
+        #config.name = f'single-garment-fixed-init-env'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    def step(self, action): 
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+
+        if isinstance(action, dict):
+            dict_action = action
+        else:
+            dict_action = {
+                'norm-pixel-fold': {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4],
+                    'place_0': action[4:6],
+                    'place_1': action[6:8]
+                }
+            }
+
+        info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.info = self._process_info(info)
+        dict_applied_action = self.info['applied_action'] ## This line is critical!!! This is not used at all.
+        vector_action = []
+        for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
+            vector_action.append(dict_action['norm-pixel-fold'][param_name])
+        #print('vector_action', vector_action)
+        vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = vector_action
+        return self.info
+
+
+==================================================
+FILE: multi_garment_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+import uuid
+import datetime
+from itertools import zip_longest
+
+from .utils.env_utils import set_scene
+from .garment_env import GarmentEnv
+
+global ENV_NUM
+ENV_NUM = 0
+
+
+class MultiGarmentEnv(GarmentEnv):
+    
+    def __init__(self, config):
+        self.num_eval_trials = config.get('num_eval_trials', 30)
+        self.num_train_trials = config.get('num_train_trials', 100)
+        self.num_val_trials = config.get('num_val_trials', 10)
+
+        config.name = f'multi-garment-{config.garment_type}-env'
+        
+        if config.garment_type == 'all':
+            self.all_garment_types = config.all_garment_types
+            self.num_eval_trials = len(self.all_garment_types) * 8 # e.g., 32
+            self.num_train_trials *= len(self.all_garment_types)   # e.g., 400
+            self.num_val_trials = len(self.all_garment_types) * 3  # e.g., 12
+            
+        super().__init__(config)
+
+    # def reset(self, episode_config=None):
+    #     if episode_config is None:
+    #         episode_config = {}
+            
+    #     episode_config.setdefault('save_video', False)
+        
+    #     if episode_config.get('eid') is None:
+    #         # Randomly select an episode ID based on the current mode's trial limits
+    #         mode_trials = {
+    #             'train': self.num_train_trials,
+    #             'val': self.num_val_trials,
+    #             'eval': self.num_eval_trials
+    #         }
+    #         # Default to eval limits if the mode isn't explicitly found
+    #         max_trials = mode_trials.get(getattr(self, 'mode', 'eval'), self.num_eval_trials)
+    #         episode_config['eid'] = np.random.randint(max_trials)
+           
+    #     self.eid = episode_config['eid']
+    #     self.save_video = episode_config['save_video']
+    #     self.episode_config = episode_config
+
+    #     # Generate unique ID for the episode
+    #     timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    #     self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
+
+    #     # Fetch physical parameters for the chosen episode
+    #     init_state_params = self._get_init_state_params(self.eid)
+    #     init_state_params['scene_config'] = self.scene_config
+    #     init_state_params.update(self.default_config)
+        
+    #     self.num_mesh_particles = int(len(init_state_params['mesh_verts']) / 3)
+    #     print(f'[MultiGarmentEnv] mesh particles: {self.num_mesh_particles}')
+    #     self.init_state_params = init_state_params
+
+    #     print('[MultiGarmentEnv] Ready to set scene')
+    #     set_scene(config=init_state_params, state=init_state_params)
+        
+    #     self.pickers.reset(self.picker_initial_pos)
+    #     self.low_level_mesh_particles = []
+    #     self.low_level_visible_pcs = []
+
+    #     self.action_tool.reset(self) # Get out of camera view and open the gripper
+    #     self._step_sim()
+
+    #     # State tracking resets
+    #     self.draw_fatten_contour = ('alignment' in self.task.name)
+    #     self.sim_step = 0
+    #     self.video_frames = []
+    #     self.is_recording_low_level = False
+       
+    #     self.picker_poses = []
+    #     self.last_flattened_step = -100
+    #     self.action_step = 0
+    #     self.overstretch = 0
+    #     self.evaluate_result = None
+
+    #     # Get environment coverage and flattened observation
+    #     self.init_coverae = self._get_coverage() 
+    #     self.flattened_obs = None
+    #     self.get_flattened_obs()
+       
+    #     # Task and trajectory initialization
+    #     self.task.reset(self)
+    #     self._initialise_trajectory() 
+        
+    #     # Process initial info dictionary
+    #     self.info = {}
+    #     self.last_info = None
+    #     self.all_infos = [self.info]
+    #     self.info = self._process_info(self.info)
+    #     self.clear_frames()
+
+    #     # Final flag tracking
+    #     self.info['observation']['is_first'] = True
+    #     self.info['observation']['is_terminal'] = self.info.get('terminated', False)
+        
+    #     return self.info
+
+    def reset(self, episode_config=None):
+        if episode_config is None:
+            episode_config = {}
+            
+        episode_config.setdefault('save_video', False)
+        
+        if episode_config.get('eid') is None:
+            # Randomly select an episode ID based on the current mode's trial limits
+            mode_trials = {
+                'train': self.num_train_trials,
+                'val': self.num_val_trials,
+                'eval': self.num_eval_trials
+            }
+            # Default to eval limits if the mode isn't explicitly found
+            max_trials = mode_trials.get(getattr(self, 'mode', 'eval'), self.num_eval_trials)
+            episode_config['eid'] = np.random.randint(max_trials)
+           
+        self.eid = episode_config['eid']
+        self.save_video = episode_config['save_video']
+        self.episode_config = episode_config
+
+        # --- NEW: Retry loop to ensure the garment starts inside the camera view ---
+        max_retries = 50
+        for attempt in range(max_retries):
+            # Generate unique ID for the episode
+            timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+            self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
+
+            # Fetch physical parameters for the chosen episode
+            init_state_params = self._get_init_state_params(self.eid)
+            init_state_params['scene_config'] = self.scene_config
+            init_state_params.update(self.default_config)
+            
+            self.num_mesh_particles = int(len(init_state_params['mesh_verts']) / 3)
+            self.init_state_params = init_state_params
+
+            set_scene(config=init_state_params, state=init_state_params)
+            
+            self.pickers.reset(self.picker_initial_pos)
+            self.low_level_mesh_particles = []
+            self.low_level_visible_pcs = []
+
+            self.action_tool.reset(self) # Get out of camera view and open the gripper
+            self._step_sim()
+            
+            # --- Quick Visibility Check ---
+            # We call _get_obs with flatten_obs=False so it safely crops the mask 
+            # without triggering downstream flattened keypoint logic yet.
+            temp_obs = self._get_obs(flatten_obs=False)
+            if np.sum(temp_obs['mask']) >= 10:  # Matches the 'out_of_view' threshold
+                break # It's visible, break out of the retry loop and continue
+            
+            print(f"[MultiGarmentEnv] Episode {self.eid} initialized out of view. Trying next episode...")
+            self.eid += 1
+            self.episode_config['eid'] = self.eid
+            
+        else:
+            print("[MultiGarmentEnv] WARNING: Reached max retries looking for a visible garment!")
+
+        # State tracking resets
+        self.draw_fatten_contour = ('alignment' in self.task.name)
+        self.sim_step = 0
+        self.video_frames = []
+        self.is_recording_low_level = False
+       
+        self.picker_poses = []
+        self.last_flattened_step = -100
+        self.action_step = 0
+        self.overstretch = 0
+        self.evaluate_result = None
+
+        # Get environment coverage and flattened observation
+        self.init_coverae = self._get_coverage() 
+        self.flattened_obs = None
+        self.get_flattened_obs()
+       
+        # Task and trajectory initialization
+        self.task.reset(self)
+        self._initialise_trajectory() 
+        
+        # Process initial info dictionary
+        self.info = {}
+        self.last_info = None
+        self.all_infos = [self.info]
+        self.info = self._process_info(self.info)
+        self.clear_frames()
+
+        # Final flag tracking
+        self.info['observation']['is_first'] = True
+        self.info['observation']['is_terminal'] = self.info.get('terminated', False)
+        
+        return self.info
+
+    def _get_init_state_keys(self):
+        """
+        This method gathers episode keys (references to specific initial garment states) 
+        from your HDF5 dataset. 
+        
+        If 'garment_type' is 'all', it loads keys for EVERY garment type, splits them 
+        into Train/Val/Eval sets proportionally, and then "interleaves" them. 
+        Interleaving ensures that during training/evaluation, the environment naturally 
+        alternates between different garments (e.g., T-shirt -> Pants -> Dress) rather 
+        than running 100 T-shirts in a row before seeing the next type.
+        """
+        if self.config.garment_type == 'all':
+            garment_types = self.all_garment_types
+            num_garments = len(garment_types)
+
+            garment_eval_keys, garment_val_keys, garment_train_keys = [], [], []
+
+            # Load and split keys per garment type
+            for garment_type in garment_types:
+                eval_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
+                train_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
+
+                eval_key_file = os.path.join(self.config.init_state_path, f'{garment_type}-eval.json')
+                train_key_file = os.path.join(self.config.init_state_path, f'{garment_type}-train.json')
+
+                eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+                train_keys = self._get_init_keys_helper(train_path, train_key_file)
+
+                # Split evaluation pool into Validation and Evaluation
+                val_share = self.num_val_trials // num_garments
+                eval_share = self.num_eval_trials // num_garments
+                
+                garment_val_keys.append(eval_keys[:val_share])
+                garment_eval_keys.append(eval_keys[val_share : val_share + eval_share])
+                
+                # Trim training pool to its required share
+                train_share = self.num_train_trials // num_garments
+                garment_train_keys.append(train_keys[:train_share])
+
+            # Helper to perfectly alternate items from multiple lists (e.g., zip_longest)
+            def interleave_flexible(lists):
+                return [item for group in zip_longest(*lists) for item in group if item is not None]
+
+            self.eval_keys = interleave_flexible(garment_eval_keys)
+            self.val_keys = interleave_flexible(garment_val_keys)
+            self.train_keys = interleave_flexible(garment_train_keys)
+        
+        else: 
+            # Standard single-garment loading
+            eval_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-eval.hdf5')
+            train_path = os.path.join(self.config.init_state_path, f'multi-{self.config.garment_type}-train.hdf5')
+
+            eval_key_file = os.path.join(self.config.init_state_path, f'{self.name}-eval.json')
+            train_key_file = os.path.join(self.config.init_state_path, f'{self.name}-train.json')
+
+            eval_keys = self._get_init_keys_helper(eval_path, eval_key_file, difficulties=['hard'])
+            self.train_keys = self._get_init_keys_helper(train_path, train_key_file)
+
+            # Split Evaluation keys into Validation and Evaluation sets
+            self.val_keys = eval_keys[:self.num_val_trials]
+            self.eval_keys = eval_keys[self.num_val_trials:]
+            
+            self.val_uses_train_file = False
+            
+            # Fallback if there aren't enough eval keys: Prioritize Eval numbers, pull Val from Train
+            if len(self.eval_keys) < self.num_eval_trials:
+                self.eval_keys = eval_keys[:self.num_eval_trials]
+                self.val_keys = self.train_keys[self.num_train_trials : self.num_train_trials + self.num_val_trials]
+                self.val_uses_train_file = True  # Tell the params method to switch files
+
+    def _get_init_state_params(self, eid):
+        garment_type = self.config.garment_type
+        if garment_type == 'all':
+            # Determine which garment type this episode ID maps to
+            garment_type = self.all_garment_types[eid % len(self.all_garment_types)]
+
+        mode = getattr(self, 'mode', 'eval')
+        
+        # Select correct key pool and file path
+        if mode == 'train':
+            keys = self.train_keys
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
+        elif mode == 'eval':
+            keys = self.eval_keys
+            hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
+        else: # mode == 'val'
+            keys = self.val_keys
+            # If the fallback grabbed train keys for val, we must open the train HDF5
+            if getattr(self, 'val_uses_train_file', False):
+                hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-train.hdf5')
+            else:
+                hdf5_path = os.path.join(self.config.init_state_path, f'multi-{garment_type}-eval.hdf5')
+
+        # Find the next valid configuration
+        while True:
+            # Added modulo safety to prevent IndexErrors if eid exceeds key length after skips
+            safe_eid = eid % len(keys)
+            key = keys[safe_eid]
+
+            with h5py.File(hdf5_path, 'r') as init_states:
+                if key not in init_states:
+                    print(f'here!! {eid}, safe_eid {safe_eid}, len keys {len(keys)}')
+                    eid += 1
+                    continue
+                group = init_states[key]
+                episode_params = dict(group.attrs)
+
+                # Validation check: Ensure the state has an associated pkl_path
+                if 'pkl_path' not in episode_params:
+                    eid += 1 if garment_type != 'all' else len(self.all_garment_types)
+                    continue
+                
+                # Extract dataset arrays into memory
+                for dataset_name in group.keys():
+                    episode_params[dataset_name] = group[dataset_name][()]
+
+                self.episode_params = episode_params
+            break
+            
+        return episode_params
+
+
+==================================================
+FILE: single_garment_second_last_goal_vectorised_fold_prim_env.py
+==================================================
+
+import numpy as np
+
+from .single_garment_second_last_goal_init_env import SingleGarmentSecondLastGoaInitEnv
+
+# @ray.remote
+class SingleGarmentSecondLastGoalInitVectorisedFoldPrimEnv(SingleGarmentSecondLastGoaInitEnv):
+    
+    def __init__(self, config):
+        #config.name = f'single-garment-fixed-init-env'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    def step(self, action): 
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+
+        if isinstance(action, dict):
+            dict_action = action
+        else:
+            dict_action = {
+                'norm-pixel-fold': {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4],
+                    'place_0': action[4:6],
+                    'place_1': action[6:8]
+                }
+            }
+
+        info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.info = self._process_info(info)
+        dict_applied_action = self.info['applied_action']
+        vector_action = []
+        for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
+            vector_action.append(dict_action['norm-pixel-fold'][param_name])
+        #print('vector_action', vector_action)
+        vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = vector_action
+        return self.info
+
+
+==================================================
+FILE: single_garment_subgoal_initial_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+import cv2
+import json
+
+from softgym.action_space.action_space import Picker
+from softgym.utils.env_utils import get_coverage
+import pyflex
+from actoris_harena import Arena
+from tqdm import tqdm
+
+
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
+from .utils.env_utils import set_scene
+from .utils.camera_utils import get_camera_matrix
+from .garment_env import GarmentEnv
+
+global ENV_NUM
+ENV_NUM = 0
+
+# @ray.remote
+class SingleGarmentSubGoalEnv(GarmentEnv):
+    
+    def __init__(self, config):
+        self.num_eval_trials = 30
+        self.num_train_trials = 100
+        self.num_val_trials = 10
+        config.name = f'single-garment-subgoal-initial-env-{config.garment_type}'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    ## TODO: if eid is out of range, we need to raise an error.   
+    def reset(self, episode_config=None):
+        if episode_config == None:
+            episode_config = {
+                'eid': None,
+                'save_video': False
+            }
+        if 'save_video' not in episode_config:
+            episode_config['save_video'] = False
+
+        if 'eid' not in episode_config or episode_config['eid'] is None:
+            if self.mode == 'train':
+                episode_config['eid'] = np.random.randint(self.num_train_trials)
+            elif self.mode == 'val':
+                episode_config['eid'] = np.random.randint(self.num_val_trials)
+            else:
+                episode_config['eid'] = np.random.randint(self.num_eval_trials)
+        
+        init_state_params = self._get_init_state_params(0) #single garment
+
+
+
+        self.sim_step = 0
+        self.video_frames = []
+        self.save_video = episode_config['save_video']
+
+        self.episode_config = episode_config
+
+        init_state_params['scene_config'] = self.scene_config
+        init_state_params.update(self.default_config)
+        set_scene(
+            config=init_state_params, 
+            state=init_state_params)
+        self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
+        self.init_state_params = init_state_params
+
+        
+        
+        #print('set scene done')
+        #print('pciker initial pos', self.picker_initial_pos)
+        self.pickers.reset(self.picker_initial_pos)
+        #print('picker reset done')
+
+        self.init_coverae = self._get_coverage()
+        self.flattened_obs = None
+        self.get_flattened_obs()
+        #self.flatten_coverage = init_state_params['flatten_area']
+        
+        self.info = {}
+        self.last_info = None
+        self.action_tool.reset(self) # get out of camera view, and open the gripper
+        self._step_sim()
+        
+        self.last_flattened_step = -100
+        self.eid = 0
+        self.task.reset(self)
+
+        ###### apply subgoal init
+        goals = self.task.get_goals()
+        #print('goals', goals)
+        all_sub_goals = len(goals) * len(goals[0])
+
+        ## make a random seed using eid, then choose subgoal deterministically
+        self.eid = episode_config['eid']
+        rng = np.random.RandomState(self.eid)
+        idx = rng.randint(0, all_sub_goals)
+
+        goal_id = idx // len(goals[0])   # integer division for goal index
+        subgoal_id = idx % len(goals[0]) # remainder for subgoal index
+
+        goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+
+        # Random rotation around Z-axis
+        theta = rng.uniform(0, 2 * np.pi)  # random angle in radians
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+        goal_particles = goal_particles @ rotation_matrix.T  # rotate
+
+        # Random displacement within ±0.5 range per axis
+        displacement = rng.uniform(-0.5, 0.5, size=3)
+        displacement[2] = 0
+        goal_particles += displacement
+
+        self.set_mesh_particles_positions(goal_particles)
+        self._wait_to_stabalise()
+        #######
+
+
+        self.action_step = 0
+
+        self.evaluate_result = None
+          
+        
+        self.overstretch = 0
+        self.info = self._process_info({})
+        self.clear_frames()
+
+        
+        return self.info
+    
+    
+    def get_eval_configs(self):
+        eval_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_eval_trials)
+        ]
+        
+        return eval_configs
+
+    def get_train_configs(self):
+        train_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': self.config.get('save_video', False)}
+            for eid in range(self.num_train_trials)
+        ]
+        
+        return train_configs
+
+    
+    def get_val_configs(self):
+        val_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_val_trials)
+        ]
+        
+        return val_configs
+
+
+
+
+    def _get_init_state_keys(self):
+        
+        path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        #train_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-train.hdf5')
+
+        key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
+        #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')
+
+        self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
+        
+        # print len of keys
+        self.num_trials = 1
+
+    def _get_init_state_params(self, eid):
+            
+        hdf5_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        key = self.keys[eid]
+        with h5py.File(hdf5_path, 'r') as init_states:
+
+            group = init_states[key]
+            
+            episode_params = dict(group.attrs)
+            #print('episode_params', episode_params)
+            
+            for dataset_name in group.keys():
+                episode_params[dataset_name] = group[dataset_name][()]
+
+            self.episode_params = episode_params
+
+        return episode_params
+
+
+==================================================
+FILE: single_garment_subgoal_init_vectorised_fold_prim_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+import cv2
+import json
+
+from softgym.action_space.action_space import Picker
+from softgym.utils.env_utils import get_coverage
+import pyflex
+from actoris_harena import Arena
+from tqdm import tqdm
+
+
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
+from .utils.env_utils import set_scene
+from .utils.camera_utils import get_camera_matrix
+from .single_garment_subgoal_initial_env import SingleGarmentSubGoalEnv
+
+global ENV_NUM
+ENV_NUM = 0
+
+# @ray.remote
+class SingleGarmentSubgoalInitVectorisedFoldPrimEnv(SingleGarmentSubGoalEnv):
+    
+    def __init__(self, config):
+        #config.name = f'single-garment-fixed-init-env'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    def step(self, action): 
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+
+        if isinstance(action, dict):
+            dict_action = action
+        else:
+            dict_action = {
+                'norm-pixel-fold': {
+                    'pick_0': action[:2],
+                    'pick_1': action[2:4],
+                    'place_0': action[4:6],
+                    'place_1': action[6:8]
+                }
+            }
+
+        info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.info = self._process_info(info)
+        dict_applied_action = self.info['applied_action']
+        vector_action = []
+        for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
+            vector_action.append(dict_action['norm-pixel-fold'][param_name])
+        #print('vector_action', vector_action)
+        vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = vector_action
+        return self.info
+
+
+==================================================
+FILE: combine_files.py
+==================================================
+
+import os
+import glob
+
+def combine_python_files(directory_path, output_filename="combined_code.txt"):
+    """
+    Finds all .py files in a directory and combines them into a single text file.
+    """
+    # Create a search pattern to find all .py files in the specified directory
+    search_pattern = os.path.join(directory_path, "*.py")
+    py_files = glob.glob(search_pattern)
+
+    # Check if any files were found
+    if not py_files:
+        print(f"No Python files found in '{directory_path}'.")
+        return
+
+    try:
+        # Open the output file in write mode
+        with open(output_filename, 'w', encoding='utf-8') as outfile:
+            for file_path in py_files:
+                # Extract just the filename from the full path
+                filename = os.path.basename(file_path)
+                
+                # Write a clear visual header for each file
+                outfile.write(f"{'='*50}\n")
+                outfile.write(f"FILE: {filename}\n")
+                outfile.write(f"{'='*50}\n\n")
+                
+                # Read the contents of the current python file and write it
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as infile:
+                        outfile.write(infile.read())
+                except Exception as e:
+                    outfile.write(f"# Error reading {filename}: {e}\n")
+                
+                # Add some blank space before the next file begins
+                outfile.write("\n\n\n")
+                
+        print(f"Success! Combined {len(py_files)} files into '{output_filename}'.")
+    
+    except Exception as e:
+        print(f"An error occurred while writing the output file: {e}")
+
+# --- Execution ---
+if __name__ == "__main__":
+    # The directory you want to scan. 
+    # "." means the current directory where this script is located.
+    # You can change this to a specific path like "C:/Users/Name/Documents/MyCode"
+    target_directory = "." 
+    
+    # The name of the text file you want to generate
+    output_file = "all_my_python_code.txt"
+    
+    combine_python_files(target_directory, output_file)
+
+
+==================================================
+FILE: multi_garment_vectorised_dual_picker_pick_and_place_env.py
+==================================================
+
+import numpy as np
+import gym
+import random 
+
+from .multi_garment_env import MultiGarmentEnv
+from .pixel_based_pick_and_place_env_logger import PixelBasedPickAndPlaceEnvLogger
+
+global ENV_NUM
+ENV_NUM = 0
+
+class MultiGarmentVectorisedDualPickerPickAndPlaceEnv(MultiGarmentEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.action_space = gym.spaces.Box(-1, 1, (8, ), dtype=np.float32)
+        self.logger = PixelBasedPickAndPlaceEnvLogger()
+
+    def sample_random_action(self):
+        return self.action_space.sample()
+
+    def get_action_space(self):
+        return self.action_space 
+
+    def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+        #print('action!!!', action)
+        dict_action = {
+            'norm-pixel-pick-and-place': {
+                'pick_0': action[:2],
+                'pick_1': action[2:4],
+                'place_0': action[4:6],
+                'place_1': action[6:],
+
+            }
+        }
+
+        self.info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.all_infos.append(self.info)
+        self.info = self._process_info(self.info)
+        applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
+        #vector_action = []
+        if random.random() < 0.5:
+            applied_action = applied_action.reshape(-1, 2)
+            applied_action[[0, 1, 2, 3]] = applied_action[[1, 0, 3, 2]]
+            applied_action = applied_action.flatten()
+
+        #vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = applied_action
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['terminated']
+        return self.info
+
+import ray
+@ray.remote(num_gpus=1.0)
+class MultiGarmentVectorisedDualPickerPickAndPlaceEnvRay(MultiGarmentVectorisedDualPickerPickAndPlaceEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+
+
+==================================================
+FILE: garment_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+import cv2
+import json
+import pyflex
+from actoris_harena import Arena
+from tqdm import tqdm
+from scipy.spatial.distance import cdist
+import gym
+
+from .action_primitives.picker import Picker
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
+from .pixel_based_primitive_env_logger import PixelBasedPrimitiveEnvLogger
+from .utils.env_utils import set_scene, get_coverage
+from .utils.camera_utils import get_camera_matrix
+
+global ENV_NUM
+ENV_NUM = 0
+
+class GarmentEnv(Arena):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+        self.info = {}
+        self.draw_fatten_contour = False
+        self.all_infos = []
+        self.sim_step = 0
+        self.save_video = False
+        self.debug = config.get("debug", False)
+        self.add_final_goal_to_obs = config.get('add_final_goal_to_obs', False)
+        
+        self.random_reset = False
+        self.set_id(0)
+        self.name = config.name
+        self.frame_resolution = config.get("frame_resolution", [256, 256])
+        self.obs_resolution =  config.get("image_resolution", [128, 128])
+        self.stop_on_success = config.get('stop_on_success', True)
+        self.hard_shift_x = self.config.get('hard_shift_x', 0.0)
+        
+        # Softgym Setup
+        self._get_sim_config()
+        self._setup_camera()
+        
+        self.scene_config = self.default_config['scene_config']
+        self.workspace_mask = None
+        
+        headless = not config.disp
+
+        pyflex.init(
+            headless, 
+            True, 
+            self.camera_config['cam_size'][0], 
+            self.camera_config['cam_size'][1],
+        )
+        
+        self.pickers = Picker(
+            2, picker_radius=self.config.picker_radius, 
+            particle_radius=self.scene_config['radius'],
+            picker_threshold=self.config.picker_threshold,
+            picker_low=self.config.picker_low, 
+            picker_high=self.config.picker_high,
+            grasp_mode=(self.config.grasp_mode if 'grasp_mode' in self.config.keys() else {'closest': 1.0}),
+        )
+        self.particle_radius = self.scene_config['radius']
+        
+        self.apply_workspace = config.get('apply_workspace', False)
+        if self.apply_workspace:
+            self.readjust_to_workspace = config.get('readjust_to_workspace', False)
+            self.robot1_radius = config.robot1_radius
+            self.robot0_radius = config.robot0_radius
+            self.robot0_base = config.robot0_base
+            self.robot1_base = config.robot1_base
+            self._calculate_workspace_masks(self.camera_config['cam_size'])
+
+        self.action_tool = HybridActionPrimitive(
+            readjust_pick_poss=self.config.get('readjust_pick_poss', 0),
+            apply_workspace=self.apply_workspace,
+            drag_vel=0.01
+        )
+        
+        self.save_each_action_picker_poses = True
+        self.logger = PixelBasedPrimitiveEnvLogger()
+
+        self._observation_image_shape = config.get('observation_image_shape', (480, 480, 3))
+        self.init_state_path = config.init_state_path
+        self.garment_type = self.config.get('garment_type', 'longsleeve')
+        self._get_init_state_keys()
+
+        self.evaluate_result = None
+        self.track_semkey_on_frames = self.config.get('track_semkey_on_frames', False)
+        self.init_mode = self.config.get('init_mode', 'crumpled')
+        self.action_step = 0
+        self.last_info = None
+        self.action_horizon = self.config.action_horizon
+
+        self.overstretch = 0
+        
+    def _get_garment_colour(self):
+        """
+        Extracts the median RGB colour of the garment using the rendered mask.
+        Returns a list: [R, G, B]
+        """
+        rgb = self.info['observation']['rgb']
+        mask = self.info['observation']['mask']
+        cloth_pixels = rgb[mask]
+        
+        if len(cloth_pixels) > 0:
+            return np.median(cloth_pixels, axis=0).astype(int).tolist()
+        return [0, 0, 0]
+    
+    def _calculate_workspace_masks(self, resolution):
+        """
+        Computes the reachable workspace for robot arms on a 2D pixel grid.
+        It un-projects the 2D camera pixels back into 3D space, finds where those 
+        camera rays intersect the table plane (z=0), and then checks if those 3D 
+        table points are within the physical reach radius of the robot bases.
+        """
+        W, H = resolution[0], resolution[1]
+
+        # 1. Generate pixel grid and format as homogeneous 2D points (u, v, 1)
+        u, v = np.arange(W), np.arange(H)
+        uu, vv = np.meshgrid(u, v)
+        # Note: vv (Y) is stacked first to match the pre-swapped intrinsic matrix
+        pixels = np.stack([vv.ravel(), uu.ravel(), np.ones(H * W)], axis=1)
+
+        # 2. Un-project: Multiply by Inverse Intrinsic Matrix to get 3D rays in Camera Space
+        K_inv = np.linalg.inv(self.camera_intrinsic_matrix)
+        rays_cam = (K_inv @ pixels.T).T
+        rays_cam /= np.linalg.norm(rays_cam, axis=1, keepdims=True) # Normalize rays
+
+        # 3. Transform rays from Camera Space to World Space
+        T_world_cam = self.camera_extrinsic_matrix
+        R, cam_origin = T_world_cam[:3, :3], T_world_cam[:3, 3]
+        rays_world = (R @ rays_cam.T).T
+
+        # 4. Ray-Plane Intersection: Find exactly where rays hit the table (z = 0)
+        # Formula: origin.z + ray.z * s = 0  =>  s = -origin.z / ray.z
+        dz = rays_world[:, 2]
+        valid = np.abs(dz) > 1e-6 # Avoid division by zero for rays parallel to the table
+        s = np.full(dz.shape, np.nan)
+        s[valid] = -cam_origin[2] / dz[valid]
+        world_points = cam_origin + rays_world * s[:, None]
+
+        # 5. Measure planar distances (XY only) from each Robot Base to the Table Points
+        robot0_dist = np.linalg.norm(world_points[:, :2] - np.asarray(self.robot0_base)[:2], axis=1)
+        robot1_dist = np.linalg.norm(world_points[:, :2] - np.asarray(self.robot1_base)[:2], axis=1)
+
+        # 6. Create binary masks based on minimum/maximum reach radiuses
+        robot0_mask = (robot0_dist >= self.robot0_radius[0]) & (robot0_dist <= self.robot0_radius[1])
+        robot1_mask = (robot1_dist >= self.robot1_radius[0]) & (robot1_dist <= self.robot1_radius[1])
+
+        # 7. Reshape back to the 2D image dimension
+        self.robot0_mask_full = robot0_mask.reshape(H, W)
+        self.robot1_mask_full = robot1_mask.reshape(H, W)
+        
+        # Aliases
+        self.robot0_mask = self.robot0_mask_full
+        self.robot1_mask = self.robot1_mask_full
+
+    def _setup_camera(self):
+        self.default_camera = self.default_config['camera_name']
+        self.camera_config = self.default_config['camera_params'][self.default_camera]
+        self.camera_config['cam_position'][1] = self.config.get('camera_height', self.camera_config['cam_position'][1])
+        
+        if 'camera_resolution' in self.config:
+            self.camera_config['cam_size'] = list(self.config.camera_resolution)
+            
+        if 'field_of_view' in self.config:
+            fov_x_rad = self.config.field_of_view[0] * np.pi / 180.0
+            fov_y_rad = self.config.field_of_view[1] * np.pi / 180.0
+            self.camera_config['cam_fov'] = [fov_x_rad, fov_y_rad]
+
+        camera_pos = self.camera_config['cam_position'].copy()
+        camera_pos[1], camera_pos[2] = camera_pos[2], camera_pos[1]  # swap y and z
+        self.camera_height = camera_pos[2]
+        
+        camera_angle = self.camera_config['cam_angle'].copy()
+        camera_angle[1], camera_angle[2] = camera_angle[2], camera_angle[1]
+        camera_angle[0] = np.pi + camera_angle[0]
+        camera_angle[2] = 4*np.pi/2 - camera_angle[2]
+
+        self.picker_initial_pos = self.config.picker_initial_pos
+        self.camera_intrinsic_matrix, self.camera_extrinsic_matrix = get_camera_matrix(
+            camera_pos, camera_angle, self.camera_config['cam_size'], self.camera_config['cam_fov'])
+            
+        self.camera_pos = camera_pos
+        self.camera_angle = camera_angle
+        self.camera_size = self.camera_config['cam_size']
+        self.picker_poses = []
+
+    def _get_sim_config(self):
+        from .utils.env_utils import get_default_config
+        
+        # Extract variables from config, falling back to defaults if not present
+        p_radius = self.config.get('particle_radius', 0.0175)
+        c_stiffness = self.config.get('cloth_stiffness', [0.75, 0.02, 0.02])
+        scale = self.config.get('scale', 0.8)
+        c_distance = self.config.get('collisionDistance', 0.0006)
+        
+        self.default_config = get_default_config(
+            particle_radius=p_radius,
+            cloth_stiffness=c_stiffness,
+            scale=scale,
+            collision_distance=c_distance
+        )
+
+    def reset(self, episode_config=None):
+        if episode_config is None:
+            episode_config = {'eid': None, 'save_video': False}
+        
+        self.eid = episode_config['eid']
+        self.save_video = episode_config.get('save_video', False)
+        self.episode_config = episode_config
+
+        init_state_params = self._get_init_state_params(self.eid)
+        self.draw_fatten_contour = ('alignment' in self.task.name)
+        self.sim_step = 0
+        self.video_frames = []
+
+        init_state_params['scene_config'] = self.scene_config
+        init_state_params.update(self.default_config)
+        set_scene(config=init_state_params, state=init_state_params)
+        
+        self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
+        self.init_state_params = init_state_params
+
+        self.pickers.reset(self.picker_initial_pos)
+        self.info = {}
+        self.last_info = None
+        self.action_tool.reset(self)
+        self._step_sim()
+           
+        self.last_flattened_step = -100
+        self.flattened_obs = None
+        self.get_flattened_obs()
+        
+        self.task.reset(self)
+        self.action_step = 0
+        self.evaluate_result = None
+        self._initialise_trajectory()
+        self.init_coverae = self._get_coverage()
+        self.is_recording_low_level = False
+
+        self.info = self._process_info({})
+        self.clear_frames()
+        self.picker_poses = []
+        self.all_infos = [self.info]
+        
+        return self.info
+
+    def set_to_flatten(self, re_process_info=False):
+        pyflex.set_positions(self.episode_params['init_particle_pos'].flatten())
+        self.wait_until_stable()
+        self._get_particle_distance_matrix()
+
+        self.info = self._process_info({}, task_related=re_process_info, flatten_obs=False)
+        return self.info
+    
+    def set_to_canon_flatten(self, re_process_info=False):
+        self.set_to_flatten()
+        goal_particles = self.get_mesh_particles_positions()
+
+        theta = np.pi
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+        goal_particles = goal_particles @ rotation_matrix.T 
+
+        displacement = [0, 0, 0]
+        displacement[0] += self.config.get('hard_shift_x', 0.0)
+        
+        goal_particles += displacement
+        self.set_mesh_particles_positions(goal_particles)
+        self.wait_until_stable()
+
+        self.info = self._process_info({}, task_related=re_process_info, flatten_obs=False)
+        return self.info
+
+    def set_to_random_flatten(self, re_process_info=False):
+        self.set_to_flatten()
+        goal_particles = self.get_mesh_particles_positions()
+
+        rng = np.random.RandomState(self.eid)
+        theta = rng.uniform(0, 2 * np.pi) 
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+        goal_particles = goal_particles @ rotation_matrix.T 
+
+        disp_range = self.config.get('random_displacement_range', [-0.3, 0.3])
+        displacement = rng.uniform(disp_range[0], disp_range[1], size=3)
+        displacement[2] = 0
+        displacement[0] += self.config.get('hard_shift_x', 0.0)
+        
+        goal_particles += displacement
+        self.set_mesh_particles_positions(goal_particles)
+        self.wait_until_stable()
+
+        self.info = self._process_info({}, task_related=re_process_info, flatten_obs=False)
+        return self.info
+    
+    def _initialise_trajectory(self):
+        if self.init_mode == 'flattened':
+            particles = self.flattened_obs['observation']['particle_positions']
+            particles += [self.config.get('hard_shift_x', 0.0), 0, 0]
+            self.set_mesh_particles_positions(particles)
+            self.wait_until_stable()
+            self.last_flattened_step = 0
+            
+        elif self.init_mode == 'random_flattened':
+            rng = np.random.RandomState(self.eid)
+            theta = rng.uniform(0, 2 * np.pi)
+            rotation_matrix = np.array([
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta),  np.cos(theta), 0],
+                [0,              0,             1]
+            ])
+            goal_particles = self.flattened_obs['observation']['particle_positions']
+            center = goal_particles.mean(axis=0)
+            goal_particles -= center
+            goal_particles = goal_particles @ rotation_matrix.T 
+
+            displacement = rng.uniform(-0.3, 0.3, size=3)
+            displacement[2] = 0
+            goal_particles += displacement
+
+            self.set_mesh_particles_positions(goal_particles)
+            self.wait_until_stable()
+            self.last_flattened_step = 0
+
+    def get_episode_config(self):
+        return self.episode_config
+    
+    # def get_num_episodes(self):
+    #     return 1 if self.mode in ['eval', 'train'] else NotImplementedError
+
+    def get_info(self, new=False):
+        if new:
+            self.info = self._process_info({})
+        return self.info
+    
+    def get_trajectory_infos(self):
+        return self.all_infos
+    
+    def _process_info(self, info, task_related=True, flatten_obs=True):
+        info.update({
+            'observation': self._get_obs(flatten_obs),
+            'arena': self,
+            'arena_id': self.aid,
+            'action_space': self.get_action_space(),
+            'overstretch': self.overstretch,
+            'sim_steps': self.sim_step,
+            'draw_flatten_contour': self.draw_fatten_contour
+        })
+        
+        info['observation']['low_level_mesh_particles'] = getattr(self, 'low_level_mesh_particles', [])
+        info['observation']['low_level_visible_pcs'] = getattr(self, 'low_level_visible_pcs', [])
+        
+        if self.save_each_action_picker_poses and self.mode != 'train':
+            if len(self.picker_poses) > 0:
+                picker_poses = np.stack(self.picker_poses)
+                picker_poses = picker_poses[:, :, [0, 2, 1]].reshape(-1, 3)
+                picker_pixel_poses, _ = self.get_visibility(picker_poses)
+                
+                if hasattr(self, 'crop_size') and hasattr(self, 'x1'):
+                    picker_pixels_crop = picker_pixel_poses - np.array([self.y1, self.x1])
+                    norm_pixels = (picker_pixels_crop / self.crop_size) * 2.0 - 1.0
+                else:
+                    norm_pixels = picker_pixel_poses / np.array(self.camera_size) * 2 - 1
+                
+                info['observation']['picker_norm_pixel_pos'] = norm_pixels.reshape(-1, 2, 2)
+            else: 
+                info['observation']['picker_norm_pixel_pos'] = None
+
+        if flatten_obs:
+            info['flattened_obs'] = self.get_flattened_obs()
+            for k, v in info['flattened_obs']['observation'].items():
+                info['observation'][f'flattened-{k}'] = v
+
+        is_truncated = self.action_step >= self.action_horizon
+        is_terminated = False
+        info['discount'] = 1.0 
+        
+        # Out of view threshold check
+        cloth_pixel_count = np.sum(info['observation']['mask'])
+        out_of_view = cloth_pixel_count < 10 
+        info['out_of_view'] = out_of_view
+        
+        if out_of_view:
+            is_terminated = True
+        
+        if task_related:
+            info['evaluation'] = self.evaluate()
+            if info['evaluation'].get('normalised_coverage', 0) > 0.9:
+                self.last_flattened_step = self.action_step
+
+            info['observation']['last_flattened_step'] = self.last_flattened_step
+            info['success'] = self.success()
+            
+            if info['success'] and self.stop_on_success:
+                is_terminated = True
+                
+            if info['evaluation']:
+                info['reward'] = self.task.reward(self.last_info, None, info)
+                for k, v in info['reward'].items():
+                    info['evaluation'][f'reward/{k}'] = v
+            
+            goals = self.task.get_goals()
+            if goals:
+                goal_obs = goals[0][-1]['observation']
+                info['goal'] = goal_obs.copy()
+                info['goals'] = goals[0]
+                if self.add_final_goal_to_obs:
+                    for k, v in goal_obs.items():
+                        info['observation'][f'goal_{k}'] = v
+                        info['observation'][f'goal-{k}'] = v
+
+        info['terminated'] = is_terminated
+        info['truncated'] = is_truncated
+        info['done'] = is_terminated or is_truncated
+
+        return info
+    
+    def step(self, action): 
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.picker_poses = []
+        self.low_level_mesh_particles = []
+        self.low_level_visible_pcs = []
+        self.is_recording_low_level = True 
+
+        self.overstretch = 0
+        self.sim_step = 0
+        self.info = self.action_tool.step(self, action)
+        
+        self.action_step += 1
+        self.all_infos.append(self.info)
+        self.info = self._process_info(self.info)
+
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['done']
+
+        if self.debug and self.video_frames:
+            from actoris_harena.utilities.visual_utils import save_numpy_as_gif
+            save_numpy_as_gif(self.video_frames, './tmp', 'debug-frames')
+        
+        return self.info
+    
+    @property
+    def observation_space(self):
+        spaces = {"image": gym.spaces.Box(0, 255, tuple(self.obs_resolution) + (3,), dtype=np.uint8)}
+        return gym.spaces.Dict(spaces)
+
+    def clear_frames(self):
+        self.video_frames = []
+    
+    def get_action_space(self):
+        return self.action_tool.get_action_space()
+    
+    def get_frames(self):
+        return self.video_frames
+    
+    def _get_particle_distance_matrix(self):
+        mesh_particles = self.get_mesh_particles_positions()
+        self.particle_dist_matrix = cdist(mesh_particles, mesh_particles)
+
+    def _compute_flattened_state(self, setup_method):
+        """Helper to reduce duplication between flattened observation generators"""
+        if self.flattened_obs is None:
+            current_particle_pos = pyflex.get_positions()
+            self.flattened_obs = setup_method()
+            self.flatten_coverage = self._get_coverage()
+            pyflex.set_positions(current_particle_pos)
+            self.wait_until_stable()
+        return self.flattened_obs
+
+    def get_flattened_obs(self):
+        return self._compute_flattened_state(self.set_to_flatten)
+    
+    def get_random_flattened_obs(self):
+        return self._compute_flattened_state(self.set_to_random_flatten)
+
+    def get_caon_flattened_obs(self):
+        return self._compute_flattened_state(self.set_to_canon_flatten)
+
+    def get_no_op(self):
+        return self.action_tool.get_no_op()
+    
+    def set_disp(self, disp):
+        pass
+
+    def evaluate(self):
+        if self.evaluate_result is None or self.action_step == 0:
+            self.evaluate_result = self.task.evaluate(self)
+        return self.evaluate_result
+        
+    def observation_shape(self):
+        return {'rgb': self._observation_image_shape, 'depth': self._observation_image_shape}
+
+    def sample_random_action(self):
+        return self.action_tool.sample_random_action()
+
+    def get_picker_position(self):
+        p = self._get_picker_position()
+        p[:, [1, 2]] = p[:, [2, 1]]
+        return p
+    
+    def control_picker(self, signal, process_info=True):
+        signal = signal[:, [0, 2, 1, 3]]
+        new_picker_pos = self.pickers.step(signal, self)
+        self._step_sim()
+        
+        if getattr(self, 'is_recording_low_level', True):
+            self.picker_poses.append(new_picker_pos)
+            
+            mesh_pos = self.get_mesh_particles_positions()
+            self.low_level_mesh_particles.append(mesh_pos.copy()) 
+            
+            _, visible_mask = self.get_visibility(mesh_pos)
+            self.low_level_visible_pcs.append(mesh_pos[visible_mask].copy())
+
+        info = {}
+        if process_info:
+            info = self._process_info_({'observation': self._get_obs()})
+        return info
+    
+    def wait_until_stable(self, max_wait_step=200, stable_vel_threshold=0.0006, target_point=None, target_pos=None):
+        stable_step = 0
+        last_pos = pyflex.get_positions().reshape(-1, 4)[:, :3]
+        
+        for _ in range(max_wait_step):
+            cur_pos = pyflex.get_positions().reshape(-1, 4)[:, :3]
+            curr_vel = np.linalg.norm(cur_pos - last_pos, axis=1)
+            
+            if target_point is not None:
+                cur_poss = pyflex.get_positions()
+                curr_vell = pyflex.get_velocities()
+                cur_poss[target_point * 4: target_point * 4 + 3] = target_pos
+                curr_vell[target_point * 3: target_point * 3 + 3] = [0, 0, 0]
+                pyflex.set_positions(cur_poss.flatten())
+                pyflex.set_velocities(curr_vell)
+                curr_vel = curr_vell
+
+            self._step_sim()
+            
+            if stable_step > 10:
+                break
+            if np.max(curr_vel) < stable_vel_threshold:
+                stable_step += 1
+            else:
+                stable_step = 0
+
+            last_pos = cur_pos
+
+    def _get_coverage(self):
+        particle_positions = self.get_mesh_particles_positions()
+        particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
+        return get_coverage(particle_positions, self.particle_radius)
+
+    def get_particle_positions(self):
+        pos = pyflex.get_positions().reshape(-1, 4)[:, :3].copy()
+        pos[:, [1, 2]] = pos[:, [2, 1]]
+        return pos
+    
+    def get_mesh_particles_positions(self):
+        return self.get_particle_positions()[:self.num_mesh_particles]
+    
+    def get_algn_mesh_particles_positions(self):
+        return self.flattened_obs['observation']['particle_positions']
+
+    def set_particle_positions(self, particle_positions):
+        particle_positions[:, [1, 2]] = particle_positions[:, [2, 1]]
+        pos = pyflex.get_positions().reshape(-1, 4).copy()
+        pos[:, :3] = particle_positions.copy()
+        pyflex.set_positions(pos.flatten())
+    
+    def set_mesh_particles_positions(self, mesh_particle_positions):
+        particle_positions = self.get_particle_positions()
+        particle_positions[:self.num_mesh_particles] = mesh_particle_positions
+        self.set_particle_positions(particle_positions)
+    
+    def _get_picker_pos(self):
+        return self.pickers.get_picker_pos()
+    
+    def _get_picker_position(self):
+        return self._get_picker_pos()[:, :3].copy()
+        
+    def _step_sim(self):
+        pyflex.step()
+        
+        if self.save_video:
+            rgb = self._render('rgb', background=True, resolution=self.frame_resolution)
+            
+            if self.track_semkey_on_frames and self.task.semkey2pid:
+                particle_pos = self.get_mesh_particles_positions()
+                semkey2pid = self.task.semkey2pid
+                keypids = list(semkey2pid.values())
+                keynames = list(semkey2pid.keys())
+
+                key_particles = particle_pos[keypids]
+                key_pixels, visibility = self.get_visibility(key_particles, resolution=self.frame_resolution)
+
+                K = len(keynames)
+                hsv_colors = [(int(i * 180 / K), 255, 255) for i in range(K)]
+                bgr_colors = [cv2.cvtColor(np.uint8([[c]]), cv2.COLOR_HSV2BGR)[0,0].tolist() for c in hsv_colors]
+
+                debug_frame = rgb.copy()
+                for (v, u), vis, name, color in zip(key_pixels, visibility, keynames, bgr_colors):
+                    color = tuple(map(int, color))
+                    cv2.circle(debug_frame, (int(u), int(v)), 4, color, -1)
+                    cv2.putText(debug_frame, name, (int(u)+5, int(v)-5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                self.video_frames.append(debug_frame)
+            else:
+                self.video_frames.append(rgb)
+
+        self.sim_step += 1
+
+    def _process_info_(self, info):
+        return info
+
+    def _render(self, mode='rgb', camera_name='default_camera', resolution=None, background=False):
+        if not background:
+            img, depth_img = pyflex.render_cloth()
+        else:
+            img, depth_img = pyflex.render()
+
+        CAMERA_WIDTH = self.camera_config['cam_size'][0]
+        CAMERA_HEIGHT = self.camera_config['cam_size'][1]
+
+        img = img.reshape(CAMERA_HEIGHT, CAMERA_WIDTH, 4)[::-1, :, :3]  
+        depth_img = depth_img.reshape(CAMERA_HEIGHT, CAMERA_WIDTH, 1)[::-1, :, :1]
+        
+        if mode == 'rgbd': img = np.concatenate((img, depth_img), axis=2)
+        elif mode == 'depth': img = depth_img
+        elif mode == 'mask': img = img.sum(axis=2) > 0
+        
+        if resolution is not None and (CAMERA_HEIGHT != resolution[0] or CAMERA_WIDTH != resolution[1]):
+            img = cv2.resize(img, resolution)
+
+        return img
+    
+    def _get_obs(self, flatten_obs=True):
+        obs = {}
+        
+        W_full, H_full = self.camera_size[0], self.camera_size[1]
+        self.crop_size = min(H_full, W_full)
+        
+        offset_x = self.config.get('crop_offset_x', 0) 
+        self.x1 = W_full // 2 - self.crop_size // 2 + offset_x
+        self.y1 = H_full // 2 - self.crop_size // 2 
+        x2, y2 = self.x1 + self.crop_size, self.y1 + self.crop_size
+
+        rgbd_full = self._render(mode='rgbd') 
+        self.cloth_mask_full = rgbd_full[:, :, :3].sum(axis=2) > 0
+        
+        rgbd_crop = rgbd_full[self.y1:y2, self.x1:x2]
+        self.cloth_mask_crop = self.cloth_mask_full[self.y1:y2, self.x1:x2]
+        
+        if self.apply_workspace:
+            self.robot0_mask_crop = self.robot0_mask_full[self.y1:y2, self.x1:x2]
+            self.robot1_mask_crop = self.robot1_mask_full[self.y1:y2, self.x1:x2]
+
+        rgbd_resized = cv2.resize(rgbd_crop, tuple(self.obs_resolution), interpolation=cv2.INTER_LINEAR)
+
+        obs['rgb'] = obs['image'] = rgbd_resized[:, :, :3].astype(np.uint8)
+        obs['depth'] = rgbd_resized[:, :, 3:]
+        
+        cloth_mask_uint8 = self.cloth_mask_crop.astype(np.uint8) * 255
+        obs['mask'] = cv2.resize(cloth_mask_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+        
+        if self.apply_workspace:
+            r0_uint8 = self.robot0_mask_crop.astype(np.uint8) * 255
+            r1_uint8 = self.robot1_mask_crop.astype(np.uint8) * 255
+            obs['robot0_mask'] = cv2.resize(r0_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+            obs['robot1_mask'] = cv2.resize(r1_uint8, tuple(self.obs_resolution), interpolation=cv2.INTER_NEAREST) > 0
+
+        obs['raw_rgb'] = rgbd_full[:, :, :3].astype(np.uint8)
+        self.cloth_mask = self.cloth_mask_crop
+
+        if self.debug:
+            from actoris_harena.utilities.save_utils import save_mask 
+            step_idx, ep_id = getattr(self, 'action_step', 0), getattr(self, 'eid', 'unknown')
+            save_mask(mask=obs['mask'], filename=f"mask_ep{ep_id}_step{step_idx}", directory="tmp/debug_garment_env")
+            
+        obs['particle_positions'] = self.get_mesh_particles_positions()
+        obs['semkey2pid'] = self.task.semkey2pid
+
+        # if self.config.get('collect_control_data', False):
+        _, visible_mask = self.get_visibility(obs['particle_positions'])
+        obs['visible_point_cloud'] = obs['particle_positions'][visible_mask]
+        if hasattr(self, 'init_state_params') and 'mesh_faces' in self.init_state_params:
+            obs['mesh_faces'] = self.init_state_params['mesh_faces']
+        
+        if flatten_obs and obs['semkey2pid']:
+            keypids = list(obs['semkey2pid'].values())
+            
+            # Current State Keys
+            if self.config.get("provide_semkey_pos", False):
+                obs['semkey_pos'] = obs['particle_positions'][keypids].astype(np.float32)
+            
+            # Flattened State Keys
+            if self.config.get("provide_flattened_semkey_pos", False):
+                obs['flattened_semkey_pos'] = self.flattened_obs['observation']['particle_positions'][keypids].astype(np.float32)
+
+            # Normalised Pixel Keys (Current)
+            if self.config.get("provide_semkey_norm_pixel", False):
+                key_particles = obs['particle_positions'][keypids]                 
+                key_pixels_full, _ = self.get_visibility(key_particles)  
+                key_pixels_crop = key_pixels_full - np.array([self.y1, self.x1])
+                obs['semkey_norm_pixel'] = ((key_pixels_crop / self.crop_size) * 2.0 - 1.0).flatten()
+                obs['key_pixels'] = key_pixels_crop
+
+            # Normalised Pixel Keys (Flattened)
+            if self.config.get("provide_flattened_semkey_norm_pixel", False):
+                flat_particles = self.flattened_obs['observation']['particle_positions'][keypids]                 
+                flat_pixels_full, _ = self.get_visibility(flat_particles)  
+                flat_pixels_crop = flat_pixels_full - np.array([self.y1, self.x1])
+                obs['flattened_semkey_norm_pixel'] = ((flat_pixels_crop / self.crop_size) * 2.0 - 1.0).flatten()
+
+        obs['action_step'] = self.action_step
+        return obs
+
+    def _get_cloth_mask(self, camera_name='default_camera', resolution=None, crop=True):
+        rgb = self._render(camera_name=camera_name, mode='rgb', resolution=resolution)
+        mask = rgb.sum(axis=2) > 0
+        if crop and hasattr(self, 'x1'):
+            mask = mask[self.y1:self.y1+self.crop_size, self.x1:self.x1+self.crop_size]
+        return mask
+    
+    def _get_init_keys_helper(self, hdf5_path, key_file, difficulties=['hard', 'easy']):
+        if os.path.exists(key_file):
+            with open(key_file, 'r') as f:
+                return json.load(f)
+        else:
+            with h5py.File(hdf5_path, 'r') as tasks:
+                eval_keys = [key for key in tasks if tasks[key].attrs['task_difficulty'] in difficulties]
+            keys = []
+            for key in tqdm(eval_keys, desc='Filtering keys'):
+                with h5py.File(hdf5_path, 'r') as tasks:
+                    group = tasks[key]
+                    episode_params = dict(group.attrs)
+                    for dataset_name in group.keys():
+                        episode_params[dataset_name] = group[dataset_name][()]
+                    
+                    episode_params['scene_config'] = self.scene_config
+                    episode_params.update(self.default_config)
+                    set_scene(config=episode_params, state=episode_params)
+                    
+                    pyflex.step()
+                    cloth_mask = self._get_cloth_mask()
+                    if self.workspace_mask is not None:
+                        cloth_mask = cloth_mask & self.workspace_mask
+                    if cloth_mask.sum() > 500:
+                        keys.append(key)
+                        
+            with open(key_file, 'w') as f:
+                json.dump(keys, f)
+        return keys
+
+    def _get_init_state_keys(self):
+        path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
+        self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
+        self.num_trials = 1 
+
+    def _get_init_state_params(self, eid):
+        raise NotImplementedError
+    
+    def get_visibility(self, particle_positions, resolution=None):
+        """
+        Takes 3D particles in the environment and computes their (Y, X) pixel 
+        coordinates on the camera sensor, returning a boolean mask identifying 
+        which points are actually visible (i.e. not occluded by cloth overlaps).
+        """
+        assert particle_positions.shape[1] == 3, "particle_positions must be (N, 3)"
+        N = particle_positions.shape[0]
+
+        # 1. Transform World Points to Camera Frame (Multiply by Inverse Extrinsic)
+        particles_world_h = np.hstack([particle_positions, np.ones((N, 1), dtype=np.float32)])
+        T_cam_world = np.linalg.inv(self.camera_extrinsic_matrix)
+        cam_pts = (T_cam_world @ particles_world_h.T).T[:, :3]
+
+        # 2. Camera Frame to Image Plane (Multiply by Intrinsic Matrix)
+        if resolution is not None:
+            camera_intrinsic_matrix, _ = get_camera_matrix(
+                self.camera_pos, self.camera_angle, resolution, self.camera_config['cam_fov'])
+        else:
+            camera_intrinsic_matrix = self.camera_intrinsic_matrix
+            
+        proj = (camera_intrinsic_matrix @ cam_pts.T).T  
+        z = proj[:, 2]
+        z_safe = np.where(z == 0, 1e-6, z)
+        
+        # 3. Divide by Depth (Z) to get final pixel coordinates
+        pixels = proj[:, :2] / z_safe[:, None]  
+        W, H = resolution if resolution is not None else self.camera_size             
+
+        # Swapped Intrinsic K means index 0 is V (Y-axis) and index 1 is U (X-axis)
+        v, u = pixels[:, 0], pixels[:, 1]
+
+        # 4. Filter 1: Frustum Check (Is it behind the camera or off screen?)
+        visible = (z > 0) & (u >= 0) & (u < W) & (v >= 0) & (v < H)
+
+        # 5. Filter 2: Occlusion Check (Depth Buffer Comparison)
+        # Fetch the rendered z-buffer (what the camera actually sees right now)
+        depth_img = self._render('depth', resolution=resolution).reshape(H, W)
+        u_int = np.clip(np.round(u).astype(int), 0, W - 1)
+        v_int = np.clip(np.round(v).astype(int), 0, H - 1)
+        depth_buffer = depth_img[v_int, u_int]
+
+        # --- FIX 1: Use planar Z-depth (from step 2) instead of radial Euclidean distance ---
+        particle_depth = z
+
+        # --- FIX 2: Relax the epsilon tolerance to 0.015 to fix self-occlusion / Z-fighting ---
+        eps = 0.015
+        
+        # If the front of the particle is <= the depth buffer, it is visible!
+        visible &= (particle_depth - self.particle_radius) <= (depth_buffer + eps)
+
+        return pixels, visible
+    
+    def get_cloth_area(self):
+        return self.episode_params['cloth_height'] * self.episode_params['cloth_width']
+
+    def compare(self, results_1, results_2):
+        return self.task.compare(results_1, results_2)
+
+    def close(self):
+        """
+        Shuts down the PyFlex simulation, freeing up GPU/CPU memory.
+        """
+        pyflex.clean()
+
+
+==================================================
+FILE: multi_garment_vectorised_single_picker_pick_and_place_env.py
+==================================================
+
+import numpy as np
+import gym
+from .multi_garment_env import MultiGarmentEnv
+from .multi_garment_env import MultiGarmentEnv
+from .pixel_based_pick_and_place_env_logger import PixelBasedPickAndPlaceEnvLogger
+
+global ENV_NUM
+ENV_NUM = 0
+
+class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.action_space = gym.spaces.Box(-1, 1, (4, ), dtype=np.float32)
+        self.logger = PixelBasedPickAndPlaceEnvLogger()
+    
+    def sample_random_action(self):
+        return self.action_space.sample()
+
+    def get_action_space(self):
+        return self.action_space
+
+    def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+        dict_action = {
+            'norm-pixel-pick-and-place': {
+                'pick_0': action[:2],
+                'place_0': action[2:4]
+            }
+        }
+
+        self.info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.all_infos.append(self.info)
+        self.info = self._process_info(self.info)
+        
+        applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
+
+        self.info['applied_action'] = np.stack([applied_action[:2], applied_action[4:6]]).flatten()
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['terminated']
+        return self.info
+    
+import os
+import ray
+
+@ray.remote(num_gpus=1.0)
+class MultiGarmentVectorisedSinglePickerPickAndPlaceEnvRay(MultiGarmentVectorisedSinglePickerPickAndPlaceEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Specify GPU ID
+        # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Make CUDA calls synchronous
+
+
+==================================================
+FILE: pixel_based_primitive_env_logger.py
+==================================================
+
+import os
+import cv2
+import numpy as np
+import json
+from ..video_logger import VideoLogger
+import matplotlib.pyplot as plt
+
+from .draw_utils import *
+# Make sure to import your NumpyEncoder from wherever it lives in your project
+from real_robot.utils.save_utils import NumpyEncoder 
+
+class PixelBasedPrimitiveEnvLogger(VideoLogger):
+
+    def __call__(self, episode_config, result, filename=None, wandb_logger=None):
+        super().__call__(episode_config, result, filename=filename)
+        eid = episode_config['eid']
+        frames = [info["observation"]["rgb"] for info in result["information"]]
+        robot0_masks = None
+        robot1_masks = None
+        if 'robot0_mask' in result["information"][0]["observation"]:
+            robot0_masks = [info["observation"]["robot0_mask"] for info in result["information"]]
+        if 'robot1_mask' in result["information"][0]["observation"]:
+            robot1_masks = [info["observation"]["robot1_mask"] for info in result["information"]]
+        
+        actions = result["actions"]
+        picker_traj = [info["observation"]["picker_norm_pixel_pos"]
+                       for info in result["information"]]  # [T][2,2]
+
+        H, W = 512, 512
+
+        if filename is None:
+            filename = 'manupilation'
+        out_dir = os.path.join(self.log_dir, filename, 'performance_visualisation')
+        os.makedirs(out_dir, exist_ok=True)
+
+        # =======================================================================
+        # --- NEW: Setup Directory for Step Data and Save Internal States ---
+        # =======================================================================
+        episode_data_dir = os.path.join(self.log_dir, filename, f'episode_{eid}')
+        os.makedirs(episode_data_dir, exist_ok=True)
+
+        # Iterate through ALL steps to save internal states (including the final state)
+        for i, info in enumerate(result["information"]):
+            step_dir = os.path.join(episode_data_dir, f'step_{i}')
+            os.makedirs(step_dir, exist_ok=True)
+            
+            step_internal_state = info.get('internal_states')
+            
+            # Fallback if it's stored in the main result dict
+            if step_internal_state is None and 'internal_states' in result and i < len(result['internal_states']):
+                step_internal_state = result['internal_states'][i]
+
+            if step_internal_state is not None:
+                # 1. Make a shallow copy to safely mutate
+                state_to_save = step_internal_state.copy()
+                
+                # 2. Extract heavy arrays/tensors to save as .npy
+                npy_keys = [
+                    'noise_actions_history', 'primitive_probabilities',
+                    'predicted_keypoints', 'gt_keypoints',
+                    # Add any other big arrays you might have here like 'recon_obs', etc.
+                ]
+                
+                for key in npy_keys:
+                    if key in state_to_save:
+                        data_arr = state_to_save.pop(key)
+                        
+                        # Safely convert PyTorch tensors or Lists to numpy arrays
+                        if hasattr(data_arr, 'cpu'):
+                            data_arr = data_arr.cpu().detach().numpy()
+                        elif not isinstance(data_arr, np.ndarray):
+                            if data_arr is not None:
+                                data_arr = np.array(data_arr)
+                                
+                        if data_arr is not None:
+                            np.save(os.path.join(step_dir, f'{key}.npy'), data_arr)
+
+        # =======================================================================
+                    
+        images = []
+        for i, act in enumerate(actions):
+            info = result["information"][i]
+            obs = info["observation"]
+            key = list(act.keys())[0]
+            val = act[key]
+
+            img = frames[i].copy()
+            # --- Resize to 512×512 BEFORE drawing text ---
+            img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_LINEAR)
+
+            if info.get('draw_flatten_contour', False):
+                # Locate the goal mask (checking standard locations based on your Arena)
+                goal_mask = None
+                if 'goal_mask' in obs:
+                    goal_mask = obs['goal_mask']
+                elif 'goal' in info and 'mask' in info['goal']:
+                    goal_mask = info['goal']['mask']
+                elif 'flattened-mask' in obs:
+                    goal_mask = obs['flattened-mask']
+                
+                if goal_mask is not None:
+                    # Convert to uint8 (0-255) for OpenCV contour detection
+                    mask_uint8 = (goal_mask > 0).astype(np.uint8) * 255
+                    mask_resized = cv2.resize(mask_uint8, (W, H), interpolation=cv2.INTER_NEAREST)
+                    
+                    # Find contours (EXTERNAL only to get the outer boundary)
+                    contours, _ = cv2.findContours(mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    # Draw contours in Green (0, 255, 0) with a thickness of 2
+                    cv2.drawContours(img, contours, -1, (0, 255, 0), 2)
+
+            if robot0_masks is not None:
+                mask0 = cv2.resize(
+                    robot0_masks[i].astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+                img = apply_workspace_shade(
+                    img,
+                    mask0,
+                    color=(255, 0, 0),  # Blue in BGR
+                    alpha=0.2
+                )
+                
+            if robot1_masks is not None:
+                mask1 = cv2.resize(
+                    robot1_masks[i].astype(np.uint8),
+                    (W, H),
+                    interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+                img = apply_workspace_shade(
+                    img,
+                    mask1,
+                    color=(0, 0, 255),  # Red in BGR
+                    alpha=0.2
+                )
+            
+
+            primitive_color = PRIMITIVE_COLORS.get(key, PRIMITIVE_COLORS["default"])
+
+            step_text = f"Step {i+1}: "
+            if key == "norm-pixel-dual-pick-and-place":
+                # If there are 4 coordinates (pick0_x, pick0_y, pick1_x, pick1_y), it's dual.
+                step_text += "Dual Pick and Place"
+            elif key == "norm-pixel-single-pick-and-place":
+                step_text += "Single Pick and Place"
+            elif key == "norm-pixel-pick-and-fling":
+                step_text += "Pick and Fling"
+            elif key == "no-operation":
+                step_text += "No operation"
+            else:
+                step_text += key
+
+            draw_text_with_bg(
+                img,
+                step_text,
+                (10, TEXT_Y_STEP),
+                primitive_color,
+                scale=1,     # <--- ADDED: Lowers text size (default is usually ~1.0)
+                thickness=2    # <--- ADDED: Makes the thinner text look clean
+            )
+
+            # ================================
+            #          FOLD / PICK-PLACE
+            # ================================
+            if key in ["norm-pixel-single-pick-and-place", "norm-pixel-dual-pick-and-place"]:
+                # ADDED BOUNDS CHECK
+                if i + 1 < len(result["information"]):
+                    info_next = result["information"][i+1]
+                    if 'applied_action' in info_next:
+                        # Get the action using the current key
+                        applied_action = info_next['applied_action'].get(key)
+                        
+                        # Fallback just in case the environment still saves it under the old generic name
+                        if applied_action is None:
+                            applied_action = info_next['applied_action'].get('norm-pixel-pick-and-place')
+                            
+                        if applied_action is not None:
+                            img = draw_pick_and_place(img, applied_action)
+
+            # ================================
+            #        PICK & FLING
+            # ================================
+            elif key == "norm-pixel-pick-and-fling":
+                # pick_0 = norm_to_px(val[:2], W, H)
+                # pick_1 = norm_to_px(val[2:4], W, H)
+
+                # ADDED BOUNDS CHECK
+                traj = None
+                if i + 1 < len(picker_traj):
+                    traj = picker_traj[i + 1]
+
+                ## TODO: do not overlap with the step-wise primitive information text
+                if traj is None or len(traj) == 0:
+                    draw_text_with_bg(
+                        img,
+                        "Rejected",
+                        (10, TEXT_Y_STATUS),
+                        MILD_RED,
+                        scale=1.2
+                    )
+                    
+                else:
+                    traj = traj[10:-10]
+
+                    traj_px_0 = [norm_to_px(step[0], W, H) for step in traj]
+                    traj_px_1 = [norm_to_px(step[1], W, H) for step in traj]
+
+                    T = len(traj)
+                    num_samples = 20
+                    idx = np.linspace(0, T - 1, min(T, num_samples)).astype(int)
+
+                    sampled_0 = [traj_px_0[j] for j in idx]
+                    sampled_1 = [traj_px_1[j] for j in idx]
+
+                    # Colormaps
+                    cmap0 = cv2.COLORMAP_COOL
+                    cmap1 = cv2.COLORMAP_AUTUMN
+
+                    BLUE = cv2.applyColorMap(
+                        np.uint8([[[0]]]), cmap0
+                    )[0, 0].tolist()
+                    
+                    RED = cv2.applyColorMap(
+                        np.uint8([[[0]]]), cmap1
+                    )[0, 0].tolist()
+
+                    for s in range(1, len(idx)):
+                        alpha = s / (len(idx) - 1)
+
+                        value = np.uint8([[[int((1.0 - alpha) * 255)]]])
+                        color0 = cv2.applyColorMap(value, cmap0)[0, 0].tolist()
+                        color1 = cv2.applyColorMap(value, cmap1)[0, 0].tolist()
+
+                        cv2.line(img, swap(sampled_0[s-1]), swap(sampled_0[s]), color0, 8)
+                        cv2.line(img, swap(sampled_1[s-1]), swap(sampled_1[s]), color1, 8)
+
+                    def draw_hollow_circle(img, p, color, radius=10, thickness=3):
+                        cv2.circle(img, swap(p), radius, color, thickness)
+
+                    draw_hollow_circle(img, sampled_0[0], BLUE)
+                    draw_hollow_circle(img, sampled_1[0], RED)
+                    # ------------------------------------------------------------------
+
+                    # Final triangle marker
+                    def draw_triangle_down(img, center, color, size=15):
+                        cx, cy = center  # (x, y)
+
+                        pts = np.array([
+                            (cy - size, cx - size),  # top-left
+                            (cy + size, cx - size),  # top-right
+                            (cy,        cx + size),  # bottom (apex)
+                        ], np.int32)
+
+                        cv2.fillPoly(img, [pts], color)
+
+                    draw_triangle_down(img, traj_px_0[-1], BLUE)
+                    draw_triangle_down(img, traj_px_1[-1], RED)
+
+            images.append(img)
+
+        # Add final frame safely
+        if len(frames) > len(images):
+             images.append(frames[-1])
+
+        # ===========================================
+        #  CONCAT images in a matplotlib grid
+        # ===========================================
+
+        MAX_COLS = 6
+        num_images = len(images)
+
+        # Compute number of rows
+        num_rows = (num_images + MAX_COLS - 1) // MAX_COLS
+        if num_rows == 0: num_rows = 1
+
+        # Create the figure
+        fig, axes = plt.subplots(
+            num_rows, MAX_COLS,
+            figsize=(3 * MAX_COLS, 3 * num_rows),  # adjust tile size here
+        )
+
+        # If only one row/col, axes may not be 2D — fix it:
+        if num_rows == 1:
+            axes = np.expand_dims(axes, axis=0)
+        if MAX_COLS == 1:
+            axes = np.expand_dims(axes, axis=1)
+
+        # Fill the grid
+        idx = 0
+        for r in range(num_rows):
+            for c in range(MAX_COLS):
+                ax = axes[r][c]
+
+                if idx < num_images:
+                    # RGB images in OpenCV are BGR — convert before plotting
+                    img_rgb = cv2.cvtColor(images[idx], cv2.COLOR_BGR2RGB)
+                    ax.imshow(img_rgb)
+                    ax.axis("off")
+                    idx += 1
+                else:
+                    # Hide empty cells
+                    ax.axis("off")
+
+        # Tight layout avoids big gaps
+        plt.tight_layout()
+
+        # Save final image
+        save_path = os.path.join(out_dir, f"episode_{eid}_trajectory.png")
+        plt.savefig(save_path, dpi=200)
+        plt.close(fig)
+
+        if wandb_logger is not None:
+            wandb_logger.log(
+                {f"trajectory/episode_{eid}": save_path}
+            )
+
+
+==================================================
+FILE: multi_garment_vectorised_fold_prim_env.py
+==================================================
+
+import numpy as np
+import gym
+from .multi_garment_env import MultiGarmentEnv
+from .multi_garment_env import MultiGarmentEnv
+from .pixel_based_pick_and_place_env_logger import PixelBasedPickAndPlaceEnvLogger
+
+global ENV_NUM
+ENV_NUM = 0
+
+# @ray.remote
+class MultiGarmentVectorisedFoldPrimEnv(MultiGarmentEnv):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.action_space = gym.spaces.Box(-1, 1, (8, ), dtype=np.float32)
+        self.logger = PixelBasedPickAndPlaceEnvLogger()
+        
+
+    def step(self, action): ## get action for hybrid action primitive, action defined in the observation space
+        self.last_info = self.info
+        self.evaluate_result = None
+        self.overstretch = 0
+        dict_action = {
+            'norm-pixel-pick-and-place': {
+                'pick_0': action[:2],
+                'pick_1': action[2:4],
+                'place_0': action[4:6],
+                'place_1': action[6:8]
+            }
+        }
+
+        self.info = self.action_tool.step(self, dict_action)
+        self.action_step += 1
+        self.all_infos.append(self.info)
+        self.info = self._process_info(self.info)
+        dict_applied_action = self.info['applied_action']
+        vector_action = []
+        for param_name in ['pick_0', 'pick_1', 'place_0', 'place_1']:
+            vector_action.append(dict_applied_action['norm-pixel-pick-and-place'][param_name])
+        #print('vector_action', vector_action)
+        vector_action = np.stack(vector_action).flatten()
+
+        self.info['applied_action'] = vector_action
+        self.info['observation']['is_first'] = False
+        self.info['observation']['is_terminal'] = self.info['terminated']
+        return self.info
+
+
+==================================================
+FILE: draw_utils.py
+==================================================
+
+import cv2
+import numpy as np
+
+MILD_RED = (120, 120, 220)  # soft red (B, G, R)
+
+TEXT_Y_STEP = 35
+TEXT_Y_STATUS = 80
+TEXT_BG_ALPHA = 0.6
+
+BLUE = (200, 50, 50)   # left picker
+RED  = (50, 50, 200)   # right picker
+MILD_RED = (120, 120, 220)  # soft red (B, G, R)
+
+PRIMITIVE_COLORS = {
+    "norm-pixel-pick-and-place": (255, 180, 80),          # orange
+    "norm-pixel-pick-and-fling": (80, 200, 255),# cyan
+    "no-operation": (255, 255, 255),             # gray
+    "default": (255, 255, 255),                  # white
+}
+
+# -------------------------------
+# Normalized → pixel coordinates
+# -------------------------------
+def norm_to_px(v, W, H):
+    x = int((v[0] + 1) * 0.5 * W)
+    y = int((v[1] + 1) * 0.5 * H)
+    return x, y
+
+def apply_workspace_shade(rgb, mask, color, alpha=0.35):
+    """
+    Shade pixels where mask == True with given BGR color.
+    """
+    shaded = rgb.copy()
+    overlay = np.zeros_like(rgb, dtype=np.uint8)
+    overlay[:] = color
+
+    shaded[mask] = cv2.addWeighted(
+        rgb[mask], 1 - alpha,
+        overlay[mask], alpha,
+        0
+    )
+    return shaded
+
+
+# OpenCV uses (row, col)
+def swap(p):
+    return (p[1], p[0])
+
+def draw_big_arrowhead(img, p_from, p_to, color, size=28):
+    """
+    p_from, p_to are (x, y)
+    """
+    dx = p_to[0] - p_from[0]
+    dy = p_to[1] - p_from[1]
+    norm = np.sqrt(dx * dx + dy * dy) + 1e-6
+
+    ux, uy = dx / norm, dy / norm      # direction
+    px, py = -uy, ux                   # perpendicular
+
+    tip = np.array([p_to[0], p_to[1]])
+
+    left = np.array([
+        p_to[0] - size * ux + size * 0.6 * px,
+        p_to[1] - size * uy + size * 0.6 * py
+    ])
+
+    right = np.array([
+        p_to[0] - size * ux - size * 0.6 * px,
+        p_to[1] - size * uy - size * 0.6 * py
+    ])
+
+    # Convert to OpenCV (col, row) only here
+    pts = np.array([
+        (int(tip[0]),   int(tip[1])),
+        (int(left[0]),  int(left[1])),
+        (int(right[0]), int(right[1]))
+    ], dtype=np.int32)
+
+    cv2.fillPoly(img, [pts], color)
+
+def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20):
+    """
+    Draw a straight line from p_start → p_end with color gradient.
+    p_start, p_end: (x, y) in pixel coords
+    """
+    xs = np.linspace(p_start[0], p_end[0], num_samples).astype(int)
+    ys = np.linspace(p_start[1], p_end[1], num_samples).astype(int)
+
+    for i in range(1, num_samples):
+        alpha = i / (num_samples - 1)
+
+        value = np.uint8([[[int((1.0 - alpha) * 255)]]])
+        color = cv2.applyColorMap(value, cmap)[0, 0].tolist()
+
+        cv2.line(
+            img,
+            (xs[i - 1], ys[i - 1]),
+            (xs[i], ys[i]),
+            color,
+            thickness
+        )
+
+    draw_big_arrowhead(
+        img,
+        (xs[-2], ys[-2]),
+        (xs[-1], ys[-1]),
+        color,
+        size=30
+    )
+
+def draw_text_with_bg(img, text, org, color, scale=1.2, thickness=4):
+    (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    x, y = org
+    overlay = img.copy()
+    cv2.rectangle(
+        overlay,
+        (x - 5, y - h - 5),
+        (x + w + 5, y + 5),
+        (0, 0, 0),
+        -1
+    )
+    cv2.addWeighted(overlay, TEXT_BG_ALPHA, img, 1 - TEXT_BG_ALPHA, 0, img)
+    cv2.putText(
+        img,
+        text,
+        org,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        color,
+        thickness,
+        cv2.LINE_AA
+    )
+
+def draw_pick_and_place(img, action):
+    H, W = img.shape[:2]
+    if len(action) > 4:
+        pick_0  = norm_to_px(action[:2], W, H)
+        pick_1  = norm_to_px(action[2:4], W, H)
+        place_0 = norm_to_px(action[4:6], W, H)
+        place_1 = norm_to_px(action[6:8], W, H)
+
+        # ----- Ensure BLUE pick is always the LEFT one -----
+        picks = [(pick_0, place_0), (pick_1, place_1)]
+        picks_sorted = sorted(picks, key=lambda p: p[0][1])  # sort by x
+
+        (left_pick, left_place), (right_pick, right_place) = picks_sorted
+        
+    else:
+
+        left_pick  = norm_to_px(action[:2], W, H)
+        left_place  = norm_to_px(action[2:4], W, H)
+
+   
+    # BLUE = left, RED = right
+
+    # ----- Draw arrows with SMALLER arrowheads -----
+    small_tip = 0.08    # << smaller arrowhead tip size
+
+    # Colormaps (same convention as fling)
+    cmap_left  = cv2.COLORMAP_COOL   # BLUE-ish
+    cmap_right = cv2.COLORMAP_AUTUMN   # RED-ish
+
+    draw_colored_line(
+        img,
+        swap(left_pick),
+        swap(left_place),
+        cmap_left,
+        thickness=8,
+        num_samples=20
+    )
+
+    if len(action) > 4:
+        draw_colored_line(
+            img,
+            swap(right_pick),
+            swap(right_place),
+            cmap_right,
+            thickness=8,
+            num_samples=20
+        )
+
+
+    BLUE = cv2.applyColorMap(
+        np.uint8([[[0]]]), cmap_left
+    )[0, 0].tolist()
+                    
+    RED = cv2.applyColorMap(
+        np.uint8([[[0]]]), cmap_right
+    )[0, 0].tolist()
+    
+    # ----- Hollow circles -----
+    cv2.circle(img, swap(left_pick),  10, BLUE, 3)
+
+    if len(action) > 4:
+        cv2.circle(img, swap(right_pick), 10, RED,  3)
+
+    return img
+
+
+==================================================
+FILE: generate_initial_states.py
+==================================================
+
+
+# Borrow from LaGarNet's modification on cloth-funnel's script
+
+import h5py
+import hashlib
+
+from env.utils.trial_utils import *
+from env.utils.flex_utils import (
+    set_scene,
+    get_default_config,
+    center_object,
+    wait_until_stable,
+    get_current_covered_area,
+    PickerPickPlace,
+    get_rgb
+)
+
+from copy import deepcopy
+import numpy as np
+import pyflex
+import torch
+import time
+import random
+from time import sleep
+from typing import List
+from tqdm import tqdm
+from argparse import ArgumentParser
+from filelock import FileLock
+from pathlib import Path
+import trimesh
+import ray
+import os
+import json
+from functools import partial
+
+
+def pyflex_step_raw(data, info):
+    if 'env_mesh_vertices' not in data:
+        data['env_mesh_vertices'] = []
+    data['env_mesh_vertices'].append(pyflex.get_positions().reshape((-1, 4))[:info['num_particles'], :3])
+    pyflex.step()
+
+def seed_all(seed):
+    # print(f"SEEDING WITH {seed}")
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def generate_randomization(
+        action_tool,
+        cloth_mesh_path=None,
+        pkl_dir_name=None,
+        mesh_category=None,
+        trial_difficulty='hard',
+        trial=None,
+        scale=0.7,
+        gui=False,
+        dump_images=None,
+        randomize_direction=False,
+        randomize_instance=False,
+        random_translation=np.array([0, 0, 0]),
+        stiffness_factor=1,
+        recreate_step=None,
+        save_episode_data=False,
+        cloth_mass=50,
+        **kwargs):
+
+    assert trial is not None
+
+    config = deepcopy(get_default_config(scale=scale))
+
+    mesh_stretch_edges = np.array([])
+    mesh_bend_edges = np.array([])
+    mesh_shear_edges = np.array([])
+    mesh_faces = np.array([])
+    mesh_nocs_verts = np.array([])
+
+    assert cloth_mesh_path is not None
+
+    json_path = os.path.join(cloth_mesh_path, mesh_category)
+
+    instances_dict = json.load(open(json_path))
+    train_instances = instances_dict['train']
+    test_instances = instances_dict['test']
+    cloth_category = train_instances[0].split('.')[0].split('_')[1]
+        
+    if args.trial_id is not None:
+        cloth_instance = args.trial_id + f"_{cloth_category}.obj.pkl"
+    else:
+
+        if args.eval:
+            pkl_files = test_instances
+        else:
+            pkl_files = train_instances
+        cloth_instance = np.random.choice(pkl_files)
+
+    
+    # cloth_instance = pkl_files[args.trial_id]
+        # print(f"Picking {mesh_category} instance with random index:", args.trial_id)
+    pkl_path = os.path.join(cloth_mesh_path, cloth_category, cloth_instance)
+    print(pkl_path)
+
+    if recreate_step is not None:
+        pkl_path = os.path.join(cloth_mesh_path, cloth_category, str(recreate_step['instance']))
+
+    
+    #sample a number between -args.random_translation to args.random_translation
+    mesh_verts, mesh_faces, mesh_stretch_edges, \
+        mesh_bend_edges, mesh_shear_edges, mesh_nocs_verts = load_cloth(pkl_path)
+    
+    #scale the cloth
+    mesh_verts = mesh_verts * config['scale'] 
+
+    num_particle = mesh_verts.shape[0]
+
+    cloth_trimesh = trimesh.Trimesh(mesh_verts, mesh_faces)
+
+    flattened_area = cloth_trimesh.area /2
+
+    # Stretch, Bend and Shear Stiffness
+    stiffness = (0.75, .02, .02)
+    if mesh_category == 'Shirt':
+        stiffness = (0.75, .02, .02)
+    elif mesh_category == 'Trouser':
+        stiffness = (0.9, 0.5, 1)
+
+    config.update({
+        'cloth_pos': [0, 1, 0],
+        'cloth_stiff': stiffness,
+        'cloth_mass': cloth_mass,
+        'mesh_verts': mesh_verts.reshape(-1),
+        'mesh_stretch_edges': mesh_stretch_edges.reshape(-1),
+        'mesh_bend_edges': mesh_bend_edges.reshape(-1),
+        'mesh_shear_edges': mesh_shear_edges.reshape(-1),
+        'mesh_faces': mesh_faces.reshape(-1),
+        'mesh_nocs_verts': mesh_nocs_verts,
+    })
+
+    mesh_save_data = {}
+    info = {'num_particles': num_particle}
+    pyflex_step = partial(pyflex_step_raw, mesh_save_data, info)
+
+    config = set_scene(config)
+    action_tool.reset([0., -1., 0.])
+    particle_radius = config['scene_config']['radius']
+
+    # Start with flattened cloth
+    positions = pyflex.get_positions().reshape(-1, 4)
+    pyflex.set_positions(positions)
+    for _ in range(100):
+        pyflex_step()
+
+    center_object(num_particle)
+
+    init_rgb = get_rgb()
+    pre_cross_pos = pyflex.get_positions()
+
+    curr_pos = pyflex.get_positions()
+    xzy = curr_pos.reshape(-1, 4)[:num_particle, :3]
+    x = xzy[:, 0]
+    y = xzy[:, 2]
+
+    cloth_height = float(np.max(y) - np.min(y))
+    cloth_width = float(np.max(x) - np.min(x))
+    print('cloth_height:', cloth_height, 'cloth_width:', cloth_width)
+    
+    all_keypoint_groups = get_keypoint_groups(xzy)
+
+    init_positions = pyflex.get_positions()
+
+    theta = 0
+    if randomize_direction:
+        theta = random.uniform(0, 2*np.pi)
+
+    curr_verts = init_positions.copy().reshape(-1, 4)
+    curr_verts[:, :3] = curr_verts[:, :3] @ get_rotation_matrix(np.array([0, 1, 0]),theta)
+
+    pre_cross_pos = pre_cross_pos.reshape(-1, 4)
+    pre_cross_pos[:, :3] = pre_cross_pos[:, :3] @ get_rotation_matrix(np.array([0, 1, 0]),theta)
+    pre_cross_pos = pre_cross_pos.flatten()
+
+
+    pyflex.set_positions(curr_verts.flatten())
+
+
+    if recreate_step is not None:
+        recreate_verts = recreate_step['vertices']
+        v = pyflex.get_positions().reshape(-1, 4)
+        v[:num_particle, :3] = recreate_verts
+        pyflex.set_positions(v.flatten())
+    
+
+    center_object(num_particle)
+
+    pickpoint = random.randint(0, num_particle - 1)
+
+    if trial_difficulty == 'hard':
+        pyflex.set_positions(pre_cross_pos)
+        mass, pickpoint_pos = grasp_point(pickpoint)
+        rand_height = np.random.random(1) * 0.6 + 1
+        target = pickpoint_pos + np.array([0.0, float(rand_height), 0.0])
+        move(pickpoint, target, 0.005)
+        wait_until_stable(gui=gui, step_sim_fn=pyflex_step)
+        release_point(pickpoint, mass)
+
+    elif trial_difficulty == "easy":
+        mass, pickpoint_pos = grasp_point(pickpoint)
+
+        angle = np.random.random() * np.pi * 2
+        magnitude = np.random.random() * 0.5
+        height = np.random.random() * 0.5
+
+
+        offset = np.array([np.cos(angle) * magnitude, height, np.sin(angle) * magnitude])
+        target = pickpoint_pos + offset
+        move(pickpoint, target, 0.01)
+        release_point(pickpoint, mass)
+            
+    elif trial_difficulty == 'none':
+        pyflex_step()
+
+    elif trial_difficulty == 'flat':
+        pyflex.set_positions(pre_cross_pos)
+        pyflex_step()
+    
+    else:
+        raise Exception("Not implemented")
+
+    center_object(num_particle)
+    random_translation_vector = np.array([random.uniform(-args.random_translation, args.random_translation), 0 ,random.uniform(-args.random_translation, args.random_translation)])
+    positions = pyflex.get_positions()
+    positions = positions.reshape(-1, 4)
+    positions[:, :3] += random_translation_vector
+    pyflex.set_positions(positions.flatten())
+    pyflex_step()
+
+    wait_until_stable(gui=gui, step_sim_fn=pyflex_step)
+
+    flattened_rgb = get_rgb()
+
+    heights = pyflex.get_positions().reshape(-1, 4)[:, 1]
+
+    if heights.max() > 0.4:
+        #print("[TrialGenerator] Discarding trial due to error due to height max")
+        print(heights.max())
+        return None
+
+    if np.sum(flattened_rgb) == 0:
+        #print("TrialGenerator] Discarding trial due to error due to empty scene")
+        return None
+
+    output = {
+        'pickpoint':pickpoint,
+        'particle_pos': pyflex.get_positions(),
+        'init_particle_pos': init_positions,
+        'particle_vel': pyflex.get_velocities(),
+        'initial_coverage': get_current_covered_area(num_particle, particle_radius),
+        'shape_pos': pyflex.get_shape_states(),
+        'phase':  pyflex.get_phases(),
+        'flatten_area': flattened_area,
+        'flip_mesh': 0,
+        'cloth_stiff': stiffness,
+        'cloth_mass': cloth_mass,
+        'trial_difficulty': trial_difficulty,
+        'mesh_verts': mesh_verts.reshape(-1),
+        'mesh_stretch_edges': mesh_stretch_edges.reshape(-1),
+        'mesh_bend_edges': mesh_bend_edges.reshape(-1),
+        'mesh_shear_edges': mesh_shear_edges.reshape(-1),
+        'mesh_faces': mesh_faces.reshape(-1),
+        'mesh_nocs_verts':mesh_nocs_verts,
+        'cloth_instance':cloth_instance,
+        'init_rgb':init_rgb,
+        'flattened_rgb':flattened_rgb,
+        'cloth_height':cloth_height,
+        'cloth_width':cloth_width,
+        'all_keypoint_groups':all_keypoint_groups,
+        'pkl_path': pkl_path
+    }
+    #print("[TrialGenerator] Trial generated")
+    if save_episode_data:
+        output['episode_mesh_data'] = np.array(mesh_save_data['env_mesh_vertices'])
+        # print("Episode shape", output['episode_mesh_data'].shape)
+
+    # if os.path.exists(args.path):
+    #     with FileLock(args.path + '.lock'):
+    #         with h5py.File(args.path, 'r') as file:
+    #             print(f"Progress:{len(file)}/{args.num_trials}")
+
+    # pyflex.clean()
+    return output
+
+
+
+def generate_trials_helper(path: str,  gui: bool, recreate_steps=None, **kwargs):
+    
+    #for the pyflex init below
+    msaaSamples = get_default_config()['scene_config']['msaaSamples']
+    pyflex.init(
+        not gui,  # headless: bool
+        True,  # render: bool
+        480, 
+        480)  # camera dimensions: int x int
+    action_tool = PickerPickPlace(
+        num_picker=2,
+        particle_radius=0.00625, # TODO: we need to make this adaptive
+        picker_radius=0.05,
+        picker_low=(-5, 0, -5),
+        picker_high=(5, 5, 5))
+
+    while True:
+
+        if recreate_steps is not None:
+            if len(recreate_steps) > 0:
+                vertices, instance = recreate_steps.pop()
+                print("Process has", len(recreate_steps), "trials left")
+            else:
+                break
+
+            trial = generate_randomization(
+                action_tool,
+                gui=gui,
+                recreate_step={"vertices":vertices, "instance":instance},
+                **kwargs)
+        else:
+            trial = generate_randomization(
+                action_tool,
+                gui=gui,
+                **kwargs)
+
+      
+        if trial is None:  
+            continue
+    
+        if trial['cloth_width'] * trial['cloth_height'] == 0:
+            continue
+
+        Path(path).parent.mkdir(exist_ok=True, parents=True)
+        with FileLock(path + '.lock'):
+            with h5py.File(path, 'a') as file:
+                if len(file) >= kwargs['num_trials']:
+                    break
+                #key = hashlib.sha1(f'{len(file)}'.encode()).hexdigest()
+                key = hashlib.sha1(f'{time.time()}_{random.randint(0, 1000000)}'.encode()).hexdigest()
+                #print(f"[TrialGenerator] Writing trial to {path} with key {key}")
+                
+                # creat group for the key if it doesn't exist
+                group = file.create_group(key)
+                
+                for key, value in trial.items():
+                    if key == "cloth_instance":
+                        value = str(value)
+                    if type(value) == float or \
+                            type(value) == int or\
+                            type(value) == np.float64 or\
+                            type(value) == str:
+                        group.attrs[key] = value
+                    else:
+                        try:
+                            group.create_dataset(
+                                name=key,
+                                data=value,
+                                compression='gzip',
+                                compression_opts=9)
+                        except Exception as e:
+                            print("Error writing to h5 file")
+                            print(key, value)
+                            print(type(value))
+                            print(e)
+                            exit(1)
+                            # raise Exception("Error writing to h5 file")
+
+        
+      
+
+class Trial:
+    def __init__(self,
+                 name: str,
+                 flatten_area: float,
+                 initial_coverage: float,
+                 trial_difficulty: str,
+                 flip_mesh: int = 0,
+                 particle_pos: np.array = [],
+                 particle_vel: np.array = [],
+                 shape_pos: np.array = [],
+                 mesh_verts: np.array = [],
+                 mesh_stretch_edges: np.array = [],
+                 mesh_bend_edges: np.array = [],
+                 mesh_shear_edges: np.array = [],
+                 mesh_faces: np.array = [],
+                 phase: np.array = [],
+                 cloth_stiff: np.array = [],
+                 cloth_mass: float = 0.5,
+                 cloth_pos=[0, 2, 0],
+                 pts_path= str,
+                 pickpoint = int,
+                 summary_path = str,
+                 mesh_nocs_verts: np.array = [],
+                 cloth_instance: int = 0,
+                 init_particle_pos: np.array = [],
+                 init_rgb: np.array = [],
+                 flattened_rgb: np.array = [],
+                 cloth_height: float = 0,
+                 cloth_width: float = 0,
+                 pkl_path: str = None,
+                 all_keypoint_groups: np.array = [],
+                ):
+        self.name = name
+        self.flatten_area = flatten_area
+        self.initial_coverage = initial_coverage
+        self.trial_difficulty = trial_difficulty
+        self.cloth_mass = cloth_mass
+        self.particle_pos = np.array(particle_pos)
+        self.particle_vel = np.array(particle_vel)
+        self.shape_pos = np.array(shape_pos)
+        self.phase = np.array(phase)
+        self.cloth_pos = np.array(cloth_pos)
+        self.cloth_stiff = np.array(cloth_stiff)
+        self.flip_mesh = flip_mesh
+        self.mesh_verts = np.array(mesh_verts)
+        self.mesh_stretch_edges = np.array(mesh_stretch_edges)
+        self.mesh_bend_edges = np.array(mesh_bend_edges)
+        self.mesh_shear_edges = np.array(mesh_shear_edges)
+        self.mesh_faces = np.array(mesh_faces)
+        self.mesh_nocs_verts = np.array(mesh_nocs_verts)
+        self.init_rgb = np.array(init_rgb)
+        self.flattened_rgb = np.array(flattened_rgb)
+        self.all_keypoint_groups = np.array(all_keypoint_groups)
+
+        config = get_default_config()
+        self.camera_config = config['camera_params']
+        self.scene_config = config['scene_config']
+        self.scale = config['scale']
+
+        self.pts_path = pts_path
+        self.summary_path = summary_path
+        self.pickpoint = pickpoint
+        self.cloth_instance = cloth_instance
+        self.init_particle_pos = np.array(init_particle_pos)
+
+        self.cloth_height = cloth_height
+        self.cloth_width = cloth_width
+
+        self.pkl_path = pkl_path
+
+    def get_keypoint_data(self):
+        keypoint_names = ['bottom_right', 'bottom_left', 'top_right', 'top_left', 'right_shoulder', 'left_shoulder']
+        return {
+            key: self.all_keypoint_groups[i] for i, key in enumerate(keypoint_names)
+        }
+
+    def get_config(self):
+        return {
+            'cloth_pos': self.cloth_pos,
+            'cloth_stiff': self.cloth_stiff,
+            'cloth_mass': self.cloth_mass,
+            'camera_name': 'default_camera',
+            'camera_params': self.camera_config,
+            'flip_mesh': self.flip_mesh,
+            'flatten_area': self.flatten_area,
+            'mesh_verts': self.mesh_verts,
+            'mesh_stretch_edges': self.mesh_stretch_edges,
+            'mesh_bend_edges': self.mesh_bend_edges,
+            'mesh_shear_edges': self.mesh_shear_edges,
+            'mesh_faces': self.mesh_faces,
+            'mesh_nocs_verts': self.mesh_nocs_verts,
+            'cloth_instance': self.cloth_instance,
+            'scene_config': self.scene_config,
+            'scale': self.scale,
+            'cloth_height': self.cloth_height,
+            'cloth_width': self.cloth_width,
+            'cloth_area': self.cloth_height * self.cloth_width,
+            'trial_difficulty': self.trial_difficulty,
+        }
+
+    def get_images(self):
+        return {
+            'init_rgb': self.init_rgb,
+            'flattened_rgb': self.flattened_rgb,
+        }
+
+    def get_state(self):
+        return {
+            'particle_pos': self.particle_pos,
+            'particle_vel': self.particle_vel,
+            'init_particle_pos': self.init_particle_pos,
+            'shape_pos': self.shape_pos,
+            'phase': self.phase,
+            # 'camera_params': self.camera_params
+        }
+
+    def get_stats(self):
+        return {
+            'trial_name': self.name,
+            'cloth_mass': self.cloth_mass,
+            'cloth_stiff': self.cloth_stiff,
+            'max_coverage': self.flatten_area,
+            'trial_difficulty': self.trial_difficulty,
+            # 'init_coverage': self.initial_coverage
+        }
+
+    def get_garmentnets_data(self):
+        return {
+            'pts_path': self.pts_path,
+            'summary_path': self.summary_path,
+            'pickpoint': self.pickpoint
+        }
+
+    def __str__(self):
+        output = f'[Trial] {self.name}\n'
+        output += f'\ttrial_difficulty: {self.trial_difficulty}\n'
+        output += '\tinitial_coverage (%): ' +\
+            f'{self.initial_coverage*100/self.flatten_area:.02f}\n'
+        output += f'\tcloth_mass (kg): {self.cloth_mass:.04f}\n'
+        output += f'\tcloth_stiff: {self.cloth_stiff}\n'
+        output += f'\tflatten_area (m^2): {self.flatten_area:.04f}\n'
+        output += f'\tcloth_instance: {self.cloth_instance}\n'
+        return output
+
+
+def get_init_verts_from_trial(trial_group):
+    mesh_verts = trial_group['mesh_verts']
+    num_particles = mesh_verts.shape[0] // 3
+    init_verts = np.array(trial_group['init_particle_pos']).reshape(-1, 4)[:num_particles, :3]
+    return init_verts
+
+class TrialLoader:
+    def __init__(self, hdf5_path: str, 
+                    eval_hdf5_path: str, 
+                    repeat: bool = True,
+                     eval: bool = False, 
+                     seed: int = 0,
+                     recreate_trial_query: float = None,
+                     grid_search: bool = False
+                     ):
+        
+        seed_all(seed)
+        self.hdf5_path = hdf5_path
+        self.repeat = not eval
+        self.keys = None
+        self.recreate_trial_query = recreate_trial_query
+
+        if eval:
+            print("[TrialLoader] Loading eval trials")
+            self.hdf5_path = eval_hdf5_path
+            with h5py.File(self.hdf5_path, 'r') as trials:
+                self.keys = [key for key in trials if trials[key].attrs['trial_difficulty'] == 'hard']
+        else:
+            print("[TrialLoader] Loading train trials")
+            with h5py.File(self.hdf5_path, 'r') as trials:
+                if recreate_trial_query is None:
+                    self.keys = [key for key in trials]
+                else:
+                    print("[TrialLoader] Recreating trial with query {}".format(recreate_trial_query))
+                    self.keys = [key for key in trials if np.sum(get_init_verts_from_trial(trials[key])) == recreate_trial_query]
+                    if grid_search:
+                        #ensure there are plenty of trials for a grid search
+                        MAX_GRID_SEARCH_TASKS = 100
+                        self.keys = self.keys * MAX_GRID_SEARCH_TASKS
+
+                print(f'[TrialLoader] Found {len(self.keys)} trials from',
+                    self.hdf5_path)
+                if len(self.keys) == 0:
+                    raise ValueError(f'[TrialLoader] No trials found in {self.hdf5_path}')
+        self.curr_trial_idx = 0
+
+
+    def get_next_trial(self) -> Trial:
+        with h5py.File(self.hdf5_path, 'r') as trials:
+            
+            if not self.repeat:
+                key = self.keys[self.curr_trial_idx]
+                group = trials[key]
+                self.curr_trial_idx += 1
+                print('[TrialLoader] {}/{}'.format(
+                    self.curr_trial_idx,
+                    len(self.keys)))
+                if self.curr_trial_idx >= len(self.keys):
+                    print('[TrialLoader] Out of trials')
+                    while True:
+                        sleep(5)
+            else:
+                key = np.random.choice(self.keys)
+                group = trials[key]
+                if ('init_rgb' not in group) or (np.sum(group['init_rgb']) == 0):
+                    print('[TrialLoader] Skipping trial with no init_rgb')
+                    return self.get_next_trial()
+            
+            return Trial(name=key, **group.attrs, **group)
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser('Trial Generation')
+    parser.add_argument("--path", type=str, required=True,
+                        help="path to output HDF5 dataset")
+    parser.add_argument("--cloth_mesh_path", type=str,
+                        help="path to root dir containing the mesh data", default=f"{os.getcwd()}/cloth_funnels/cloth_data/cloth3d_pickle")                                       
+    parser.add_argument("--cloth_type", type=str, default='mesh',
+                        choices=['square', 'mesh'],
+                        help="type of cloth trial to create")
+    parser.add_argument("--mesh_category", type=str, default='Shirt',
+        help="category of clothing")
+    parser.add_argument("--num_trials", type=int, default=100,
+                        help="number of trials to generate")
+
+    parser.add_argument("--trial_id", type=str, default=None)
+    parser.add_argument('--randomize_instance', action='store_true', default=True)
+    parser.add_argument('--randomize_direction', action='store_true', default=False)
+    parser.add_argument('--local_mode', action='store_true', default=False)
+
+    parser.add_argument('--random_translation', type=float, default=0.0)
+    parser.add_argument('--trial_difficulty', type=str, default="none", help="(hard, easy, none)", choices=["hard", "easy", "flat", "none", "pick"])
+    parser.add_argument('--eval', action='store_true', default=False)
+    parser.add_argument('--test_single', action='store_true', default=False)
+    parser.add_argument('--stiffness_factor', type=int, default=1)
+
+    parser.add_argument("--num_processes", type=int, default=8,
+                        help="number of parallel environments")
+
+    parser.add_argument("--num_perturbations", type=int, default=0)
+    parser.add_argument("--save_perturbations", action='store_true', default=False)
+
+    parser.add_argument("--from_replay_buffer", type=str, default=None)
+    parser.add_argument("--recreate_gt", action='store_true', default=False)
+    parser.add_argument("--recreate_step_idx", action='store_true', default=8)
+
+
+    parser.add_argument("--gui", action='store_true',
+                        help="Run headless or not")
+    parser.add_argument("--dump_images", type=str, default=None, help="Path to dump images")
+    parser.add_argument("--scale", type=float, default=0.8, help="Scale of the cloth")
+    parser.add_argument("--trial", type=str, choices=["cross", "unfold"])
+    args = parser.parse_args()
+
+
+    mesh_category, cloth_mesh_path = \
+        args.mesh_category, args.cloth_mesh_path
+
+    print("Results will be recorded in:", args.path)
+
+    #add the clothing_type to the path
+    ray.init(local_mode=args.local_mode)
+    if args.test_single:
+        print("[Trial] Testing single trial")
+        generate_trials_helper(**vars(args))
+
+
+    elif args.from_replay_buffer is not None:
+
+
+        json_path = os.path.join(cloth_mesh_path, mesh_category)
+        instances_dict = json.load(open(json_path))
+        test_instances = instances_dict['test']
+        verts_to_instance = {}
+
+        for instance in test_instances:
+            pkl_path = os.path.join(cloth_mesh_path, cloth_mesh_path, instance.split("_")[1].split(".")[0], instance)   
+            
+            #sample a number between -args.random_translation to args.random_translation
+            mesh_verts, mesh_faces, mesh_stretch_edges, \
+                mesh_bend_edges, mesh_shear_edges, mesh_nocs_verts = load_cloth(pkl_path)
+
+            verts_to_instance[mesh_verts.shape[0]] = instance
+
+
+        print("[Trial] Reading from replay buffer")
+        with h5py.File(args.from_replay_buffer, 'r') as dataset:
+            keys = list(dataset.keys())
+            print("[Trial] Done reading")
+            recreate_keys = []
+
+            episodes = {}
+            for key in keys:
+                #don't include the easy trials
+                if dataset[key].attrs['trial_difficulty'] == 'easy':
+                    continue
+                episode = int(key.split("step")[0][:-1])
+                if episode not in episodes:
+                    episodes[episode] = []
+                step = int(key.split("_")[1][4:])
+                episodes[episode].append((step, key))
+
+            recreate_keys = []
+            for e, steps in episodes.items():
+                chosen_steps = np.random.choice(np.arange(len(steps)), size=3, replace=False)
+                # chosen_index = min(len(steps)-1, args.recreate_step_idx)
+                for chosen_index in chosen_steps:
+                    chosen_step = steps[chosen_index]
+                    recreate_keys.append(chosen_step[1])
+
+            num_trials = len(recreate_keys)
+            
+            split_keys = [[] for _ in range(args.num_processes)]
+
+            for i, key in enumerate(recreate_keys):
+                split_keys[i % len(split_keys)].append(key)
+
+            helper_fn = ray.remote(generate_trials_helper).options(
+                num_gpus=float(torch.cuda.device_count())/args.num_processes)
+
+
+            handles = []
+            for process_id, keys in enumerate(split_keys):
+
+                init_verts = [np.array(dataset[key]['init_verts']) for key in keys]
+                last_verts = [np.array(dataset[key]['postaction_verts']) for key in keys]
+            
+                try:
+                    pkl_paths = [np.array(dataset[key]['trial_pkl_path']) for key in keys]
+                except:
+                    pkl_paths = [np.array(verts_to_instance[dataset[key]['init_verts'].shape[0]]) for key in keys]
+
+                verts = init_verts if args.recreate_gt else last_verts
+                recreate_steps = list(zip(verts, pkl_paths))
+                handles.append(helper_fn.remote(**vars(args), recreate_steps=recreate_steps))
+
+            with tqdm(total=num_trials,
+                desc='Generating trials',
+                dynamic_ncols=True) as pbar:
+                while True:
+                    ray.wait(handles, timeout=5)
+                    if not os.path.exists(args.path):
+                        continue
+                    with FileLock(args.path + '.lock'):
+                        with h5py.File(args.path, 'r') as file:
+                            pbar.update(len(file) - pbar.n)
+                            pbar.refresh()
+                            if len(file) >= num_trials:
+                                exit()
+
+    else:
+        with FileLock(args.path  + '.lock'):
+            if os.path.exists(args.path):
+                with h5py.File(args.path, 'r+') as file:
+                    file_len = len(file)
+                    print(f"Progress:{len(file)}/{args.num_trials}")
+                ## remove the execess trials
+                if file_len >= args.num_trials:
+                    print("[Trial] Removing excess trials")
+                
+                    with h5py.File(args.path, 'a') as file:
+                        for key in tqdm(list(file.keys())[:-args.num_trials], desc='Removing excess trials', dynamic_ncols=True):
+                            del file[key]
+                    exit(0)
+
+        helper_fn = ray.remote(generate_trials_helper).options(
+            num_gpus=float(torch.cuda.device_count())/args.num_processes)
+        #added pkl dir, pts_dir, common_files, summary_path
+        handles = [helper_fn.remote(**vars(args))
+                for _ in range(args.num_processes)]
+        
+        with tqdm(total=args.num_trials,
+                desc='Generating trials',
+                dynamic_ncols=True) as pbar:
+            while True:
+                ray.wait(handles, timeout=5)
+                if not os.path.exists(args.path):
+                    continue
+                with FileLock(args.path  + '.lock'):
+                    with h5py.File(args.path, 'r') as file:
+                        #print("Progress:{}/{}".format(len(file), args.num_trials))
+                        len_file = len(file)
+                        pbar.n = len(file)
+                        #pbar.update(len(file) - pbar.n)  
+                if len_file >= args.num_trials:
+                    # stop all processes
+                    ray.kill(handles)
+                    ray.shutdown()
+                    exit(0)
+
+
+
+==================================================
+FILE: pixel_based_pick_and_place_env_logger.py
+==================================================
+
+import os
+import cv2
+import numpy as np
+from ..video_logger import VideoLogger
+import matplotlib.pyplot as plt
+from .draw_utils import *
+
+
+class PixelBasedPickAndPlaceEnvLogger(VideoLogger):
+
+    def __call__(self, episode_config, result, filename=None, wandb_logger=None):
+        super().__call__(episode_config, result, filename=filename, wandb_logger=None)
+
+        eid = episode_config["eid"]
+        frames = [info["observation"]["rgb"] for info in result["information"]]
+        #actions = result["actions"]
+
+        H, W = 512, 512
+
+        if filename is None:
+            filename = "manipulation"
+
+        out_dir = os.path.join(self.log_dir, filename, "performance_visualisation")
+        os.makedirs(out_dir, exist_ok=True)
+
+        
+
+        images = []
+
+        for i in range(len(frames)-1):
+            img = frames[i].copy()
+            img = cv2.resize(img, (W, H), interpolation=cv2.INTER_LINEAR)
+
+            # -------------------------------
+            # Step text
+            # -------------------------------
+            step_text = f"Step {i + 1}: Pick and Place"
+            primitive_color = PRIMITIVE_COLORS.get("norm-pixel-pick-and-place", PRIMITIVE_COLORS["default"])
+            draw_text_with_bg(
+                img,
+                step_text,
+                (10, TEXT_Y_STEP),
+                primitive_color
+            )
+            # -------------------------------
+            # Extract action
+            # -------------------------------
+            # act must contain exactly:
+            # pick_0, pick_1, place_0, place_1
+            #print('results keys', result.keys())
+            applied_action = result["information"][i+1]['applied_action']
+
+            img = draw_pick_and_place(img, applied_action)
+            
+
+            images.append(img)
+
+        # Add final frame (no action)
+        images.append(cv2.resize(frames[-1], (W, H)))
+
+        # ===========================================
+        #  Matplotlib grid visualization
+        # ===========================================
+        MAX_COLS = 6
+        num_images = len(images)
+        num_rows = (num_images + MAX_COLS - 1) // MAX_COLS
+
+        fig, axes = plt.subplots(
+            num_rows, MAX_COLS,
+            figsize=(3 * MAX_COLS, 3 * num_rows),
+        )
+
+        if num_rows == 1:
+            axes = np.expand_dims(axes, axis=0)
+
+        idx = 0
+        for r in range(num_rows):
+            for c in range(MAX_COLS):
+                ax = axes[r][c]
+                if idx < num_images:
+                    img_rgb = cv2.cvtColor(images[idx], cv2.COLOR_BGR2RGB)
+                    ax.imshow(img_rgb)
+                ax.axis("off")
+                idx += 1
+
+        plt.tight_layout()
+
+        save_path = os.path.join(out_dir, f"episode_{eid}_trajectory.png")
+        plt.savefig(save_path, dpi=200)
+        plt.close(fig)
+
+        if wandb_logger is not None:
+            wandb_logger.log(
+                {f"trajectory/episode_{eid}": save_path})
+
+
+
+==================================================
+FILE: single_garment_second_last_goal_init_env.py
+==================================================
+
+import os
+import h5py
+import numpy as np
+
+from itertools import zip_longest
+
+
+from .action_primitives.hybrid_action_primitive import HybridActionPrimitive
+from .utils.env_utils import set_scene
+from .garment_env import GarmentEnv
+
+global ENV_NUM
+ENV_NUM = 0
+# self.all_garment_types = ['longsleeve', 'trousers', 'skirt', 'dress']
+
+# @ray.remote
+class SingleGarmentSecondLastGoaInitEnv(GarmentEnv):
+    
+    def __init__(self, config):
+        self.num_eval_trials = 30
+        self.num_train_trials = 100
+        self.num_val_trials = 10
+        config.name = f'single-garment-subgoal-initial-env-{config.garment_type}'
+        super().__init__(config)
+        #self.name =f'single-garment-fixed-init-env'
+
+    ## TODO: if eid is out of range, we need to raise an error.   
+    def reset(self, episode_config=None):
+        if episode_config == None:
+            episode_config = {
+                'eid': None,
+                'save_video': False
+            }
+        if 'save_video' not in episode_config:
+            episode_config['save_video'] = False
+
+        if 'eid' not in episode_config or episode_config['eid'] is None:
+            if self.mode == 'train':
+                episode_config['eid'] = np.random.randint(self.num_train_trials)
+            elif self.mode == 'val':
+                episode_config['eid'] = np.random.randint(self.num_val_trials)
+            else:
+                episode_config['eid'] = np.random.randint(self.num_eval_trials)
+        
+        init_state_params = self._get_init_state_params(0) #single garment
+
+
+
+        self.sim_step = 0
+        self.video_frames = []
+        self.save_video = episode_config['save_video']
+
+        self.episode_config = episode_config
+
+        init_state_params['scene_config'] = self.scene_config
+        init_state_params.update(self.default_config)
+        set_scene(
+            config=init_state_params, 
+            state=init_state_params)
+        self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
+        self.init_state_params = init_state_params
+
+        
+        
+        #print('set scene done')
+        #print('pciker initial pos', self.picker_initial_pos)
+        self.pickers.reset(self.picker_initial_pos)
+        #print('picker reset done')
+
+        self.init_coverae = self._get_coverage()
+        self.flattened_obs = None
+        self.get_flattened_obs()
+        #self.flatten_coverage = init_state_params['flatten_area']
+        
+        self.info = {}
+        self.last_info = None
+        self.action_tool.reset(self) # get out of camera view, and open the gripper
+        self._step_sim()
+        
+        self.last_flattened_step = -100
+        self.eid = 0
+        self.task.reset(self)
+
+        ###### apply subgoal init
+        goals = self.task.get_goals()
+        #print('goals', goals)
+        all_sub_goals = len(goals)
+
+        ## make a random seed using eid, then choose subgoal deterministically
+        self.eid = episode_config['eid']
+        rng = np.random.RandomState(self.eid)
+        idx = rng.randint(0, all_sub_goals)
+
+        goal_id = idx     # integer division for goal index
+        subgoal_id = -2 # remainder for subgoal index
+
+        goal_particles = goals[goal_id][subgoal_id]['observation']['particle_positions']
+
+        center = goal_particles.mean(axis=0)
+        goal_particles -= center
+
+        # Random rotation around Z-axis
+        theta = rng.uniform(0, 2 * np.pi)  # random angle in radians
+        rotation_matrix = np.array([
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta),  np.cos(theta), 0],
+            [0,              0,             1]
+        ])
+        goal_particles = goal_particles @ rotation_matrix.T  # rotate
+
+        # Random displacement within ±0.5 range per axis
+        displacement = rng.uniform(-0.5, 0.5, size=3)
+        displacement[2] = 0
+        goal_particles += displacement
+
+        self.set_mesh_particles_positions(goal_particles)
+        self._wait_to_stabalise()
+        #######
+
+
+        self.action_step = 0
+
+        self.evaluate_result = None
+          
+        
+        self.overstretch = 0
+        self.info = self._process_info({})
+        self.clear_frames()
+
+        
+        return self.info
+    
+    
+    def get_eval_configs(self):
+        eval_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_eval_trials)
+        ]
+        
+        return eval_configs
+
+    def get_train_configs(self):
+        train_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': self.config.get('save_video', False)}
+            for eid in range(self.num_train_trials)
+        ]
+        
+        return train_configs
+
+    
+    def get_val_configs(self):
+        val_configs = [
+            {'eid': eid, 'tier': 0, 'save_video': True}
+            for eid in range(self.num_val_trials)
+        ]
+        print('len config', len(val_configs), 'num tiral', self.num_val_trials)
+        return val_configs
+
+
+
+
+    def _get_init_state_keys(self):
+        
+        path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        #train_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-train.hdf5')
+
+        key_file = os.path.join(self.init_state_path, f'{self.name}-eval.json')
+        #train_key_file = os.path.join(self.init_state_path, f'{self.name}-train.json')
+
+        self.keys = self._get_init_keys_helper(path, key_file, difficulties=['hard'])
+        
+        # print len of keys
+        self.num_trials = 1
+
+    def _get_init_state_params(self, eid):
+            
+        hdf5_path = os.path.join(self.init_state_path, f'multi-{self.garment_type}-eval.hdf5')
+        key = self.keys[eid]
+        with h5py.File(hdf5_path, 'r') as init_states:
+
+            group = init_states[key]
+            
+            episode_params = dict(group.attrs)
+            #print('episode_params', episode_params)
+            
+            for dataset_name in group.keys():
+                episode_params[dataset_name] = group[dataset_name][()]
+
+            self.episode_params = episode_params
+
+        return episode_params
+
+

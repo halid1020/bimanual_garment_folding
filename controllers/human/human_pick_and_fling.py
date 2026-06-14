@@ -1,23 +1,22 @@
+from actoris_harena import Agent
 import numpy as np
 import cv2
-from actoris_harena import Agent
 from .utils import (
     overlay_workspaces, overlay_active_goal_contour, append_goal_grid, 
     get_user_clicks_with_undo, normalize_clicks, draw_evaluation_metrics
 )
 
-class HumanSinglePickerPickAndPlace(Agent):
-    """Interactive policy for executing a single bimanual Pick-and-Place sequence."""
+class HumanPickAndFling(Agent):
+    """Interactive policy for executing a Pick-and-Fling sequence."""
     
     def __init__(self, config):
         super().__init__(config)
-        self.name = "human-single-picker-pixel-pick-and-place"
-        self.place_orien = config.get('place_orien', False)
+        self.name = "human-pixel-pick-and-fling"
         self.overlay_goal_contour = config.get('overlay_goal_contour', False)
 
     def act(self, info_list, update=False):
         return [self.single_act(info) for info in info_list]
-    
+
     def single_act(self, state, update=False):
         rgb = cv2.resize(cv2.cvtColor(state['observation']['rgb'], cv2.COLOR_BGR2RGB), (512, 512))
         rgb = overlay_workspaces(rgb, state)
@@ -31,17 +30,14 @@ class HumanSinglePickerPickAndPlace(Agent):
         # Draw metrics on bottom right
         draw_evaluation_metrics(img, state)
 
-        # Collect user input
-        clicks = get_user_clicks_with_undo(img, num_clicks=2, window_name='Single Pick & Place (2 clicks)')
+        # Collect user input (2 clicks for Fling)
+        clicks = get_user_clicks_with_undo(img, num_clicks=2, window_name='Pick & Fling (2 clicks)')
         
         # Normalize and package action
         h, w = rgb.shape[:2]
-        action = normalize_clicks(clicks, w, h)
+        norm = normalize_clicks(clicks, w, h)
         
-        if self.place_orien:
-            action.append(0)
-            
-        return np.asarray(action)
-        
+        return np.asarray(norm)
+
     def init(self, state): pass
     def update(self, state, action): pass

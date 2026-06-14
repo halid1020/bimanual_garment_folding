@@ -14,7 +14,7 @@ from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
 
 SUCCESS_TRESHOLD = 0.05
-IOU_TRESHOLDS = [0.8, 0.8, 0.82]
+IOU_TRESHOLDS = [0.75, 0.75, 0.75]
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
@@ -64,6 +64,8 @@ class GarmentFoldingTask(GarmentTask):
 
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
+
+        self.use_strict_alignment = config.get('alignment', False) is True
         self.goals = [] # This needs to be loaded  or generated
         self.has_succeeded = False
         self.through_canon = config.get('through_canon', False)
@@ -96,7 +98,14 @@ class GarmentFoldingTask(GarmentTask):
     def _generate_a_goal(self, arena):
         goal = []
         particle_pos = arena.get_particle_positions()
-        info = arena.set_to_flatten()
+
+        if self.through_canon:
+            info = arena.set_to_canon_flatten()
+        elif self.config.get('randomise_goal', False):
+            info = arena.set_to_random_flatten()
+        else:
+            info = arena.set_to_flatten()
+
         self.demonstrator.reset([arena.id])
         goal.append(info)
         while not self.demonstrator.terminate()[arena.id]: ## The demonstrator does not need update and init function
@@ -152,7 +161,9 @@ class GarmentFoldingTask(GarmentTask):
                     subgoal = {
                         'observation': {
                             'rgb': rgb[:, :, :3],
-                            'particle_positions': particles
+                            'particle_positions': particles,
+                            # --- NEW: Reconstruct the mask from the RGB image ---
+                            'mask': rgb[:, :, :3].sum(axis=2) > 0
                         }
                     }
                     goal.append(subgoal.copy())
@@ -164,31 +175,69 @@ class GarmentFoldingTask(GarmentTask):
         if len(self.goals) == 0:
             return {}
         cur_particles = arena.get_mesh_particles_positions()
-        #print('len cur', len(cur_particles))
 
         # Evaluate particle alignment against each goal
         particle_distances = []
         key_distances = []
         for goal in self.goals:
             goal_particles = goal[-1]['observation']["particle_positions"]
-            #print('goal len', len(goal_particles))
             mdp, kdp = self._compute_particle_distance(cur_particles, goal_particles, arena)
             particle_distances.append(mdp)
             key_distances.append(kdp)
        
         mean_particle_distance = median(particle_distances)
         key_particle_distance = median(key_distances)
-        #print('MPD', mean_particle_distance)
 
-        #semantic_dist = self._compute_keypoint_distance(arena, cur_particles, goal_particles)
+        # --- NEW: Calculate Active Subgoal Index mirroring Multi-Stage Reward ---
+        trj_infos = arena.get_trajectory_infos()
+        N = len(trj_infos)
+        K = self.config.goal_steps
+        
+        # 1. If we have already succeeded, lock the UI to the final goal
+        if self.has_succeeded:
+            active_idx = K - 1
+            
+        # 2. Otherwise, scan the recent sliding window for the sequence
+        else:
+            K_window = min(K, N)
+            traj_window = trj_infos[N - K_window : N]
+            
+            best_matched_steps = 0
+
+            # Try all possible start positions in the recent trajectory window
+            for start in range(K_window):
+                matched_steps = 0
+                
+                for g in range(K):
+                    t = start + g
+                    if t >= K_window:
+                        break
+                    
+                    # Check the trajectory frame against the specific goal step
+                    iou = self._iou_for_goal_step(arena, traj_window[t], g)
+                    
+                    # If it matches, increment. If not, the contiguous sequence is broken.
+                    if iou >= IOU_TRESHOLDS[g]:
+                        matched_steps += 1
+                    else:
+                        break
+                        
+                best_matched_steps = max(best_matched_steps, matched_steps)
+
+            # The active index is the number of successfully matched steps in a row,
+            # clamped to the final goal index so it doesn't go out of bounds.
+            active_idx = min(best_matched_steps, K - 1)
+        # ------------------------------------------------------------------------
 
         return {
             "mean_particle_distance": mean_particle_distance,
             "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
+            'algn_IoU': self._get_algn_IoU(arena),
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'algn_IoU_to_flattened': self._get_algn_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
+            'active_subgoal_idx': active_idx  # <-- Synced with has_succeeded state
         }
 
     def _align_points(self, arena, cur, goal):
@@ -196,13 +245,13 @@ class GarmentFoldingTask(GarmentTask):
         Align cur points to goal points using Procrustes rigid alignment.
         Returns aligned points and mean distance.
         """
-        # if len(self.aligned_pairs) == arena.action_step + 1:
-        #     return self.aligned_pairs[-1]
+        
+        if self.use_strict_alignment:
+            return cur, goal
 
         if self.config.alignment == 'simple_rigid':
             # Center both sets
             aligned_curr, aligned_goal = simple_rigid_align(cur, goal)
-            #return aligned, goal_centered
         else:
             raise NotImplementedError
         
@@ -210,10 +259,8 @@ class GarmentFoldingTask(GarmentTask):
         assert not (np.isnan(aligned_curr).any() or np.isnan(aligned_goal).any()), \
             "NaN values detected after point alignment!"
         
-        # self.aligned_pairs.append((aligned_curr, aligned_goal))
-        
         return aligned_curr, aligned_goal
-
+    
     def _get_algn_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
         goal_mask = arena.get_flattened_obs()['observation']['mask']
@@ -307,7 +354,7 @@ class GarmentFoldingTask(GarmentTask):
             K = self.config.goal_steps
 
             # Always give some shaping based on current IoU to goal[0]
-            multi_stage_reward = self._max_iou_for_goal_step(arena, trj_infos[-1], 0)
+            multi_stage_reward = self._iou_for_goal_step(arena, trj_infos[-1], 0)
 
             K = min(K, N)
             # Need at least K trajectory steps to attempt full alignment
@@ -326,7 +373,7 @@ class GarmentFoldingTask(GarmentTask):
                     if t >= K:
                         break
 
-                    iou = self._max_iou_for_goal_step(
+                    iou = self._iou_for_goal_step(
                         arena,
                         traj_window[t],
                         g
@@ -352,33 +399,6 @@ class GarmentFoldingTask(GarmentTask):
 
             multi_stage_reward = best_reward
 
-        #print('!!! multi_stage_reward', multi_stage_reward)
-
-            # multi_stage_reward = stable_nc_iou_reward(last_info, action, info)
-            # arena = info['arena']
-            # for i in range(self.config.goal_steps)[1:]:
-            #     cur_mdps = []
-            #     last_mdps = []
-                
-            #     for goal in self.goals:
-            #         cur_goal_particles = goal[i]['observation']["particle_positions"]
-            #         last_goal_particles = goal[i-1]['observation']["particle_positions"]
-            #         #print('goal len', len(goal_particles))
-            #         cur_mdp, kdp = self._compute_particle_distance(cur_particles, cur_goal_particles, arena)
-            #         last_mdp, kdp = self._compute_particle_distance(last_particles, last_goal_particles, arena)
-            #         cur_mdps.append(cur_mdp)
-            #         last_mdps.append(last_mdp)
-
-            #     last_mdp = median(last_mdps)
-            #     cur_mdp = median(cur_mdps)
-            #     last_action_step = last_info['observation']['action_step']
-            #     # print(f'\nlast_mdp for goal step {i-1} at action step {last_action_step}:', last_mdp)
-            #     # print(f'\ncur_mdp for goal step {i} at action step {last_action_step+1}:', cur_mdp)
-                
-            #     if last_mdp < SUCCESS_PARTICLE_TRESHOLD:
-            #         # print(f'!!match at last goal step {i-1}, current step mdp', cur_mdp)
-            #         multi_stage_reward = i + particle_distance_reward(cur_mdp)
-                
         multi_stage_reward /= self.config.goal_steps # make sure it is between 0 and 1
 
         threshold =  self.config.get('overstretch_penalty_threshold', 0)
@@ -396,20 +416,25 @@ class GarmentFoldingTask(GarmentTask):
             'multi_stage_reward': multi_stage_reward,
         }
     
-    def _max_iou_for_goal_step(self, arena, traj_info, goal_step):
+    def _iou_for_goal_step(self, arena, traj_info, goal_step):
         """
-        Compute max IoU between current trajectory step mask
-        and all goal masks at a specific goal_step.
+        Compute IoU between current trajectory step mask
+        and all goal masks at a specific goal_step based on strict alignment flag.
         """
         cur_mask = traj_info['observation']['mask']
-        max_IoU = 0.0
+        best_IoU = 0.0
 
         for goal in self.goals:
             goal_mask = goal[goal_step]['observation']['rgb'].sum(axis=2) > 0
-            IoU, _ = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
-            max_IoU = max(max_IoU, IoU)
+            
+            if self.use_strict_alignment:
+                IoU = calculate_iou(cur_mask, goal_mask)
+            else:
+                IoU, _ = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
+                
+            best_IoU = max(best_IoU, IoU)
 
-        return max_IoU
+        return best_IoU
 
     def get_goals(self):
         return self.goals
@@ -421,21 +446,25 @@ class GarmentFoldingTask(GarmentTask):
         trj_infos = arena.get_trajectory_infos()
         N = len(trj_infos)
         K = self.config.goal_steps
-        #print('goal steps', K)
+        
         if len(trj_infos) < K:
             return False
         
-        # if has succeed, check the current cloth is messed up or not
-        # if mess up, reset success and return False
-        # else return True
         if self.has_succeeded:
             mask = trj_infos[-1]['observation']['mask']
-            max_IoU = 0
+            best_IoU = 0
             for goal in self.goals:
                 goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0
-                IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-                max_IoU = max(IoU, max_IoU)
-            if max_IoU < IOU_TRESHOLDS[-1]:
+                
+                # --- NEW: Strict checking ---
+                if self.use_strict_alignment:
+                    IoU = calculate_iou(mask, goal_mask)
+                else:
+                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
+                    
+                best_IoU = max(IoU, best_IoU)
+                
+            if best_IoU < IOU_TRESHOLDS[-1]:
                 self.has_succeeded = False
                 print('[folding task] Success is messed up!')
                 return False
@@ -443,29 +472,29 @@ class GarmentFoldingTask(GarmentTask):
                 print('[folding task] Successful Step!')
                 return True
         
-        # if has not succeeded before, check consquent sub goals matches the trajecotry operation/
+        # if has not succeeded before, check consequent sub goals
         for k in range(K):
             mask  = trj_infos[N - K + k]['observation']['mask']
-            max_IoU = 0
+            best_IoU = 0
             for goal in self.goals:
                 goal_mask = goal[k]['observation']["rgb"].sum(axis=2) > 0
-                IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-                max_IoU = max(IoU, max_IoU)
-            #print(f'goal step {k}, current step {N - K + k}: max_IoU: {max_IoU}')
-            if max_IoU < IOU_TRESHOLDS[k]:
+                
+                # --- NEW: Strict checking ---
+                if self.use_strict_alignment:
+                    IoU = calculate_iou(mask, goal_mask)
+                else:
+                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
+                    
+                best_IoU = max(IoU, best_IoU)
+                
+            if best_IoU < IOU_TRESHOLDS[k]:
                 return False
+                
         print('[folding task] Successful Step!')
         self.has_succeeded = True
         return True
         
 
-    # def success(self, arena):
-    #     cur_eval = self.evaluate(arena)
-
-    #     if cur_eval == {}:
-    #         return False
-    #     return cur_eval['mean_particle_distance'] < SUCCESS_TRESHOLD
-    
     def _get_max_IoU(self, arena):
         cur_mask = arena.cloth_mask
         max_IoU = 0
@@ -477,6 +506,18 @@ class GarmentFoldingTask(GarmentTask):
                 max_IoU = IoU
         
         return IoU
+    
+    def _get_algn_IoU(self, arena):
+        cur_mask = arena.cloth_mask
+        algn_IoU = 0
+        for goal in self.goals[:1]:
+            goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
+            
+            IoU = calculate_iou(cur_mask, goal_mask)
+            if IoU > algn_IoU:
+                algn_IoU = IoU
+        
+        return algn_IoU
     
     def _get_max_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
@@ -490,18 +531,54 @@ class GarmentFoldingTask(GarmentTask):
         # clip between 0 and 1
         return np.clip(res, 0, 1)
 
-    def compare(self, results_1, results_2):
-        threshold=0.95
-
-        # --- Compute averages for results_1 ---
-        score_1 = mean([ep["mean_particle_distance"][-1] for ep in results_1])
-        # --- Compute averages for results_2 ---
-        score_2 = mean([ep["mean_particle_distance"][-1] for ep in results_2])
-
-        # --- Otherwise prefer higher score ---
-        if score_1 < score_2:
-            return 1
-        elif score_1 > score_2:
-            return -1
-        else:
-            return 0
+    def success(self, arena):
+        trj_infos = arena.get_trajectory_infos()
+        N = len(trj_infos)
+        K = self.config.goal_steps
+        
+        if len(trj_infos) < K:
+            return False
+        
+        if self.has_succeeded:
+            mask = trj_infos[-1]['observation']['mask']
+            best_IoU = 0
+            for goal in self.goals:
+                goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0
+                
+                # --- NEW: Strict checking ---
+                if self.use_strict_alignment:
+                    IoU = calculate_iou(mask, goal_mask)
+                else:
+                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
+                    
+                best_IoU = max(IoU, best_IoU)
+                
+            if best_IoU < IOU_TRESHOLDS[-1]:
+                self.has_succeeded = False
+                print('[folding task] Success is messed up!')
+                return False
+            else:
+                print('[folding task] Successful Step!')
+                return True
+        
+        # if has not succeeded before, check consequent sub goals
+        for k in range(K):
+            mask  = trj_infos[N - K + k]['observation']['mask']
+            best_IoU = 0
+            for goal in self.goals:
+                goal_mask = goal[k]['observation']["rgb"].sum(axis=2) > 0
+                
+                # --- NEW: Strict checking ---
+                if self.use_strict_alignment:
+                    IoU = calculate_iou(mask, goal_mask)
+                else:
+                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
+                    
+                best_IoU = max(IoU, best_IoU)
+                
+            if best_IoU < IOU_TRESHOLDS[k]:
+                return False
+                
+        print('[folding task] Successful Step!')
+        self.has_succeeded = True
+        return True

@@ -14,7 +14,15 @@ def build_sim_task(task_cfg):
     if task_cfg.task_name == 'centre-sleeve-folding':
         demonstrator = HumanMultiPrimitive({"debug": False})
         task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
-       
+
+    elif task_cfg.task_name == 'canonicalisation_alignment_centre_sleeve_folding':
+        demonstrator = HumanMultiPrimitive({"debug": False})
+        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+        
+    elif task_cfg.task_name == 'central_alignment_centre_sleeve_folding':
+        demonstrator = HumanMultiPrimitive({"debug": False})
+        task = GarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+ 
     elif task_cfg.task_name == 'waist-leg-alignment-folding':
         from controllers.demonstrators.waist_leg_alignment_folding_stochastic_policy \
             import WaistLegFoldingStochasticPolicy
@@ -35,7 +43,6 @@ def build_sim_task(task_cfg):
 
     elif task_cfg.task_name == 'canonicalisation_alignment':
         task = CanonicalisationAlignmentTask(task_cfg)
-
 
     elif task_cfg.task_name == 'dummy':
         task = None

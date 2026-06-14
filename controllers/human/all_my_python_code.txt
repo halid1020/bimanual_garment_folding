@@ -1,0 +1,1094 @@
+==================================================
+FILE: no_operation.py
+==================================================
+
+from actoris_harena import Agent
+import numpy as np
+import cv2
+
+class NoOperation(Agent):
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.name = "human-pixel-pick-and-place-two"
+
+    def act(self, info_list, update=False):
+        """
+        Pop up a window shows the RGB image, and user can click on the image to
+        produce normalised pick-and-place action ranges from [-1, 1]
+        """
+        actions = []
+        for info in info_list:
+            actions.append(self.single_act(info))
+        
+        return actions
+    
+    def single_act(self, state, update=False):
+        """
+        Pop up a window shows the RGB image, and user can click on the image to
+        produce normalised pick-and-place actions for two objects, ranges from [-1, 1]
+        """
+        return np.zeros(0)
+        
+    def init(self, state):
+        pass
+    
+    def update(self, state, action):
+        pass
+
+
+==================================================
+FILE: human_multi_primitive.py
+==================================================
+
+import cv2
+import numpy as np
+from actoris_harena import Agent
+
+from .human_pick_and_fling import HumanPickAndFling
+from .human_dual_pickers_pick_and_place import HumanDualPickersPickAndPlace
+from .human_single_picker_pick_and_place import HumanSinglePickerPickAndPlace
+from .no_operation import NoOperation
+from .utils import draw_text_top_right, overlay_workspaces, overlay_active_goal_contour, append_goal_grid
+
+class HumanMultiPrimitive(Agent):
+    """Router Agent allowing a human user to dynamically switch between action primitives."""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.primitive_names = [
+            "norm-pixel-pick-and-fling",
+            "norm-pixel-dual-pick-and-place",
+            "norm-pixel-single-pick-and-place",
+            "no-operation"
+        ]
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
+        self.primitive_instances = [
+            HumanPickAndFling(config),
+            HumanDualPickersPickAndPlace(config),
+            HumanSinglePickerPickAndPlace(config),
+            NoOperation(config)
+        ]
+    
+    def reset(self, arena_ids):
+        self.internal_states = {arena_id: {} for arena_id in arena_ids}
+        self.last_primitive = None
+    
+    def single_act(self, state, update=False):
+        """Displays observation context, queries user for primitive selection, and executes it."""
+        rgb = cv2.resize(cv2.cvtColor(state['observation']['rgb'], cv2.COLOR_BGR2RGB), (512, 512))
+        
+        if self.overlay_goal_contour:
+            rgb = overlay_active_goal_contour(rgb, state)
+            
+        rgb = overlay_workspaces(rgb, state)
+
+        # Overlay standard evaluation metrics
+        if 'evaluation' in state and state['evaluation']:
+            metrics = state['evaluation']
+            text_lines = [
+                (f"Success: {state['success']}", (0, 255, 0) if state['success'] else (0, 0, 255)),
+                (f"Max IoU(flat): {metrics.get('max_IoU_to_flattened', 0):.3f}", (255, 255, 255)),
+                (f"Align IoU(flat): {metrics.get('algn_IoU_to_flattened', 0):.3f}", (255, 255, 255))
+            ]
+            if 'max_IoU' in metrics:
+                text_lines.append((f"IoU(fold): {metrics['max_IoU']:.3f}", (255, 255, 255)))
+            
+            draw_text_top_right(rgb, text_lines)
+
+        img = append_goal_grid(rgb, state)
+        
+        obs_dir = "tmp/human_rgb.png"
+        cv2.imwrite(obs_dir, img)
+        print(f'[human-multi-primitive] Current Observation logged to {obs_dir}')
+
+        chosen_primitive = None
+        while True:
+            print("\nSelect a Primitive:")
+            for i, prim in enumerate(self.primitive_names):
+                print(f"{i + 1}. {prim}")
+        
+            try:
+                choice = int(input("Selection [1-4]: ")) - 1
+                if 0 <= choice < len(self.primitive_names):
+                    chosen_primitive = self.primitive_names[choice]
+                    self.current_primitive = self.primitive_instances[choice]
+                    break
+                print("Invalid index. Try again.")
+            except ValueError:
+                print("Invalid input. Enter an integer.")
+
+        action = self.current_primitive.single_act(state)
+        self.last_primitive = chosen_primitive
+
+        return {chosen_primitive: action}
+    
+    def terminate(self):
+        return {arena_id: (self.last_primitive == 'no-operation') for arena_id in self.internal_states}
+
+    def init(self, infos): pass
+    def update(self, infos, actions): pass
+
+
+==================================================
+FILE: human_single_picker_pick_and_place.py
+==================================================
+
+import numpy as np
+import cv2
+from actoris_harena import Agent
+from .utils import (
+    overlay_workspaces, overlay_active_goal_contour, append_goal_grid, 
+    get_user_clicks_with_undo, normalize_clicks
+)
+
+class HumanSinglePickerPickAndPlace(Agent):
+    """Interactive policy for executing a single bimanual Pick-and-Place sequence."""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.name = "human-single-picker-pixel-pick-and-place"
+        self.place_orien = config.get('place_orien', False)
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
+    def act(self, info_list, update=False):
+        return [self.single_act(info) for info in info_list]
+    
+    def single_act(self, state, update=False):
+        rgb = cv2.resize(cv2.cvtColor(state['observation']['rgb'], cv2.COLOR_BGR2RGB), (512, 512))
+        rgb = overlay_workspaces(rgb, state)
+
+        if self.overlay_goal_contour:
+            rgb = overlay_active_goal_contour(rgb, state)
+
+        # Build full UI layout
+        img = append_goal_grid(rgb, state)
+
+        # Collect user input
+        clicks = get_user_clicks_with_undo(img, num_clicks=2, window_name='Single Pick & Place (2 clicks)')
+        
+        # Normalize and package action
+        h, w = rgb.shape[:2]
+        action = normalize_clicks(clicks, w, h)
+        
+        if self.place_orien:
+            action.append(0)
+            
+        return np.asarray(action)
+        
+    def init(self, state): pass
+    def update(self, state, action): pass
+
+
+==================================================
+FILE: human_dual_pickers_pick_and_place.py
+==================================================
+
+import numpy as np
+import cv2
+from actoris_harena import Agent
+from .utils import (
+    overlay_workspaces, overlay_active_goal_contour, append_goal_grid, 
+    get_user_clicks_with_undo, normalize_clicks
+)
+
+class HumanDualPickersPickAndPlace(Agent):
+    """Interactive policy for executing dual simultaneous Pick-and-Place sequences."""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.name = "human-pixel-pick-and-place-two"
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
+    def act(self, info_list, update=False):
+        return [self.single_act(info) for info in info_list]
+    
+    def single_act(self, state, update=False):
+        rgb = cv2.resize(cv2.cvtColor(state['observation']['rgb'], cv2.COLOR_BGR2RGB), (512, 512))
+        rgb = overlay_workspaces(rgb, state)
+
+        if self.overlay_goal_contour:
+            rgb = overlay_active_goal_contour(rgb, state)
+
+        # Build full UI layout
+        img = append_goal_grid(rgb, state)
+
+        # Collect user input (4 clicks)
+        clicks = get_user_clicks_with_undo(img, num_clicks=4, window_name='Dual Pick & Place (4 clicks)')
+        
+        # Normalize and package action
+        h, w = rgb.shape[:2]
+        norm = normalize_clicks(clicks, w, h)
+        
+        # Interleave pick_0, pick_1, place_0, place_1
+        return np.concatenate([norm[:2], norm[4:6], norm[2:4], norm[6:]])
+        
+    def init(self, state): pass
+    def update(self, state, action): pass
+
+
+==================================================
+FILE: human_pick_and_fling.py
+==================================================
+
+from actoris_harena import Agent
+import numpy as np
+import cv2
+import os
+from .utils import apply_workspace_shade, CV2_DISPLAY, SIM_DISPLAY
+
+class HumanPickAndFling(Agent):
+    
+        def __init__(self, config):
+            #self.config = config
+            self.name = "human-pixel-pick-and-fling"
+            self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
+
+        def act(self, info_list, update=False):
+            """
+            Pop up a window shows the RGB image, and user can click on the image to
+            produce normalised pick-and-place action ranges from [-1, 1]
+            """
+            actions = []
+            for info in info_list:
+                actions.append(self.single_act(info))
+            
+            return actions
+
+        def single_act(self, state):
+            
+            rgb = state['observation']['rgb']
+        
+        
+            ## make it bgr to rgb using cv2
+            rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+
+            if self.overlay_goal_contour:
+                if 'goals' in state.keys() and isinstance(state['goals'], list) and len(state['goals']) > 0:
+                    
+                    if 'evaluation' in state and 'active_subgoal_idx' in state['evaluation']:
+                        active_idx = state['evaluation']['active_subgoal_idx']
+                    else:
+                        active_idx = 0
+                    
+                    active_goal_state = state['goals'][active_idx]
+                    
+                    if 'observation' in active_goal_state and 'mask' in active_goal_state['observation']:
+                        goal_mask = active_goal_state['observation']['mask']
+                        goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+                        contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        
+                        # --- ADJUSTED: Thinner contour (thickness=1) ---
+                        cv2.drawContours(rgb, contours, -1, (0, 255, 255), 1)
+                        
+                        # --- ADJUSTED: Smaller text, bottom-left corner ---
+                        h, w = rgb.shape[:2]
+                        cv2.putText(rgb, f"Target: Subgoal {active_idx + 1}/{len(state['goals'])}", 
+                                    (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+                                    
+                elif 'goal' in state.keys() and 'mask' in state['goal']:
+                    goal_mask = state['goal']['mask']
+                    goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+                    contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    # --- ADJUSTED: Thinner contour for fallback as well ---
+                    cv2.drawContours(rgb, contours, -1, (0, 255, 255), 1)
+
+            ## resize
+            rgb = cv2.resize(rgb, (512, 512))
+            H, W = rgb.shape[:2]
+            if 'robot0_mask' in state['observation']:
+                mask0 = state['observation']['robot0_mask'].astype(bool)
+
+                if mask0.shape[:2] != (H, W):
+                    mask0 = cv2.resize(
+                        mask0.astype(np.uint8),
+                        (W, H),
+                        interpolation=cv2.INTER_NEAREST
+                    ).astype(bool)
+
+                rgb = apply_workspace_shade(
+                    rgb,
+                    mask0,
+                    color=(255, 0, 0),  # Blue in BGR
+                    alpha=0.2
+                )
+
+            if 'robot1_mask' in state['observation']:
+                mask1 = state['observation']['robot1_mask'].astype(bool)
+
+                if mask1.shape[:2] != (H, W):
+                    mask1 = cv2.resize(
+                        mask1.astype(np.uint8),
+                        (W, H),
+                        interpolation=cv2.INTER_NEAREST
+                    ).astype(bool)
+
+                rgb = apply_workspace_shade(
+                    rgb,
+                    mask1,
+                    color=(0, 0, 255),  # Red in BGR
+                    alpha=0.2
+                )
+
+            
+            
+            # Create a copy of the image to draw on
+            img = rgb.copy()
+
+            if 'goals' in state.keys():
+                goals = state['goals']  # list of goal infos
+
+                # Extract goal RGBs
+                rgbs = []
+                for goal in goals[:4]:  # max 4 for 2x2 grid
+                    g = goal['observation']['rgb']
+
+                    # Ensure RGB
+                    if g.shape[-1] == 3:
+                        g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
+
+                    # Resize to half-size (for 2x2 grid)
+                    g = cv2.resize(g, (256, 256))
+                    rgbs.append(g)
+
+                # Pad with black images if fewer than 4
+                while len(rgbs) < 4:
+                    rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
+
+                # Arrange into 2x2 grid
+                top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
+                bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
+                goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
+                img = np.concatenate([img, goal_rgb], axis=1)
+
+            os.environ["DISPLAY"] = CV2_DISPLAY
+            # Draw vertical white line between the two images
+            line_x = rgb.shape[1]   # x-position = width of left image (512)
+            cv2.line(img, (line_x, 0), (line_x, img.shape[0]), (255, 255, 255), 2)
+            # Store click coordinates
+            clicks = []
+            
+            def mouse_callback(event, x, y, flags, param):
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    clicks.append((x, y))
+                    cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
+                    cv2.imshow('Click Two Pick Points for Fling', img)
+            
+            cv2.imshow('Click Two Pick Points for Fling', img)
+            cv2.setMouseCallback('Click Two Pick Points for Fling', mouse_callback)
+            
+            while len(clicks) < 2:
+                cv2.waitKey(1)
+            
+            cv2.destroyAllWindows()
+            os.environ["DISPLAY"] = SIM_DISPLAY
+            
+            # Normalize the coordinates to [-1, 1]
+            height, width = rgb.shape[:2]
+            pick_y, pick_x = clicks[0]
+            place_y, place_x = clicks[1]
+            
+            normalized_action = [
+                (pick_x / width) * 2 - 1,
+                (pick_y / height) * 2 - 1,
+                (place_x / width) * 2 - 1,
+                (place_y / height) * 2 - 1
+            ]
+            
+            return np.asarray(normalized_action)
+            
+            
+        def get_phase(self):
+            return "default"
+        
+        def terminate(self):
+            return self.step >= 1
+    
+
+
+==================================================
+FILE: combine_files.py
+==================================================
+
+import os
+import glob
+
+def combine_python_files(directory_path, output_filename="combined_code.txt"):
+    """
+    Finds all .py files in a directory and combines them into a single text file.
+    """
+    # Create a search pattern to find all .py files in the specified directory
+    search_pattern = os.path.join(directory_path, "*.py")
+    py_files = glob.glob(search_pattern)
+
+    # Check if any files were found
+    if not py_files:
+        print(f"No Python files found in '{directory_path}'.")
+        return
+
+    try:
+        # Open the output file in write mode
+        with open(output_filename, 'w', encoding='utf-8') as outfile:
+            for file_path in py_files:
+                # Extract just the filename from the full path
+                filename = os.path.basename(file_path)
+                
+                # Write a clear visual header for each file
+                outfile.write(f"{'='*50}\n")
+                outfile.write(f"FILE: {filename}\n")
+                outfile.write(f"{'='*50}\n\n")
+                
+                # Read the contents of the current python file and write it
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as infile:
+                        outfile.write(infile.read())
+                except Exception as e:
+                    outfile.write(f"# Error reading {filename}: {e}\n")
+                
+                # Add some blank space before the next file begins
+                outfile.write("\n\n\n")
+                
+        print(f"Success! Combined {len(py_files)} files into '{output_filename}'.")
+    
+    except Exception as e:
+        print(f"An error occurred while writing the output file: {e}")
+
+# --- Execution ---
+if __name__ == "__main__":
+    # The directory you want to scan. 
+    # "." means the current directory where this script is located.
+    # You can change this to a specific path like "C:/Users/Name/Documents/MyCode"
+    target_directory = "." 
+    
+    # The name of the text file you want to generate
+    output_file = "all_my_python_code.txt"
+    
+    combine_python_files(target_directory, output_file)
+
+
+==================================================
+FILE: real_world_human_policy.py
+==================================================
+
+import time
+import numpy as np
+from termcolor import colored
+from real_robot.utils.human_utils \
+    import click_points_pick_and_place, click_points_pick_and_fling, \
+    click_points_single_pick_and_place  # <-- Added new import here
+from real_robot.utils.save_utils import save_colour, save_mask
+import cv2
+
+from actoris_harena import Agent
+
+class RealWordHumanPolicy(Agent):
+    """Interactive human-in-the-loop policy for giving pick/place actions."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.measure_time = config.get('measure_time', False)
+        self.debug = config.get('debug', False)
+        self.overlay_goal_contour = config.get('overlay_goal_contour', False)
+
+
+    def reset(self, arena_ids):
+        self.internal_states = {arena_id: {} for arena_id in arena_ids}
+        for arena_id in arena_ids:
+            self.internal_states[arena_id]['inference_time'] = []
+
+    def single_act(self, info, update=False):
+        """Get an action dict from user clicks."""
+        # --- Start Timer ---
+        if self.measure_time:
+            start_time = time.time()
+            arena_id = info['arena_id']
+
+        while True:
+            # <-- Updated prompt text to match the logic mapping below
+            cmd = input(colored("\n[RealWordHumanPolicy] Skill [1=pick-fling, 2=dual-pick-place, 3=single-pick-place, 4=no-operation, q=quit]: ", "green")).strip().lower()
+            if cmd in ("q", "quit"):
+                return None
+            elif cmd == "1":
+                prim_type = "pick_and_fling"
+                break
+            elif cmd == "2":
+                prim_type = "dual_pick_and_place"
+                break
+            elif cmd == "3":
+                prim_type = "single_pick_and_place"
+                break
+            elif cmd == '4':
+                prim_type = "no_operation"
+                break
+            else:
+                print(colored("[RealWordHumanPolicy] Invalid command. Please enter 1, 2, 3, 4 or q.", "red"))
+
+        # Unpack scene info
+        rgb, depth = info['observation']["rgb"], info['observation']["depth"]
+        mask = info['observation']["mask"]
+        workspace_mask_0, workspace_mask_1 = info['observation']["robot0_mask"], info['observation']["robot1_mask"]
+        
+        if self.debug:
+            save_colour(rgb, 'policy_input_rgb', './tmp')
+            save_mask(mask, 'policy_input_mask', './tmp')
+            save_mask(workspace_mask_0, 'policy_input_workspace_mask_0', './tmp')
+            save_mask(workspace_mask_1, 'policy_input_workspace_mask_1', './tmp')
+        
+        display_rgb = self.apply_workspace_masks(rgb, workspace_mask_0, workspace_mask_1)
+
+        if self.overlay_goal_contour:
+            goal_mask = info['goal']['mask']
+
+            goal_mask_uint8 = np.array(goal_mask * 255, dtype=np.uint8)
+
+            contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            display_rgb = cv2.drawContours(display_rgb, contours, -1, (0, 255, 255), 1)
+            
+        h, w = rgb.shape[:2]
+
+        # Shared normalisation function
+        def norm_xy(pt):
+            y, x = pt
+            return ((x / w) * 2 - 1, (y / h) * 2 - 1)
+
+        # -------------------------------
+        # Dual Pick & Place
+        # -------------------------------
+        if prim_type == "dual_pick_and_place":
+            clicks = click_points_pick_and_place("Pick & Place", display_rgb, mask)
+
+            pick_0, place_0, pick_1, place_1 = clicks
+
+            pick_0_norm = norm_xy(pick_0)
+            place_0_norm = norm_xy(place_0)
+            pick_1_norm = norm_xy(pick_1)
+            place_1_norm = norm_xy(place_1)
+
+            action = {
+                "norm-pixel-dual-pick-and-place": \
+                    np.concatenate([pick_0_norm, pick_1_norm, place_0_norm, place_1_norm])
+            }
+
+        # -------------------------------
+        # Single Pick & Place (NEW BLOCK)
+        # -------------------------------
+        elif prim_type == "single_pick_and_place":
+            clicks = click_points_single_pick_and_place("Single Pick & Place", display_rgb, mask)
+
+            pick_0, place_0 = clicks
+
+            pick_0_norm = norm_xy(pick_0)
+            place_0_norm = norm_xy(place_0)
+
+            action = {
+                "norm-pixel-single-pick-and-place": \
+                    np.concatenate([pick_0_norm, place_0_norm])
+            }
+
+        # -------------------------------
+        # Pick & Fling
+        # -------------------------------
+        elif prim_type == "pick_and_fling":
+            clicks = click_points_pick_and_fling("Pick & Fling", display_rgb, mask)
+
+            pick_0, pick_1 = clicks
+
+            pick_0_norm = norm_xy(pick_0)
+            pick_1_norm = norm_xy(pick_1)
+
+            action = {
+                "norm-pixel-pick-and-fling": \
+                    np.concatenate([pick_0_norm, pick_1_norm])
+            }
+
+        # -------------------------------
+        # No Operation
+        # -------------------------------
+        elif prim_type == 'no_operation':
+            action = {"no-operation": np.zeros(8)}
+
+        else:
+            raise ValueError(f"Unknown skill type: {prim_type}")
+        
+
+        # --- End Timer & Store Duration ---
+        if self.measure_time:
+            self.internal_states[arena_id]['inference_time'].append(time.time() - start_time)
+        
+        return action
+
+    def apply_workspace_masks(self, rgb, robot_0_mask, robot_1_mask):
+        # Ensure masks are boolean and 2D
+        robot_0_mask = robot_0_mask.astype(bool)
+        robot_1_mask = robot_1_mask.astype(bool)
+        
+        # Remove channel dimension if any (H, W, 1) → (H, W)
+        if robot_0_mask.ndim == 3:
+            robot_0_mask = robot_0_mask[:, :, 0]
+        if robot_1_mask.ndim == 3:
+            robot_1_mask = robot_1_mask[:, :, 0]
+
+        combined_mask = robot_0_mask | robot_1_mask
+
+        rgb_f = rgb.astype(np.float32) / 255.0
+
+        robot_0_tint = np.array([0.2, 0.5, 1.0])
+        robot_1_tint = np.array([1.0, 0.4, 0.4])
+        gray_tint  = np.array([0.5, 0.5, 0.5])
+
+        blend_outside = 0.3
+        blend_robot_0 = 0.7
+        blend_robot_1 = 0.7
+
+        shaded_rgb = rgb_f.copy()
+
+        # --- FIXED LINE ---
+        shaded_rgb[~combined_mask] = (
+            rgb_f[~combined_mask] * blend_outside + gray_tint * (1 - blend_outside)
+        )
+
+        robot_0_only = robot_0_mask & ~robot_1_mask
+        shaded_rgb[robot_0_only] = (
+            rgb_f[robot_0_only] * blend_robot_0 + robot_0_tint * (1 - blend_robot_0)
+        )
+
+        robot_1_only = robot_1_mask & ~robot_0_mask
+        shaded_rgb[robot_1_only] = (
+            rgb_f[robot_1_only] * blend_robot_1 + robot_1_tint * (1 - blend_robot_1)
+        )
+
+        overlap_mask = robot_0_mask & robot_1_mask
+        if np.any(overlap_mask):
+            purple_tint = np.array([0.7, 0.4, 0.9])
+            blend_overlap = 0.4
+            shaded_rgb[overlap_mask] = (
+                rgb_f[overlap_mask] * blend_overlap + purple_tint * (1 - blend_overlap)
+            )
+
+        shaded_rgb = (np.clip(shaded_rgb, 0, 1) * 255).astype(np.uint8)
+        return shaded_rgb
+
+
+==================================================
+FILE: real_world_human_single_arm_pick_and_place_policy.py
+==================================================
+
+import time
+import cv2
+import numpy as np
+from actoris_harena import Agent
+
+class RealWorldSingleArmHumanPickAndPlacePolicy(Agent):
+    """
+    Interactive human-in-the-loop policy for Single-Arm Pick & Place.
+    Returns: np.array([pick_x, pick_y, place_x, place_y]) in normalized [-1, 1] range.
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.measure_time = config.get('measure_time', False)
+        self.debug = config.get('debug', False)
+        self.window_name = "Single Arm Human Policy"
+
+    def reset(self, arena_ids):
+        self.internal_states = {arena_id: {} for arena_id in arena_ids}
+        for arena_id in arena_ids:
+            self.internal_states[arena_id]['inference_time'] = []
+
+    def single_act(self, info, update=False):
+        """Get a single-arm action from user clicks."""
+        
+        # --- Start Timer ---
+        if self.measure_time:
+            start_time = time.time()
+            arena_id = info['arena_id']
+
+
+        # 2. Process Observation for Visualization
+        obs = info['observation']
+        rgb = obs["rgb"]
+        
+        # Handle mask: simpler logic for single arm
+        # We only care about robot0_mask (the UR5e)
+        workspace_mask = obs.get("robot0_mask", np.ones(rgb.shape[:2], dtype=bool))
+        
+        # Visualization: Gray out invalid areas, tint blue valid areas
+        display_rgb = self.apply_workspace_mask(rgb, workspace_mask)
+        
+        h, w = rgb.shape[:2]
+
+        # 3. Handle Primitives
+        action_array = np.zeros(4, dtype=np.float32)
+
+        # Get 2 clicks: Pick (Green), Place (Red)
+        print(f"Please click: 1. Pick Point, 2. Place Point")
+        clicks = self.get_user_clicks(display_rgb, num_points=2)
+        
+        if len(clicks) < 2: 
+            print("Action cancelled.")
+            # Return zeros (No-Op) if cancelled
+            return np.zeros(4, dtype=np.float32)
+
+        pick_pt, place_pt = clicks
+
+        # Normalize to [-1, 1]
+        def norm_xy(pt):
+            y, x= pt
+            return ((x / w) * 2 - 1, (y / h) * 2 - 1)
+
+        pick_norm = norm_xy(pick_pt)
+        place_norm = norm_xy(place_pt)
+
+        # Return flattened array directly: [px, py, lx, ly]
+        action_array = np.concatenate([pick_norm, place_norm]).astype(np.float32)
+
+        # --- End Timer ---
+        if self.measure_time:
+            self.internal_states[arena_id]['inference_time'].append(time.time() - start_time)
+        
+        return action_array
+
+    def apply_workspace_mask(self, rgb, mask):
+        """
+        Visualizes the valid workspace for the single arm.
+        Valid area = Blue tint.
+        Invalid area = Grayed out.
+        """
+        # Ensure boolean
+        mask = mask.astype(bool)
+        if mask.ndim == 3: mask = mask[:, :, 0]
+
+        rgb_f = rgb.astype(np.float32) / 255.0
+        
+        # Colors
+        valid_tint = np.array([0.2, 0.6, 1.0]) # Nice Blue
+        gray_tint  = np.array([0.3, 0.3, 0.3]) # Dark Gray
+
+        blend_valid = 0.2
+        blend_invalid = 0.6
+
+        shaded = rgb_f.copy()
+
+        # Apply Gray to invalid
+        shaded[~mask] = (
+            rgb_f[~mask] * (1 - blend_invalid) + gray_tint * blend_invalid
+        )
+
+        # Apply Blue to valid
+        shaded[mask] = (
+            rgb_f[mask] * (1 - blend_valid) + valid_tint * blend_valid
+        )
+
+        return (np.clip(shaded, 0, 1) * 255).astype(np.uint8)
+
+    def get_user_clicks(self, img, num_points=2):
+        """
+        Self-contained OpenCV click listener.
+        Returns a list of (x, y) tuples.
+        """
+        points = []
+        img_display = img.copy()
+        
+        # Colors for dots: Green (Pick), Red (Place)
+        colors = [(0, 255, 0), (0, 0, 255)] 
+
+        def mouse_callback(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                if len(points) < num_points:
+                    points.append((x, y))
+                    # Draw circle
+                    idx = len(points) - 1
+                    color = colors[idx] if idx < len(colors) else (255, 255, 0)
+                    cv2.circle(img_display, (x, y), 5, color, -1)
+                    cv2.imshow(self.window_name, img_display)
+
+        cv2.namedWindow(self.window_name)
+        cv2.setMouseCallback(self.window_name, mouse_callback)
+        cv2.imshow(self.window_name, img_display)
+
+        print(f"Waiting for {num_points} clicks...")
+        
+        while len(points) < num_points:
+            key = cv2.waitKey(10) & 0xFF
+            if key == ord('q') or key == 27: # q or ESC
+                break
+        
+        # Brief pause to show the final dots
+        cv2.waitKey(200)
+        cv2.destroyWindow(self.window_name)
+        
+        return points
+
+
+==================================================
+FILE: utils.py
+==================================================
+
+"""
+Utility functions for environment rendering, interactive UI, and image processing.
+Centralizes OpenCV rendering logic to prevent redundancy across human policy agents.
+"""
+
+import os
+import cv2
+import numpy as np
+
+# Display Configuration
+REMOTE = True
+ACTUAL_DISPLAY = os.environ.get("DISPLAY", "localhost:10.0")
+CV2_DISPLAY = "localhost:10.0" if REMOTE else ":0"
+SIM_DISPLAY = "" if REMOTE else ":0"
+
+def overlay_workspaces(rgb: np.ndarray, state: dict) -> np.ndarray:
+    """
+    Overlays the workspace masks for robot0 and robot1 onto the provided RGB image.
+
+    Args:
+        rgb (np.ndarray): The raw RGB image from the environment.
+        state (dict): The environment state dictionary containing masks.
+
+    Returns:
+        np.ndarray: The RGB image with shaded workspace overlays.
+    """
+    H, W = rgb.shape[:2]
+    
+    for robot_key, color in [('robot0_mask', (255, 0, 0)), ('robot1_mask', (0, 0, 255))]:
+        if robot_key in state['observation']:
+            mask = state['observation'][robot_key].astype(bool)
+            
+            # Resize if dimensions mismatch
+            if mask.shape[:2] != (H, W):
+                mask = cv2.resize(
+                    mask.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST
+                ).astype(bool)
+
+            rgb = apply_workspace_shade(rgb, mask, color=color, alpha=0.2)
+            
+    return rgb
+
+def apply_workspace_shade(rgb: np.ndarray, mask: np.ndarray, color: tuple, alpha: float = 0.35) -> np.ndarray:
+    """
+    Applies a semi-transparent color shade over a specified boolean mask.
+    """
+    shaded = rgb.copy()
+    overlay = np.zeros_like(rgb, dtype=np.uint8)
+    overlay[:] = color
+
+    shaded[mask] = cv2.addWeighted(rgb[mask], 1 - alpha, overlay[mask], alpha, 0)
+    return shaded
+
+def draw_text_top_right(img: np.ndarray, lines: list, margin: int = 10, font_scale: float = 0.7, thickness: int = 2):
+    """
+    Draws multiple text lines with black background boxes at the top-right corner.
+    """
+    h, w = img.shape[:2]
+    y = margin + 20
+
+    for text, color in lines:
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        x = w - tw - margin
+
+        # Draw background box
+        cv2.rectangle(img, (x - 5, y - th - 5), (x + tw + 5, y + 5), (0, 0, 0), -1)
+        # Draw text
+        cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
+        
+        y += th + 15
+
+def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
+    """
+    Identifies the currently active subgoal, overlays its contour on the RGB image,
+    and displays the current vs. target IoU progress.
+    """
+    # Thresholds matching your GarmentFoldingTask
+    TARGET_THRESHOLDS = [0.80, 0.80, 0.82]
+    FONT_SCALE = 0.35
+    
+    if 'goals' in state and isinstance(state['goals'], list) and len(state['goals']) > 0:
+        active_idx = state.get('evaluation', {}).get('active_subgoal_idx', 0)
+        active_goal_state = state['goals'][active_idx]
+        
+        if 'observation' in active_goal_state and 'mask' in active_goal_state['observation']:
+            goal_mask = active_goal_state['observation']['mask']
+            current_mask = state['observation']['mask']
+            
+            # Draw the contour
+            _draw_contour(rgb, goal_mask)
+            
+            # Calculate dynamic progress
+            current_iou = calculate_aligned_iou(current_mask, goal_mask)
+            target_iou = TARGET_THRESHOLDS[active_idx] if active_idx < len(TARGET_THRESHOLDS) else 0.80
+            
+            # UI Feedback Colors (Green if passing, Yellow if pending)
+            progress_color = (0, 255, 0) if current_iou >= target_iou else (0, 255, 255)
+            
+            h, w = rgb.shape[:2]
+            cv2.putText(rgb, f"Target: Subgoal {active_idx + 1}/{len(state['goals'])}", 
+                        (10, h - 25), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), 1)
+            cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}", 
+                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, 1)
+                        
+    elif 'goal' in state and 'mask' in state['goal']:
+        goal_mask = state['goal']['mask']
+        current_mask = state['observation']['mask']
+        
+        _draw_contour(rgb, goal_mask)
+        
+        current_iou = calculate_aligned_iou(current_mask, goal_mask)
+        target_iou = 0.80 # Fallback target
+        progress_color = (0, 255, 0) if current_iou >= target_iou else (0, 255, 255)
+        
+        h, w = rgb.shape[:2]
+        cv2.putText(rgb, f"Target: Final Goal", 
+                    (10, h - 25), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), 1)
+        cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}", 
+                    (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, 1)
+        
+    return rgb
+
+def _draw_contour(img: np.ndarray, mask: np.ndarray):
+    """Internal helper to extract and draw contours from a binary mask."""
+    mask_uint8 = np.array(mask * 255, dtype=np.uint8)
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(img, contours, -1, (0, 255, 255), 1)
+
+def append_goal_grid(img: np.ndarray, state: dict) -> np.ndarray:
+    """
+    Appends a 2x2 grid of up to 4 subgoal images to the right side of the main observation.
+    """
+    if 'goals' not in state:
+        # Fallback to single goal appending if no multi-stage goals exist
+        if 'goal' in state and 'rgb' in state['goal']:
+            goal_rgb = cv2.cvtColor(state['goal']['rgb'], cv2.COLOR_BGR2RGB)
+            goal_rgb = cv2.resize(goal_rgb, (img.shape[0], img.shape[0]))
+            return np.concatenate([img, goal_rgb], axis=1)
+        return img
+
+    rgbs = []
+    for goal in state['goals'][:4]:  # Max 4 for a 2x2 grid
+        g = goal['observation']['rgb']
+        if g.shape[-1] == 3:
+            g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
+        g = cv2.resize(g, (256, 256))
+        rgbs.append(g)
+
+    # Pad missing goals with black squares
+    while len(rgbs) < 4:
+        rgbs.append(np.zeros((256, 256, 3), dtype=np.uint8))
+
+    top_row = np.concatenate([rgbs[0], rgbs[1]], axis=1)
+    bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
+    goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
+    
+    # Concatenate horizontal and draw separator
+    combined_img = np.concatenate([img, goal_rgb], axis=1)
+    cv2.line(combined_img, (img.shape[1], 0), (img.shape[1], combined_img.shape[0]), (255, 255, 255), 2)
+    
+    return combined_img
+
+def get_user_clicks_with_undo(img: np.ndarray, num_clicks: int, window_name: str) -> list:
+    """
+    Spawns an interactive OpenCV window to collect a precise number of clicks.
+    Includes a dedicated Undo panel.
+
+    Args:
+        img (np.ndarray): The image to display.
+        num_clicks (int): The target number of clicks to collect before returning.
+        window_name (str): Title of the OpenCV window.
+
+    Returns:
+        list: A list of (x, y) tuples representing the user's clicks.
+    """
+    os.environ["DISPLAY"] = CV2_DISPLAY
+    clicks = []
+    
+    # Configure Undo panel dimensions
+    panel_width = 80
+    button_top_left = (10, 10)
+    button_bottom_right = (panel_width - 10, 50)
+
+    def redraw_image():
+        temp_img = img.copy()
+        
+        # Plot existing clicks sequentially
+        for i, (x, y) in enumerate(clicks):
+            color = (0, 255, 0) if i < 2 else (0, 0, 255) # Green for first pair, Red for second
+            if i % 2 == 0:  # Pick action
+                cv2.circle(temp_img, (x, y), 5, color, -1)
+            else:           # Place action
+                cv2.drawMarker(temp_img, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=10, thickness=2)
+
+        # Render sidebar panel and button
+        panel_img = np.ones((img.shape[0], panel_width, 3), dtype=np.uint8) * 50
+        cv2.rectangle(panel_img, button_top_left, button_bottom_right, (0, 0, 0), -1)
+        cv2.putText(panel_img, 'UNDO', (button_top_left[0] + 5, button_top_left[1] + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        display_img = np.concatenate([temp_img, panel_img], axis=1)
+        cv2.imshow(window_name, display_img)
+
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if x >= img.shape[1]:  # Clicked in the side panel
+                panel_x = x - img.shape[1]
+                if (button_top_left[0] <= panel_x <= button_bottom_right[0] and 
+                    button_top_left[1] <= y <= button_bottom_right[1]):
+                    if clicks:
+                        clicks.pop()
+                        redraw_image()
+            else:  # Clicked on the image
+                if len(clicks) < num_clicks:
+                    clicks.append((x, y))
+                    redraw_image()
+
+    redraw_image()
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    while len(clicks) < num_clicks:
+        cv2.waitKey(1)
+
+    cv2.destroyAllWindows()
+    os.environ["DISPLAY"] = SIM_DISPLAY
+    return clicks
+
+def calculate_aligned_iou(mask1: np.ndarray, mask2: np.ndarray) -> float:
+    """Computes the Translation-Invariant (Center-of-Mass aligned) IoU between two masks."""
+    y_c, x_c = np.where(mask1)
+    y_g, x_g = np.where(mask2)
+    
+    if len(y_c) > 0 and len(y_g) > 0:
+        cy_c, cx_c = int(np.mean(y_c)), int(np.mean(x_c))
+        cy_g, cx_g = int(np.mean(y_g)), int(np.mean(x_g))
+        dy, dx = cy_g - cy_c, cx_g - cx_c
+        
+        shifted_mask = np.zeros_like(mask1)
+        y1_s, y2_s = max(0, dy), min(mask1.shape[0], mask1.shape[0] + dy)
+        x1_s, x2_s = max(0, dx), min(mask1.shape[1], mask1.shape[1] + dx)
+        y1_c, y2_c = max(0, -dy), min(mask1.shape[0], mask1.shape[0] - dy)
+        x1_c, x2_c = max(0, -dx), min(mask1.shape[1], mask1.shape[1] - dx)
+        
+        shifted_mask[y1_s:y2_s, x1_s:x2_s] = mask1[y1_c:y2_c, x1_c:x2_c]
+        
+        intersection = np.logical_and(shifted_mask, mask2).sum()
+        union = np.logical_or(shifted_mask, mask2).sum()
+        return float(intersection / union) if union > 0 else 0.0
+    return 0.0
+
+def normalize_clicks(clicks: list, width: int, height: int, header_offset: int = 0) -> list:
+    """
+    Converts raw pixel coordinates to normalized [-1, 1] coordinates.
+    """
+    normalized = []
+    for x, y in clicks:
+        adj_y = y - header_offset
+        normalized.extend([
+            (x / width) * 2 - 1,
+            (adj_y / height) * 2 - 1
+        ])
+    return normalized
+
+

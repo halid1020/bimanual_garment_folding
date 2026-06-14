@@ -206,7 +206,12 @@ class MagpieTrainer:
                     
                     # Convert primitive ID back to normalized [-1, 1] bin format
                     prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
-                    add_action = np.zeros(self.agent.data_save_action_dim)
+                    
+                    # --- FIXED: Dynamically allocate enough space for the primitive ID + parameters ---
+                    # Ensures the array is at least size 9 for dual-pick-and-place
+                    action_size = max(getattr(self.agent, 'data_save_action_dim', 0), action_param.shape[0] + 1)
+                    add_action = np.zeros(action_size)
+                    
                     add_action[0] = prim_act
                     add_action[1:action_param.shape[0]+1] = action_param
                 elif self.config.primitive_integration == 'none':

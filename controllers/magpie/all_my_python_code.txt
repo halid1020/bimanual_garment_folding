@@ -2,6 +2,15 @@
 FILE: magpie_trainer.py
 ==================================================
 
+"""
+Magpie Trainer Module.
+
+This module contains the MagpieTrainer class, which orchestrates the data loading, 
+validation, and training loops for the Magpie diffusion-based robotics agent. It 
+supports both standard Denoising Diffusion Probabilistic Models (DDPM) and 
+Optimal Transport (OT) Flow Matching, along with primitive action integration.
+"""
+
 import os
 import torch
 import torch.nn as nn
@@ -16,13 +25,38 @@ from .dataset import DiffusionDataset
 from .utils import compute_classification_metrics
 
 class MagpieTrainer:
+    """
+    Coordinates the training and validation pipelines for the MagpieAgent.
+
+    Attributes:
+        agent: The core diffusion agent containing the networks and state.
+        config (DotMap): Configuration dictionary containing hyperparameters.
+        device (torch.device): Hardware device (CPU/GPU) for tensor operations.
+    """
+
     def __init__(self, agent):
+        """
+        Initializes the MagpieTrainer with a reference to the main agent.
+
+        Args:
+            agent: The MagpieAgent instance containing neural networks and config.
+        """
         self.agent = agent
         self.config = agent.config
         self.device = agent.device
 
     def _init_dataset(self):
-        """Initializes the standard trajectory dataset and optional ROS."""
+        """
+        Initializes the standard trajectory dataset and prepares PyTorch DataLoaders.
+
+        Configures either a 'diffusion' or 'general' dataset mode. If primitive 
+        integration is enabled, it sets up Random Oversampling (ROS) using a 
+        WeightedRandomSampler to mitigate class imbalance among primitive actions.
+
+        Raises:
+            ValueError: If an unsupported `dataset_mode` is provided.
+        """
+        # 1. Dataset Instantiation
         if self.config.dataset_mode == 'diffusion':
             train_dataset = DiffusionDataset(
                 dataset_path=self.config.dataset_path,
@@ -31,6 +65,7 @@ class MagpieTrainer:
                 action_horizon=self.config.action_horizon
             )
             self.agent.stats = train_dataset.stats
+            
         elif self.config.dataset_mode == 'general':
             from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
             config_dict = self.config.dataset_config.toDict()
@@ -39,9 +74,9 @@ class MagpieTrainer:
             if self.agent.validate_training:
                 val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
         else:
-            raise ValueError('Invalid dataset mode')
+            raise ValueError('Invalid dataset mode. Expected "diffusion" or "general".')
 
-        # Random Oversampling (ROS) Logic
+        # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
         use_ros = self.config.get('use_random_oversampling', False)
         sampler = None
         shuffle_data = True
@@ -53,21 +88,26 @@ class MagpieTrainer:
             class_counts = np.zeros(self.agent.K)
             sample_classes = []
             
+            # Tally occurrences of each primitive class
             for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
                 action_data = train_dataset[i]['action']
                 act_key = list(action_data.keys())[0]
                 prim_bin = action_data[act_key][0][0] 
+                
+                # Extract and normalize the primitive ID
                 prim_id = int(np.clip((((prim_bin + 1) / 2) * self.agent.K), 0, self.agent.K - 1))
                 class_counts[prim_id] += 1
                 sample_classes.append(prim_id)
                 
+            # Assign higher selection weights to underrepresented classes
             class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
             sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
             
             sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
-            shuffle_data = False 
+            shuffle_data = False # Must disable native shuffling when using a custom sampler
             print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
 
+        # 3. DataLoader Performance Optimization
         torch.backends.cudnn.benchmark = True
         num_workers = self.config.get('num_workers', 0)
         persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
@@ -88,14 +128,22 @@ class MagpieTrainer:
         self.agent.dataset_inited = True
 
     def _init_demo_policy_dataset(self, arenas):
-        """Initializes dataset by rolling out a demonstrator policy."""
+        """
+        Initializes the dataset by rolling out a demonstrator policy in the environment.
+
+        Instead of loading pre-collected data, this method actively collects 
+        trajectories from an expert policy until the desired number of demos is reached.
+
+        Args:
+            arenas (list): A list containing the simulation environments to roll out in.
+        """
         arena = arenas[0]
         org_horizon = arena.action_horizon
         arena.action_horizon = self.config.get('demo_horizon', org_horizon)
         
         from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
         config_dict = self.config.dataset_config
-        config_dict['io_mode'] = 'a'
+        config_dict['io_mode'] = 'a' # Append mode
         train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
 
         import actoris_harena as ag_ar
@@ -108,6 +156,7 @@ class MagpieTrainer:
         episode_id = train_dataset.num_trajectories()
         train_configs = arena.get_train_configs()
         
+        # 1. Trajectory Collection Loop
         while train_dataset.num_trajectories() < self.config.num_demos:
             observations = {obs_type: [] for obs_type in train_dataset.obs_types}
             actions = {act_type: [] for act_type in train_dataset.action_types}
@@ -122,6 +171,7 @@ class MagpieTrainer:
                 action = policy.single_act(info)
                 if action is None: break
                 
+                # Store and format vision/mask observations
                 for k, v in info['observation'].items():
                     if k in observations.keys():
                         if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -133,11 +183,14 @@ class MagpieTrainer:
                         else:
                             observations[k].append(v)
                 
+                # Handle primitive action mapping
                 add_action = action
                 if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks']: 
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.agent.prim_name2id[action_name]
+                    
+                    # Convert primitive ID back to normalized [-1, 1] bin format
                     prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
                     add_action = np.zeros(self.agent.data_save_action_dim)
                     add_action[0] = prim_act
@@ -152,6 +205,7 @@ class MagpieTrainer:
                 done = info['done']
                 if self.agent.collect_on_success and info['success']: break
             
+            # Capture final terminal observation
             for k, v in info['observation'].items():
                 if k in observations.keys():
                     if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
@@ -163,6 +217,7 @@ class MagpieTrainer:
                     else:
                         observations[k].append(v)
                         
+            # Save successful trajectories
             if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
                 for k, v in observations.items():
                     observations[k] = np.stack(v)
@@ -174,33 +229,35 @@ class MagpieTrainer:
 
         arena.action_horizon = org_horizon
         
-        # ROS setup skipped here for brevity, mirror logic from _init_dataset
+        # ROS setup skipped here for brevity, mirrors logic from _init_dataset
         self.agent.dataloader = torch.utils.data.DataLoader(
             train_dataset, batch_size=self.config.batch_size, shuffle=True, pin_memory=self.config.get('pin_memory', False)
         )
         self.agent.dataset_inited = True
 
     def validate(self):
-        """Runs the validation loop across the validation dataloader."""
+        """
+        Executes the validation loop across the validation dataloader.
+
+        Computes action MSE, state prediction L2 distance, and primitive 
+        classification accuracy (if applicable). Logs all metrics to wandb.
+        """
         if not hasattr(self.agent, 'val_dataloader'):
             print("[Validation] No validation dataloader found. Skipping.")
             return
 
         self.agent.nets.eval() 
         
-        # --- RESTORED: Logging Accumulators ---
-        val_prim_losses = []
-        val_state_mse = []
-        val_state_l2 = []
-        val_action_mse = []
-        all_preds = []
-        all_gts = []
+        # Metrics Accumulators
+        val_prim_losses, val_state_mse, val_state_l2, val_action_mse = [], [], [], []
+        all_preds, all_gts = [], []
         
         print(f"--- Running Validation at Step {self.agent.update_step} ---")
         
         with torch.no_grad():
             for nbatch in self.agent.val_dataloader:
                 
+                # 1. Observation Pre-processing
                 if self.config.dataset_mode == 'general':
                     obs = nbatch['observation']
                     action = nbatch['action']['default']
@@ -208,7 +265,7 @@ class MagpieTrainer:
                     nbatch['action'] = action.reshape(*action.shape[:2], -1)
                     nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
 
-                # Construct Composite Observations
+                # Construct composite multi-modal observations
                 if self.config.input_obs == 'rgbd':
                     nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
                 if self.config.input_obs == 'rgb-workspace-mask':
@@ -223,7 +280,7 @@ class MagpieTrainer:
                 B = nbatch[self.config.input_obs].shape[0]
                 input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
                 
-                # Vision Extraction
+                # 2. Extract Vision and State Features
                 if self.agent.vision_encoder_type == 'original':
                     image_features = self.agent.nets['vision_encoder'](input_obs)
                     obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
@@ -239,7 +296,7 @@ class MagpieTrainer:
 
                 obs_cond = obs_features.flatten(start_dim=1)
                 
-                # --- RESTORED: Validate Keypoint Precision and State Loss ---
+                # 3. Validate State Predictor Representation Learning
                 if self.agent.rep_learn == 'predict-state':
                     pred_combined = self.agent.nets['state_predictor'](obs_features)
                     state_key = self.config.get('state_key', 'semkey_norm_pixel')
@@ -268,7 +325,7 @@ class MagpieTrainer:
                         mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
                         val_state_mse.append(mse_loss.item())
 
-                # Validation Primitive Logic
+                # 4. Validate Primitive Classification Head
                 gt_prim_ids = None
                 if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
@@ -278,7 +335,6 @@ class MagpieTrainer:
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
                     
-                    # --- RESTORED: Primitive Metric Accumulation ---
                     loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
                     val_prim_losses.append(loss.item())
                     all_preds.extend(preds.cpu().numpy())
@@ -292,10 +348,11 @@ class MagpieTrainer:
                 else:
                     gt_action = nbatch['action'].to(self.device)
 
+                # 5. Full Evaluation Denoising Pass
                 eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
                 loss_type = self.config.get('loss_type', 'diffusion')
                 
-                # Reverse Diffusion / Flow Matching Loop
+                # Branch: Optimal Transport Flow Matching
                 if loss_type == 'ot_flow_match':
                     num_steps = self.config.num_diffusion_iters
                     dt = 1.0 / num_steps
@@ -318,6 +375,8 @@ class MagpieTrainer:
                             v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
                             
                         eval_naction = eval_naction + v_pred * dt
+                
+                # Branch: Standard DDPM Reverse Diffusion
                 else:
                     self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
                     for k in self.agent.noise_scheduler.timesteps:
@@ -339,22 +398,24 @@ class MagpieTrainer:
                             
                         eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
 
+                # 6. Action MSE Calculation
                 pred_action = eval_naction[..., :self.agent.network_action_dim]
                 
+                # Only calculate loss on the valid action dimensions corresponding to the chosen primitive
                 if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
                     mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
                     for b in range(B):
                         mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
                     
                     diff = (pred_action - gt_action) * mask
-                    valid_count = mask.sum().clamp(min=1.0)
+                    valid_count = mask.sum().clamp(min=1.0) # Avoid div by zero
                     mse = (diff ** 2).sum() / valid_count
                 else:
                     mse = nn.functional.mse_loss(pred_action, gt_action)
                 
                 val_action_mse.append(mse.item())
 
-        # --- RESTORED: Metric Aggregation and wandb Integration ---
+        # 7. Metric Aggregation and wandb Integration
         metrics = {}
         if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
         if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
@@ -382,13 +443,20 @@ class MagpieTrainer:
         self.agent.nets.train()
 
     def train(self, update_steps, arenas):
-        """Main Training Loop."""
+        """
+        Executes the main training optimization loop.
+
+        Args:
+            update_steps (int): Total number of gradient steps to take in this call.
+            arenas (list): Simulation environments (required if training from policy).
+        """
         if not self.agent.dataset_inited:
             if self.config.train_mode == 'from_dataset':
                 self._init_dataset()
             elif self.config.train_mode == 'from_policy':
                 self._init_demo_policy_dataset(arenas)
         
+        # Ensure we don't overshoot total configured steps
         update_steps = min(self.config.total_update_steps - self.agent.update_step, update_steps)
         
         if self.config.get('freeze_encoder', False):
@@ -404,6 +472,7 @@ class MagpieTrainer:
         for i in pbar:
             nbatch = next(train_iter)
             
+            # 1. Input Batch Setup
             if self.config.dataset_mode == 'diffusion':
                 nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
             else:
@@ -425,18 +494,19 @@ class MagpieTrainer:
             use_amp = self.config.get('use_amp', False)
 
             with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
-                # 1. Forward Features
+                # 2. Forward Feature Extraction
                 image_features = self.agent.nets['vision_encoder'](input_obs.to(self.device))
                 obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
                 
                 if getattr(self.agent, 'use_projector', False):
                     obs_features = self.agent.nets['obs_projector'](obs_features)
 
+                # Add noise to conditioning features for robustness
                 if self.agent.nets.training:
                     noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
                     obs_features = obs_features + noise
 
-                # --- RESTORED: rep_loss tracking ---
+                # 3. Representation Learning Auxiliary Losses
                 rep_loss = torch.tensor(0.0, device=self.device)
                 
                 if self.agent.rep_learn == 'auto-encoder':
@@ -465,7 +535,7 @@ class MagpieTrainer:
                     
                 obs_cond = obs_features.flatten(start_dim=1)
 
-                # 2. Extract targets based on primitive integration
+                # 4. Primitive Classification Loss
                 gt_prim_ids = None
                 prim_loss = torch.tensor(0.0, device=self.device)
                 
@@ -475,12 +545,10 @@ class MagpieTrainer:
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
                     
-                    # --- RESTORED: Training Primitive Logging ---
                     weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
                     class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
                     prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
 
-                    # FIX: Fetch directly from config with a fallback default of 200
                     log_every = self.config.get('log_prim_metrics_every', 200)
                     
                     if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
@@ -497,13 +565,14 @@ class MagpieTrainer:
                             )}
                             self.agent.logger.log(confusion, step=self.agent.update_step)
 
-                    nbatch['action'] = nbatch['action'][:, :, 1:] # Slice off bin selector
+                    # Remove primitive bin from action target
+                    nbatch['action'] = nbatch['action'][:, :, 1:] 
 
                     if self.agent.primitive_integration == 'one-hot-encoding':
                         prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
-                # --- RESTORED: Joint Diffusion Target (State Prediction via Diffusion) ---
+                # 5. Build Diffusion Target
                 if self.agent.rep_learn == 'predict-state-with-action':
                     state_key = self.config.get('state_key', 'semkey_norm_pixel')
                     gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
@@ -522,11 +591,12 @@ class MagpieTrainer:
                     
                 loss_type = self.config.get('loss_type', 'diffusion')
 
-                # 3. Add Noise & Forward Diffusion (Handles both OT Flow Match and Standard Diffusion)
+                # 6. Forward Forward Diffusion (Adding Noise)
                 if loss_type == 'ot_flow_match':
                     noise = torch.randn_like(diffusion_target)
                     t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
                     t_expand = t.view(B, 1, 1)
+                    # Interpolate linearly between pure noise (t=0) and data (t=1)
                     noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
                     target = diffusion_target - noise
                     timesteps = t * self.config.num_diffusion_iters
@@ -534,9 +604,9 @@ class MagpieTrainer:
                     noise = torch.randn(diffusion_target.shape, device=self.device)
                     timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
                     noisy_actions = self.agent.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
-                    target = noise
+                    target = noise # DDPM trains to predict the added noise
 
-                # Route to appropriate network(s)
+                # 7. Model Predictions
                 if self.agent.primitive_integration == 'separate_networks':
                     noise_pred = torch.zeros_like(noisy_actions)
                     for k in range(self.agent.K):
@@ -550,7 +620,7 @@ class MagpieTrainer:
                 else:
                     noise_pred = self.agent.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
 
-                # Calculate Loss with optional masking
+                # 8. Loss Calculations
                 if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
                     mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
                     for b in range(B):
@@ -575,7 +645,7 @@ class MagpieTrainer:
                 if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
                     total_loss += rep_loss * self.config.get('rep_weight', 0.1)
 
-            # 4. Optimize
+            # 9. Optimizer and Scheduler Updates
             total_loss.backward()
             
             if self.agent.clip_norm > 0:
@@ -588,7 +658,7 @@ class MagpieTrainer:
             trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
             self.agent.ema.step(trainable_params)
 
-            # --- RESTORED: Unified Logging Dictionary ---
+            # 10. Training Logging
             if hasattr(self.agent, 'logger'):
                 metrics_to_log = {
                     'train/actor_noise_loss': actor_noise_loss.item(),
@@ -602,7 +672,7 @@ class MagpieTrainer:
                     
                 self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
 
-            # --- RESTORED: Periodic Full Denoising Metric Evaluation ---
+            # 11. Periodic Full Denoising Metric Evaluation (for Joint Diffusion)
             log_interval = self.config.get('log_state_eval_every', 500)
             if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
                 with torch.no_grad():
@@ -672,6 +742,16 @@ class MagpieTrainer:
 FILE: magpie_agent.py
 ==================================================
 
+"""
+Magpie Agent Module.
+
+This module defines the MagpieAgent, a trainable policy class that integrates 
+diffusion-based action generation within the Actoris-Harena evaluation framework. 
+It supports complex vision-based continuous control pipelines, handling multi-modal 
+observations (RGB, depth, masks), goal-conditioning, primitive action integration, 
+and customizable vision encoders (ResNet, ViT, GC-RSSM).
+"""
+
 import os
 import time
 import torch
@@ -679,6 +759,8 @@ import numpy as np
 from collections import deque
 import cv2
 
+# Optimize CPU multi-threading for OpenCV and PyTorch to prevent thread-locking
+# during high-frequency data loading in RL environments.
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 cv2.setNumThreads(0)
@@ -694,16 +776,39 @@ from .action_sampler import ActionSampler
 from .constrain_action_functions import name2func
 
 class MagpieAgent(TrainableAgent):
+    """
+    Core Diffusion Agent for vision-based continuous action generation.
+
+    Inherits from Actoris-Harena's TrainableAgent. Manages the orchestration of 
+    vision encoders, primitive classification heads, and the diffusion noise 
+    prediction networks for sequential decision-making in robotic tasks.
+
+    Attributes:
+        config (DotMap): Complete configuration parameters for the agent.
+        device (torch.device): Compute device for model inference and training.
+        nets (nn.ModuleDict): Dictionary holding all neural network components.
+        trainer (MagpieTrainer): Dedicated class handling the training optimization loop.
+    """
+
     def __init__(self, config):
+        """
+        Initializes the MagpieAgent, configuring action spaces and network dimensions.
+
+        Args:
+            config (DotMap): Hyperparameter configuration, including primitive setups 
+                             and data augmentation strategies.
+        """
         super().__init__(config)
         self.name = 'diffusion'
         self.config = config
+        
+        # State tracking for sequential RL environments
         self.internal_states = {}
         self.buffer_actions = {}
         self.last_actions = {}
         self.obs_deque = {}
         
-        # Configuration flags
+        # Operational flags
         self.collect_on_success = self.config.get('collect_on_success', True)
         self.measure_time = config.get('measure_time', False)
         self.debug = config.get('debug', False)
@@ -711,7 +816,10 @@ class MagpieAgent(TrainableAgent):
         self.val_interval = self.config.get('val_interval', 100)
         self.validate_training = self.config.get('validate_training', 100)
 
-        # Primitive Integration Setup
+        # ---------------------------------------------------------
+        # Primitive Action Integration
+        # Handles discrete/continuous hybrid action spaces (e.g., parameterized skills)
+        # ---------------------------------------------------------
         self.primitive_integration = self.config.get('primitive_integration', 'none')
         if self.primitive_integration != 'none':
             self.primitives = config.primitives
@@ -719,9 +827,12 @@ class MagpieAgent(TrainableAgent):
             self.action_dims = [prim['dim'] if isinstance(prim, dict) else prim.dim for prim in self.primitives]
             self.prim_name2id = {item['name']: i for i, item in enumerate(self.primitives)}
             
+            # The network output dimension must accommodate the largest primitive
             self.network_action_dim = max(self.action_dims)
+            
+            # Adjust dimensions based on the integration strategy
             if self.primitive_integration == 'bin_as_output':
-                self.network_action_dim += 1
+                self.network_action_dim += 1 # Reserve idx 0 for the continuous bin selector
                 
             self.data_save_action_dim = self.network_action_dim
             if self.primitive_integration == 'one-hot-encoding':
@@ -729,10 +840,14 @@ class MagpieAgent(TrainableAgent):
                 
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
         else:
+            # Standard continuous action space
             self.network_action_dim = config.action_dim
             self.data_save_action_dim = config.action_dim
 
-        # Extracted Network Initialization
+        # ---------------------------------------------------------
+        # Component Initialization
+        # ---------------------------------------------------------
+        # Delegate network construction to a modular builder
         self.nets, self.optimizer, self.lr_scheduler, self.ema, self.clip_norm = build_networks_and_optimizers(self)
         
         if self.primitive_integration != 'none':
@@ -748,7 +863,7 @@ class MagpieAgent(TrainableAgent):
         self.data_augmenter = build_data_augmenter(config.data_augmenter)
         self.device = self.config.get('device', 'cpu')
         
-        # Extracted Trainer Logic
+        # Instantiate the trainer responsible for optimization and logging
         self.trainer = MagpieTrainer(self)
 
     def train(self, update_steps, arenas):
@@ -760,10 +875,15 @@ class MagpieAgent(TrainableAgent):
         self.trainer.validate()
 
     def set_log_dir(self, logdir, project_name, exp_name, disable_wandb=False):
+        """Sets the logging directory for Weights & Biases and local checkpoints."""
         super().set_log_dir(logdir, project_name, exp_name, disable_wandb=disable_wandb)
         self.save_dir = logdir
 
+    # ---------------------------------------------------------
+    # Checkpointing Methods
+    # ---------------------------------------------------------
     def save(self):
+        """Saves current network weights, overwriting older non-'best' checkpoints."""
         ckpt_dir = os.path.join(self.save_dir, 'checkpoints')
         os.makedirs(ckpt_dir, exist_ok=True)
         for filename in os.listdir(ckpt_dir):
@@ -777,20 +897,25 @@ class MagpieAgent(TrainableAgent):
         torch.save(self.nets.state_dict(), ckpt_path)
 
     def save_best(self):
+        """Saves the current network weights exclusively as the 'best' model."""
         ckpt_path = os.path.join(self.save_dir, 'checkpoints')
         os.makedirs(ckpt_path, exist_ok=True)
         torch.save(self.nets.state_dict(), os.path.join(ckpt_path, 'net_best.pt'))
 
     def load_checkpoint(self, checkpoint):
+        """Loads a specific checkpoint by iteration number."""
         ckpt_path = os.path.join(self.save_dir, 'checkpoints', f'net_{checkpoint}.pt')
         self.nets.load_state_dict(torch.load(ckpt_path))
         print(f'Loaded checkpoint: {checkpoint}')
         self.loaded = True
 
     def load(self):
+        """Automatically loads the most recent non-'best' checkpoint."""
         ckpt_path = os.path.join(self.save_dir, 'checkpoints')
         os.makedirs(ckpt_path, exist_ok=True)
         ckpt_files = [c for c in os.listdir(ckpt_path) if c.endswith('.pt') and 'best' not in c]
+        
+        # Sort sequentially based on update step encoded in filename
         ckpt_files = sorted(ckpt_files, key=lambda x: int(x.split('_')[1].split('.')[0]))
         
         if not ckpt_files:
@@ -805,6 +930,7 @@ class MagpieAgent(TrainableAgent):
         return self.update_step
 
     def load_best(self):
+        """Loads the 'net_best.pt' checkpoint for evaluation."""
         ckpt_path = os.path.join(self.save_dir, 'checkpoints', 'net_best.pt')
         if not os.path.exists(ckpt_path):
             print(f"[MultiPrimitiveDiffusion, load_best] Checkpoint not found at: {ckpt_path}")
@@ -815,8 +941,24 @@ class MagpieAgent(TrainableAgent):
         print(f"[MultiPrimitiveDiffusion, load_best] Best checkpoint is loaded")
         return -2
 
+    # ---------------------------------------------------------
+    # Inference / Environment Interaction Pipeline
+    # ---------------------------------------------------------
     @torch.no_grad()
     def single_act(self, info, update=False):
+        """
+        Executes a single inference step to generate an action trajectory.
+
+        This is the core evaluation loop: it aggregates visual history, encodes 
+        features, processes primitives, and runs the reverse diffusion process.
+
+        Args:
+            info (dict): Current environment state and observations.
+            update (bool): Whether to update internal observation history.
+
+        Returns:
+            dict or np.ndarray: The predicted action, formatted for the environment.
+        """
         start_time = time.time()
         arena_id = info['arena_id']
 
@@ -827,13 +969,14 @@ class MagpieAgent(TrainableAgent):
             else:
                 self.init([info])
 
+        # Execute full planning if the action buffer is depleted
         if len(self.buffer_actions[arena_id]) == 0:
             sample_state = self._prepare_eval_state(info)
             obs_features = self._extract_vision_features(sample_state['image'], info)
             
             if self.config.include_state:
                 vector_state = torch.stack([x['vector_state'] for x in self.obs_deque[arena_id]])
-                # MUST cast to device before concatenation!
+                # CRITICAL: Must cast to device before concatenation to avoid host-to-device bottlenecks
                 vector_state = vector_state.to(self.device) 
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
 
@@ -842,16 +985,19 @@ class MagpieAgent(TrainableAgent):
 
             obs_cond, cur_prim_id, prim_probs_log = self._process_primitives(obs_features, info)
             
+            # Sample initial noise for the reverse diffusion process
             naction = self.eval_action_sampler.sample(
                 state=sample_state, 
                 horizon=self.config.pred_horizon, 
                 action_dim=getattr(self, 'diffusion_dim', self.network_action_dim)
             ).to(self.device)
             
+            # Denoise the trajectory conditioned on visual observations
             naction, noise_actions = self._run_diffusion_loop(naction, obs_cond, cur_prim_id, info)
             self._store_predicted_actions(naction, arena_id)
             self._log_internal_states(naction, noise_actions, prim_probs_log, obs_features, info)
 
+        # Pop the next immediate action from the planned trajectory buffer
         action = self.buffer_actions[arena_id].popleft()
         action = action[:self.network_action_dim].flatten()
         out_action = self._format_output_action(action, cur_prim_id if 'cur_prim_id' in locals() else None)
@@ -865,9 +1011,11 @@ class MagpieAgent(TrainableAgent):
         return out_action
 
     def act(self, infos, updates):
+        """Batched action inference across multiple environments."""
         return [self.single_act(info, upd) for info, upd in zip(infos, updates)]
 
     def reset(self, arena_ids):
+        """Resets the internal tracking queues for the specified environments."""
         if not self.loaded:
             self.load()
             
@@ -877,23 +1025,27 @@ class MagpieAgent(TrainableAgent):
             self.last_actions[arena_id] = None
 
     def get_state(self):
+        """Retrieves diagnostic internal states for logging/visualization."""
         return self.internal_states
 
     def init(self, infos):
+        """Initializes observation deques with the starting state duplicated across the horizon."""
         for info in infos:
             obs = self._process_info(info)
             self.obs_deque[info['arena_id']] = deque([obs]*self.config.obs_horizon, maxlen=self.config.obs_horizon)
 
     def update(self, infos, actions):
+        """Appends the latest observation to the historical deque."""
         for info, action in zip(infos, actions):
             obs = self._process_info(info)
             self.obs_deque[info['arena_id']].append(obs)
 
     # --------------------------------------------------------------------------------
-    # --- PRIVATE HELPERS FOR SINGLE_ACT (Keeps the main logic clean) ----------------
+    # --- PRIVATE HELPERS FOR SINGLE_ACT ---------------------------------------------
     # --------------------------------------------------------------------------------
 
     def _prepare_eval_state(self, info):
+        """Stacks the observation history into a batch for network ingestion."""
         arena_id = info['arena_id']
         image = torch.stack([x[self.config.input_obs] for x in self.obs_deque[arena_id]])
         state = {'image': image}
@@ -902,15 +1054,21 @@ class MagpieAgent(TrainableAgent):
         return state
 
     def _extract_vision_features(self, image, info):
-        # --- CRITICAL FIX: Push CPU deque tensor back to GPU ---
+        """
+        Routes the raw image tensors through the designated vision architecture.
+        
+        Supports standard ResNets, Vision Transformers (ViT), and state-space 
+        transition models (GC-RSSM) for dynamic visual representations.
+        """
+        # --- CRITICAL FIX: Push CPU deque tensor back to GPU prior to encoding ---
         image = image.to(self.device)
         
-        # The logic here mirrors the existing vision branching
         if self.vision_encoder_type == 'original':
-            # Now `image` is on the GPU, matching the ResNet weights
+            # Fast, standard ResNet pass
             return self.nets['vision_encoder'](image)
             
         elif self.vision_encoder_type == 'vit':
+            # ViTs require specific 224x224 scaling
             import torchvision.transforms.functional as TF
             B = 1 # single_act operates unbatched
             T = image.shape[0] if image.ndim == 4 else image.shape[1]
@@ -925,10 +1083,12 @@ class MagpieAgent(TrainableAgent):
             return image_features.reshape(B, T, -1)
             
         elif self.vision_encoder_type == 'gc_rssm_encoder':
+            # Concatenate features from Goal-Conditioned Recurrent State Space Models
             return torch.cat([self.nets['vision_encoder'](image[:, :3, :, :]), 
                               self.nets['vision_encoder'](image[:, 3:6, :, :])], dim=-1)
                               
         elif self.vision_encoder_type == 'gc_rssm_dynamic':
+            # Roll out the world model transition dynamics to infer latent state
             image_b = image.unsqueeze(0)
             B, T = image_b.shape[:2]
             obs_emb = self.nets['vision_encoder'](image_b[:, :, :3].flatten(end_dim=1)).view(B, T, -1).transpose(0, 1)
@@ -944,6 +1104,10 @@ class MagpieAgent(TrainableAgent):
             return torch.cat([hidden[0], hidden[4]], dim=-1).transpose(0, 1).squeeze(0)
         
     def _process_primitives(self, obs_features, info):
+        """
+        Determines the appropriate high-level primitive action using the classifier head.
+        Appends a one-hot encoding of the selected primitive to the conditioning vector.
+        """
         cur_prim_id = 0
         prim_probs_log = None
         
@@ -959,59 +1123,76 @@ class MagpieAgent(TrainableAgent):
             if self.primitive_integration == 'one-hot-encoding':
                 prim_enc = torch.nn.functional.one_hot(prim_id, num_classes=self.K).float()
                 obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
-                # Ensure the one-hot appended tensor is flattened identically
+                # Ensure the one-hot appended tensor is flattened identically for the denoiser
                 return obs_cond.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
                 
         return obs_features.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
     
     def _run_diffusion_loop(self, naction, obs_cond, cur_prim_id, info):
+        """
+        Executes the reverse process to refine pure noise into a usable action trajectory.
+        Supports both Standard DDPM and Optimal Transport (OT) Flow Matching.
+        """
         start = self.config.obs_horizon - 1
         end = start + self.config.action_horizon
         dim_k = self.diffusion_dims[cur_prim_id] if self.primitive_integration == 'separate_networks' else self.diffusion_dim
         
-        # RESTORED: Capture the very first fully-noised frame for debug visualizations
+        # Capture the very first fully-noised frame for debug/GIF visualizations
         noise_actions = [ts_to_np(naction[:, start:end, :self.network_action_dim])]
 
         if dim_k == 0:
             naction = torch.zeros_like(naction)
             return naction, [ts_to_np(naction[:, start:end, :self.network_action_dim])] * (self.config.num_diffusion_iters + 1)
 
+        # Select network based on routing strategy
         active_net = self.nets[f'noise_pred_net_{cur_prim_id}'] if self.primitive_integration == 'separate_networks' else self.nets['noise_pred_net']
         
+        # Forward Pass: Optimal Transport Flow Matching
         if self.config.get('loss_type', 'diffusion') == 'ot_flow_match':
             num_steps = self.config.num_diffusion_iters
             dt = 1.0 / num_steps
             for i in range(num_steps):
                 t_val = i / num_steps
                 t_tensor = torch.tensor([t_val * num_steps], device=self.device, dtype=torch.float32)
+                
+                # Predict vector field v(x_t)
                 v_pred = active_net(sample=naction[..., :dim_k], timestep=t_tensor, global_cond=obs_cond)
+                
+                # Euler Integration Step
                 naction[..., :dim_k] += v_pred * dt
+                
+                # Enforce physical constraints on the evolving trajectory
                 if self.primitive_integration == 'one-hot-encoding':
-                    # FIX: Pass the normalized t_val instead of i
                     naction = self._apply_action_constraints(naction, info, t_val)
+                    
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+                
+        # Forward Pass: Standard Denoising Diffusion (DDPM)
         else:
             self.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-            # Fetch the total number of timesteps for normalization
             total_ddpm_steps = self.noise_scheduler.config.num_train_timesteps 
             for k in self.noise_scheduler.timesteps:
                 noise_pred = active_net(sample=naction[..., :dim_k], timestep=k, global_cond=obs_cond)
                 naction[..., :dim_k] = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction[..., :dim_k]).prev_sample
+                
                 if self.primitive_integration == 'one-hot-encoding':
-                    # FIX: Invert and normalize the DDPM step (it counts down from ~1000 to 0)
+                    # DDPM steps count backwards (~1000 to 0). Normalize to [0, 1] for constraint logic.
                     progress = 1.0 - (k.item() / total_ddpm_steps) 
                     naction = self._apply_action_constraints(naction, info, progress)
+                    
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
                 
         return naction, noise_actions
     
     def _apply_action_constraints(self, naction, info, timestep):
+        """Applies mathematical or environmental boundaries (e.g., table boundaries) to the trajectory."""
         act_part = naction[..., :self.network_action_dim]
         state_part = naction[..., self.network_action_dim:]
         act_part = self.constrain_action(act_part, info, t=timestep, debug=self.debug)
         return torch.cat([act_part, state_part], dim=-1)
 
     def _store_predicted_actions(self, naction, arena_id):
+        """Un-normalizes the raw tensor actions and pushes them to the execution queue."""
         start = self.config.obs_horizon - 1
         end = start + self.config.action_horizon
         final_naction = naction[..., :self.network_action_dim]
@@ -1019,9 +1200,11 @@ class MagpieAgent(TrainableAgent):
         self.buffer_actions[arena_id] = deque(action_pred[start:end, :], maxlen=self.config.action_horizon)
 
     def _format_output_action(self, action, cur_prim_id):
+        """Formats the numerical vector back into a structured dictionary expected by the environment."""
         if self.config.primitive_integration == 'none':
             return action
         elif self.config.primitive_integration == 'bin_as_output':
+            # Action[0] represents a continuous selector [-1, 1], map it back to a discrete ID
             prim_idx = int(np.clip(((action[0] + 1)/2)*self.K - 1e-6, 0, self.K - 1))
             p_obj = self.primitives[prim_idx]
             prim_name = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
@@ -1033,6 +1216,7 @@ class MagpieAgent(TrainableAgent):
         raise NotImplementedError
 
     def _log_internal_states(self, naction, noise_actions, prim_probs_log, obs_features, info):
+        """Records state predictions and primitive confidences for debugging and wandb visualization."""
         pred_keypoints = None
         if naction.shape[-1] > self.network_action_dim:
             pred_keypoints = ts_to_np(naction[..., self.network_action_dim:])
@@ -1049,13 +1233,19 @@ class MagpieAgent(TrainableAgent):
         })
 
     def _process_info(self, info):
+        """
+        Processes and fuses multi-modal observation dictionaries from the environment.
+        Handles concatenations of RGB, Depth, Robot Masks, and Goal States along the channel dimension.
+        """
+        # Ensure depth is treated as a distinct channel dimension
         if 'depth' in info['observation'].keys():
-            depth = info['observation']['depth'] #get the view from first camera.
+            depth = info['observation']['depth'] 
 
             if len(depth.shape) == 2:
                 depth = np.expand_dims(depth, axis=-1)
                 info['observation']['depth'] = depth
 
+        # Modality Fusion Branching
         if self.config.input_obs == 'rgbd':
             info['observation']['rgbd'] = np.concatenate(
                 [info['observation']['rgb'][0].astype(np.float32), depth], axis=-1)
@@ -1065,26 +1255,25 @@ class MagpieAgent(TrainableAgent):
                 [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
         def resize_mask_to_rgb(mask):
+                """Helper to strictly align mask spatial dimensions with main RGB frames."""
                 H, W = rgb.shape[:2]
 
-                # Ensure numpy array (already true, but safe)
                 mask = np.asarray(mask)
 
-                # Remove channel if present
                 if mask.ndim == 3:
                     mask = mask[..., 0]
 
-                # CRITICAL: cast dtype
+                # CRITICAL: OpenCV resize fails silently or produces artifacts on boolean/int matrices
                 if mask.dtype != np.uint8 and mask.dtype != np.float32:
                     mask = mask.astype(np.float32)
 
                 mask = cv2.resize(
                     mask,
-                    (W, H),                      # (width, height)
+                    (W, H), 
                     interpolation=cv2.INTER_NEAREST
                 )
 
-                return mask[..., None]           # (H, W, 1)
+                return mask[..., None] 
         
         if self.config.input_obs == 'rgb-workspace-mask':
             rgb = info['observation']['rgb'].astype(np.float32)
@@ -1116,6 +1305,7 @@ class MagpieAgent(TrainableAgent):
             )
             if self.debug: print('input shape', info['observation']['rgb+goal_mask'].shape)
 
+        # Batch Preparation
         input_data = {
             self.config.input_obs: info['observation'][self.config.input_obs]\
                 .reshape(1, 1, *info['observation'][self.config.input_obs].shape),
@@ -1129,10 +1319,12 @@ class MagpieAgent(TrainableAgent):
             input_data['vector_state'] = info['observation']['vector_state']\
                 .reshape(1, 1, *info['observation']['vector_state'].shape)
 
+        # Pass through offline data augmentation pipelines (if configured)
         input_data = self.data_augmenter(input_data, train=False, device=self.device) 
         
         vis = input_data[self.config.input_obs].squeeze(0).squeeze(0)
 
+        # Push to CPU for deque storage to save VRAM 
         obs = {
             self.config.input_obs: vis.cpu(),  
         }
@@ -1146,6 +1338,7 @@ class MagpieAgent(TrainableAgent):
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
 
+        # Log observation format for debugging
         self.internal_states[info['arena_id']].update(
             {'input_obs': input_obs.transpose(1,2,0),
              'input_type': self.config.input_obs}
@@ -1161,6 +1354,16 @@ class MagpieAgent(TrainableAgent):
 FILE: magpie_network_builder.py
 ==================================================
 
+"""
+Magpie Network Builder Module.
+
+This module acts as a factory for constructing the complex neural network 
+architectures required by the Magpie diffusion agent. It handles the instantiation 
+of vision encoders, observation projectors, primitive classification heads, 
+noise prediction backbones (U-Net or MLP), and representation learning modules. 
+It also configures the optimizers and learning rate schedulers.
+"""
+
 import os
 import torch
 import torch.nn as nn
@@ -1174,30 +1377,58 @@ from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder, Condition
 
 def build_networks_and_optimizers(agent):
     """
-    Extracts the massive _init_networks and _init_optimizer logic.
-    Returns nets, optimizer, lr_scheduler, ema, and clip_norm.
+    Constructs all neural network components, optimizers, and schedulers for the agent.
+
+    This function extracts the massive initialization logic from the main agent class 
+    to maintain modularity. It dynamically scales network input/output dimensions 
+    based on the configured observation space and primitive action integration.
+
+    Args:
+        agent: The MagpieAgent instance containing the `.config` and `.primitives` definitions.
+
+    Returns:
+        tuple: A 5-tuple containing:
+            - nets (nn.ModuleDict): A dictionary of all trainable and non-trainable networks.
+            - optimizer (torch.optim.Optimizer): The AdamW optimizer.
+            - lr_scheduler (torch.optim.lr_scheduler.LRScheduler): The learning rate scheduler.
+            - ema (EMAModel): The Exponential Moving Average model for stable diffusion sampling.
+            - clip_norm (float): The maximum gradient norm for clipping.
     """
     config = agent.config
     device = config.get('device', 'cpu')
     
+    # =========================================================================
     # 1. Determine Input Channels
+    # Dynamically map the sensory modality to the required image channel depth.
+    # =========================================================================
     agent.rep_learn = config.get('rep_learn', 'none')
     input_channel_map = {
-        'depth': 1, 'rgbd': 4, 'rgb+goal_mask': 4,
-        'rgb-workspace-mask': 5, 'rgb+goal_rgb': 6,
+        'depth': 1, 
+        'rgbd': 4, 
+        'rgb+goal_mask': 4,
+        'rgb-workspace-mask': 5, 
+        'rgb+goal_rgb': 6,
         'rgb-workspace-mask-goal': 8
     }
     agent.input_channel = input_channel_map.get(config.input_obs, 3)
 
+    # =========================================================================
     # 2. Vision Encoder Initialization
+    # Supports standard ResNets, Vision Transformers, and recurrent state-space models.
+    # =========================================================================
     agent.vision_encoder_type = config.get('vision_encoder', 'original')
     if agent.vision_encoder_type == 'original':
         vision_encoder = get_resnet('resnet18', input_channel=agent.input_channel)
+        # CRITICAL: Replace BatchNorm with GroupNorm. RL/Robotics datasets often require
+        # small batch sizes that cause BatchNorm statistics to become highly unstable.
         vision_encoder = replace_bn_with_gn(vision_encoder)
+        
     elif agent.vision_encoder_type == 'vit':
         vision_encoder = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
-        vision_encoder.heads = nn.Identity() 
+        vision_encoder.heads = nn.Identity() # Strip the classification head to extract pure embeddings
+        
     elif agent.vision_encoder_type in ['gc_rssm_encoder', 'gc_rssm_dynamic']:
+        # Import state-space models specifically designed for transition dynamics
         from ..rl.lagarnet.networks import ImageEncoder
         vision_encoder = ImageEncoder(
             image_dim=config.input_obs_dim, embedding_size=config.embedding_dim,
@@ -1207,12 +1438,16 @@ def build_networks_and_optimizers(agent):
     else:
         vision_encoder = nn.Identity()
 
+    # Freezing the encoder prevents catastrophic forgetting if fine-tuning from a pre-trained base
     if config.get('freeze_encoder', False):
         for param in vision_encoder.parameters():
             param.requires_grad = False
         vision_encoder.eval()
 
+    # =========================================================================
     # 3. Projectors and Classifiers
+    # Compresses vision features and sets up routing for primitive skills.
+    # =========================================================================
     agent.use_projector = config.get('use_projector', False)
     agent.effective_obs_dim = config.obs_dim
     
@@ -1229,8 +1464,10 @@ def build_networks_and_optimizers(agent):
         obs_projector = nn.Sequential(*layers)
         agent.effective_obs_dim = proj_out
 
+    # Initialize the primitive classification head if using hybrid action spaces
     prim_class_head = None
     global_cond_dim = agent.effective_obs_dim * config.obs_horizon
+    
     if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
         cls_cfg = config.get("primitive_classifier", {}) 
         prim_class_head = MLPClassifier(
@@ -1239,17 +1476,24 @@ def build_networks_and_optimizers(agent):
             dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),
         )
         if agent.primitive_integration == 'one-hot-encoding':
+            # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
             global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
 
+    # =========================================================================
     # 4. Diffusion Network Setup
+    # Builds the core noise prediction networks (U-Net or MLP).
+    # =========================================================================
     agent.diffusion_dim = agent.network_action_dim
     agent.diffusion_dims = {}
+    
+    # If jointly diffusing states and actions, extend the diffusion dimension
     extra_state_dim = config.state_dim + config.get('goal_state_dim', 30) if agent.rep_learn == 'predict-state-with-action' else 0
     agent.diffusion_dim += extra_state_dim
 
     for k in range(getattr(agent, 'K', 1)):
         agent.diffusion_dims[k] = agent.action_dims[k] + extra_state_dim if hasattr(agent, 'action_dims') else agent.diffusion_dim
 
+    # Accumulate networks into a dictionary for easy `nn.ModuleDict` instantiation
     net_dict = {'vision_encoder': vision_encoder, 'obs_projector': obs_projector}
     if prim_class_head: 
         net_dict['prim_class_head'] = prim_class_head
@@ -1257,6 +1501,7 @@ def build_networks_and_optimizers(agent):
     backbone_type = config.get('noise_pred_net', 'unet')
     mlp_cfg = config.get('mlp_backbone_config', {})
 
+    # 'separate_networks' instantiates an independent denoiser for *each* primitive skill
     if agent.primitive_integration == 'separate_networks':
         for k in range(agent.K):
             dim_k = agent.diffusion_dims[k]
@@ -1270,6 +1515,7 @@ def build_networks_and_optimizers(agent):
             setattr(agent, f'noise_pred_net_{k}', net)
             net_dict[f'noise_pred_net_{k}'] = net
     else:
+        # Standard monolithic denoiser handling all actions
         if backbone_type == 'mlp':
             noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
         else:
@@ -1278,14 +1524,19 @@ def build_networks_and_optimizers(agent):
         setattr(agent, 'noise_pred_net', noise_pred_net)
         net_dict['noise_pred_net'] = noise_pred_net
 
+    # Standard DDPM Scheduler from Hugging Face Diffusers
     agent.noise_scheduler = DDPMScheduler(
         num_train_timesteps=config.num_diffusion_iters, 
-        beta_schedule='squaredcos_cap_v2',
+        beta_schedule='squaredcos_cap_v2', # Cosine schedule prevents noise explosion at boundaries
         clip_sample=True, 
         prediction_type='epsilon'
     )
 
-    # --- RESTORED: Representation Learning Networks (State Predictor / Auto-Encoder) ---
+    # =========================================================================
+    # 5. Representation Learning Networks
+    # Auxiliary tasks (like state/keypoint prediction) to force the vision 
+    # encoder to learn geometrically meaningful embeddings.
+    # =========================================================================
     if agent.rep_learn == 'auto-encoder':
         net_dict['vision_decoder'] = ResNetDecoder(
             input_dim=512, 
@@ -1331,17 +1582,25 @@ def build_networks_and_optimizers(agent):
         layers.append(nn.Linear(in_dim, out_dim))
         net_dict['state_predictor'] = nn.Sequential(*layers)
 
-    # 5. Initialization and Optimizers
+    # =========================================================================
+    # 6. Initialization and Optimizers
+    # =========================================================================
     nets = nn.ModuleDict(net_dict).to(device)
     
     trainable_params = [p for p in nets.parameters() if p.requires_grad]
+    
+    # Exponential Moving Average (EMA) maintains a smoothed version of the weights.
+    # This is practically mandatory for stable inference in diffusion models.
     ema = EMAModel(parameters=trainable_params, power=config.get('ema_power', 0.75))
     
     opt_params = config.get('optimiser_params', {})
     if hasattr(opt_params, 'toDict'): 
         opt_params = opt_params.toDict()
     
+    # AdamW is preferred to decouple weight decay from the gradient updates
     optimizer = torch.optim.AdamW(params=trainable_params, **opt_params)
+    
+    # Cosine learning rate scheduler with warmup to prevent early training collapse
     lr_scheduler = get_scheduler(
         name=config.get('lr_scheduler', 'cosine'), 
         optimizer=optimizer,
@@ -1352,11 +1611,25 @@ def build_networks_and_optimizers(agent):
 
     return nets, optimizer, lr_scheduler, ema, clip_norm
 
+
 def build_primitive_action_masks(agent):
-    """Builds action masks for different primitive outputs."""
+    """
+    Builds binary masks to zero out irrelevant action dimensions for different primitives.
+
+    When using a shared action space for multiple distinct robotic skills (e.g., 
+    a 4-DoF pick vs an 8-DoF bimanual operation), this ensures the network only 
+    focuses its loss and predictions on the valid dimensions for the active skill.
+
+    Args:
+        agent: The MagpieAgent instance.
+
+    Returns:
+        dict: A mapping from primitive IDs (int) to a binary `torch.Tensor` mask.
+    """
     masks = {}
     
     start = None
+    # Determine the offset index based on whether we reserve dimension 0 for the primitive bin
     if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
         start = 0
     elif agent.primitive_integration == 'bin_as_output':
@@ -1364,8 +1637,9 @@ def build_primitive_action_masks(agent):
 
     for pid, prim in enumerate(agent.primitives):
         mask = torch.zeros(agent.network_action_dim, dtype=torch.float32)
+        
         if start == 1: 
-            mask[0] = 1.0
+            mask[0] = 1.0 # Always unmask the bin selector if using it
             
         dim = prim['dim'] if isinstance(prim, dict) else prim.dim
         mask[start:start + dim] = 1.0
@@ -1434,13 +1708,24 @@ class DiffusionTransform:
 FILE: constrain_action_functions.py
 ==================================================
 
+"""
+Constrain Action Functions Module.
+
+This module provides physical and geometric constraint logic for the diffusion 
+action trajectories. It ensures that predicted end-effector positions (picks/places) 
+remain within valid workspace boundaries (defined by segmentation masks). It supports 
+both "hard snapping" (forcing points into valid regions) and "soft restoring forces" 
+(treating constraints as an ODE during the reverse diffusion process).
+"""
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
 # --- Configuration ---
-# Set to True if your network outputs [Y, X] (Row, Col). 
+# CRITICAL: Adjust this based on how your dataset normalized spatial coordinates.
+# Set to True if your network outputs [Y, X] (Row, Col).
 # Set to False if your network outputs [X, Y] (Width, Height).
 IS_YX_ACTION_SPACE = False 
 
@@ -1449,43 +1734,95 @@ IS_YX_ACTION_SPACE = False
 # -----------------------------------------------------------------------------
 
 def _snap_to_nearest(points_bht, valid_points):
+    """
+    Finds the nearest valid spatial point for a batch of trajectory coordinates.
+
+    Args:
+        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
+        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates in the mask.
+
+    Returns:
+        torch.Tensor: Snapped coordinates of shape (Batch, Horizon, 2).
+    """
     if valid_points is None or valid_points.shape[0] == 0:
         return points_bht
+    
     B, H, D = points_bht.shape
     flat_points = points_bht.reshape(-1, 2)
+    
+    # Compute pairwise Euclidean distances between predicted points and all valid mask points
     dists = torch.cdist(flat_points, valid_points)
     min_indices = torch.argmin(dists, dim=1)
+    
     return valid_points[min_indices].reshape(B, H, 2)
 
 def _get_restoring_force(points_bht, valid_points):
+    """
+    Calculates a directional vector pointing from the predicted point to the 
+    nearest valid mask coordinate.
+
+    Args:
+        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
+        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates.
+
+    Returns:
+        torch.Tensor: Force vectors of shape (Batch, Horizon, 2).
+    """
     if valid_points is None or valid_points.shape[0] == 0:
         return torch.zeros_like(points_bht)
+        
     nearest_points = _snap_to_nearest(points_bht, valid_points)
     return nearest_points - points_bht
 
 def _get_min_dist(points_bht, valid_points):
+    """
+    Calculates the average minimum distance from a set of points to a valid region.
+    Used as a heuristic cost function for arm-to-mask assignment.
+    """
     if valid_points is None or valid_points.shape[0] == 0:
         return float('inf')
+        
     flat_points = points_bht.reshape(-1, 2)
     dists = torch.cdist(flat_points, valid_points)
     return torch.min(dists, dim=1)[0].mean().item()
 
 def _get_dynamic_assignments(action_b, entities, valid_masks):
+    """
+    Dynamically assigns robotic arms to specific workspace masks using a 
+    bipartite matching heuristic based on proximity.
+
+    For bimanual setups, it prevents both arms from trying to snap to the 
+    same valid workspace if there are two distinct valid areas.
+
+    Args:
+        action_b (torch.Tensor): Single batch action trajectory (1, Horizon, Dim).
+        entities (list): List of dictionaries defining the action dimensions for 
+                         each robot's 'pick' and 'place' actions.
+        valid_masks (dict): Dictionary mapping mask IDs (0, 1) to valid coordinate tensors.
+
+    Returns:
+        dict: A mapping of Entity ID to assigned Mask ID (e.g., {0: 1, 1: 0}).
+    """
     assignments = {} 
+    
+    # Bimanual case: 2 arms, 2 valid masks available
     if len(entities) == 2 and 0 in valid_masks and 1 in valid_masks:
         e0_pick = action_b[:, :, entities[0]['pick']]
         e1_pick = action_b[:, :, entities[1]['pick']]
         
+        # Calculate cost (distance) matrix
         d_e0_m0 = _get_min_dist(e0_pick, valid_masks[0])
         d_e0_m1 = _get_min_dist(e0_pick, valid_masks[1])
         d_e1_m0 = _get_min_dist(e1_pick, valid_masks[0])
         d_e1_m1 = _get_min_dist(e1_pick, valid_masks[1])
         
+        # Simple bipartite matching: minimize total assignment distance
         if (d_e0_m0 + d_e1_m1) <= (d_e0_m1 + d_e1_m0):
             assignments = {0: 0, 1: 1}
         else:
             assignments = {0: 1, 1: 0}
             
+    # Single-arm case: assign the arm to whichever mask is closest
     elif len(entities) == 1 and len(valid_masks) > 0:
         e0_pick = action_b[:, :, entities[0]['pick']]
         best_mask = min(valid_masks.keys(), key=lambda m: _get_min_dist(e0_pick, valid_masks[m]))
@@ -1498,12 +1835,17 @@ def _get_dynamic_assignments(action_b, entities, valid_masks):
 # -----------------------------------------------------------------------------
 
 def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t, method):
+    """
+    Generates an overlay plot of the original vs. constrained trajectories on 
+    top of the current camera observation and segmentation masks.
+    """
     save_dir = "tmp/debug_magpie"
     os.makedirs(save_dir, exist_ok=True)
 
     rgb = obs.get('rgb', None)
     if rgb is None: return 
         
+    # Unpack and normalize RGB for Matplotlib
     if torch.is_tensor(rgb): rgb = rgb.detach().cpu().numpy()
     if rgb.ndim == 4: rgb = rgb[0]
     if rgb.shape[0] == 3: rgb = np.transpose(rgb, (1, 2, 0))
@@ -1527,10 +1869,12 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
     m0 = get_mask('robot0_mask')
     m1 = get_mask('robot1_mask')
 
+    # Overlay workspaces as semi-transparent blue/red hues
     if m0 is not None: ax.imshow(np.ma.masked_where(m0 < 0.5, m0), cmap='Blues', alpha=0.4)
     if m1 is not None: ax.imshow(np.ma.masked_where(m1 < 0.5, m1), cmap='Reds', alpha=0.4)
 
     def to_pix(uv_coords):
+        """Converts normalized [-1, 1] coordinates back to pixel space [0, W]."""
         dim0, dim1 = uv_coords[:, 0], uv_coords[:, 1]
         if IS_YX_ACTION_SPACE:
             y, x = (dim0 + 1) * H / 2, (dim1 + 1) * W / 2
@@ -1542,14 +1886,13 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
     new_act = new_action[0, 0].detach().cpu().numpy()
     colors = {0: 'blue', 1: 'red'}
     
-    # Dynamic prefix for the legend
     lbl_prefix = "Snap" if method == 'snap' else "Force"
     
     for e_idx, m_idx in assignments.items():
         ent = entities[e_idx]
         c = colors.get(m_idx, 'green')
 
-        # Plot PICK
+        # Plot PICK trajectory adjustments
         if len(ent['pick']) == 2:
             pu, pv = ent['pick']
             ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
@@ -1557,10 +1900,9 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
             
             ax.plot(ox, oy, marker='x', color='yellow', markersize=8, label='Orig Pick' if e_idx==0 else "")
             ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Pick (R{m_idx})')
-            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
-                        arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
 
-        # Plot PLACE
+        # Plot PLACE trajectory adjustments
         if len(ent['place']) == 2:
             pu, pv = ent['place']
             ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
@@ -1568,8 +1910,7 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
             
             ax.plot(ox, oy, marker='x', color='orange', markersize=8, label='Orig Place' if e_idx==0 else "")
             ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Place (R{m_idx})')
-            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]),
-                        arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
 
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
@@ -1584,28 +1925,44 @@ def _visualize_debug(original_action, new_action, obs, entities, assignments, pr
 # -----------------------------------------------------------------------------
 
 def identity(action, info, t, debug=False):
+    """No-op constraint function. Returns the action unmodified."""
     return action
 
 def _apply_constraints_core(action, info, t, method, debug=False):
+    """
+    Core engine for applying workspace constraints to the action tensor.
+    
+    Args:
+        action (torch.Tensor): Current predicted trajectory of shape (Batch, Horizon, Dim).
+        info (dict): Environment data containing the semantic masks.
+        t (float/Tensor): Current diffusion timestep (for debugging).
+        method (str): 'snap' for hard replacement, 'force' for soft ODE addition.
+        debug (bool): If True, renders visual debugging plots.
+        
+    Returns:
+        torch.Tensor: The constrained action trajectory.
+    """
     device = action.device
     obs = info.get('observation', {})
     original_action = action.clone() 
     
+    # 1. Map primitive names to the corresponding dimensions in the action vector
     prim_name = info.get('prim_name', 'norm-pixel-dual-pick-and-place')
     
     entities = []
     if 'pick-and-fling' in prim_name:
-        entities.append({'pick': [0, 1], 'place': []})
-        entities.append({'pick': [2, 3], 'place': []})
+        entities.append({'pick': [0, 1], 'place': []})     # Left Arm Pick
+        entities.append({'pick': [2, 3], 'place': []})     # Right Arm Pick
     elif 'dual-pick-and-place' in prim_name:
-        entities.append({'pick': [0, 1], 'place': [4, 5]})
-        entities.append({'pick': [2, 3], 'place': [6, 7]})
+        entities.append({'pick': [0, 1], 'place': [4, 5]}) # Left Arm
+        entities.append({'pick': [2, 3], 'place': [6, 7]}) # Right Arm
     elif 'single-pick-and-place' in prim_name:
-        entities.append({'pick': [0, 1], 'place': [2, 3]})
+        entities.append({'pick': [0, 1], 'place': [2, 3]}) # Single Arm
     elif 'no-operation' in prim_name:
         return action
 
-    # --- THE CRITICAL FIX: PROPER (ROWS, COLS) -> (Y, X) MAPPING ---
+    # 2. Extract Valid Pixel Coordinates from Semantic Masks
+    # Converts binary 2D image masks into a list of valid [-1, 1] spatial coordinates.
     valid_masks = {}
     for m_idx, key in enumerate(['robot0_mask', 'robot1_mask']):
         if key in obs:
@@ -1617,10 +1974,12 @@ def _apply_constraints_core(action, info, t, method, debug=False):
             
             if len(rows) > 0:
                 H, W = mask.shape
+                
+                # Normalize pixel indices to the [-1, 1] range expected by the diffusion model
                 norm_x = (cols / float(W)) * 2 - 1.0
                 norm_y = (rows / float(H)) * 2 - 1.0
                 
-                # Stack coordinates based on the network's output format
+                # Stack coordinates based on the network's architectural output format
                 if IS_YX_ACTION_SPACE:
                     valid_pts = np.stack([norm_y, norm_x], axis=1)
                 else:
@@ -1628,6 +1987,7 @@ def _apply_constraints_core(action, info, t, method, debug=False):
                     
                 valid_masks[m_idx] = torch.tensor(valid_pts, dtype=torch.float32, device=device)
 
+    # If no valid workspace masks are detected, abort constraints
     if not valid_masks:
         return action
 
@@ -1635,7 +1995,9 @@ def _apply_constraints_core(action, info, t, method, debug=False):
     force_vector = torch.zeros_like(action) if method == 'force' else None
     debug_assignments_b0 = {}
 
+    # 3. Apply Constraints per Batch Item
     for b in range(B):
+        # Figure out which arm should target which valid workspace region
         assignments = _get_dynamic_assignments(action[b:b+1], entities, valid_masks)
         
         if b == 0:
@@ -1645,19 +2007,22 @@ def _apply_constraints_core(action, info, t, method, debug=False):
             ent = entities[e_idx]
             pts = valid_masks[m_idx]
             
+            # Apply to PICK positions
             if method == 'snap':
                 action[b:b+1, :, ent['pick']] = _snap_to_nearest(action[b:b+1, :, ent['pick']], pts)
             elif method == 'force':
                 force_vector[b:b+1, :, ent['pick']] = _get_restoring_force(action[b:b+1, :, ent['pick']], pts)
                 
+            # Apply to PLACE positions
             if len(ent['place']) > 0:
                 if method == 'snap':
                     action[b:b+1, :, ent['place']] = _snap_to_nearest(action[b:b+1, :, ent['place']], pts)
                 elif method == 'force':
                     force_vector[b:b+1, :, ent['place']] = _get_restoring_force(action[b:b+1, :, ent['place']], pts)
 
+    # 4. Integrate Soft Forces (if applicable)
     if method == 'force':
-        eta_dt = 0.5 
+        eta_dt = 0.5 # Hyperparameter governing the strength of the restorative ODE step
         action = action + (eta_dt * force_vector)
         
     if debug:
@@ -1673,24 +2038,34 @@ def _get_t_val(t):
     return float(t)
 
 def constrain_bimanual_mask(action, info, t, debug=False):
-    """Hard-snapping implementation."""
+    """
+    Hard-snapping implementation.
+    
+    Hard constraints rigidly overwrite the network's prediction. Applying them too 
+    early in diffusion destroys the signal. Therefore, we only activate the hard snap 
+    in the final 20% of the reverse diffusion process when the trajectory is nearly clean.
+    """
     t_val = _get_t_val(t)
     
-    # Assuming t goes 0 -> 1 (Noise -> Data). 
-    # Only apply the hard snap in the final 20% of the trajectory.
-    # (Adjust this logic if your solver integrates 1 -> 0 instead)
+    # Assuming t normalizes to [0, 1] representing [Data, Noise] (or vice versa based on scheduler).
+    # Prevent snapping if the timestep signifies a highly noisy state.
     if t_val < 0.8: 
         return action
         
     return _apply_constraints_core(action, info, t, method='snap', debug=debug)
 
 def apply_workspace_force(action, info, t, debug=False):
-    """ODE Kinematic restoring force implementation (MEGPIE standard)."""
+    """
+    ODE Kinematic restoring force implementation.
+    
+    Soft constraints act as a continuous directional pull during diffusion. They can be 
+    safely applied earlier in the denoising process than hard snaps, gently guiding 
+    the vector field toward valid spatial regions.
+    """
     t_val = _get_t_val(t)
     
-    # ODE forces are typically applied earlier and softer than hard snaps.
-    # Here we disable it only in the very earliest pure-noise phase (e.g. t < 0.2)
-    # if you find it destabilizes the initial vector field.
+    # Optional: Disable only in the very earliest pure-noise phase (e.g., t < 0.2) 
+    # if you find the force destabilizes the initial vector field geometry.
     # if t_val < 0.2: 
     #     return action
         
@@ -1699,6 +2074,7 @@ def apply_workspace_force(action, info, t, debug=False):
 # -----------------------------------------------------------------------------
 # Function Registry
 # -----------------------------------------------------------------------------
+# Used dynamically by the config system to swap constraint behaviors at runtime.
 name2func = {
     'identity': identity,
     'bimanual_workspace_snap': constrain_bimanual_mask,
@@ -1710,6 +2086,15 @@ name2func = {
 FILE: networks.py
 ==================================================
 
+"""
+Magpie Core Networks Module.
+
+This module contains the foundational neural network architectures for the diffusion 
+policy. It includes the 1D U-Net and MLP backbones for the reverse diffusion process, 
+positional embeddings for timestep conditioning, FiLM-modulated residual blocks for 
+state conditioning, and auxiliary networks for representation learning and classification.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1717,12 +2102,18 @@ import math
 from typing import Union
 
 class ResNetDecoder(nn.Module):
+    """
+    Decodes a 1D latent representation back into a 2D spatial image mask or observation.
+
+    Typically used as an auxiliary task (Auto-Encoder) during representation learning 
+    to force the vision encoder to capture geometrically meaningful features.
+    """
     def __init__(self, input_dim=512, output_channel=3):
         super().__init__()
-        # Map the 512-dim vector to a spatial tensor of 6x6
+        # Map the flat 512-dim vector into a low-resolution spatial feature map (6x6)
         self.fc = nn.Linear(input_dim, 256 * 6 * 6)
         
-        # Upsample 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
+        # Sequentially upsample: 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
         self.decoder = nn.Sequential(
             nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
@@ -1737,23 +2128,41 @@ class ResNetDecoder(nn.Module):
             nn.ReLU(inplace=True),
             
             nn.ConvTranspose2d(32, output_channel, kernel_size=4, stride=2, padding=1),
-            # Assuming your normalized image inputs are in [0, 1] range based on your transform
+            # Squash output to [0, 1] range to match normalized image inputs
             nn.Sigmoid() 
         )
 
     def forward(self, x):
-        # x shape: (Batch, 512)
+        """
+        Args:
+            x (torch.Tensor): Latent vector of shape (Batch, 512).
+        Returns:
+            torch.Tensor: Reconstructed spatial tensor of shape (Batch, C, 96, 96).
+        """
         x = self.fc(x)
         x = x.view(-1, 256, 6, 6)
         x = self.decoder(x)
         return x
     
 class SinusoidalPosEmb(nn.Module):
+    """
+    Standard sinusoidal positional embedding.
+    
+    Used to encode the scalar diffusion timestep `k` into a high-dimensional 
+    vector so the neural network can condition its denoising logic on the current 
+    noise level.
+    """
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
 
     def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): 1D tensor of timesteps (Batch,).
+        Returns:
+            torch.Tensor: Embedded timesteps of shape (Batch, dim).
+        """
         device = x.device
         half_dim = self.dim // 2
         emb = math.log(10000) / (half_dim - 1)
@@ -1764,6 +2173,7 @@ class SinusoidalPosEmb(nn.Module):
 
 
 class Downsample1d(nn.Module):
+    """Halves the temporal resolution of the action sequence."""
     def __init__(self, dim, disable=False):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
@@ -1775,6 +2185,7 @@ class Downsample1d(nn.Module):
         return self.conv(x)
 
 class Upsample1d(nn.Module):
+    """Doubles the temporal resolution of the action sequence."""
     def __init__(self, dim, disable=False):
         super().__init__()
         self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
@@ -1787,13 +2198,15 @@ class Upsample1d(nn.Module):
 
 
 class Conv1dBlock(nn.Module):
-    '''
-        Conv1d --> GroupNorm --> Mish
-    '''
+    """
+    Standard 1D Convolutional Block using GroupNorm and Mish activation.
 
+    GroupNorm is preferred over BatchNorm in sequence modeling and RL because 
+    batch sizes are often small or highly correlated, which destabilizes BatchNorm.
+    Mish provides a smooth, non-monotonic gradient flow.
+    """
     def __init__(self, inp_channels, out_channels, kernel_size, n_groups=8):
         super().__init__()
-
         self.block = nn.Sequential(
             nn.Conv1d(inp_channels, out_channels, kernel_size, padding=kernel_size // 2),
             nn.GroupNorm(n_groups, out_channels),
@@ -1805,6 +2218,14 @@ class Conv1dBlock(nn.Module):
 
 
 class ConditionalResidualBlock1D(nn.Module):
+    """
+    A 1D Residual Block modulated by global conditioning features via FiLM.
+
+    Feature-wise Linear Modulation (FiLM) is the standard mechanism to inject 
+    the environmental observation (image features) and the diffusion timestep 
+    into the action denoiser. It predicts a per-channel scale and bias to shift 
+    the convolutional activations.
+    """
     def __init__(self,
             in_channels,
             out_channels,
@@ -1818,36 +2239,37 @@ class ConditionalResidualBlock1D(nn.Module):
             Conv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
         ])
 
-        # FiLM modulation https://arxiv.org/abs/1709.07871
-        # predicts per-channel scale and bias
+        # FiLM Modulator: maps the global condition to scale and bias vectors
         cond_channels = out_channels * 2
         self.out_channels = out_channels
         self.cond_encoder = nn.Sequential(
             nn.Mish(),
             nn.Linear(cond_dim, cond_channels),
-            nn.Unflatten(-1, (-1, 1))
+            nn.Unflatten(-1, (-1, 1)) # Prepare for broadcasting over the time dimension
         )
 
-        # make sure dimensions compatible
+        # 1x1 conv to match channel dimensions for the residual connection
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
 
     def forward(self, x, cond):
-        '''
-            x : [ batch_size x in_channels x horizon ]
-            cond : [ batch_size x cond_dim]
+        """
+        Args:
+            x (torch.Tensor): Action sequence of shape (Batch, in_channels, Horizon).
+            cond (torch.Tensor): Global condition (vision + timestep) of shape (Batch, cond_dim).
 
-            returns:
-            out : [ batch_size x out_channels x horizon ]
-        '''
-        #print('x.shape', x.shape)
+        Returns:
+            torch.Tensor: Modulated action sequence of shape (Batch, out_channels, Horizon).
+        """
         out = self.blocks[0](x)
+        
+        # Generate FiLM scale and bias
         embed = self.cond_encoder(cond)
-
-        embed = embed.reshape(
-            embed.shape[0], 2, self.out_channels, 1)
-        scale = embed[:,0,...]
-        bias = embed[:,1,...]
+        embed = embed.reshape(embed.shape[0], 2, self.out_channels, 1)
+        scale = embed[:, 0, ...]
+        bias = embed[:, 1, ...]
+        
+        # Apply affine modulation
         out = scale * out + bias
 
         out = self.blocks[1](out)
@@ -1856,6 +2278,13 @@ class ConditionalResidualBlock1D(nn.Module):
 
 
 class ConditionalUnet1D(nn.Module):
+    """
+    The core Diffusion Backbone: A 1D U-Net.
+
+    Unlike standard 2D U-Nets used for images, this operates over the temporal 
+    horizon of the action trajectory. The spatial dimension is `T` (prediction horizon), 
+    and the "channels" are the action dimensions.
+    """
     def __init__(self,
         input_dim,
         global_cond_dim,
@@ -1863,22 +2292,23 @@ class ConditionalUnet1D(nn.Module):
         down_dims=[256,512,1024],
         kernel_size=5,
         n_groups=8,
-        diable_updown=False):
+        diable_updown=False): # Note: retained original typo 'diable_updown' for compatibility
         """
-        input_dim: Dim of actions.
-        global_cond_dim: Dim of global conditioning applied with FiLM
-          in addition to diffusion step embedding. This is usually obs_horizon * obs_dim
-        diffusion_step_embed_dim: Size of positional encoding for diffusion iteration k
-        down_dims: Channel size for each UNet level.
-          The length of this array determines numebr of levels.
-        kernel_size: Conv kernel size
-        n_groups: Number of groups for GroupNorm
+        Args:
+            input_dim: Action dimension (e.g., 7 DoF).
+            global_cond_dim: Dimension of the flattened vision/state features.
+            diffusion_step_embed_dim: Dimension of the sinusoidal time embedding.
+            down_dims: List of channel dimensions for the UNet hierarchy.
+            kernel_size: Convolutional kernel size along the time axis.
+            n_groups: Group count for GroupNorm.
+            diable_updown: If True, skips spatial downsampling/upsampling.
         """
-        print('disabel_updown', diable_updown)
+        print('disable_updown', diable_updown)
         super().__init__()
         all_dims = [input_dim] + list(down_dims)
         start_dim = down_dims[0]
 
+        # Process diffusion timestep `k` into an embedding
         dsed = diffusion_step_embed_dim
         diffusion_step_encoder = nn.Sequential(
             SinusoidalPosEmb(dsed),
@@ -1886,47 +2316,41 @@ class ConditionalUnet1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
+        
+        # The total conditioning dimension injected into every FiLM block
         cond_dim = dsed + global_cond_dim
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
         mid_dim = all_dims[-1]
+        
+        # Bottleneck blocks
         self.mid_modules = nn.ModuleList([
-            ConditionalResidualBlock1D(
-                mid_dim, mid_dim, cond_dim=cond_dim,
-                kernel_size=kernel_size, n_groups=n_groups
-            ),
-            ConditionalResidualBlock1D(
-                mid_dim, mid_dim, cond_dim=cond_dim,
-                kernel_size=kernel_size, n_groups=n_groups
-            ),
+            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
         ])
 
+        # Contracting Path
         down_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (len(in_out) - 1)
             down_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
-                    dim_in, dim_out, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(
-                    dim_out, dim_out, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(dim_in, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(dim_out, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
                 Downsample1d(dim_out, diable_updown) if not is_last else nn.Identity()
             ]))
 
+        # Expanding Path
         up_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (len(in_out) - 1)
             up_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
-                    dim_out*2, dim_in, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(
-                    dim_in, dim_in, cond_dim=cond_dim,
-                    kernel_size=kernel_size, n_groups=n_groups),
+                # dim_out * 2 because of skip connections concatenated from down_modules
+                ConditionalResidualBlock1D(dim_out*2, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(dim_in, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
                 Upsample1d(dim_in, diable_updown) if not is_last else nn.Identity()
             ]))
 
+        # Final projection back to action dimensions
         final_conv = nn.Sequential(
             Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
             nn.Conv1d(start_dim, input_dim, 1),
@@ -1937,57 +2361,58 @@ class ConditionalUnet1D(nn.Module):
         self.down_modules = down_modules
         self.final_conv = final_conv
 
-        print("number of parameters: {:e}".format(
-            sum(p.numel() for p in self.parameters()))
-        )
+        print("number of parameters: {:e}".format(sum(p.numel() for p in self.parameters())))
 
     def forward(self,
             sample: torch.Tensor,
             timestep: Union[torch.Tensor, float, int],
             global_cond=None):
         """
-        x: (B,T,input_dim)
-        timestep: (B,) or int, diffusion step
-        global_cond: (B,global_cond_dim)
-        output: (B,T,input_dim)
-        """
-        # (B,T,C)
-        sample = sample.moveaxis(-1,-2)
-        # (B,C,T)
-        #print('sample', sample.shape)
+        Args:
+            sample (torch.Tensor): Noisy action sequence (Batch, Horizon, ActionDim).
+            timestep (Tensor/int): Current diffusion step.
+            global_cond (torch.Tensor): Visual/State conditioning (Batch, CondDim).
 
-        # 1. time
+        Returns:
+            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim).
+        """
+        # PyTorch 1D Convs expect (Batch, Channels, Length). We swap ActionDim and Horizon.
+        # (B, T, C) -> (B, C, T)
+        sample = sample.moveaxis(-1,-2)
+
+        # 1. Process Timesteps
         timesteps = timestep
         if not torch.is_tensor(timesteps):
-            # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+            
+        # Broadcast to batch dimension
         timesteps = timesteps.expand(sample.shape[0])
 
         global_feature = self.diffusion_step_encoder(timesteps)
 
+        # 2. Fuse Timestep and Vision features
         if global_cond is not None:
-            global_feature = torch.cat([
-                global_feature, global_cond
-            ], axis=-1)
+            global_feature = torch.cat([global_feature, global_cond], axis=-1)
 
         x = sample
         h = []
+        
+        # 3. Contracting Path
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
-            #print('x', x.shape)
             x = resnet(x, global_feature)
             x = resnet2(x, global_feature)
-            h.append(x)
+            h.append(x) # Save for skip connection
             x = downsample(x)
 
+        # 4. Bottleneck
         for mid_module in self.mid_modules:
             x = mid_module(x, global_feature)
 
+        # 5. Expanding Path
         for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
-            # print('x', x.shape)
-            # print('h', h[-1].shape)
+            # Concatenate skip connection
             x = torch.cat((x, h.pop()), dim=1)
             x = resnet(x, global_feature)
             x = resnet2(x, global_feature)
@@ -1995,12 +2420,13 @@ class ConditionalUnet1D(nn.Module):
 
         x = self.final_conv(x)
 
-        # (B,C,T)
+        # Revert back to (Batch, Horizon, ActionDim)
         x = x.moveaxis(-1,-2)
-        # (B,T,C)
         return x
 
+
 def get_activation(name: str):
+    """Utility to map string names to PyTorch activation modules."""
     name = name.lower()
     if name == "relu":
         return nn.ReLU()
@@ -2017,6 +2443,12 @@ def get_activation(name: str):
 
 
 class MLPClassifier(nn.Module):
+    """
+    Standard Multi-Layer Perceptron.
+
+    Used primarily as the classification head for primitive skill selection 
+    (e.g., determining whether to execute a pick, place, or dual-arm operation).
+    """
     def __init__(
         self,
         input_dim: int,
@@ -2030,7 +2462,6 @@ class MLPClassifier(nn.Module):
 
         layers = []
         dims = [input_dim] + list(hidden_dims)
-
         act = get_activation(activation)
 
         for i in range(len(hidden_dims)):
@@ -2052,6 +2483,14 @@ class MLPClassifier(nn.Module):
         return self.net(x)
 
 class ConditionalMLP1D(nn.Module):
+    """
+    An alternative Diffusion Backbone: A Dense MLP.
+
+    While the U-Net leverages temporal convolutions to maintain structural awareness 
+    across the trajectory horizon, the MLP flattens the entire horizon into a single 
+    vector. This is faster and uses fewer parameters, but generally performs worse 
+    on highly complex continuous control tasks compared to the U-Net.
+    """
     def __init__(
         self,
         input_dim,
@@ -2063,17 +2502,18 @@ class ConditionalMLP1D(nn.Module):
         dropout=0.1
     ):
         """
-        input_dim: Dim of actions.
-        global_cond_dim: Dim of global conditioning (usually obs_horizon * obs_dim)
-        pred_horizon: The length of the action sequence (needed to flatten/unflatten)
-        diffusion_step_embed_dim: Size of positional encoding for diffusion iteration
-        hidden_dims: List of hidden layer dimensions for the MLP
+        Args:
+            input_dim: Dim of a single action step.
+            global_cond_dim: Dim of global conditioning.
+            pred_horizon: The length of the action sequence (needed to flatten/unflatten).
+            diffusion_step_embed_dim: Size of positional encoding for diffusion iteration.
+            hidden_dims: List of hidden layer dimensions.
         """
         super().__init__()
         self.input_dim = input_dim
         self.pred_horizon = pred_horizon
 
-        # Time step embedding (identical to ConditionalUnet1D for consistency)
+        # Time step embedding (identical to ConditionalUnet1D for consistent scaling)
         dsed = diffusion_step_embed_dim
         self.diffusion_step_encoder = nn.Sequential(
             SinusoidalPosEmb(dsed),
@@ -2087,7 +2527,7 @@ class ConditionalMLP1D(nn.Module):
         mlp_input_dim = (pred_horizon * input_dim) + cond_dim
         output_dim = pred_horizon * input_dim
 
-        # Build the MLP layers
+        # Build the dense layers
         layers = []
         dims = [mlp_input_dim] + list(hidden_dims)
         act = get_activation(activation)
@@ -2098,7 +2538,7 @@ class ConditionalMLP1D(nn.Module):
             if dropout > 0:
                 layers.append(nn.Dropout(dropout))
 
-        # Final projection to the flattened action dimension
+        # Final projection to the flattened action shape
         layers.append(nn.Linear(dims[-1], output_dim))
         self.net = nn.Sequential(*layers)
 
@@ -2113,10 +2553,13 @@ class ConditionalMLP1D(nn.Module):
         global_cond=None
     ):
         """
-        sample: (B, T, input_dim)
-        timestep: (B,) or int, diffusion step
-        global_cond: (B, global_cond_dim)
-        output: (B, T, input_dim)
+        Args:
+            sample: (Batch, Horizon, ActionDim)
+            timestep: (Batch,) or int
+            global_cond: (Batch, CondDim)
+            
+        Returns:
+            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim)
         """
         B, T, C = sample.shape
 
@@ -2134,14 +2577,14 @@ class ConditionalMLP1D(nn.Module):
         if global_cond is not None:
             global_feature = torch.cat([global_feature, global_cond], dim=-1)
 
-        # 3. Flatten the action sample and concatenate with the conditioning
-        sample_flat = sample.reshape(B, -1) # (B, T*C)
-        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) # (B, T*C + cond_dim)
+        # 3. Flatten the action sample (B, T*C) and concat with conditioning
+        sample_flat = sample.reshape(B, -1) 
+        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) 
 
-        # 4. Forward pass through the dense network
-        out_flat = self.net(mlp_in) # (B, T*C)
+        # 4. Forward pass
+        out_flat = self.net(mlp_in) 
 
-        # 5. Unflatten back to the original sequence shape
+        # 5. Unflatten back to original temporal shape
         out = out_flat.reshape(B, T, C)
         return out
 
@@ -2336,38 +2779,77 @@ def plot_rgb_workspace_mask_goal_features(image_tensor, save_dir='tmp'):
 FILE: utils.py
 ==================================================
 
+"""
+Magpie Utilities Module.
+
+This module provides a collection of helper functions required for the Magpie 
+diffusion agent. It handles configuration parsing, hierarchical action space 
+flattening, classification metric computations, vision encoder modifications 
+(e.g., swapping BatchNorm for GroupNorm), and debugging visualizations.
+"""
+
+import os
 import torch
 import torch.nn as nn
 import torchvision
 from typing import Callable
 from omegaconf import DictConfig, ListConfig, OmegaConf
 import numpy as np
-
-import numpy as np
 import matplotlib.pyplot as plt
 import imageio
-import os
+
+# =============================================================================
+# Configuration & Action Space Utilities
+# =============================================================================
 
 def omegaconf_to_plain_dict(cfg):
+    """
+    Strips Hydra/OmegaConf wrappers from a configuration object.
+
+    Many logging frameworks (like wandb) or downstream serialization methods 
+    fail when passed DictConfig objects. This ensures a pure Python dictionary.
+
+    Args:
+        cfg (DictConfig, ListConfig, or dict): The configuration object.
+
+    Returns:
+        dict: A standard, unnested Python dictionary.
+    """
     if isinstance(cfg, (DictConfig, ListConfig)):
-        return OmegaConf.to_container(cfg, resolve=True)  # nested dict/list
+        return OmegaConf.to_container(cfg, resolve=True) 
     return cfg
 
 def dict_to_action_vector(dict_action, action_output_template):
     """
-    Convert dictionary form of action back into flat vector form.
+    Flattens a structured, hierarchical action dictionary into a 1D NumPy array.
+
+    In complex robotics tasks (e.g., dual-arm setups with grippers), environments 
+    often expect actions as nested dictionaries (e.g., `{'arm0': {'pose': [...], 
+    'gripper': [...]}}`). However, the diffusion network requires a flat 1D vector.
+    This maps the dictionary values to their predefined index positions in the vector.
+
+    Args:
+        dict_action (dict): The nested action dictionary from the environment or dataset.
+        action_output_template (dict): A template defining which vector indices 
+                                       correspond to which dictionary keys.
+
+    Returns:
+        np.ndarray: A flattened 1D action vector of type float.
+        
+    Raises:
+        ValueError: If no valid indices can be found in the template.
     """
-    #print('action_output_template', action_output_template)
     indices = list(_max_index_in_dict(action_output_template))
     if indices:
         max_index = max(indices)
     else:
         raise ValueError(f"No indices found in action_output_template: {action_output_template}")
 
-    #print('max_index', max_index)
+    # Initialize the flat vector
     action = np.zeros(max_index + 1, dtype=float)
 
     def fill_action(d_action, template):
+        """Recursively traverses the template to place values into the flat array."""
         for k, v in template.items():
             if isinstance(v, dict):
                 fill_action(d_action[k], v)
@@ -2378,31 +2860,52 @@ def dict_to_action_vector(dict_action, action_output_template):
     fill_action(dict_action, action_output_template)
     return action
 
-
 def _max_index_in_dict(d):
-    """Helper to find all indices used in the template dict."""
+    """
+    Recursive generator to find all index assignments defined in the template.
+    
+    Args:
+        d (dict): The template dictionary.
+        
+    Yields:
+        int: The maximum index found in the current branch.
+    """
     for v in d.values():
-        #print(type(v))
         if isinstance(v, dict):
             yield from _max_index_in_dict(v)
         elif isinstance(v, (list, ListConfig)) and len(v) > 0:
             yield max(v)
 
+# =============================================================================
+# Training Metrics
+# =============================================================================
+
 def compute_classification_metrics(logits, targets, num_classes):
     """
-    logits: (B, K)
-    targets: (B,)
+    Computes accuracy, precision, recall, and F1 scores for primitive classification.
+
+    When training the high-level primitive selection head, class imbalance is common 
+    (e.g., standard movements vs. rare grasping events). This function computes 
+    macro-averaged metrics to ensure minority classes are evaluated fairly.
+
+    Args:
+        logits (torch.Tensor): Unnormalized network predictions (Batch, NumClasses).
+        targets (torch.Tensor): Ground truth class indices (Batch,).
+        num_classes (int): Total number of primitive classes (K).
+
+    Returns:
+        dict: A dictionary containing 'accuracy', 'precision_macro', 
+              'recall_macro', and 'f1_macro'.
     """
     with torch.no_grad():
         preds = torch.argmax(logits, dim=-1)
-
         accuracy = (preds == targets).float().mean()
 
         metrics = {
             "accuracy": accuracy.item()
         }
 
-        # Per-class precision / recall / F1 (macro-averaged)
+        # Epsilon to prevent division by zero
         eps = 1e-8
         precisions, recalls, f1s = [], [], []
 
@@ -2427,21 +2930,37 @@ def compute_classification_metrics(logits, targets, num_classes):
 
     return metrics
 
-def get_resnet(name:str, input_channel=3, weights=None, **kwargs) -> nn.Module:
+# =============================================================================
+# Network Architecture Utilities
+# =============================================================================
+
+def get_resnet(name: str, input_channel=3, weights=None, **kwargs) -> nn.Module:
     """
-    name: resnet18, resnet34, resnet50
-    weights: "IMAGENET1K_V1", None
+    Instantiates a standard ResNet vision encoder from torchvision.
+
+    Modifies the first convolutional layer to accommodate non-standard input 
+    dimensions (e.g., RGB-D or stacked mask channels) and removes the final 
+    classification head to extract raw 512-dimensional embeddings.
+
+    Args:
+        name (str): Model name (e.g., 'resnet18', 'resnet34').
+        input_channel (int): Number of input channels (default: 3).
+        weights (str, optional): Pre-trained weights to load, e.g., 'IMAGENET1K_V1'.
+
+    Returns:
+        nn.Module: The modified ResNet encoder.
     """
-    # Use standard ResNet implementation from torchvision
     func = getattr(torchvision.models, name)
     resnet = func(**kwargs)
+    
+    # Overwrite the first layer if input channels != 3 (e.g., RGBD = 4, RGB+Masks = 5)
     resnet.conv1 = nn.Conv2d(input_channel, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
-    # remove the final fully connected layer
-    # for resnet18, the output dim should be 512
+    # Strip the final fully connected classification layer to use as an embedding extractor.
+    # For resnet18, the output embedding dimension will be 512.
     resnet.fc = torch.nn.Identity()
     resnet.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-    #print(resnet)
+    
     return resnet
 
 
@@ -2450,11 +2969,15 @@ def replace_submodules(
         predicate: Callable[[nn.Module], bool],
         func: Callable[[nn.Module], nn.Module]) -> nn.Module:
     """
-    Replace all submodules selected by the predicate with
-    the output of func.
+    Recursively replaces specific submodules within a PyTorch model.
 
-    predicate: Return true if the module is to be replaced.
-    func: Return new module to use.
+    Args:
+        root_module (nn.Module): The top-level PyTorch module.
+        predicate (Callable): Returns True if the submodule should be replaced.
+        func (Callable): A factory function that takes the old module and returns the new one.
+
+    Returns:
+        nn.Module: The updated root module.
     """
     if predicate(root_module):
         return func(root_module)
@@ -2462,99 +2985,123 @@ def replace_submodules(
     bn_list = [k.split('.') for k, m
         in root_module.named_modules(remove_duplicate=True)
         if predicate(m)]
+        
     for *parent, k in bn_list:
         parent_module = root_module
         if len(parent) > 0:
             parent_module = root_module.get_submodule('.'.join(parent))
+            
         if isinstance(parent_module, nn.Sequential):
             src_module = parent_module[int(k)]
         else:
             src_module = getattr(parent_module, k)
+            
         tgt_module = func(src_module)
+        
         if isinstance(parent_module, nn.Sequential):
             parent_module[int(k)] = tgt_module
         else:
             setattr(parent_module, k, tgt_module)
-    # verify that all modules are replaced
+            
+    # Verification pass to ensure no modules were missed
     bn_list = [k.split('.') for k, m
         in root_module.named_modules(remove_duplicate=True)
         if predicate(m)]
-    assert len(bn_list) == 0
+    assert len(bn_list) == 0, "Failed to replace all target submodules."
+    
     return root_module
 
 def replace_bn_with_gn(
     root_module: nn.Module,
     features_per_group: int=16) -> nn.Module:
     """
-    Relace all BatchNorm layers with GroupNorm.
+    Replaces all BatchNorm2d layers in a network with GroupNorm.
+
+    **Why this is critical for RL & Robotics:** BatchNorm relies on calculating running statistics over the batch dimension. 
+    In RL pipelines or diffusion models where VRAM limits batch sizes (e.g., batch size 
+    of 8 or 16), these statistics become highly erratic and destabilize training. 
+    GroupNorm computes statistics over channel groups independently of batch size, 
+    making it significantly more stable for these workloads.
+
+    Args:
+        root_module (nn.Module): The network (e.g., a ResNet) to modify.
+        features_per_group (int): The number of channels per normalization group.
+
+    Returns:
+        nn.Module: The network with all BatchNorm layers replaced.
     """
     replace_submodules(
         root_module=root_module,
         predicate=lambda x: isinstance(x, nn.BatchNorm2d),
         func=lambda x: nn.GroupNorm(
-            num_groups=x.num_features//features_per_group,
+            num_groups=max(1, x.num_features // features_per_group), # Ensure at least 1 group
             num_channels=x.num_features)
     )
     return root_module
 
+# =============================================================================
+# Debugging & Visualization
+# =============================================================================
+
 def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='tmp/denoising_evolution'):
     """
-    Generates a GIF showing the evolution of the action prediction during diffusion.
+    Generates a GIF visualizing the reverse diffusion process over time.
     
+    This plots the iterative refinement of the predicted action trajectory as 
+    it evolves from pure noise (at the start of the reverse process) to the 
+    clean, final predicted trajectory. It overlays the trajectory on the camera 
+    feed and workspace masks.
+
     Args:
-        image: (C, H, W) or (H, W, C) numpy array, normalized or uint8.
-        masks: List of two (H, W) numpy arrays [mask_left, mask_right].
-        noise_actions_history: List of (T, D) numpy arrays. Each element is the trajectory at a diffusion step.
-        step_idx: Integer, current simulation step for filename uniqueness.
-        save_dir: Directory to save the GIF.
+        image (np.ndarray): (C, H, W) or (H, W, C) numpy array, normalized or uint8.
+        masks (list): List of two (H, W) numpy arrays representing valid regions [mask_left, mask_right].
+        noise_actions_history (list): List of (T, D) numpy arrays representing the trajectory at each diffusion step.
+        step_idx (int): Current simulation step (used for filename uniqueness).
+        save_dir (str): Output directory for the GIF.
     """
     os.makedirs(save_dir, exist_ok=True)
     
-    # 1. Prepare Background Image (RGB + Masks)
-    # Ensure image is H,W,C and uint8
+    # 1. Prepare Background Image (Ensure H,W,C and uint8 format)
     if image.shape[0] in [1, 3]: image = np.transpose(image, (1, 2, 0))
     if image.max() <= 1.0: image = (image * 255).astype(np.uint8)
     
     H, W = image.shape[:2]
     
-    # Create figure once to reuse settings
+    # Create figure once to reuse settings and save rendering time
     fig, ax = plt.subplots(figsize=(5, 5))
     
-    # Function to render a single frame
     def render_frame(action_traj, frame_idx):
+        """Renders a single frame of the diffusion process."""
         ax.clear()
         
-        # A. Plot Image
+        # A. Plot Base Image
         ax.imshow(image)
         
-        # B. Overlay Masks (Left=Blue tint, Right=Red tint)
-        # We create a colored overlay where mask is active
+        # B. Overlay Semantic Masks (Left=Blue tint, Right=Red tint)
         if masks[0] is not None:
-            # Create blue overlay
             blue_mask = np.zeros((H, W, 4))
             blue_mask[..., 2] = 1.0 # Blue channel
-            blue_mask[..., 3] = masks[0] * 0.2 # Alpha
+            blue_mask[..., 3] = masks[0] * 0.2 # Alpha transparency
             ax.imshow(blue_mask)
             
         if masks[1] is not None:
-            # Create red overlay
             red_mask = np.zeros((H, W, 4))
             red_mask[..., 0] = 1.0 # Red channel
-            red_mask[..., 3] = masks[1] * 0.2 # Alpha
+            red_mask[..., 3] = masks[1] * 0.2 # Alpha transparency
             ax.imshow(red_mask)
             
         # C. Plot Action Trajectories
-        # Robot 0 (Left) -> Indices [0,1] -> Light Blue ('cyan')
+        # Robot 0 (Left Arm) -> Assuming indices [0,1] correspond to X, Y
         r0_traj = action_traj[:, :2]
-        # Denormalize [-1, 1] -> [0, W]
+        # Denormalize from diffusion space [-1, 1] back to pixel space [0, W]
         r0_x = (r0_traj[:, 0] + 1) * W / 2
         r0_y = (r0_traj[:, 1] + 1) * H / 2
         
         ax.plot(r0_x, r0_y, c='cyan', linewidth=2, label='Left (R0)')
-        ax.scatter(r0_x[0], r0_y[0], c='cyan', s=30, marker='o') # Start
-        ax.scatter(r0_x[-1], r0_y[-1], c='cyan', s=30, marker='x') # End
+        ax.scatter(r0_x[0], r0_y[0], c='cyan', s=30, marker='o') # Trajectory Start
+        ax.scatter(r0_x[-1], r0_y[-1], c='cyan', s=30, marker='x') # Trajectory End
         
-        # Robot 1 (Right) -> Indices [7,8] -> Warm Red ('tomato')
+        # Robot 1 (Right Arm) -> Assuming indices [7,8] correspond to X, Y
         r1_traj = action_traj[:, 7:9]
         r1_x = (r1_traj[:, 0] + 1) * W / 2
         r1_y = (r1_traj[:, 1] + 1) * H / 2
@@ -2566,7 +3113,7 @@ def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='
         ax.set_title(f"Diffusion Step: {frame_idx}/{len(noise_actions_history)}")
         ax.axis('off')
         
-        # Draw canvas to numpy array
+        # Draw canvas and convert to numpy array for imageio
         fig.canvas.draw()
         frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
         frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
@@ -2574,15 +3121,14 @@ def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='
 
     # 2. Generate Frames
     frames = []
-    # Reverse history so it goes from Noisy -> Clean
+    # Reverse history so the GIF plays from High Noise -> Clean Output
     for i, act in enumerate(reversed(noise_actions_history)):
         frames.append(render_frame(act, i))
         
-    # 3. Save GIF
+    # 3. Save as looping GIF
     filename = os.path.join(save_dir, f'step_{step_idx}_evolution.gif')
     imageio.mimsave(filename, frames, fps=10)
     plt.close(fig)
-
 
 
 ==================================================

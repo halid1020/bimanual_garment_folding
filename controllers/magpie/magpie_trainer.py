@@ -69,8 +69,17 @@ class MagpieTrainer:
 
             if self.agent.validate_training:
                 val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
+        
+        elif self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            config_dict = self.config.dataset_config.toDict()
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+
+            if self.agent.validate_training:
+                val_dataset = HindsightDataset(**config_dict, sample_mode='val')
+
         else:
-            raise ValueError('Invalid dataset mode. Expected "diffusion" or "general".')
+            raise ValueError('Invalid dataset mode. Expected "diffusion", "hindsignt", "general".')
 
         # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
         use_ros = self.config.get('use_random_oversampling', False)
@@ -137,10 +146,19 @@ class MagpieTrainer:
         org_horizon = arena.action_horizon
         arena.action_horizon = self.config.get('demo_horizon', org_horizon)
         
-        from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-        config_dict = self.config.dataset_config
+        # Safely convert to a standard dict to prevent mutating the global config
+        config_dict = self.config.dataset_config.toDict() if hasattr(self.config.dataset_config, 'toDict') else dict(self.config.dataset_config)
         config_dict['io_mode'] = 'a' # Append mode
-        train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
+        
+        # Route dataset instantiation based on the config mode
+        if self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+        else:
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+            # Strip the HER mapping if falling back to the general base class
+            config_dict.pop('future_goal_mapping', None)
+            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
 
         import actoris_harena as ag_ar
         policy = ag_ar.build_agent(self.config.demo_policy, self.config.get('demo_policy_config', DotMap({})), disable_wandb=True)

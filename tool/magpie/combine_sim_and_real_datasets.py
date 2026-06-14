@@ -30,7 +30,7 @@ from actoris_harena import TrajectoryDataset
 # Target Dataset Configuration
 # ==========================================
 COMBINED_DATASET_CONFIG: Dict[str, Any] = {
-    "data_path": "sim_and_real_combined",
+    "data_path": "sim_and_real_garments_combined_multi_primitive_alignment",
     "data_dir": "./data/datasets",
     "split_ratios": [0.0, 0.05, 0.95],
     "seq_length": 1,
@@ -186,7 +186,7 @@ if __name__ == "__main__":
                         help="Folder name of the simulation dataset.")
     parser.add_argument('--real_name', type=str, default="real_world_longsleeve", 
                         help="Folder name of the real-world dataset.")
-    parser.add_argument('--output_name', type=str, default="sim_and_real_combined", 
+    parser.add_argument('--output_name', type=str, default="sim_and_real_garments_combined_multi_primitive_alignment", 
                         help="Folder name for the new output dataset.")
     
     args = parser.parse_args()

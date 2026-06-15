@@ -177,6 +177,17 @@ class MagpieTrainer:
 
             policy.reset([arena.id])
             info = arena.reset(train_configs[episode_id])
+
+            # Check if all requested keys exist in the environment's observation output
+            missing_keys = [k for k in train_dataset.obs_types if k not in info['observation']]
+            if missing_keys:
+                raise ValueError(
+                    f"\n[MagpieTrainer] CONFIGURATION ERROR: \n"
+                    f"Your dataset configuration is requesting the following keys: {missing_keys}\n"
+                    f"However, the environment (or task) is not outputting them in info['observation'].\n"
+                    f"Please either remove these keys from your dataset config (yaml) or update your environment to generate them."
+                )
+            
             policy.init([info])
             info['reward'] = 0
             done = info['done']
@@ -207,13 +218,16 @@ class MagpieTrainer:
                     # Convert primitive ID back to normalized [-1, 1] bin format
                     prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
                     
-                    # --- FIXED: Dynamically allocate enough space for the primitive ID + parameters ---
-                    # Ensures the array is at least size 9 for dual-pick-and-place
-                    action_size = max(getattr(self.agent, 'data_save_action_dim', 0), action_param.shape[0] + 1)
-                    add_action = np.zeros(action_size)
+                    # This guarantees all primitives output an array of the exact same length (e.g., 9)
+                    expected_dim = train_dataset.action_config['default']['shape'][0]
+                    add_action = np.zeros(expected_dim, dtype=np.float32)
                     
                     add_action[0] = prim_act
-                    add_action[1:action_param.shape[0]+1] = action_param
+                    
+                    # Copy the primitive parameters into the zero-padded array safely
+                    copy_len = min(action_param.shape[0], expected_dim - 1)
+                    add_action[1:copy_len+1] = action_param[:copy_len]
+                    
                 elif self.config.primitive_integration == 'none':
                     add_action = action
                 

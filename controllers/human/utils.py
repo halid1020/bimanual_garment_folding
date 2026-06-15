@@ -64,23 +64,31 @@ def draw_evaluation_metrics(img: np.ndarray, state: dict):
     """
     if 'evaluation' in state and state['evaluation']:
         metrics = state['evaluation']
+        
         text_lines = [
             (f"Success: {state.get('success', False)}", (0, 255, 0) if state.get('success', False) else (0, 0, 255)),
             (f"NC: {metrics.get('normalised_coverage', 0):.3f}", (255, 255, 255)),
             (f"Max IoU(flat): {metrics.get('max_IoU_to_flattened', 0):.3f}", (255, 255, 255)),
             (f"Align IoU(flat): {metrics.get('algn_IoU_to_flattened', 0):.3f}", (255, 255, 255))
         ]
-        if 'max_IoU' in metrics:
-            text_lines.append((f"IoU(fold): {metrics['max_IoU']:.3f}", (255, 255, 255)))
         
-        draw_text_bottom_right(img, text_lines, font_scale=0.5, thickness=1)
+        # --- ADDED: Max and Align IoU for the fold state ---
+        if 'max_IoU' in metrics:
+            text_lines.append((f"Max IoU(fold): {metrics['max_IoU']:.3f}", (255, 255, 255)))
+        if 'algn_IoU' in metrics:
+            text_lines.append((f"Align IoU(fold): {metrics['algn_IoU']:.3f}", (255, 255, 255)))
+        
+        draw_text_bottom_right(img, text_lines, font_scale=0.7, thickness=2)
 
 def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
-    TARGET_THRESHOLDS = [0.75]*3
-    FONT_SCALE = 0.4
+    FONT_SCALE = 0.6
+    FONT_THICKNESS = 2
     
     if 'goals' in state and isinstance(state['goals'], list) and len(state['goals']) > 0:
-        active_idx = state.get('evaluation', {}).get('active_subgoal_idx', 0)
+        evaluation = state.get('evaluation', {})
+        active_idx = evaluation.get('active_subgoal_idx', 0)
+        
+        TARGET_THRESHOLDS = evaluation.get('iou_thresholds', [0.80] * len(state['goals']))
         active_goal_state = state['goals'][active_idx]
         
         if 'observation' in active_goal_state and 'mask' in active_goal_state['observation']:
@@ -89,17 +97,17 @@ def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
             
             _draw_contour(rgb, goal_mask)
             
-            # STRICT Absolute IoU (No translation)
             current_iou = calculate_strict_iou(current_mask, goal_mask)
             target_iou = TARGET_THRESHOLDS[active_idx] if active_idx < len(TARGET_THRESHOLDS) else 0.80
             
             progress_color = (0, 255, 0) if current_iou >= target_iou else (0, 255, 255)
             
             h, w = rgb.shape[:2]
+            # --- ADJUSTED: Increased spacing between the two lines (h - 35 and h - 10) ---
             cv2.putText(rgb, f"Target: Subgoal {active_idx + 1}/{len(state['goals'])}", 
-                        (10, h - 25), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), 1)
+                        (10, h - 35), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), FONT_THICKNESS)
             cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}", 
-                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, 1)
+                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, FONT_THICKNESS)
                         
     elif 'goal' in state and 'mask' in state['goal']:
         goal_mask = state['goal']['mask']
@@ -112,10 +120,11 @@ def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
         progress_color = (0, 255, 0) if current_iou >= target_iou else (0, 255, 255)
         
         h, w = rgb.shape[:2]
-        cv2.putText(rgb, f"Target: Final Goal", 
-                    (10, h - 25), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), 1)
+        # --- ADJUSTED: Increased spacing here as well ---
+        cv2.putText(rgb, f"Target: Final Subgoal", 
+                    (10, h - 35), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), FONT_THICKNESS)
         cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}", 
-                    (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, 1)
+                    (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, FONT_THICKNESS)
         
     return rgb
 
@@ -126,26 +135,29 @@ def _draw_contour(img: np.ndarray, mask: np.ndarray):
         
     mask_uint8 = np.array(mask * 255, dtype=np.uint8)
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(img, contours, -1, (0, 255, 255), 1)
+    cv2.drawContours(img, contours, -1, (0, 255, 255), 2)
 
 def append_goal_grid(img: np.ndarray, state: dict) -> np.ndarray:
     if 'goals' not in state:
         if 'goal' in state and 'rgb' in state['goal']:
             goal_rgb = cv2.cvtColor(state['goal']['rgb'], cv2.COLOR_BGR2RGB)
             goal_rgb = cv2.resize(goal_rgb, (img.shape[0], img.shape[0]))
-            cv2.putText(goal_rgb, "Final Goal", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(goal_rgb, "Final Subgoal", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+            
+            # --- NEW: Draw metrics strictly on the goal image ---
+            draw_evaluation_metrics(goal_rgb, state)
+            
             return np.concatenate([img, goal_rgb], axis=1)
         return img
 
     rgbs = []
-    for i, goal in enumerate(state['goals'][:4]):
+    for i, goal in enumerate(state['goals']):
         g = goal['observation']['rgb']
         if g.shape[-1] == 3:
             g = cv2.cvtColor(g, cv2.COLOR_BGR2RGB)
         g = cv2.resize(g, (256, 256))
         
-        # --- NEW: Add the Goal label text directly onto the mini-image ---
-        cv2.putText(g, f"Goal {i+1}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(g, f"Subgoal {i+1}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
         rgbs.append(g)
 
     while len(rgbs) < 4:
@@ -155,10 +167,73 @@ def append_goal_grid(img: np.ndarray, state: dict) -> np.ndarray:
     bottom_row = np.concatenate([rgbs[2], rgbs[3]], axis=1)
     goal_rgb = np.concatenate([top_row, bottom_row], axis=0)
     
+    # --- NEW: Draw metrics strictly on the 2x2 goal grid ---
+    draw_evaluation_metrics(goal_rgb, state)
+    
     combined_img = np.concatenate([img, goal_rgb], axis=1)
     cv2.line(combined_img, (img.shape[1], 0), (img.shape[1], combined_img.shape[0]), (255, 255, 255), 2)
     
     return combined_img
+
+def get_user_primitive_selection(img: np.ndarray, primitive_names: list, window_name: str) -> int:
+    """
+    Spawns an interactive OpenCV window with a side panel of clickable buttons 
+    to select an action primitive. Also supports keyboard shortcuts (1, 2, 3...).
+    """
+    os.environ["DISPLAY"] = CV2_DISPLAY
+    panel_width = 280
+    button_height = 50
+    margin = 15
+    
+    # Draw dark panel
+    panel_img = np.ones((img.shape[0], panel_width, 3), dtype=np.uint8) * 40
+    
+    cv2.putText(panel_img, "Select Primitive:", (margin, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+
+    buttons = []
+    start_y = 50
+    for i, name in enumerate(primitive_names):
+        # Clean up the raw string names for a prettier UI
+        display_name = name.replace("norm-pixel-", "").replace("-", " ").title()
+        
+        btn_top_left = (margin, start_y + i * (button_height + margin))
+        btn_bottom_right = (panel_width - margin, start_y + i * (button_height + margin) + button_height)
+        buttons.append((btn_top_left, btn_bottom_right))
+        
+        # Draw Button Box
+        cv2.rectangle(panel_img, btn_top_left, btn_bottom_right, (80, 80, 80), -1)
+        # Draw Button Text
+        cv2.putText(panel_img, f"{i+1}. {display_name}", 
+                    (btn_top_left[0] + 10, btn_top_left[1] + 32),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    
+    display_img = np.concatenate([img, panel_img], axis=1)
+    
+    selected_idx = [-1] # Wrapped in list to allow mutation inside callback
+    
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if x >= img.shape[1]:  # Clicked in the side panel
+                panel_x = x - img.shape[1]
+                for i, (tl, br) in enumerate(buttons):
+                    if tl[0] <= panel_x <= br[0] and tl[1] <= y <= br[1]:
+                        selected_idx[0] = i
+                        break
+    
+    cv2.imshow(window_name, display_img)
+    cv2.setMouseCallback(window_name, mouse_callback)
+    
+    while selected_idx[0] == -1:
+        key = cv2.waitKey(10) & 0xFF
+        # Keyboard shortcuts 1 through N
+        if ord('1') <= key <= ord(str(len(primitive_names))):
+            selected_idx[0] = key - ord('1')
+    
+    cv2.destroyAllWindows()
+    os.environ["DISPLAY"] = SIM_DISPLAY
+    
+    return selected_idx[0]
 
 def get_user_clicks_with_undo(img: np.ndarray, num_clicks: int, window_name: str) -> list:
     os.environ["DISPLAY"] = CV2_DISPLAY

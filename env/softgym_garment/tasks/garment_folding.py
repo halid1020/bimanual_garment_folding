@@ -14,7 +14,7 @@ from .garment_task import GarmentTask
 from ..utils.garment_utils import simple_rigid_align
 
 SUCCESS_TRESHOLD = 0.05
-IOU_TRESHOLDS = [0.75, 0.75, 0.75]
+# IOU_TRESHOLDS = [0.75, 0.75, 0.75]
 
 def save_point_cloud_ply(path, points):
     N = points.shape[0]
@@ -65,6 +65,7 @@ class GarmentFoldingTask(GarmentTask):
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
 
+        self.iou_thresholds = config.get('iou_thresholds', [0.80] * self.config.goal_steps)
         self.use_strict_alignment = config.get('alignment', False) is True
         self.goals = [] # This needs to be loaded  or generated
         self.has_succeeded = False
@@ -142,30 +143,43 @@ class GarmentFoldingTask(GarmentTask):
                 goal = self._generate_a_goal(arena)
                 os.makedirs(goal_path, exist_ok=True)
 
-                for i, subgoal in enumerate(goal):
+                # --- FIXED: Changed loop variable to 'j' to avoid shadowing 'i' ---
+                for j, subgoal in enumerate(goal):
                     # Save RGB
-                    plt.imsave(os.path.join(goal_path, f"rgb_step_{i}.png"), subgoal['observation']['rgb']/255.0)
+                    plt.imsave(os.path.join(goal_path, f"rgb_step_{j}.png"), subgoal['observation']['rgb']/255.0)
+
+                    # --- NEW: Save Depth as a numpy array ---
+                    if 'depth' in subgoal['observation']:
+                        np.save(os.path.join(goal_path, f"depth_step_{j}.npy"), subgoal['observation']['depth'])
 
                     # Save particles as PLY
-                    save_point_cloud_ply(os.path.join(goal_path, f"particles_step_{i}.ply"),
+                    save_point_cloud_ply(os.path.join(goal_path, f"particles_step_{j}.ply"),
                                         subgoal['observation']["particle_positions"])
 
                 goals.append(goal)
             else:
                 goal = []
-                for i in range(self.config.goal_steps):
-                    # Load existing goal
-                    rgb = (plt.imread(os.path.join(goal_path, f"rgb_step_{i}.png"))*255).astype(np.uint8)
-
-                    particles = load_point_cloud_ply(os.path.join(goal_path, f"particles_step_{i}.ply"))
+                for j in range(self.config.goal_steps + 1):
+                    # Load existing goal RGB
+                    rgb = (plt.imread(os.path.join(goal_path, f"rgb_step_{j}.png"))*255).astype(np.uint8)
+                    particles = load_point_cloud_ply(os.path.join(goal_path, f"particles_step_{j}.ply"))
+                    
                     subgoal = {
                         'observation': {
                             'rgb': rgb[:, :, :3],
                             'particle_positions': particles,
-                            # --- NEW: Reconstruct the mask from the RGB image ---
                             'mask': rgb[:, :, :3].sum(axis=2) > 0
                         }
                     }
+
+                    # --- NEW: Load Depth from numpy array if it exists ---
+                    depth_file = os.path.join(goal_path, f"depth_step_{j}.npy")
+                    if os.path.exists(depth_file):
+                        subgoal['observation']['depth'] = np.load(depth_file)
+                    else:
+                        # Fallback for old cached goals that didn't have depth saved
+                        subgoal['observation']['depth'] = np.zeros_like(rgb[:, :, :1], dtype=np.float32)
+
                     goal.append(subgoal.copy())
                 goals.append(goal.copy())
         return goals
@@ -191,7 +205,7 @@ class GarmentFoldingTask(GarmentTask):
         # --- NEW: Calculate Active Subgoal Index mirroring Multi-Stage Reward ---
         trj_infos = arena.get_trajectory_infos()
         N = len(trj_infos)
-        K = self.config.goal_steps
+        K = self.config.goal_steps + 1
         
         # 1. If we have already succeeded, lock the UI to the final goal
         if self.has_succeeded:
@@ -217,7 +231,7 @@ class GarmentFoldingTask(GarmentTask):
                     iou = self._iou_for_goal_step(arena, traj_window[t], g)
                     
                     # If it matches, increment. If not, the contiguous sequence is broken.
-                    if iou >= IOU_TRESHOLDS[g]:
+                    if iou >= self.iou_thresholds[g]:
                         matched_steps += 1
                     else:
                         break
@@ -237,7 +251,8 @@ class GarmentFoldingTask(GarmentTask):
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'algn_IoU_to_flattened': self._get_algn_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
-            'active_subgoal_idx': active_idx  # <-- Synced with has_succeeded state
+            'active_subgoal_idx': active_idx,
+            'iou_thresholds': self.iou_thresholds
         }
 
     def _align_points(self, arena, cur, goal):
@@ -351,7 +366,7 @@ class GarmentFoldingTask(GarmentTask):
             arena = info['arena']
             trj_infos = arena.get_trajectory_infos()
             N = len(trj_infos)
-            K = self.config.goal_steps
+            K = self.config.goal_steps + 1
 
             # Always give some shaping based on current IoU to goal[0]
             multi_stage_reward = self._iou_for_goal_step(arena, trj_infos[-1], 0)
@@ -381,7 +396,7 @@ class GarmentFoldingTask(GarmentTask):
 
                     #print(f"[reward] K={K} start={start}, step={t}, goal={g}, iou={iou:.3f}")
 
-                    if iou >= IOU_TRESHOLDS[g]:
+                    if iou >= self.iou_thresholds[g]:
                         matched_steps += 1
                         last_iou = 0.0
                     else:
@@ -445,7 +460,7 @@ class GarmentFoldingTask(GarmentTask):
     def success(self, arena):
         trj_infos = arena.get_trajectory_infos()
         N = len(trj_infos)
-        K = self.config.goal_steps
+        K = self.config.goal_steps + 1
         
         if len(trj_infos) < K:
             return False
@@ -464,7 +479,7 @@ class GarmentFoldingTask(GarmentTask):
                     
                 best_IoU = max(IoU, best_IoU)
                 
-            if best_IoU < IOU_TRESHOLDS[-1]:
+            if best_IoU < self.iou_thresholds[-1]:
                 self.has_succeeded = False
                 print('[folding task] Success is messed up!')
                 return False
@@ -487,7 +502,7 @@ class GarmentFoldingTask(GarmentTask):
                     
                 best_IoU = max(IoU, best_IoU)
                 
-            if best_IoU < IOU_TRESHOLDS[k]:
+            if best_IoU < self.iou_thresholds[k]:
                 return False
                 
         print('[folding task] Successful Step!')
@@ -530,55 +545,3 @@ class GarmentFoldingTask(GarmentTask):
         
         # clip between 0 and 1
         return np.clip(res, 0, 1)
-
-    def success(self, arena):
-        trj_infos = arena.get_trajectory_infos()
-        N = len(trj_infos)
-        K = self.config.goal_steps
-        
-        if len(trj_infos) < K:
-            return False
-        
-        if self.has_succeeded:
-            mask = trj_infos[-1]['observation']['mask']
-            best_IoU = 0
-            for goal in self.goals:
-                goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0
-                
-                # --- NEW: Strict checking ---
-                if self.use_strict_alignment:
-                    IoU = calculate_iou(mask, goal_mask)
-                else:
-                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-                    
-                best_IoU = max(IoU, best_IoU)
-                
-            if best_IoU < IOU_TRESHOLDS[-1]:
-                self.has_succeeded = False
-                print('[folding task] Success is messed up!')
-                return False
-            else:
-                print('[folding task] Successful Step!')
-                return True
-        
-        # if has not succeeded before, check consequent sub goals
-        for k in range(K):
-            mask  = trj_infos[N - K + k]['observation']['mask']
-            best_IoU = 0
-            for goal in self.goals:
-                goal_mask = goal[k]['observation']["rgb"].sum(axis=2) > 0
-                
-                # --- NEW: Strict checking ---
-                if self.use_strict_alignment:
-                    IoU = calculate_iou(mask, goal_mask)
-                else:
-                    IoU, _ = get_max_IoU(mask, goal_mask, debug=self.config.debug)
-                    
-                best_IoU = max(IoU, best_IoU)
-                
-            if best_IoU < IOU_TRESHOLDS[k]:
-                return False
-                
-        print('[folding task] Successful Step!')
-        self.has_succeeded = True
-        return True

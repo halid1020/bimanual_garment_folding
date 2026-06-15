@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /agent/magpie@agent: magpie_canon_align_folding_longsleeve_p4_v80_no_state_test
-  - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace
+  - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace_horizon_25
   - /task/magpie@task: canonicalisation_alignment_centre_sleeve_folding
 
 exp_name:  magpie_canon_align_folding_longsleeve_p4_v80_no_state_test

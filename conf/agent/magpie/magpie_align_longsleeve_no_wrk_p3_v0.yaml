@@ -10,7 +10,7 @@ use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
 num_demos: 100
-demo_horizon: 10
+demo_horizon: 15
 
 disable_updown: True
 action_shape: [8]

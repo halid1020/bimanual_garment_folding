@@ -17,6 +17,6 @@ def resolve_save_root(default_root):
     elif "labruja" in hostname:
         return '/data/ah390/bimanual_garment_folding'
     else:
-        raise ValueError
+        return './tmp'
     
     return default_root

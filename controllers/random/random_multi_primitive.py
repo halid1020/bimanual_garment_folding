@@ -3,6 +3,7 @@ import random
 
 from .random_pick_and_fling import RandomPickAndFling
 from .dual_arm_random_pick_and_place import DualArmRandomPickAndPlace
+from .single_arm_random_pick_and_place import SingleArmRandomPickAndPlace
 from ..human.no_operation import NoOperation
 
 
@@ -11,16 +12,17 @@ class RandomMultiPrimitive(Agent):
     def __init__(self, config):
         super().__init__(config)
 
-        # 🔁 MUST MATCH HumanMultiPrimitive
         self.primitive_names = [
             "norm-pixel-pick-and-fling",
-            "norm-pixel-pick-and-place",
+            "norm-pixel-dual-pick-and-place",
+            "norm-pixel-single-pick-and-place",
             "no-operation"
         ]
 
         self.primitive_instances = [
             RandomPickAndFling(config),
             DualArmRandomPickAndPlace(config),   # MUST be dual-picker compatible
+            SingleArmRandomPickAndPlace(config),
             NoOperation(config)
         ]
 

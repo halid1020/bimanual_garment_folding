@@ -17,7 +17,7 @@ from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from .utils import get_resnet, replace_bn_with_gn
-from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder, ConditionalMLP1D
+from .networks import ConditionalUnet1D, MLPNetwork, ResNetDecoder, ConditionalMLP1D
 
 def build_networks_and_optimizers(agent):
     """
@@ -99,13 +99,21 @@ def build_networks_and_optimizers(agent):
     if agent.use_projector:
         proj_hidden = config.get('projector_hidden_dims', [])
         proj_out = config.get('projector_out_dim', 128)
-        layers = []
-        in_dim = config.obs_dim
-        for h in proj_hidden:
-            layers.extend([nn.Linear(in_dim, h), nn.ReLU()])
-            in_dim = h
-        layers.append(nn.Linear(in_dim, proj_out))
-        obs_projector = nn.Sequential(*layers)
+        
+        # Pull new flexibility parameters with safe defaults
+        act_name = config.get('projector_activation', 'relu')
+        dropout_p = config.get('projector_dropout', 0.0)
+        use_ln = config.get('projector_use_layernorm', False)
+        
+        # Reuse your existing MLP class for a fully featured projector
+        obs_projector = MLPNetwork(
+            input_dim=config.obs_dim, 
+            output_dim=proj_out,
+            hidden_dims=proj_hidden, 
+            activation=act_name,
+            dropout=dropout_p, 
+            use_layernorm=use_ln
+        )
         agent.effective_obs_dim = proj_out
 
     # Initialize the primitive classification head if using hybrid action spaces
@@ -114,7 +122,7 @@ def build_networks_and_optimizers(agent):
     
     if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
         cls_cfg = config.get("primitive_classifier", {}) 
-        prim_class_head = MLPClassifier(
+        prim_class_head = MLPNetwork(
             input_dim=agent.effective_obs_dim, output_dim=agent.K,
             hidden_dims=cls_cfg.get("hidden_dims", []), activation=cls_cfg.get("activation", "relu"),
             dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),

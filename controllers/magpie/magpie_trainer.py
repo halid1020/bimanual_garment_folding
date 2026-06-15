@@ -445,15 +445,25 @@ class MagpieTrainer:
             acc = np.mean(np.array(all_preds) == np.array(all_gts))
             metrics['val/prim_accuracy'] = acc
             
-            import wandb
-            if wandb.run is not None and hasattr(self.agent, 'logger'):
-                confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                    probs=None,
-                    y_true=all_gts,
-                    preds=all_preds,
-                    class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
-                )}
-                self.agent.logger.log(confusion, step=self.agent.update_step)
+            # 1. Log the safe scalar metrics FIRST so they are never lost
+            if metrics and hasattr(self.agent, 'logger'):
+                self.agent.logger.log(metrics, step=self.agent.update_step)
+                print(f"Validation Results: {metrics}")
+
+            # 2. Attempt the W&B confusion matrix plot safely
+            if val_prim_losses:
+                import wandb
+                if wandb.run is not None and hasattr(self.agent, 'logger'):
+                    try:
+                        confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                            probs=None,
+                            y_true=all_gts,
+                            preds=all_preds,
+                            class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                        )}
+                        self.agent.logger.log(confusion, step=self.agent.update_step)
+                    except Exception as e:
+                        print(f"W&B Confusion Matrix failed to log: {e}")
 
         if metrics and hasattr(self.agent, 'logger'):
             self.agent.logger.log(metrics, step=self.agent.update_step)
@@ -685,7 +695,8 @@ class MagpieTrainer:
                 }
                 if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
                     metrics_to_log['train/state_pred_loss'] = rep_loss.item()
-                if self.agent.primitive_integration == 'one-hot-encoding':
+                
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
                     metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
                     metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
                     

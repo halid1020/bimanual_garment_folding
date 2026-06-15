@@ -354,7 +354,7 @@ def get_activation(name: str):
         raise ValueError(f"Unsupported activation: {name}")
 
 
-class MLPClassifier(nn.Module):
+class MLPNetwork(nn.Module):
     """
     Standard Multi-Layer Perceptron.
 

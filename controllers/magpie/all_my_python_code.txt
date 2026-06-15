@@ -1,741 +1,817 @@
 ==================================================
-FILE: magpie_trainer.py
+FILE: magpie_network_builder.py
 ==================================================
 
 """
-Magpie Trainer Module.
+Magpie Network Builder Module.
 
-This module contains the MagpieTrainer class, which orchestrates the data loading, 
-validation, and training loops for the Magpie diffusion-based robotics agent. It 
-supports both standard Denoising Diffusion Probabilistic Models (DDPM) and 
-Optimal Transport (OT) Flow Matching, along with primitive action integration.
+This module acts as a factory for constructing the complex neural network 
+architectures required by the Magpie diffusion agent. It handles the instantiation 
+of vision encoders, observation projectors, primitive classification heads, 
+noise prediction backbones (U-Net or MLP), and representation learning modules. 
+It also configures the optimizers and learning rate schedulers.
 """
 
 import os
 import torch
 import torch.nn as nn
-import numpy as np
-import cv2
-from tqdm import tqdm
-from dotmap import DotMap
+import torchvision.models as models
+from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
-from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
-from actoris_harena.utilities.save_utils import save_mask
-from .dataset import DiffusionDataset
-from .utils import compute_classification_metrics
+from .utils import get_resnet, replace_bn_with_gn
+from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder, ConditionalMLP1D
 
-class MagpieTrainer:
+def build_networks_and_optimizers(agent):
     """
-    Coordinates the training and validation pipelines for the MagpieAgent.
+    Constructs all neural network components, optimizers, and schedulers for the agent.
 
-    Attributes:
-        agent: The core diffusion agent containing the networks and state.
-        config (DotMap): Configuration dictionary containing hyperparameters.
-        device (torch.device): Hardware device (CPU/GPU) for tensor operations.
+    This function extracts the massive initialization logic from the main agent class 
+    to maintain modularity. It dynamically scales network input/output dimensions 
+    based on the configured observation space and primitive action integration.
+
+    Args:
+        agent: The MagpieAgent instance containing the `.config` and `.primitives` definitions.
+
+    Returns:
+        tuple: A 5-tuple containing:
+            - nets (nn.ModuleDict): A dictionary of all trainable and non-trainable networks.
+            - optimizer (torch.optim.Optimizer): The AdamW optimizer.
+            - lr_scheduler (torch.optim.lr_scheduler.LRScheduler): The learning rate scheduler.
+            - ema (EMAModel): The Exponential Moving Average model for stable diffusion sampling.
+            - clip_norm (float): The maximum gradient norm for clipping.
     """
+    config = agent.config
+    device = config.get('device', 'cpu')
+    
+    # =========================================================================
+    # 1. Determine Input Channels
+    # Dynamically map the sensory modality to the required image channel depth.
+    # =========================================================================
+    agent.rep_learn = config.get('rep_learn', 'none')
+    input_channel_map = {
+        'depth': 1, 
+        'rgbd': 4, 
+        'rgb+goal_mask': 4,
+        'rgb-workspace-mask': 5, 
+        'rgb+goal_rgb': 6,
+        'rgb-workspace-mask-goal': 8
+    }
+    agent.input_channel = input_channel_map.get(config.input_obs, 3)
 
-    def __init__(self, agent):
-        """
-        Initializes the MagpieTrainer with a reference to the main agent.
-
-        Args:
-            agent: The MagpieAgent instance containing neural networks and config.
-        """
-        self.agent = agent
-        self.config = agent.config
-        self.device = agent.device
-
-    def _init_dataset(self):
-        """
-        Initializes the standard trajectory dataset and prepares PyTorch DataLoaders.
-
-        Configures either a 'diffusion' or 'general' dataset mode. If primitive 
-        integration is enabled, it sets up Random Oversampling (ROS) using a 
-        WeightedRandomSampler to mitigate class imbalance among primitive actions.
-
-        Raises:
-            ValueError: If an unsupported `dataset_mode` is provided.
-        """
-        # 1. Dataset Instantiation
-        if self.config.dataset_mode == 'diffusion':
-            train_dataset = DiffusionDataset(
-                dataset_path=self.config.dataset_path,
-                pred_horizon=self.config.pred_horizon,
-                obs_horizon=self.config.obs_horizon,
-                action_horizon=self.config.action_horizon
-            )
-            self.agent.stats = train_dataset.stats
-            
-        elif self.config.dataset_mode == 'general':
-            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-            config_dict = self.config.dataset_config.toDict()
-            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
-
-            if self.agent.validate_training:
-                val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
-        else:
-            raise ValueError('Invalid dataset mode. Expected "diffusion" or "general".')
-
-        # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
-        use_ros = self.config.get('use_random_oversampling', False)
-        sampler = None
-        shuffle_data = True
+    # =========================================================================
+    # 2. Vision Encoder Initialization
+    # Supports standard ResNets, Vision Transformers, and recurrent state-space models.
+    # =========================================================================
+    agent.vision_encoder_type = config.get('vision_encoder', 'original')
+    if agent.vision_encoder_type == 'original':
+        vision_encoder = get_resnet('resnet18', input_channel=agent.input_channel)
+        # CRITICAL: Replace BatchNorm with GroupNorm. RL/Robotics datasets often require
+        # small batch sizes that cause BatchNorm statistics to become highly unstable.
+        vision_encoder = replace_bn_with_gn(vision_encoder)
         
-        if use_ros and self.agent.primitive_integration != 'none':
-            print("[MultiPrimitiveDiffusionAdapter] Initializing WeightedRandomSampler for ROS...")
-            from torch.utils.data import WeightedRandomSampler
-            
-            class_counts = np.zeros(self.agent.K)
-            sample_classes = []
-            
-            # Tally occurrences of each primitive class
-            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
-                action_data = train_dataset[i]['action']
-                act_key = list(action_data.keys())[0]
-                prim_bin = action_data[act_key][0][0] 
-                
-                # Extract and normalize the primitive ID
-                prim_id = int(np.clip((((prim_bin + 1) / 2) * self.agent.K), 0, self.agent.K - 1))
-                class_counts[prim_id] += 1
-                sample_classes.append(prim_id)
-                
-            # Assign higher selection weights to underrepresented classes
-            class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
-            sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
-            
-            sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
-            shuffle_data = False # Must disable native shuffling when using a custom sampler
-            print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
-
-        # 3. DataLoader Performance Optimization
-        torch.backends.cudnn.benchmark = True
-        num_workers = self.config.get('num_workers', 0)
-        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
-        prefetch_factor = self.config.get('prefetch_factor', None)
-
-        self.agent.dataloader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=shuffle_data,   
-            sampler=sampler, num_workers=num_workers, pin_memory=self.config.get('pin_memory', False),
-            persistent_workers=persistent, prefetch_factor=prefetch_factor
+    elif agent.vision_encoder_type == 'vit':
+        vision_encoder = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
+        vision_encoder.heads = nn.Identity() # Strip the classification head to extract pure embeddings
+        
+    elif agent.vision_encoder_type in ['gc_rssm_encoder', 'gc_rssm_dynamic']:
+        # Import state-space models specifically designed for transition dynamics
+        from ..rl.lagarnet.networks import ImageEncoder
+        vision_encoder = ImageEncoder(
+            image_dim=config.input_obs_dim, embedding_size=config.embedding_dim,
+            activation_function=config.activation, batchnorm=config.encoder_batchnorm,
+            residual=config.encoder_residual
         )
+    else:
+        vision_encoder = nn.Identity()
 
-        if self.agent.validate_training:
-            self.agent.val_dataloader = torch.utils.data.DataLoader(
-                val_dataset, batch_size=self.config.batch_size, shuffle=False, 
-                num_workers=max(1, num_workers // 4), pin_memory=self.config.get('pin_memory', False),
-                persistent_workers=persistent
-            )
-        self.agent.dataset_inited = True
+    # Freezing the encoder prevents catastrophic forgetting if fine-tuning from a pre-trained base
+    if config.get('freeze_encoder', False):
+        for param in vision_encoder.parameters():
+            param.requires_grad = False
+        vision_encoder.eval()
 
-    def _init_demo_policy_dataset(self, arenas):
-        """
-        Initializes the dataset by rolling out a demonstrator policy in the environment.
+    # =========================================================================
+    # 3. Projectors and Classifiers
+    # Compresses vision features and sets up routing for primitive skills.
+    # =========================================================================
+    agent.use_projector = config.get('use_projector', False)
+    agent.effective_obs_dim = config.obs_dim
+    
+    obs_projector = nn.Identity()
+    if agent.use_projector:
+        proj_hidden = config.get('projector_hidden_dims', [])
+        proj_out = config.get('projector_out_dim', 128)
+        layers = []
+        in_dim = config.obs_dim
+        for h in proj_hidden:
+            layers.extend([nn.Linear(in_dim, h), nn.ReLU()])
+            in_dim = h
+        layers.append(nn.Linear(in_dim, proj_out))
+        obs_projector = nn.Sequential(*layers)
+        agent.effective_obs_dim = proj_out
 
-        Instead of loading pre-collected data, this method actively collects 
-        trajectories from an expert policy until the desired number of demos is reached.
-
-        Args:
-            arenas (list): A list containing the simulation environments to roll out in.
-        """
-        arena = arenas[0]
-        org_horizon = arena.action_horizon
-        arena.action_horizon = self.config.get('demo_horizon', org_horizon)
-        
-        from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-        config_dict = self.config.dataset_config
-        config_dict['io_mode'] = 'a' # Append mode
-        train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
-
-        import actoris_harena as ag_ar
-        policy = ag_ar.build_agent(self.config.demo_policy, self.config.get('demo_policy_config', DotMap({})), disable_wandb=True)
-
-        qbar = tqdm(total=self.config.num_demos, desc='Collecting data from policy ...')
-        qbar.update(train_dataset.num_trajectories())
-        qbar.refresh()
-        
-        episode_id = train_dataset.num_trajectories()
-        train_configs = arena.get_train_configs()
-        
-        # 1. Trajectory Collection Loop
-        while train_dataset.num_trajectories() < self.config.num_demos:
-            observations = {obs_type: [] for obs_type in train_dataset.obs_types}
-            actions = {act_type: [] for act_type in train_dataset.action_types}
-
-            policy.reset([arena.id])
-            info = arena.reset(train_configs[episode_id])
-            policy.init([info])
-            info['reward'] = 0
-            done = info['done']
-            
-            while not done:
-                action = policy.single_act(info)
-                if action is None: break
-                
-                # Store and format vision/mask observations
-                for k, v in info['observation'].items():
-                    if k in observations.keys():
-                        if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
-                            v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                            observations[k].append(v_)
-                        elif k in ['mask', 'goal_mask']:
-                            v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                            observations[k].append(v_ > 0.9)
-                        else:
-                            observations[k].append(v)
-                
-                # Handle primitive action mapping
-                add_action = action
-                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks']: 
-                    action_name = list(action.keys())[0]
-                    action_param = action[action_name]
-                    prim_id = self.agent.prim_name2id[action_name]
-                    
-                    # Convert primitive ID back to normalized [-1, 1] bin format
-                    prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
-                    add_action = np.zeros(self.agent.data_save_action_dim)
-                    add_action[0] = prim_act
-                    add_action[1:action_param.shape[0]+1] = action_param
-                elif self.config.primitive_integration == 'none':
-                    add_action = action
-                
-                actions['default'].append(add_action)  
-                info = arena.step(action)
-                policy.update(info, add_action)
-                info['reward'] = 0
-                done = info['done']
-                if self.agent.collect_on_success and info['success']: break
-            
-            # Capture final terminal observation
-            for k, v in info['observation'].items():
-                if k in observations.keys():
-                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
-                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                        observations[k].append(v_)
-                    elif k in ['mask', 'goal_mask']:
-                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                        observations[k].append(v_ > 0.9)
-                    else:
-                        observations[k].append(v)
-                        
-            # Save successful trajectories
-            if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
-                for k, v in observations.items():
-                    observations[k] = np.stack(v)
-                actions['default'] = np.stack(actions['default'])
-                train_dataset.add_trajectory(observations, actions)
-                qbar.update(1)
-                
-            episode_id = (episode_id + 1) % arena.get_num_episodes()
-
-        arena.action_horizon = org_horizon
-        
-        # ROS setup skipped here for brevity, mirrors logic from _init_dataset
-        self.agent.dataloader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=True, pin_memory=self.config.get('pin_memory', False)
+    # Initialize the primitive classification head if using hybrid action spaces
+    prim_class_head = None
+    global_cond_dim = agent.effective_obs_dim * config.obs_horizon
+    
+    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+        cls_cfg = config.get("primitive_classifier", {}) 
+        prim_class_head = MLPClassifier(
+            input_dim=agent.effective_obs_dim, output_dim=agent.K,
+            hidden_dims=cls_cfg.get("hidden_dims", []), activation=cls_cfg.get("activation", "relu"),
+            dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),
         )
-        self.agent.dataset_inited = True
+        if agent.primitive_integration == 'one-hot-encoding':
+            # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
+            global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
 
-    def validate(self):
-        """
-        Executes the validation loop across the validation dataloader.
+    # =========================================================================
+    # 4. Diffusion Network Setup
+    # Builds the core noise prediction networks (U-Net or MLP).
+    # =========================================================================
+    agent.diffusion_dim = agent.network_action_dim
+    agent.diffusion_dims = {}
+    
+    # If jointly diffusing states and actions, extend the diffusion dimension
+    extra_state_dim = config.state_dim + config.get('goal_state_dim', 30) if agent.rep_learn == 'predict-state-with-action' else 0
+    agent.diffusion_dim += extra_state_dim
 
-        Computes action MSE, state prediction L2 distance, and primitive 
-        classification accuracy (if applicable). Logs all metrics to wandb.
-        """
-        if not hasattr(self.agent, 'val_dataloader'):
-            print("[Validation] No validation dataloader found. Skipping.")
-            return
+    for k in range(getattr(agent, 'K', 1)):
+        agent.diffusion_dims[k] = agent.action_dims[k] + extra_state_dim if hasattr(agent, 'action_dims') else agent.diffusion_dim
 
-        self.agent.nets.eval() 
-        
-        # Metrics Accumulators
-        val_prim_losses, val_state_mse, val_state_l2, val_action_mse = [], [], [], []
-        all_preds, all_gts = [], []
-        
-        print(f"--- Running Validation at Step {self.agent.update_step} ---")
-        
-        with torch.no_grad():
-            for nbatch in self.agent.val_dataloader:
-                
-                # 1. Observation Pre-processing
-                if self.config.dataset_mode == 'general':
-                    obs = nbatch['observation']
-                    action = nbatch['action']['default']
-                    nbatch = {v: k for v, k in obs.items()}
-                    nbatch['action'] = action.reshape(*action.shape[:2], -1)
-                    nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
+    # Accumulate networks into a dictionary for easy `nn.ModuleDict` instantiation
+    net_dict = {'vision_encoder': vision_encoder, 'obs_projector': obs_projector}
+    if prim_class_head: 
+        net_dict['prim_class_head'] = prim_class_head
 
-                # Construct composite multi-modal observations
-                if self.config.input_obs == 'rgbd':
-                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
-                if self.config.input_obs == 'rgb-workspace-mask':
-                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
-                if self.config.input_obs == 'rgb-workspace-mask-goal':
-                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
-                if self.config.input_obs == 'rgb+goal_rgb':
-                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
-                if self.config.input_obs == 'rgb+goal_mask':
-                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+    backbone_type = config.get('noise_pred_net', 'unet')
+    mlp_cfg = config.get('mlp_backbone_config', {})
 
-                B = nbatch[self.config.input_obs].shape[0]
-                input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
-                
-                # 2. Extract Vision and State Features
-                if self.agent.vision_encoder_type == 'original':
-                    image_features = self.agent.nets['vision_encoder'](input_obs)
-                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
-                else:
-                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) 
-                
-                if getattr(self.agent, 'use_projector', False):
-                    obs_features = self.agent.nets['obs_projector'](obs_features)
-
-                if self.config.include_state:
-                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
-                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
-
-                obs_cond = obs_features.flatten(start_dim=1)
-                
-                # 3. Validate State Predictor Representation Learning
-                if self.agent.rep_learn == 'predict-state':
-                    pred_combined = self.agent.nets['state_predictor'](obs_features)
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_tensors_val = []
-                    
-                    if state_key in nbatch:
-                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
-                        gt_tensors_val.append(gt_state)
-                        
-                        state_dim = self.config.state_dim
-                        num_kpts = state_dim // 2
-                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
-                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
-                        
-                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
-                        val_state_l2.append(l2_dist.item())
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
-                            gt_tensors_val.append(gt_goal)
-                            
-                    if gt_tensors_val:
-                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
-                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
-                        val_state_mse.append(mse_loss.item())
-
-                # 4. Validate Primitive Classification Head
-                gt_prim_ids = None
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
-                    preds = torch.argmax(prim_logits, dim=-1)
-                    
-                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
-                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
-                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
-                    
-                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
-                    val_prim_losses.append(loss.item())
-                    all_preds.extend(preds.cpu().numpy())
-                    all_gts.extend(gt_prim_ids.cpu().numpy())
-                    
-                    if self.agent.primitive_integration == 'one-hot-encoding':
-                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-                        
-                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
-                else:
-                    gt_action = nbatch['action'].to(self.device)
-
-                # 5. Full Evaluation Denoising Pass
-                eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
-                loss_type = self.config.get('loss_type', 'diffusion')
-                
-                # Branch: Optimal Transport Flow Matching
-                if loss_type == 'ot_flow_match':
-                    num_steps = self.config.num_diffusion_iters
-                    dt = 1.0 / num_steps
-                    for i in range(num_steps):
-                        t_val = i / num_steps
-                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                        
-                        if self.agent.primitive_integration == 'separate_networks':
-                            v_pred = torch.zeros_like(eval_naction)
-                            for k in range(self.agent.K):
-                                dim_k = self.agent.diffusion_dims[k]
-                                if dim_k == 0: continue
-                                mask_k = (preds == k) 
-                                if mask_k.sum() > 0:
-                                    net_out = self.agent.nets[f'noise_pred_net_{k}'](
-                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                    )
-                                    v_pred[mask_k, :, :dim_k] = net_out
-                        else:
-                            v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            
-                        eval_naction = eval_naction + v_pred * dt
-                
-                # Branch: Standard DDPM Reverse Diffusion
-                else:
-                    self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                    for k in self.agent.noise_scheduler.timesteps:
-                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
-                        
-                        if self.agent.primitive_integration == 'separate_networks':
-                            n_pred = torch.zeros_like(eval_naction)
-                            for net_idx in range(self.agent.K):
-                                dim_k = self.agent.diffusion_dims[net_idx]
-                                if dim_k == 0: continue
-                                mask_k = (preds == net_idx)
-                                if mask_k.sum() > 0:
-                                    net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
-                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                    )
-                                    n_pred[mask_k, :, :dim_k] = net_out
-                        else:
-                            n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            
-                        eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
-
-                # 6. Action MSE Calculation
-                pred_action = eval_naction[..., :self.agent.network_action_dim]
-                
-                # Only calculate loss on the valid action dimensions corresponding to the chosen primitive
-                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
-                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
-                    for b in range(B):
-                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
-                    
-                    diff = (pred_action - gt_action) * mask
-                    valid_count = mask.sum().clamp(min=1.0) # Avoid div by zero
-                    mse = (diff ** 2).sum() / valid_count
-                else:
-                    mse = nn.functional.mse_loss(pred_action, gt_action)
-                
-                val_action_mse.append(mse.item())
-
-        # 7. Metric Aggregation and wandb Integration
-        metrics = {}
-        if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
-        if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
-        if val_action_mse: metrics['val/action_mse'] = np.mean(val_action_mse)
-
-        if val_prim_losses:
-            metrics['val/prim_loss'] = np.mean(val_prim_losses)
-            acc = np.mean(np.array(all_preds) == np.array(all_gts))
-            metrics['val/prim_accuracy'] = acc
+    # 'separate_networks' instantiates an independent denoiser for *each* primitive skill
+    if agent.primitive_integration == 'separate_networks':
+        for k in range(agent.K):
+            dim_k = agent.diffusion_dims[k]
+            if dim_k == 0: continue
             
-            import wandb
-            if wandb.run is not None and hasattr(self.agent, 'logger'):
-                confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                    probs=None,
-                    y_true=all_gts,
-                    preds=all_preds,
-                    class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
-                )}
-                self.agent.logger.log(confusion, step=self.agent.update_step)
-
-        if metrics and hasattr(self.agent, 'logger'):
-            self.agent.logger.log(metrics, step=self.agent.update_step)
-            print(f"Validation Results: {metrics}")
-
-        self.agent.nets.train()
-
-    def train(self, update_steps, arenas):
-        """
-        Executes the main training optimization loop.
-
-        Args:
-            update_steps (int): Total number of gradient steps to take in this call.
-            arenas (list): Simulation environments (required if training from policy).
-        """
-        if not self.agent.dataset_inited:
-            if self.config.train_mode == 'from_dataset':
-                self._init_dataset()
-            elif self.config.train_mode == 'from_policy':
-                self._init_demo_policy_dataset(arenas)
-        
-        # Ensure we don't overshoot total configured steps
-        update_steps = min(self.config.total_update_steps - self.agent.update_step, update_steps)
-        
-        if self.config.get('freeze_encoder', False):
-            self.agent.nets['vision_encoder'].eval()
-            
-        def cycle(dl):
-            while True:
-                for data in dl: yield data
-                    
-        train_iter = iter(cycle(self.agent.dataloader))
-        pbar = tqdm(range(update_steps), desc="Training")
-
-        for i in pbar:
-            nbatch = next(train_iter)
-            
-            # 1. Input Batch Setup
-            if self.config.dataset_mode == 'diffusion':
-                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
+            if backbone_type == 'mlp':
+                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
             else:
-                obs, action = nbatch['observation'], nbatch['action']['default']
-                nbatch = {v: k for v, k in obs.items()}
-                nbatch['action'] = action.reshape(*action.shape[:2], -1)
-                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
-
-            if self.config.input_obs == 'rgbd': nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask': nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask-goal': nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_rgb': nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_mask': nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
-
-            B = nbatch[self.config.input_obs].shape[0]
-            input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
-
-            device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
-            use_amp = self.config.get('use_amp', False)
-
-            with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
-                # 2. Forward Feature Extraction
-                image_features = self.agent.nets['vision_encoder'](input_obs.to(self.device))
-                obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
-                
-                if getattr(self.agent, 'use_projector', False):
-                    obs_features = self.agent.nets['obs_projector'](obs_features)
-
-                # Add noise to conditioning features for robustness
-                if self.agent.nets.training:
-                    noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
-                    obs_features = obs_features + noise
-
-                # 3. Representation Learning Auxiliary Losses
-                rep_loss = torch.tensor(0.0, device=self.device)
-                
-                if self.agent.rep_learn == 'auto-encoder':
-                    reconstructed_obs = self.agent.nets['vision_decoder'](image_features)
-                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs.to(self.device))
-                elif self.agent.rep_learn == 'predict-state':
-                    pred_combined = self.agent.nets['state_predictor'](obs_features) 
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_tensors = []
-                    
-                    if state_key in nbatch:
-                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float() 
-                        gt_tensors.append(gt_state.to(self.device))
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float()
-                            gt_tensors.append(gt_goal.to(self.device))
-                    if gt_tensors:
-                        gt_combined = torch.cat(gt_tensors, dim=-1) 
-                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
-
-                if self.config.include_state:
-                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device)
-                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
-                    
-                obs_cond = obs_features.flatten(start_dim=1)
-
-                # 4. Primitive Classification Loss
-                gt_prim_ids = None
-                prim_loss = torch.tensor(0.0, device=self.device)
-                
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
-                    prim_bin = nbatch['action'][:, 0, 0]
-                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
-                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
-                    
-                    weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
-                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
-                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
-
-                    log_every = self.config.get('log_prim_metrics_every', 200)
-                    
-                    if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
-                        metrics = compute_classification_metrics(prim_logits.detach(), gt_prim_ids.detach(), self.agent.K)
-                        wandb_metrics = {f"train/prim_{k}": v for k, v in metrics.items()}
-                        self.agent.logger.log(wandb_metrics, step=self.agent.update_step)
-                        
-                        import wandb
-                        if wandb.run is not None:
-                            confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                                probs=None, y_true=gt_prim_ids.cpu().numpy(),
-                                preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
-                                class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
-                            )}
-                            self.agent.logger.log(confusion, step=self.agent.update_step)
-
-                    # Remove primitive bin from action target
-                    nbatch['action'] = nbatch['action'][:, :, 1:] 
-
-                    if self.agent.primitive_integration == 'one-hot-encoding':
-                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-
-                # 5. Build Diffusion Target
-                if self.agent.rep_learn == 'predict-state-with-action':
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
-                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state, gt_goal], dim=-1)
-                        else:
-                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
-                    else:
-                        diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
-                else:
-                    diffusion_target = nbatch['action'].to(self.device)
-                    
-                loss_type = self.config.get('loss_type', 'diffusion')
-
-                # 6. Forward Forward Diffusion (Adding Noise)
-                if loss_type == 'ot_flow_match':
-                    noise = torch.randn_like(diffusion_target)
-                    t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
-                    t_expand = t.view(B, 1, 1)
-                    # Interpolate linearly between pure noise (t=0) and data (t=1)
-                    noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
-                    target = diffusion_target - noise
-                    timesteps = t * self.config.num_diffusion_iters
-                else:
-                    noise = torch.randn(diffusion_target.shape, device=self.device)
-                    timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
-                    noisy_actions = self.agent.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
-                    target = noise # DDPM trains to predict the added noise
-
-                # 7. Model Predictions
-                if self.agent.primitive_integration == 'separate_networks':
-                    noise_pred = torch.zeros_like(noisy_actions)
-                    for k in range(self.agent.K):
-                        dim_k = self.agent.diffusion_dims[k]
-                        if dim_k == 0: continue
-                        mask_k = (gt_prim_ids == k)
-                        if mask_k.sum() > 0:
-                            noise_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
-                                noisy_actions[mask_k][..., :dim_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
-                            )
-                else:
-                    noise_pred = self.agent.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
-
-                # 8. Loss Calculations
-                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
-                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
-                    for b in range(B):
-                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
-                        
-                    # Also unmask state target dims if doing joint diffusion
-                    if self.agent.rep_learn == 'predict-state-with-action':
-                        mask_extra_dim = self.config.state_dim
-                        if getattr(self.agent, 'predict_goal_state', False): mask_extra_dim += getattr(self.agent, 'goal_state_dim', 30)
-                        state_mask = torch.ones((B, self.config.pred_horizon, mask_extra_dim), device=self.device)
-                        mask = torch.cat([mask, state_mask], dim=-1)
-
-                    diff = (noise_pred - target) * mask
-                    valid_count = mask.sum().clamp(min=1.0)
-                    actor_noise_loss = (diff ** 2).sum() / valid_count
-                else:
-                    actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
-                
-                prim_weight = self.config.get('prim_weight', 1.0)
-                total_loss = actor_noise_loss + (prim_loss * prim_weight) 
-                
-                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
-                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
-
-            # 9. Optimizer and Scheduler Updates
-            total_loss.backward()
+                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
             
-            if self.agent.clip_norm > 0:
-                nn.utils.clip_grad_norm_(self.agent.nets.parameters(), self.agent.clip_norm)
-
-            self.agent.optimizer.step()
-            self.agent.optimizer.zero_grad()
-            self.agent.lr_scheduler.step()
+            setattr(agent, f'noise_pred_net_{k}', net)
+            net_dict[f'noise_pred_net_{k}'] = net
+    else:
+        # Standard monolithic denoiser handling all actions
+        if backbone_type == 'mlp':
+            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
+        else:
+            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
             
-            trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
-            self.agent.ema.step(trainable_params)
+        setattr(agent, 'noise_pred_net', noise_pred_net)
+        net_dict['noise_pred_net'] = noise_pred_net
 
-            # 10. Training Logging
-            if hasattr(self.agent, 'logger'):
-                metrics_to_log = {
-                    'train/actor_noise_loss': actor_noise_loss.item(),
-                    'train/total_loss': total_loss.item()
-                }
-                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
-                    metrics_to_log['train/state_pred_loss'] = rep_loss.item()
-                if self.agent.primitive_integration == 'one-hot-encoding':
-                    metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
-                    metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
+    # Standard DDPM Scheduler from Hugging Face Diffusers
+    agent.noise_scheduler = DDPMScheduler(
+        num_train_timesteps=config.num_diffusion_iters, 
+        beta_schedule='squaredcos_cap_v2', # Cosine schedule prevents noise explosion at boundaries
+        clip_sample=True, 
+        prediction_type='epsilon'
+    )
+
+    # =========================================================================
+    # 5. Representation Learning Networks
+    # Auxiliary tasks (like state/keypoint prediction) to force the vision 
+    # encoder to learn geometrically meaningful embeddings.
+    # =========================================================================
+    if agent.rep_learn == 'auto-encoder':
+        net_dict['vision_decoder'] = ResNetDecoder(
+            input_dim=512, 
+            output_channel=agent.input_channel
+        )
+    elif agent.rep_learn == 'predict-state':
+        agent.predict_goal_state = config.get('predict_goal_state', False)
+        agent.goal_state_dim = config.get('goal_state_dim', 30) 
+        
+        out_dim = config.state_dim
+        if agent.predict_goal_state:
+            out_dim += agent.goal_state_dim
+            print(f"[MultiPrimitiveDiffusion] state_predictor out_dim extended to {out_dim} (State + Goal)")
+
+        pred_cfg = config.get('state_predictor_config', {})
+        hidden_dims = pred_cfg.get('hidden_dims', [256])
+        use_layernorm = pred_cfg.get('use_layernorm', False)
+        dropout_p = pred_cfg.get('dropout', 0)
+        activation_name = pred_cfg.get('activation', 'relu').lower()
+
+        layers = []
+        in_dim = agent.effective_obs_dim
+
+        for h_dim in hidden_dims:
+            layers.append(nn.Linear(in_dim, h_dim))
+            if use_layernorm:
+                layers.append(nn.LayerNorm(h_dim))
+            
+            if activation_name == 'relu':
+                layers.append(nn.ReLU())
+            elif activation_name == 'gelu':
+                layers.append(nn.GELU())
+            elif activation_name == 'silu':
+                layers.append(nn.SiLU())
+            else:
+                layers.append(nn.ReLU())
+            
+            if dropout_p > 0.0:
+                layers.append(nn.Dropout(p=dropout_p))
+                
+            in_dim = h_dim 
+
+        layers.append(nn.Linear(in_dim, out_dim))
+        net_dict['state_predictor'] = nn.Sequential(*layers)
+
+    # =========================================================================
+    # 6. Initialization and Optimizers
+    # =========================================================================
+    nets = nn.ModuleDict(net_dict).to(device)
+    
+    trainable_params = [p for p in nets.parameters() if p.requires_grad]
+    
+    # Exponential Moving Average (EMA) maintains a smoothed version of the weights.
+    # This is practically mandatory for stable inference in diffusion models.
+    ema = EMAModel(parameters=trainable_params, power=config.get('ema_power', 0.75))
+    
+    opt_params = config.get('optimiser_params', {})
+    if hasattr(opt_params, 'toDict'): 
+        opt_params = opt_params.toDict()
+    
+    # AdamW is preferred to decouple weight decay from the gradient updates
+    optimizer = torch.optim.AdamW(params=trainable_params, **opt_params)
+    
+    # Cosine learning rate scheduler with warmup to prevent early training collapse
+    lr_scheduler = get_scheduler(
+        name=config.get('lr_scheduler', 'cosine'), 
+        optimizer=optimizer,
+        num_warmup_steps=config.get('num_warmup_steps', 500), 
+        num_training_steps=config.total_update_steps
+    )
+    clip_norm = config.get('grad_clip_norm', -1)
+
+    return nets, optimizer, lr_scheduler, ema, clip_norm
+
+
+def build_primitive_action_masks(agent):
+    """
+    Builds binary masks to zero out irrelevant action dimensions for different primitives.
+
+    When using a shared action space for multiple distinct robotic skills (e.g., 
+    a 4-DoF pick vs an 8-DoF bimanual operation), this ensures the network only 
+    focuses its loss and predictions on the valid dimensions for the active skill.
+
+    Args:
+        agent: The MagpieAgent instance.
+
+    Returns:
+        dict: A mapping from primitive IDs (int) to a binary `torch.Tensor` mask.
+    """
+    masks = {}
+    
+    start = None
+    # Determine the offset index based on whether we reserve dimension 0 for the primitive bin
+    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+        start = 0
+    elif agent.primitive_integration == 'bin_as_output':
+        start = 1
+
+    for pid, prim in enumerate(agent.primitives):
+        mask = torch.zeros(agent.network_action_dim, dtype=torch.float32)
+        
+        if start == 1: 
+            mask[0] = 1.0 # Always unmask the bin selector if using it
+            
+        dim = prim['dim'] if isinstance(prim, dict) else prim.dim
+        mask[start:start + dim] = 1.0
+        masks[pid] = mask
+        
+    return masks
+
+
+==================================================
+FILE: hindsight_dataset.py
+==================================================
+
+from actoris_harena import TrajectoryDataset
+import numpy as np
+
+class HindsightDataset(TrajectoryDataset):
+    """
+    A tailored dataset for Hindsight Experience Replay (HER) in RL pipelines.
+    
+    Overrides observation fetching to dynamically sample goal states from 
+    future time steps within the same trajectory, replacing the static 
+    goals defined in the obs_config.
+    """
+    def __init__(self, future_goal_mapping=None, **kwargs):
+        # Pop the mapping before passing the rest to TrajectoryDataset
+        self.future_goal_mapping = future_goal_mapping or {
+            'rgb': 'goal_rgb',
+            'depth': 'goal_depth',
+            'mask': 'goal_mask',
+            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
+        }
+        super().__init__(**kwargs)
+
+    def __getitem__(self, idx: int):
+        # 1. Temporarily disable transforms to retrieve the raw data.
+        # We MUST apply the transform *after* injecting the new hindsight goals
+        # to ensure augmentations (like color jittering/scaling) are uniform.
+        current_transform = self.transform
+        self.transform = None
+        ret = super().__getitem__(idx)
+        self.transform = current_transform
+        
+        # 2. Recalculate trajectory bounds to find a valid future index
+        idx_offset = idx + self.start_sample
+        
+        if self.whole_trajectory:
+            traj_idx = idx_offset
+            start_idx = self.traj_starts[traj_idx]
+            end_idx = start_idx + self.traj_lengths[traj_idx] - 1
+        elif self.cross_trajectory:
+            start_idx = idx_offset if self.return_trj_last else self.valid_indices[idx_offset]
+            traj_idx = np.searchsorted(self.traj_starts, start_idx, side='right') - 1
+            end_idx = start_idx + self.seq_length
+        else:
+            traj_idx, start_idx = self.flat_ranges[idx_offset]
+            end_idx = start_idx + self.seq_length
+
+        # 3. Determine the effective bounds of the current trajectory
+        # traj_lengths includes the padded terminal state, so valid observations end at (length - 2)
+        effective_traj_end = self.traj_starts[traj_idx] + self.traj_lengths[traj_idx] - 2
+        
+        # Define the sampling window strictly in the future of the current sequence
+        min_future_idx = min(end_idx, effective_traj_end)
+        
+        # Sample a future state index uniformly
+        if min_future_idx >= effective_traj_end:
+            future_idx = effective_traj_end
+        else:
+            future_idx = np.random.randint(min_future_idx, effective_traj_end + 1)
+            
+        # 4. Overwrite the static goal keys in the observation dictionary with the sampled future observation
+        for src_key, goal_key in self.future_goal_mapping.items():
+            if src_key in self.obs_source and goal_key in ret['observation']:
+                # Extract the single raw future observation frame
+                future_obs = self.obs_source[src_key][future_idx].reshape(-1, *self.obs_shapes[src_key])
+                
+                # The returned observation dictionary contains sequences of shape (seq_length, ...)
+                # The goal should remain constant across the sequence steps, so we tile it.
+                seq_len = ret['observation'][goal_key].shape[0]
+                ret['observation'][goal_key] = np.repeat(future_obs, seq_len, axis=0)
+
+        # 5. Apply the transform now that the goals have been dynamically injected
+        if self.transform is not None:
+            ret_ = self.transform(ret)
+            for key in ret['observation'].keys():
+                if key not in ret_:
+                    ret_[key] = ret['observation'][key]
+            return ret_
+
+        return ret
+
+
+==================================================
+FILE: constrain_action_functions.py
+==================================================
+
+"""
+Constrain Action Functions Module.
+
+This module provides physical and geometric constraint logic for the diffusion 
+action trajectories. It ensures that predicted end-effector positions (picks/places) 
+remain within valid workspace boundaries (defined by segmentation masks). It supports 
+both "hard snapping" (forcing points into valid regions) and "soft restoring forces" 
+(treating constraints as an ODE during the reverse diffusion process).
+"""
+
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+# --- Configuration ---
+# CRITICAL: Adjust this based on how your dataset normalized spatial coordinates.
+# Set to True if your network outputs [Y, X] (Row, Col).
+# Set to False if your network outputs [X, Y] (Width, Height).
+IS_YX_ACTION_SPACE = False 
+
+# -----------------------------------------------------------------------------
+# Helper Functions for Mathematics & Assignments
+# -----------------------------------------------------------------------------
+
+def _snap_to_nearest(points_bht, valid_points):
+    """
+    Finds the nearest valid spatial point for a batch of trajectory coordinates.
+
+    Args:
+        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
+        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates in the mask.
+
+    Returns:
+        torch.Tensor: Snapped coordinates of shape (Batch, Horizon, 2).
+    """
+    if valid_points is None or valid_points.shape[0] == 0:
+        return points_bht
+    
+    B, H, D = points_bht.shape
+    flat_points = points_bht.reshape(-1, 2)
+    
+    # Compute pairwise Euclidean distances between predicted points and all valid mask points
+    dists = torch.cdist(flat_points, valid_points)
+    min_indices = torch.argmin(dists, dim=1)
+    
+    return valid_points[min_indices].reshape(B, H, 2)
+
+def _get_restoring_force(points_bht, valid_points):
+    """
+    Calculates a directional vector pointing from the predicted point to the 
+    nearest valid mask coordinate.
+
+    Args:
+        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
+        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates.
+
+    Returns:
+        torch.Tensor: Force vectors of shape (Batch, Horizon, 2).
+    """
+    if valid_points is None or valid_points.shape[0] == 0:
+        return torch.zeros_like(points_bht)
+        
+    nearest_points = _snap_to_nearest(points_bht, valid_points)
+    return nearest_points - points_bht
+
+def _get_min_dist(points_bht, valid_points):
+    """
+    Calculates the average minimum distance from a set of points to a valid region.
+    Used as a heuristic cost function for arm-to-mask assignment.
+    """
+    if valid_points is None or valid_points.shape[0] == 0:
+        return float('inf')
+        
+    flat_points = points_bht.reshape(-1, 2)
+    dists = torch.cdist(flat_points, valid_points)
+    return torch.min(dists, dim=1)[0].mean().item()
+
+def _get_dynamic_assignments(action_b, entities, valid_masks):
+    """
+    Dynamically assigns robotic arms to specific workspace masks using a 
+    bipartite matching heuristic based on proximity.
+
+    For bimanual setups, it prevents both arms from trying to snap to the 
+    same valid workspace if there are two distinct valid areas.
+
+    Args:
+        action_b (torch.Tensor): Single batch action trajectory (1, Horizon, Dim).
+        entities (list): List of dictionaries defining the action dimensions for 
+                         each robot's 'pick' and 'place' actions.
+        valid_masks (dict): Dictionary mapping mask IDs (0, 1) to valid coordinate tensors.
+
+    Returns:
+        dict: A mapping of Entity ID to assigned Mask ID (e.g., {0: 1, 1: 0}).
+    """
+    assignments = {} 
+    
+    # Bimanual case: 2 arms, 2 valid masks available
+    if len(entities) == 2 and 0 in valid_masks and 1 in valid_masks:
+        e0_pick = action_b[:, :, entities[0]['pick']]
+        e1_pick = action_b[:, :, entities[1]['pick']]
+        
+        # Calculate cost (distance) matrix
+        d_e0_m0 = _get_min_dist(e0_pick, valid_masks[0])
+        d_e0_m1 = _get_min_dist(e0_pick, valid_masks[1])
+        d_e1_m0 = _get_min_dist(e1_pick, valid_masks[0])
+        d_e1_m1 = _get_min_dist(e1_pick, valid_masks[1])
+        
+        # Simple bipartite matching: minimize total assignment distance
+        if (d_e0_m0 + d_e1_m1) <= (d_e0_m1 + d_e1_m0):
+            assignments = {0: 0, 1: 1}
+        else:
+            assignments = {0: 1, 1: 0}
+            
+    # Single-arm case: assign the arm to whichever mask is closest
+    elif len(entities) == 1 and len(valid_masks) > 0:
+        e0_pick = action_b[:, :, entities[0]['pick']]
+        best_mask = min(valid_masks.keys(), key=lambda m: _get_min_dist(e0_pick, valid_masks[m]))
+        assignments = {0: best_mask}
+        
+    return assignments
+
+# -----------------------------------------------------------------------------
+# Debug Visualization
+# -----------------------------------------------------------------------------
+
+def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t, method):
+    """
+    Generates an overlay plot of the original vs. constrained trajectories on 
+    top of the current camera observation and segmentation masks.
+    """
+    save_dir = "tmp/debug_magpie"
+    os.makedirs(save_dir, exist_ok=True)
+
+    rgb = obs.get('rgb', None)
+    if rgb is None: return 
+        
+    # Unpack and normalize RGB for Matplotlib
+    if torch.is_tensor(rgb): rgb = rgb.detach().cpu().numpy()
+    if rgb.ndim == 4: rgb = rgb[0]
+    if rgb.shape[0] == 3: rgb = np.transpose(rgb, (1, 2, 0))
+    if rgb.max() > 2.0: rgb = rgb / 255.0
+
+    H, W = rgb.shape[:2]
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(rgb)
+    
+    t_val = t.item() if torch.is_tensor(t) else t
+    ax.set_title(f"Step: {t_val:.2f} | {prim_name} | Method: {method.upper()}", fontsize=10)
+
+    def get_mask(m_key):
+        if m_key not in obs: return None
+        m = obs[m_key]
+        if torch.is_tensor(m): m = m.detach().cpu().numpy()
+        if m.ndim == 4: m = m[0]
+        if m.ndim == 3: m = m.squeeze(-1) if m.shape[-1] == 1 else m[0]
+        return m
+
+    m0 = get_mask('robot0_mask')
+    m1 = get_mask('robot1_mask')
+
+    # Overlay workspaces as semi-transparent blue/red hues
+    if m0 is not None: ax.imshow(np.ma.masked_where(m0 < 0.5, m0), cmap='Blues', alpha=0.4)
+    if m1 is not None: ax.imshow(np.ma.masked_where(m1 < 0.5, m1), cmap='Reds', alpha=0.4)
+
+    def to_pix(uv_coords):
+        """Converts normalized [-1, 1] coordinates back to pixel space [0, W]."""
+        dim0, dim1 = uv_coords[:, 0], uv_coords[:, 1]
+        if IS_YX_ACTION_SPACE:
+            y, x = (dim0 + 1) * H / 2, (dim1 + 1) * W / 2
+        else:
+            x, y = (dim0 + 1) * W / 2, (dim1 + 1) * H / 2
+        return x, y
+
+    orig_act = original_action[0, 0].detach().cpu().numpy()
+    new_act = new_action[0, 0].detach().cpu().numpy()
+    colors = {0: 'blue', 1: 'red'}
+    
+    lbl_prefix = "Snap" if method == 'snap' else "Force"
+    
+    for e_idx, m_idx in assignments.items():
+        ent = entities[e_idx]
+        c = colors.get(m_idx, 'green')
+
+        # Plot PICK trajectory adjustments
+        if len(ent['pick']) == 2:
+            pu, pv = ent['pick']
+            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
+            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
+            
+            ax.plot(ox, oy, marker='x', color='yellow', markersize=8, label='Orig Pick' if e_idx==0 else "")
+            ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Pick (R{m_idx})')
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+
+        # Plot PLACE trajectory adjustments
+        if len(ent['place']) == 2:
+            pu, pv = ent['place']
+            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
+            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
+            
+            ax.plot(ox, oy, marker='x', color='orange', markersize=8, label='Orig Place' if e_idx==0 else "")
+            ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Place (R{m_idx})')
+            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
+
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
+    
+    plt.axis('off')
+    plt.savefig(os.path.join(save_dir, f"step_{t_val:05.2f}.png"), bbox_inches='tight')
+    plt.close(fig)
+
+# -----------------------------------------------------------------------------
+# Main Constraint Logic
+# -----------------------------------------------------------------------------
+
+def identity(action, info, t, debug=False):
+    """No-op constraint function. Returns the action unmodified."""
+    return action
+
+def _apply_constraints_core(action, info, t, method, debug=False):
+    """
+    Core engine for applying workspace constraints to the action tensor.
+    
+    Args:
+        action (torch.Tensor): Current predicted trajectory of shape (Batch, Horizon, Dim).
+        info (dict): Environment data containing the semantic masks.
+        t (float/Tensor): Current diffusion timestep (for debugging).
+        method (str): 'snap' for hard replacement, 'force' for soft ODE addition.
+        debug (bool): If True, renders visual debugging plots.
+        
+    Returns:
+        torch.Tensor: The constrained action trajectory.
+    """
+    device = action.device
+    obs = info.get('observation', {})
+    original_action = action.clone() 
+    
+    # 1. Map primitive names to the corresponding dimensions in the action vector
+    prim_name = info.get('prim_name', 'norm-pixel-dual-pick-and-place')
+    
+    entities = []
+    if 'pick-and-fling' in prim_name:
+        entities.append({'pick': [0, 1], 'place': []})     # Left Arm Pick
+        entities.append({'pick': [2, 3], 'place': []})     # Right Arm Pick
+    elif 'dual-pick-and-place' in prim_name:
+        entities.append({'pick': [0, 1], 'place': [4, 5]}) # Left Arm
+        entities.append({'pick': [2, 3], 'place': [6, 7]}) # Right Arm
+    elif 'single-pick-and-place' in prim_name:
+        entities.append({'pick': [0, 1], 'place': [2, 3]}) # Single Arm
+    elif 'no-operation' in prim_name:
+        return action
+
+    # 2. Extract Valid Pixel Coordinates from Semantic Masks
+    # Converts binary 2D image masks into a list of valid [-1, 1] spatial coordinates.
+    valid_masks = {}
+    for m_idx, key in enumerate(['robot0_mask', 'robot1_mask']):
+        if key in obs:
+            mask = obs[key]
+            if mask.ndim == 3: mask = mask.squeeze(-1)
+            
+            # np.where returns (rows, columns) = (Axis 0, Axis 1)
+            rows, cols = np.where(mask > 0) 
+            
+            if len(rows) > 0:
+                H, W = mask.shape
+                
+                # Normalize pixel indices to the [-1, 1] range expected by the diffusion model
+                norm_x = (cols / float(W)) * 2 - 1.0
+                norm_y = (rows / float(H)) * 2 - 1.0
+                
+                # Stack coordinates based on the network's architectural output format
+                if IS_YX_ACTION_SPACE:
+                    valid_pts = np.stack([norm_y, norm_x], axis=1)
+                else:
+                    valid_pts = np.stack([norm_x, norm_y], axis=1)
                     
-                self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
+                valid_masks[m_idx] = torch.tensor(valid_pts, dtype=torch.float32, device=device)
 
-            # 11. Periodic Full Denoising Metric Evaluation (for Joint Diffusion)
-            log_interval = self.config.get('log_state_eval_every', 500)
-            if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
-                with torch.no_grad():
-                    self.agent.nets.eval()
-                    eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
-                    
-                    if loss_type == 'ot_flow_match':
-                        num_steps = self.config.num_diffusion_iters
-                        dt = 1.0 / num_steps
-                        for i in range(num_steps):
-                            t_val = i / num_steps
-                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                            if self.agent.primitive_integration == 'separate_networks':
-                                v_pred = torch.zeros_like(eval_naction)
-                                for k in range(self.agent.K):
-                                    dim_k = self.agent.diffusion_dims[k]
-                                    if dim_k == 0: continue
-                                    mask_k = (gt_prim_ids == k)
-                                    if mask_k.sum() > 0:
-                                        v_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
-                                eval_naction = eval_naction + v_pred * dt
-                            else:
-                                v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                                eval_naction = eval_naction + v_pred * dt
-                    else:
-                        self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                        for step_k in self.agent.noise_scheduler.timesteps:
-                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
-                            if self.agent.primitive_integration == 'separate_networks':
-                                n_pred = torch.zeros_like(eval_naction)
-                                for net_idx in range(self.agent.K):
-                                    dim_k = self.agent.diffusion_dims[net_idx]
-                                    if dim_k == 0: continue
-                                    mask_k = (gt_prim_ids == net_idx)
-                                    if mask_k.sum() > 0:
-                                        n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{net_idx}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
-                            else:
-                                n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
+    # If no valid workspace masks are detected, abort constraints
+    if not valid_masks:
+        return action
 
-                    act_dim = self.agent.network_action_dim
-                    state_dim = self.config.state_dim
-                    num_kpts = state_dim // 2
-                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
-                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
-                    
-                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
-                    if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.agent.update_step)
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_dim = getattr(self.agent, 'goal_state_dim', 30)
-                        num_goal_kpts = goal_dim // 2
-                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
-                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
-                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
-                        if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.agent.update_step)
+    B = action.shape[0]
+    force_vector = torch.zeros_like(action) if method == 'force' else None
+    debug_assignments_b0 = {}
 
-                    self.agent.nets.train()
+    # 3. Apply Constraints per Batch Item
+    for b in range(B):
+        # Figure out which arm should target which valid workspace region
+        assignments = _get_dynamic_assignments(action[b:b+1], entities, valid_masks)
+        
+        if b == 0:
+            debug_assignments_b0 = assignments 
+            
+        for e_idx, m_idx in assignments.items():
+            ent = entities[e_idx]
+            pts = valid_masks[m_idx]
+            
+            # Apply to PICK positions
+            if method == 'snap':
+                action[b:b+1, :, ent['pick']] = _snap_to_nearest(action[b:b+1, :, ent['pick']], pts)
+            elif method == 'force':
+                force_vector[b:b+1, :, ent['pick']] = _get_restoring_force(action[b:b+1, :, ent['pick']], pts)
+                
+            # Apply to PLACE positions
+            if len(ent['place']) > 0:
+                if method == 'snap':
+                    action[b:b+1, :, ent['place']] = _snap_to_nearest(action[b:b+1, :, ent['place']], pts)
+                elif method == 'force':
+                    force_vector[b:b+1, :, ent['place']] = _get_restoring_force(action[b:b+1, :, ent['place']], pts)
 
-            if self.agent.validate_training and self.agent.update_step > 0 and self.agent.update_step % self.agent.val_interval == 0:
-                self.validate()
+    # 4. Integrate Soft Forces (if applicable)
+    if method == 'force':
+        eta_dt = 0.5 # Hyperparameter governing the strength of the restorative ODE step
+        action = action + (eta_dt * force_vector)
+        
+    if debug:
+        _visualize_debug(original_action, action, obs, entities, debug_assignments_b0, prim_name, t, method)
+        
+    return action
 
-            self.agent.update_step += 1
+def _get_t_val(t):
+    """Helper to safely extract a float value from t, whether it's a tensor or primitive."""
+    if torch.is_tensor(t):
+        # If it's a batched tensor of timesteps, take the first one
+        return t[0].item() if t.ndim > 0 else t.item()
+    return float(t)
+
+def constrain_bimanual_mask(action, info, t, debug=False):
+    """
+    Hard-snapping implementation.
+    
+    Hard constraints rigidly overwrite the network's prediction. Applying them too 
+    early in diffusion destroys the signal. Therefore, we only activate the hard snap 
+    in the final 20% of the reverse diffusion process when the trajectory is nearly clean.
+    """
+    t_val = _get_t_val(t)
+    
+    # Assuming t normalizes to [0, 1] representing [Data, Noise] (or vice versa based on scheduler).
+    # Prevent snapping if the timestep signifies a highly noisy state.
+    if t_val < 0.8: 
+        return action
+        
+    return _apply_constraints_core(action, info, t, method='snap', debug=debug)
+
+def apply_workspace_force(action, info, t, debug=False):
+    """
+    ODE Kinematic restoring force implementation.
+    
+    Soft constraints act as a continuous directional pull during diffusion. They can be 
+    safely applied earlier in the denoising process than hard snaps, gently guiding 
+    the vector field toward valid spatial regions.
+    """
+    t_val = _get_t_val(t)
+    
+    # Optional: Disable only in the very earliest pure-noise phase (e.g., t < 0.2) 
+    # if you find the force destabilizes the initial vector field geometry.
+    # if t_val < 0.2: 
+    #     return action
+        
+    return _apply_constraints_core(action, info, t, method='force', debug=debug)
+
+# -----------------------------------------------------------------------------
+# Function Registry
+# -----------------------------------------------------------------------------
+# Used dynamically by the config system to swap constraint behaviors at runtime.
+name2func = {
+    'identity': identity,
+    'bimanual_workspace_snap': constrain_bimanual_mask,
+    'bimanual_workspace_force': apply_workspace_force
+}
+
+
+==================================================
+FILE: magpie_transform.py
+==================================================
+
+import numpy as np
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
+from .dataset import normalize_data, unnormalize_data
+
+class DiffusionTransform:
+    def __init__(self, config, stats):
+        self.config = config
+        self.device = self.config.get('device', 'cpu')
+        self.stats = stats
+
+    def __call__(self, data, train=True):
+        ret_data = {}
+        
+        if not train:
+            ret_data[self.config.input_obs] = data[self.config.input_obs].astype(np.float32) / 255.0
+            
+            if len(ret_data[self.config.input_obs].shape) == 3:
+                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
+                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
+
+            ret_data[self.config.input_obs] = ret_data[self.config.input_obs].transpose(0, 1, 4, 2, 3)
+            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs], self.device)
+            
+            ret_data['vector_state'] = normalize_data(
+                data['vector_state'], 
+                self.stats[self.config.data_state]
+            )
+            ret_data['vector_state'] = np_to_ts(ret_data['vector_state'], self.device)
+            
+            if len(ret_data['vector_state'].shape) == 1:
+                ret_data['vector_state'] = ret_data['vector_state'].unsqueeze(0)
+
+        else:
+            ret_data[self.config.input_obs] = data[self.config.data_obs]
+            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs][:, :self.config.obs_horizon], self.device)
+            ret_data['vector_state'] = np_to_ts(data[self.config.data_state][:, :self.config.obs_horizon], self.device)
+            ret_data['action'] = np_to_ts(data['action'], self.device)
+
+        return ret_data
+
+    def postprocess(self, data):
+        ret_data = {}
+        if 'action' in data.keys():
+            data['action'] = unnormalize_data(data['action'], self.stats[self.config.data_action])
+            ret_data['action'] = data['action']
+            
+        if self.config.input_obs in data.keys():
+            ret_data[self.config.input_obs] = (ts_to_np(data[self.config.input_obs]) * 255.0).clip(0, 255).astype(np.uint8)
+            
+        return ret_data
 
 
 ==================================================
@@ -1351,738 +1427,6 @@ class MagpieAgent(TrainableAgent):
 
 
 ==================================================
-FILE: magpie_network_builder.py
-==================================================
-
-"""
-Magpie Network Builder Module.
-
-This module acts as a factory for constructing the complex neural network 
-architectures required by the Magpie diffusion agent. It handles the instantiation 
-of vision encoders, observation projectors, primitive classification heads, 
-noise prediction backbones (U-Net or MLP), and representation learning modules. 
-It also configures the optimizers and learning rate schedulers.
-"""
-
-import os
-import torch
-import torch.nn as nn
-import torchvision.models as models
-from diffusers.optimization import get_scheduler
-from diffusers.training_utils import EMAModel
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-
-from .utils import get_resnet, replace_bn_with_gn
-from .networks import ConditionalUnet1D, MLPClassifier, ResNetDecoder, ConditionalMLP1D
-
-def build_networks_and_optimizers(agent):
-    """
-    Constructs all neural network components, optimizers, and schedulers for the agent.
-
-    This function extracts the massive initialization logic from the main agent class 
-    to maintain modularity. It dynamically scales network input/output dimensions 
-    based on the configured observation space and primitive action integration.
-
-    Args:
-        agent: The MagpieAgent instance containing the `.config` and `.primitives` definitions.
-
-    Returns:
-        tuple: A 5-tuple containing:
-            - nets (nn.ModuleDict): A dictionary of all trainable and non-trainable networks.
-            - optimizer (torch.optim.Optimizer): The AdamW optimizer.
-            - lr_scheduler (torch.optim.lr_scheduler.LRScheduler): The learning rate scheduler.
-            - ema (EMAModel): The Exponential Moving Average model for stable diffusion sampling.
-            - clip_norm (float): The maximum gradient norm for clipping.
-    """
-    config = agent.config
-    device = config.get('device', 'cpu')
-    
-    # =========================================================================
-    # 1. Determine Input Channels
-    # Dynamically map the sensory modality to the required image channel depth.
-    # =========================================================================
-    agent.rep_learn = config.get('rep_learn', 'none')
-    input_channel_map = {
-        'depth': 1, 
-        'rgbd': 4, 
-        'rgb+goal_mask': 4,
-        'rgb-workspace-mask': 5, 
-        'rgb+goal_rgb': 6,
-        'rgb-workspace-mask-goal': 8
-    }
-    agent.input_channel = input_channel_map.get(config.input_obs, 3)
-
-    # =========================================================================
-    # 2. Vision Encoder Initialization
-    # Supports standard ResNets, Vision Transformers, and recurrent state-space models.
-    # =========================================================================
-    agent.vision_encoder_type = config.get('vision_encoder', 'original')
-    if agent.vision_encoder_type == 'original':
-        vision_encoder = get_resnet('resnet18', input_channel=agent.input_channel)
-        # CRITICAL: Replace BatchNorm with GroupNorm. RL/Robotics datasets often require
-        # small batch sizes that cause BatchNorm statistics to become highly unstable.
-        vision_encoder = replace_bn_with_gn(vision_encoder)
-        
-    elif agent.vision_encoder_type == 'vit':
-        vision_encoder = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
-        vision_encoder.heads = nn.Identity() # Strip the classification head to extract pure embeddings
-        
-    elif agent.vision_encoder_type in ['gc_rssm_encoder', 'gc_rssm_dynamic']:
-        # Import state-space models specifically designed for transition dynamics
-        from ..rl.lagarnet.networks import ImageEncoder
-        vision_encoder = ImageEncoder(
-            image_dim=config.input_obs_dim, embedding_size=config.embedding_dim,
-            activation_function=config.activation, batchnorm=config.encoder_batchnorm,
-            residual=config.encoder_residual
-        )
-    else:
-        vision_encoder = nn.Identity()
-
-    # Freezing the encoder prevents catastrophic forgetting if fine-tuning from a pre-trained base
-    if config.get('freeze_encoder', False):
-        for param in vision_encoder.parameters():
-            param.requires_grad = False
-        vision_encoder.eval()
-
-    # =========================================================================
-    # 3. Projectors and Classifiers
-    # Compresses vision features and sets up routing for primitive skills.
-    # =========================================================================
-    agent.use_projector = config.get('use_projector', False)
-    agent.effective_obs_dim = config.obs_dim
-    
-    obs_projector = nn.Identity()
-    if agent.use_projector:
-        proj_hidden = config.get('projector_hidden_dims', [])
-        proj_out = config.get('projector_out_dim', 128)
-        layers = []
-        in_dim = config.obs_dim
-        for h in proj_hidden:
-            layers.extend([nn.Linear(in_dim, h), nn.ReLU()])
-            in_dim = h
-        layers.append(nn.Linear(in_dim, proj_out))
-        obs_projector = nn.Sequential(*layers)
-        agent.effective_obs_dim = proj_out
-
-    # Initialize the primitive classification head if using hybrid action spaces
-    prim_class_head = None
-    global_cond_dim = agent.effective_obs_dim * config.obs_horizon
-    
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
-        cls_cfg = config.get("primitive_classifier", {}) 
-        prim_class_head = MLPClassifier(
-            input_dim=agent.effective_obs_dim, output_dim=agent.K,
-            hidden_dims=cls_cfg.get("hidden_dims", []), activation=cls_cfg.get("activation", "relu"),
-            dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),
-        )
-        if agent.primitive_integration == 'one-hot-encoding':
-            # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
-            global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
-
-    # =========================================================================
-    # 4. Diffusion Network Setup
-    # Builds the core noise prediction networks (U-Net or MLP).
-    # =========================================================================
-    agent.diffusion_dim = agent.network_action_dim
-    agent.diffusion_dims = {}
-    
-    # If jointly diffusing states and actions, extend the diffusion dimension
-    extra_state_dim = config.state_dim + config.get('goal_state_dim', 30) if agent.rep_learn == 'predict-state-with-action' else 0
-    agent.diffusion_dim += extra_state_dim
-
-    for k in range(getattr(agent, 'K', 1)):
-        agent.diffusion_dims[k] = agent.action_dims[k] + extra_state_dim if hasattr(agent, 'action_dims') else agent.diffusion_dim
-
-    # Accumulate networks into a dictionary for easy `nn.ModuleDict` instantiation
-    net_dict = {'vision_encoder': vision_encoder, 'obs_projector': obs_projector}
-    if prim_class_head: 
-        net_dict['prim_class_head'] = prim_class_head
-
-    backbone_type = config.get('noise_pred_net', 'unet')
-    mlp_cfg = config.get('mlp_backbone_config', {})
-
-    # 'separate_networks' instantiates an independent denoiser for *each* primitive skill
-    if agent.primitive_integration == 'separate_networks':
-        for k in range(agent.K):
-            dim_k = agent.diffusion_dims[k]
-            if dim_k == 0: continue
-            
-            if backbone_type == 'mlp':
-                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
-            else:
-                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
-            
-            setattr(agent, f'noise_pred_net_{k}', net)
-            net_dict[f'noise_pred_net_{k}'] = net
-    else:
-        # Standard monolithic denoiser handling all actions
-        if backbone_type == 'mlp':
-            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
-        else:
-            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
-            
-        setattr(agent, 'noise_pred_net', noise_pred_net)
-        net_dict['noise_pred_net'] = noise_pred_net
-
-    # Standard DDPM Scheduler from Hugging Face Diffusers
-    agent.noise_scheduler = DDPMScheduler(
-        num_train_timesteps=config.num_diffusion_iters, 
-        beta_schedule='squaredcos_cap_v2', # Cosine schedule prevents noise explosion at boundaries
-        clip_sample=True, 
-        prediction_type='epsilon'
-    )
-
-    # =========================================================================
-    # 5. Representation Learning Networks
-    # Auxiliary tasks (like state/keypoint prediction) to force the vision 
-    # encoder to learn geometrically meaningful embeddings.
-    # =========================================================================
-    if agent.rep_learn == 'auto-encoder':
-        net_dict['vision_decoder'] = ResNetDecoder(
-            input_dim=512, 
-            output_channel=agent.input_channel
-        )
-    elif agent.rep_learn == 'predict-state':
-        agent.predict_goal_state = config.get('predict_goal_state', False)
-        agent.goal_state_dim = config.get('goal_state_dim', 30) 
-        
-        out_dim = config.state_dim
-        if agent.predict_goal_state:
-            out_dim += agent.goal_state_dim
-            print(f"[MultiPrimitiveDiffusion] state_predictor out_dim extended to {out_dim} (State + Goal)")
-
-        pred_cfg = config.get('state_predictor_config', {})
-        hidden_dims = pred_cfg.get('hidden_dims', [256])
-        use_layernorm = pred_cfg.get('use_layernorm', False)
-        dropout_p = pred_cfg.get('dropout', 0)
-        activation_name = pred_cfg.get('activation', 'relu').lower()
-
-        layers = []
-        in_dim = agent.effective_obs_dim
-
-        for h_dim in hidden_dims:
-            layers.append(nn.Linear(in_dim, h_dim))
-            if use_layernorm:
-                layers.append(nn.LayerNorm(h_dim))
-            
-            if activation_name == 'relu':
-                layers.append(nn.ReLU())
-            elif activation_name == 'gelu':
-                layers.append(nn.GELU())
-            elif activation_name == 'silu':
-                layers.append(nn.SiLU())
-            else:
-                layers.append(nn.ReLU())
-            
-            if dropout_p > 0.0:
-                layers.append(nn.Dropout(p=dropout_p))
-                
-            in_dim = h_dim 
-
-        layers.append(nn.Linear(in_dim, out_dim))
-        net_dict['state_predictor'] = nn.Sequential(*layers)
-
-    # =========================================================================
-    # 6. Initialization and Optimizers
-    # =========================================================================
-    nets = nn.ModuleDict(net_dict).to(device)
-    
-    trainable_params = [p for p in nets.parameters() if p.requires_grad]
-    
-    # Exponential Moving Average (EMA) maintains a smoothed version of the weights.
-    # This is practically mandatory for stable inference in diffusion models.
-    ema = EMAModel(parameters=trainable_params, power=config.get('ema_power', 0.75))
-    
-    opt_params = config.get('optimiser_params', {})
-    if hasattr(opt_params, 'toDict'): 
-        opt_params = opt_params.toDict()
-    
-    # AdamW is preferred to decouple weight decay from the gradient updates
-    optimizer = torch.optim.AdamW(params=trainable_params, **opt_params)
-    
-    # Cosine learning rate scheduler with warmup to prevent early training collapse
-    lr_scheduler = get_scheduler(
-        name=config.get('lr_scheduler', 'cosine'), 
-        optimizer=optimizer,
-        num_warmup_steps=config.get('num_warmup_steps', 500), 
-        num_training_steps=config.total_update_steps
-    )
-    clip_norm = config.get('grad_clip_norm', -1)
-
-    return nets, optimizer, lr_scheduler, ema, clip_norm
-
-
-def build_primitive_action_masks(agent):
-    """
-    Builds binary masks to zero out irrelevant action dimensions for different primitives.
-
-    When using a shared action space for multiple distinct robotic skills (e.g., 
-    a 4-DoF pick vs an 8-DoF bimanual operation), this ensures the network only 
-    focuses its loss and predictions on the valid dimensions for the active skill.
-
-    Args:
-        agent: The MagpieAgent instance.
-
-    Returns:
-        dict: A mapping from primitive IDs (int) to a binary `torch.Tensor` mask.
-    """
-    masks = {}
-    
-    start = None
-    # Determine the offset index based on whether we reserve dimension 0 for the primitive bin
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
-        start = 0
-    elif agent.primitive_integration == 'bin_as_output':
-        start = 1
-
-    for pid, prim in enumerate(agent.primitives):
-        mask = torch.zeros(agent.network_action_dim, dtype=torch.float32)
-        
-        if start == 1: 
-            mask[0] = 1.0 # Always unmask the bin selector if using it
-            
-        dim = prim['dim'] if isinstance(prim, dict) else prim.dim
-        mask[start:start + dim] = 1.0
-        masks[pid] = mask
-        
-    return masks
-
-
-==================================================
-FILE: magpie_transform.py
-==================================================
-
-import numpy as np
-from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
-from .dataset import normalize_data, unnormalize_data
-
-class DiffusionTransform:
-    def __init__(self, config, stats):
-        self.config = config
-        self.device = self.config.get('device', 'cpu')
-        self.stats = stats
-
-    def __call__(self, data, train=True):
-        ret_data = {}
-        
-        if not train:
-            ret_data[self.config.input_obs] = data[self.config.input_obs].astype(np.float32) / 255.0
-            
-            if len(ret_data[self.config.input_obs].shape) == 3:
-                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
-                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
-
-            ret_data[self.config.input_obs] = ret_data[self.config.input_obs].transpose(0, 1, 4, 2, 3)
-            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs], self.device)
-            
-            ret_data['vector_state'] = normalize_data(
-                data['vector_state'], 
-                self.stats[self.config.data_state]
-            )
-            ret_data['vector_state'] = np_to_ts(ret_data['vector_state'], self.device)
-            
-            if len(ret_data['vector_state'].shape) == 1:
-                ret_data['vector_state'] = ret_data['vector_state'].unsqueeze(0)
-
-        else:
-            ret_data[self.config.input_obs] = data[self.config.data_obs]
-            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs][:, :self.config.obs_horizon], self.device)
-            ret_data['vector_state'] = np_to_ts(data[self.config.data_state][:, :self.config.obs_horizon], self.device)
-            ret_data['action'] = np_to_ts(data['action'], self.device)
-
-        return ret_data
-
-    def postprocess(self, data):
-        ret_data = {}
-        if 'action' in data.keys():
-            data['action'] = unnormalize_data(data['action'], self.stats[self.config.data_action])
-            ret_data['action'] = data['action']
-            
-        if self.config.input_obs in data.keys():
-            ret_data[self.config.input_obs] = (ts_to_np(data[self.config.input_obs]) * 255.0).clip(0, 255).astype(np.uint8)
-            
-        return ret_data
-
-
-==================================================
-FILE: constrain_action_functions.py
-==================================================
-
-"""
-Constrain Action Functions Module.
-
-This module provides physical and geometric constraint logic for the diffusion 
-action trajectories. It ensures that predicted end-effector positions (picks/places) 
-remain within valid workspace boundaries (defined by segmentation masks). It supports 
-both "hard snapping" (forcing points into valid regions) and "soft restoring forces" 
-(treating constraints as an ODE during the reverse diffusion process).
-"""
-
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-import os
-
-# --- Configuration ---
-# CRITICAL: Adjust this based on how your dataset normalized spatial coordinates.
-# Set to True if your network outputs [Y, X] (Row, Col).
-# Set to False if your network outputs [X, Y] (Width, Height).
-IS_YX_ACTION_SPACE = False 
-
-# -----------------------------------------------------------------------------
-# Helper Functions for Mathematics & Assignments
-# -----------------------------------------------------------------------------
-
-def _snap_to_nearest(points_bht, valid_points):
-    """
-    Finds the nearest valid spatial point for a batch of trajectory coordinates.
-
-    Args:
-        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
-        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates in the mask.
-
-    Returns:
-        torch.Tensor: Snapped coordinates of shape (Batch, Horizon, 2).
-    """
-    if valid_points is None or valid_points.shape[0] == 0:
-        return points_bht
-    
-    B, H, D = points_bht.shape
-    flat_points = points_bht.reshape(-1, 2)
-    
-    # Compute pairwise Euclidean distances between predicted points and all valid mask points
-    dists = torch.cdist(flat_points, valid_points)
-    min_indices = torch.argmin(dists, dim=1)
-    
-    return valid_points[min_indices].reshape(B, H, 2)
-
-def _get_restoring_force(points_bht, valid_points):
-    """
-    Calculates a directional vector pointing from the predicted point to the 
-    nearest valid mask coordinate.
-
-    Args:
-        points_bht (torch.Tensor): Trajectory points of shape (Batch, Horizon, 2).
-        valid_points (torch.Tensor): Tensor of valid (X, Y) coordinates.
-
-    Returns:
-        torch.Tensor: Force vectors of shape (Batch, Horizon, 2).
-    """
-    if valid_points is None or valid_points.shape[0] == 0:
-        return torch.zeros_like(points_bht)
-        
-    nearest_points = _snap_to_nearest(points_bht, valid_points)
-    return nearest_points - points_bht
-
-def _get_min_dist(points_bht, valid_points):
-    """
-    Calculates the average minimum distance from a set of points to a valid region.
-    Used as a heuristic cost function for arm-to-mask assignment.
-    """
-    if valid_points is None or valid_points.shape[0] == 0:
-        return float('inf')
-        
-    flat_points = points_bht.reshape(-1, 2)
-    dists = torch.cdist(flat_points, valid_points)
-    return torch.min(dists, dim=1)[0].mean().item()
-
-def _get_dynamic_assignments(action_b, entities, valid_masks):
-    """
-    Dynamically assigns robotic arms to specific workspace masks using a 
-    bipartite matching heuristic based on proximity.
-
-    For bimanual setups, it prevents both arms from trying to snap to the 
-    same valid workspace if there are two distinct valid areas.
-
-    Args:
-        action_b (torch.Tensor): Single batch action trajectory (1, Horizon, Dim).
-        entities (list): List of dictionaries defining the action dimensions for 
-                         each robot's 'pick' and 'place' actions.
-        valid_masks (dict): Dictionary mapping mask IDs (0, 1) to valid coordinate tensors.
-
-    Returns:
-        dict: A mapping of Entity ID to assigned Mask ID (e.g., {0: 1, 1: 0}).
-    """
-    assignments = {} 
-    
-    # Bimanual case: 2 arms, 2 valid masks available
-    if len(entities) == 2 and 0 in valid_masks and 1 in valid_masks:
-        e0_pick = action_b[:, :, entities[0]['pick']]
-        e1_pick = action_b[:, :, entities[1]['pick']]
-        
-        # Calculate cost (distance) matrix
-        d_e0_m0 = _get_min_dist(e0_pick, valid_masks[0])
-        d_e0_m1 = _get_min_dist(e0_pick, valid_masks[1])
-        d_e1_m0 = _get_min_dist(e1_pick, valid_masks[0])
-        d_e1_m1 = _get_min_dist(e1_pick, valid_masks[1])
-        
-        # Simple bipartite matching: minimize total assignment distance
-        if (d_e0_m0 + d_e1_m1) <= (d_e0_m1 + d_e1_m0):
-            assignments = {0: 0, 1: 1}
-        else:
-            assignments = {0: 1, 1: 0}
-            
-    # Single-arm case: assign the arm to whichever mask is closest
-    elif len(entities) == 1 and len(valid_masks) > 0:
-        e0_pick = action_b[:, :, entities[0]['pick']]
-        best_mask = min(valid_masks.keys(), key=lambda m: _get_min_dist(e0_pick, valid_masks[m]))
-        assignments = {0: best_mask}
-        
-    return assignments
-
-# -----------------------------------------------------------------------------
-# Debug Visualization
-# -----------------------------------------------------------------------------
-
-def _visualize_debug(original_action, new_action, obs, entities, assignments, prim_name, t, method):
-    """
-    Generates an overlay plot of the original vs. constrained trajectories on 
-    top of the current camera observation and segmentation masks.
-    """
-    save_dir = "tmp/debug_magpie"
-    os.makedirs(save_dir, exist_ok=True)
-
-    rgb = obs.get('rgb', None)
-    if rgb is None: return 
-        
-    # Unpack and normalize RGB for Matplotlib
-    if torch.is_tensor(rgb): rgb = rgb.detach().cpu().numpy()
-    if rgb.ndim == 4: rgb = rgb[0]
-    if rgb.shape[0] == 3: rgb = np.transpose(rgb, (1, 2, 0))
-    if rgb.max() > 2.0: rgb = rgb / 255.0
-
-    H, W = rgb.shape[:2]
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(rgb)
-    
-    t_val = t.item() if torch.is_tensor(t) else t
-    ax.set_title(f"Step: {t_val:.2f} | {prim_name} | Method: {method.upper()}", fontsize=10)
-
-    def get_mask(m_key):
-        if m_key not in obs: return None
-        m = obs[m_key]
-        if torch.is_tensor(m): m = m.detach().cpu().numpy()
-        if m.ndim == 4: m = m[0]
-        if m.ndim == 3: m = m.squeeze(-1) if m.shape[-1] == 1 else m[0]
-        return m
-
-    m0 = get_mask('robot0_mask')
-    m1 = get_mask('robot1_mask')
-
-    # Overlay workspaces as semi-transparent blue/red hues
-    if m0 is not None: ax.imshow(np.ma.masked_where(m0 < 0.5, m0), cmap='Blues', alpha=0.4)
-    if m1 is not None: ax.imshow(np.ma.masked_where(m1 < 0.5, m1), cmap='Reds', alpha=0.4)
-
-    def to_pix(uv_coords):
-        """Converts normalized [-1, 1] coordinates back to pixel space [0, W]."""
-        dim0, dim1 = uv_coords[:, 0], uv_coords[:, 1]
-        if IS_YX_ACTION_SPACE:
-            y, x = (dim0 + 1) * H / 2, (dim1 + 1) * W / 2
-        else:
-            x, y = (dim0 + 1) * W / 2, (dim1 + 1) * H / 2
-        return x, y
-
-    orig_act = original_action[0, 0].detach().cpu().numpy()
-    new_act = new_action[0, 0].detach().cpu().numpy()
-    colors = {0: 'blue', 1: 'red'}
-    
-    lbl_prefix = "Snap" if method == 'snap' else "Force"
-    
-    for e_idx, m_idx in assignments.items():
-        ent = entities[e_idx]
-        c = colors.get(m_idx, 'green')
-
-        # Plot PICK trajectory adjustments
-        if len(ent['pick']) == 2:
-            pu, pv = ent['pick']
-            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
-            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
-            
-            ax.plot(ox, oy, marker='x', color='yellow', markersize=8, label='Orig Pick' if e_idx==0 else "")
-            ax.plot(nx, ny, marker='o', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Pick (R{m_idx})')
-            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
-
-        # Plot PLACE trajectory adjustments
-        if len(ent['place']) == 2:
-            pu, pv = ent['place']
-            ox, oy = to_pix(np.array([[orig_act[pu], orig_act[pv]]]))
-            nx, ny = to_pix(np.array([[new_act[pu], new_act[pv]]]))
-            
-            ax.plot(ox, oy, marker='x', color='orange', markersize=8, label='Orig Place' if e_idx==0 else "")
-            ax.plot(nx, ny, marker='^', color=c, markersize=8, markeredgecolor='white', label=f'{lbl_prefix} Place (R{m_idx})')
-            ax.annotate("", xy=(nx[0], ny[0]), xytext=(ox[0], oy[0]), arrowprops=dict(arrowstyle="->", color=c, lw=2, alpha=0.8))
-
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc='upper left', bbox_to_anchor=(1.05, 1))
-    
-    plt.axis('off')
-    plt.savefig(os.path.join(save_dir, f"step_{t_val:05.2f}.png"), bbox_inches='tight')
-    plt.close(fig)
-
-# -----------------------------------------------------------------------------
-# Main Constraint Logic
-# -----------------------------------------------------------------------------
-
-def identity(action, info, t, debug=False):
-    """No-op constraint function. Returns the action unmodified."""
-    return action
-
-def _apply_constraints_core(action, info, t, method, debug=False):
-    """
-    Core engine for applying workspace constraints to the action tensor.
-    
-    Args:
-        action (torch.Tensor): Current predicted trajectory of shape (Batch, Horizon, Dim).
-        info (dict): Environment data containing the semantic masks.
-        t (float/Tensor): Current diffusion timestep (for debugging).
-        method (str): 'snap' for hard replacement, 'force' for soft ODE addition.
-        debug (bool): If True, renders visual debugging plots.
-        
-    Returns:
-        torch.Tensor: The constrained action trajectory.
-    """
-    device = action.device
-    obs = info.get('observation', {})
-    original_action = action.clone() 
-    
-    # 1. Map primitive names to the corresponding dimensions in the action vector
-    prim_name = info.get('prim_name', 'norm-pixel-dual-pick-and-place')
-    
-    entities = []
-    if 'pick-and-fling' in prim_name:
-        entities.append({'pick': [0, 1], 'place': []})     # Left Arm Pick
-        entities.append({'pick': [2, 3], 'place': []})     # Right Arm Pick
-    elif 'dual-pick-and-place' in prim_name:
-        entities.append({'pick': [0, 1], 'place': [4, 5]}) # Left Arm
-        entities.append({'pick': [2, 3], 'place': [6, 7]}) # Right Arm
-    elif 'single-pick-and-place' in prim_name:
-        entities.append({'pick': [0, 1], 'place': [2, 3]}) # Single Arm
-    elif 'no-operation' in prim_name:
-        return action
-
-    # 2. Extract Valid Pixel Coordinates from Semantic Masks
-    # Converts binary 2D image masks into a list of valid [-1, 1] spatial coordinates.
-    valid_masks = {}
-    for m_idx, key in enumerate(['robot0_mask', 'robot1_mask']):
-        if key in obs:
-            mask = obs[key]
-            if mask.ndim == 3: mask = mask.squeeze(-1)
-            
-            # np.where returns (rows, columns) = (Axis 0, Axis 1)
-            rows, cols = np.where(mask > 0) 
-            
-            if len(rows) > 0:
-                H, W = mask.shape
-                
-                # Normalize pixel indices to the [-1, 1] range expected by the diffusion model
-                norm_x = (cols / float(W)) * 2 - 1.0
-                norm_y = (rows / float(H)) * 2 - 1.0
-                
-                # Stack coordinates based on the network's architectural output format
-                if IS_YX_ACTION_SPACE:
-                    valid_pts = np.stack([norm_y, norm_x], axis=1)
-                else:
-                    valid_pts = np.stack([norm_x, norm_y], axis=1)
-                    
-                valid_masks[m_idx] = torch.tensor(valid_pts, dtype=torch.float32, device=device)
-
-    # If no valid workspace masks are detected, abort constraints
-    if not valid_masks:
-        return action
-
-    B = action.shape[0]
-    force_vector = torch.zeros_like(action) if method == 'force' else None
-    debug_assignments_b0 = {}
-
-    # 3. Apply Constraints per Batch Item
-    for b in range(B):
-        # Figure out which arm should target which valid workspace region
-        assignments = _get_dynamic_assignments(action[b:b+1], entities, valid_masks)
-        
-        if b == 0:
-            debug_assignments_b0 = assignments 
-            
-        for e_idx, m_idx in assignments.items():
-            ent = entities[e_idx]
-            pts = valid_masks[m_idx]
-            
-            # Apply to PICK positions
-            if method == 'snap':
-                action[b:b+1, :, ent['pick']] = _snap_to_nearest(action[b:b+1, :, ent['pick']], pts)
-            elif method == 'force':
-                force_vector[b:b+1, :, ent['pick']] = _get_restoring_force(action[b:b+1, :, ent['pick']], pts)
-                
-            # Apply to PLACE positions
-            if len(ent['place']) > 0:
-                if method == 'snap':
-                    action[b:b+1, :, ent['place']] = _snap_to_nearest(action[b:b+1, :, ent['place']], pts)
-                elif method == 'force':
-                    force_vector[b:b+1, :, ent['place']] = _get_restoring_force(action[b:b+1, :, ent['place']], pts)
-
-    # 4. Integrate Soft Forces (if applicable)
-    if method == 'force':
-        eta_dt = 0.5 # Hyperparameter governing the strength of the restorative ODE step
-        action = action + (eta_dt * force_vector)
-        
-    if debug:
-        _visualize_debug(original_action, action, obs, entities, debug_assignments_b0, prim_name, t, method)
-        
-    return action
-
-def _get_t_val(t):
-    """Helper to safely extract a float value from t, whether it's a tensor or primitive."""
-    if torch.is_tensor(t):
-        # If it's a batched tensor of timesteps, take the first one
-        return t[0].item() if t.ndim > 0 else t.item()
-    return float(t)
-
-def constrain_bimanual_mask(action, info, t, debug=False):
-    """
-    Hard-snapping implementation.
-    
-    Hard constraints rigidly overwrite the network's prediction. Applying them too 
-    early in diffusion destroys the signal. Therefore, we only activate the hard snap 
-    in the final 20% of the reverse diffusion process when the trajectory is nearly clean.
-    """
-    t_val = _get_t_val(t)
-    
-    # Assuming t normalizes to [0, 1] representing [Data, Noise] (or vice versa based on scheduler).
-    # Prevent snapping if the timestep signifies a highly noisy state.
-    if t_val < 0.8: 
-        return action
-        
-    return _apply_constraints_core(action, info, t, method='snap', debug=debug)
-
-def apply_workspace_force(action, info, t, debug=False):
-    """
-    ODE Kinematic restoring force implementation.
-    
-    Soft constraints act as a continuous directional pull during diffusion. They can be 
-    safely applied earlier in the denoising process than hard snaps, gently guiding 
-    the vector field toward valid spatial regions.
-    """
-    t_val = _get_t_val(t)
-    
-    # Optional: Disable only in the very earliest pure-noise phase (e.g., t < 0.2) 
-    # if you find the force destabilizes the initial vector field geometry.
-    # if t_val < 0.2: 
-    #     return action
-        
-    return _apply_constraints_core(action, info, t, method='force', debug=debug)
-
-# -----------------------------------------------------------------------------
-# Function Registry
-# -----------------------------------------------------------------------------
-# Used dynamically by the config system to swap constraint behaviors at runtime.
-name2func = {
-    'identity': identity,
-    'bimanual_workspace_snap': constrain_bimanual_mask,
-    'bimanual_workspace_force': apply_workspace_force
-}
-
-
-==================================================
 FILE: networks.py
 ==================================================
 
@@ -2590,120 +1934,6 @@ class ConditionalMLP1D(nn.Module):
 
 
 ==================================================
-FILE: combine_files.py
-==================================================
-
-import os
-import glob
-
-def combine_python_files(directory_path, output_filename="combined_code.txt"):
-    """
-    Finds all .py files in a directory and combines them into a single text file.
-    """
-    # Create a search pattern to find all .py files in the specified directory
-    search_pattern = os.path.join(directory_path, "*.py")
-    py_files = glob.glob(search_pattern)
-
-    # Check if any files were found
-    if not py_files:
-        print(f"No Python files found in '{directory_path}'.")
-        return
-
-    try:
-        # Open the output file in write mode
-        with open(output_filename, 'w', encoding='utf-8') as outfile:
-            for file_path in py_files:
-                # Extract just the filename from the full path
-                filename = os.path.basename(file_path)
-                
-                # Write a clear visual header for each file
-                outfile.write(f"{'='*50}\n")
-                outfile.write(f"FILE: {filename}\n")
-                outfile.write(f"{'='*50}\n\n")
-                
-                # Read the contents of the current python file and write it
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as infile:
-                        outfile.write(infile.read())
-                except Exception as e:
-                    outfile.write(f"# Error reading {filename}: {e}\n")
-                
-                # Add some blank space before the next file begins
-                outfile.write("\n\n\n")
-                
-        print(f"Success! Combined {len(py_files)} files into '{output_filename}'.")
-    
-    except Exception as e:
-        print(f"An error occurred while writing the output file: {e}")
-
-# --- Execution ---
-if __name__ == "__main__":
-    # The directory you want to scan. 
-    # "." means the current directory where this script is located.
-    # You can change this to a specific path like "C:/Users/Name/Documents/MyCode"
-    target_directory = "." 
-    
-    # The name of the text file you want to generate
-    output_file = "all_my_python_code.txt"
-    
-    combine_python_files(target_directory, output_file)
-
-
-==================================================
-FILE: action_sampler.py
-==================================================
-
-import torch
-
-class NormalSampler:
-
-    def sample(self, state, horizon, action_dim):
-
-        return torch.randn((1, horizon, action_dim))
-
-class MaskPickUniformSampler:
-
-    def sample(self, state, horizon, action_dim):
-        mask = state['mask'][-1][0]
-        target_id = len(state['mask'])
-       
-        H = mask.shape[0]
-       
-        ### for each horizon, sample points from the mask
-        picks = torch.randn((horizon, 2))
-        #print('sampler picks:', picks.shape)
-
-        indices = torch.nonzero(mask)
-        num_points = indices.shape[0]
-        idx = torch.randint(0, num_points, (1,))[0]
-        
-
-        target_pick = indices[idx]
-        #print('pre target_pick:', target_pick)
-
-        picks[target_id] = target_pick/H * 2 -1
-        #print('target pick', picks[target_id])
-
-        #print('target pick:', target_pick)
-        
-        #print('sampler picks:', picks.shape)
-        ## uniformly sample places form -1 to 1
-        places = torch.randn((horizon, 2))
-        #print('sampler places:', places.shape)
-
-        sample_action = torch.cat([picks, places], dim=-1).unsqueeze(0)
-        #print('sample action:', sample_action.shape)
-        #print('action_dim:', action_dim)
-        return sample_action
-
-
-ActionSampler = {
-    'normal': NormalSampler,
-    'mask_pick_uniform': MaskPickUniformSampler
-}
-
-
-==================================================
 FILE: draw_utils.py
 ==================================================
 
@@ -2773,6 +2003,1167 @@ def plot_rgb_workspace_mask_goal_features(image_tensor, save_dir='tmp'):
     cv2.imwrite(os.path.join(save_dir, 'mask_ch4_robot1.png'), (mask1 * 255).astype(np.uint8))
     
     print(f"Saved individual mask channels to {save_dir}/")
+
+
+==================================================
+FILE: magpie_trainer.py
+==================================================
+
+"""
+Magpie Trainer Module.
+
+This module contains the MagpieTrainer class, which orchestrates the data loading, 
+validation, and training loops for the Magpie diffusion-based robotics agent. It 
+supports both standard Denoising Diffusion Probabilistic Models (DDPM) and 
+Optimal Transport (OT) Flow Matching, along with primitive action integration.
+"""
+
+import os
+import torch
+import torch.nn as nn
+import numpy as np
+import cv2
+from tqdm import tqdm
+from dotmap import DotMap
+
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena.utilities.save_utils import save_mask
+from .dataset import DiffusionDataset
+from .utils import compute_classification_metrics
+
+class MagpieTrainer:
+    """
+    Coordinates the training and validation pipelines for the MagpieAgent.
+
+    Attributes:
+        agent: The core diffusion agent containing the networks and state.
+        config (DotMap): Configuration dictionary containing hyperparameters.
+        device (torch.device): Hardware device (CPU/GPU) for tensor operations.
+    """
+
+    def __init__(self, agent):
+        """
+        Initializes the MagpieTrainer with a reference to the main agent.
+
+        Args:
+            agent: The MagpieAgent instance containing neural networks and config.
+        """
+        self.agent = agent
+        self.config = agent.config
+        self.device = agent.device
+
+    def _init_dataset(self):
+        """
+        Initializes the standard trajectory dataset and prepares PyTorch DataLoaders.
+
+        Configures either a 'diffusion' or 'general' dataset mode. If primitive 
+        integration is enabled, it sets up Random Oversampling (ROS) using a 
+        WeightedRandomSampler to mitigate class imbalance among primitive actions.
+
+        Raises:
+            ValueError: If an unsupported `dataset_mode` is provided.
+        """
+        # 1. Dataset Instantiation
+        if self.config.dataset_mode == 'diffusion':
+            train_dataset = DiffusionDataset(
+                dataset_path=self.config.dataset_path,
+                pred_horizon=self.config.pred_horizon,
+                obs_horizon=self.config.obs_horizon,
+                action_horizon=self.config.action_horizon
+            )
+            self.agent.stats = train_dataset.stats
+            
+        elif self.config.dataset_mode == 'general':
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+            config_dict = self.config.dataset_config.toDict()
+            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
+
+            if self.agent.validate_training:
+                val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
+        
+        elif self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            config_dict = self.config.dataset_config.toDict()
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+
+            if self.agent.validate_training:
+                val_dataset = HindsightDataset(**config_dict, sample_mode='val')
+
+        else:
+            raise ValueError('Invalid dataset mode. Expected "diffusion", "hindsignt", "general".')
+
+        # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
+        use_ros = self.config.get('use_random_oversampling', False)
+        sampler = None
+        shuffle_data = True
+        
+        if use_ros and self.agent.primitive_integration != 'none':
+            print("[MultiPrimitiveDiffusionAdapter] Initializing WeightedRandomSampler for ROS...")
+            from torch.utils.data import WeightedRandomSampler
+            
+            class_counts = np.zeros(self.agent.K)
+            sample_classes = []
+            
+            # Tally occurrences of each primitive class
+            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
+                action_data = train_dataset[i]['action']
+                act_key = list(action_data.keys())[0]
+                prim_bin = action_data[act_key][0][0] 
+                
+                # Extract and normalize the primitive ID
+                prim_id = int(np.clip((((prim_bin + 1) / 2) * self.agent.K), 0, self.agent.K - 1))
+                class_counts[prim_id] += 1
+                sample_classes.append(prim_id)
+                
+            # Assign higher selection weights to underrepresented classes
+            class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
+            sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
+            
+            sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+            shuffle_data = False # Must disable native shuffling when using a custom sampler
+            print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
+
+        # 3. DataLoader Performance Optimization
+        torch.backends.cudnn.benchmark = True
+        num_workers = self.config.get('num_workers', 0)
+        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
+        prefetch_factor = self.config.get('prefetch_factor', None)
+
+        self.agent.dataloader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.config.batch_size, shuffle=shuffle_data,   
+            sampler=sampler, num_workers=num_workers, pin_memory=self.config.get('pin_memory', False),
+            persistent_workers=persistent, prefetch_factor=prefetch_factor
+        )
+
+        if self.agent.validate_training:
+            self.agent.val_dataloader = torch.utils.data.DataLoader(
+                val_dataset, batch_size=self.config.batch_size, shuffle=False, 
+                num_workers=max(1, num_workers // 4), pin_memory=self.config.get('pin_memory', False),
+                persistent_workers=persistent
+            )
+        self.agent.dataset_inited = True
+
+    def _init_demo_policy_dataset(self, arenas):
+        """
+        Initializes the dataset by rolling out a demonstrator policy in the environment.
+
+        Instead of loading pre-collected data, this method actively collects 
+        trajectories from an expert policy until the desired number of demos is reached.
+
+        Args:
+            arenas (list): A list containing the simulation environments to roll out in.
+        """
+        arena = arenas[0]
+        org_horizon = arena.action_horizon
+        arena.action_horizon = self.config.get('demo_horizon', org_horizon)
+        
+        # Safely convert to a standard dict to prevent mutating the global config
+        config_dict = self.config.dataset_config.toDict() if hasattr(self.config.dataset_config, 'toDict') else dict(self.config.dataset_config)
+        config_dict['io_mode'] = 'a' # Append mode
+        
+        # Route dataset instantiation based on the config mode
+        if self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+        else:
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+            # Strip the HER mapping if falling back to the general base class
+            config_dict.pop('future_goal_mapping', None)
+            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
+
+        import actoris_harena as ag_ar
+        policy = ag_ar.build_agent(self.config.demo_policy, self.config.get('demo_policy_config', DotMap({})), disable_wandb=True)
+
+        qbar = tqdm(total=self.config.num_demos, desc='Collecting data from policy ...')
+        qbar.update(train_dataset.num_trajectories())
+        qbar.refresh()
+        
+        episode_id = train_dataset.num_trajectories()
+        train_configs = arena.get_train_configs()
+        
+        # 1. Trajectory Collection Loop
+        while train_dataset.num_trajectories() < self.config.num_demos:
+            observations = {obs_type: [] for obs_type in train_dataset.obs_types}
+            actions = {act_type: [] for act_type in train_dataset.action_types}
+
+            policy.reset([arena.id])
+            info = arena.reset(train_configs[episode_id])
+            policy.init([info])
+            info['reward'] = 0
+            done = info['done']
+            
+            while not done:
+                action = policy.single_act(info)
+                if action is None: break
+                
+                # Store and format vision/mask observations
+                for k, v in info['observation'].items():
+                    if k in observations.keys():
+                        if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                            v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                            observations[k].append(v_)
+                        elif k in ['mask', 'goal_mask']:
+                            v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                            observations[k].append(v_ > 0.9)
+                        else:
+                            observations[k].append(v)
+                
+                # Handle primitive action mapping
+                add_action = action
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks']: 
+                    action_name = list(action.keys())[0]
+                    action_param = action[action_name]
+                    prim_id = self.agent.prim_name2id[action_name]
+                    
+                    # Convert primitive ID back to normalized [-1, 1] bin format
+                    prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
+                    
+                    # --- FIXED: Dynamically allocate enough space for the primitive ID + parameters ---
+                    # Ensures the array is at least size 9 for dual-pick-and-place
+                    action_size = max(getattr(self.agent, 'data_save_action_dim', 0), action_param.shape[0] + 1)
+                    add_action = np.zeros(action_size)
+                    
+                    add_action[0] = prim_act
+                    add_action[1:action_param.shape[0]+1] = action_param
+                elif self.config.primitive_integration == 'none':
+                    add_action = action
+                
+                actions['default'].append(add_action)  
+                info = arena.step(action)
+                policy.update(info, add_action)
+                info['reward'] = 0
+                done = info['done']
+                if self.agent.collect_on_success and info['success']: break
+            
+            # Capture final terminal observation
+            for k, v in info['observation'].items():
+                if k in observations.keys():
+                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_)
+                    elif k in ['mask', 'goal_mask']:
+                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_ > 0.9)
+                    else:
+                        observations[k].append(v)
+                        
+            # Save successful trajectories
+            if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
+                for k, v in observations.items():
+                    observations[k] = np.stack(v)
+                actions['default'] = np.stack(actions['default'])
+                train_dataset.add_trajectory(observations, actions)
+                qbar.update(1)
+                
+            episode_id = (episode_id + 1) % arena.get_num_episodes()
+
+        arena.action_horizon = org_horizon
+        
+        # ROS setup skipped here for brevity, mirrors logic from _init_dataset
+        self.agent.dataloader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.config.batch_size, shuffle=True, pin_memory=self.config.get('pin_memory', False)
+        )
+        self.agent.dataset_inited = True
+
+    def validate(self):
+        """
+        Executes the validation loop across the validation dataloader.
+
+        Computes action MSE, state prediction L2 distance, and primitive 
+        classification accuracy (if applicable). Logs all metrics to wandb.
+        """
+        if not hasattr(self.agent, 'val_dataloader'):
+            print("[Validation] No validation dataloader found. Skipping.")
+            return
+
+        self.agent.nets.eval() 
+        
+        # Metrics Accumulators
+        val_prim_losses, val_state_mse, val_state_l2, val_action_mse = [], [], [], []
+        all_preds, all_gts = [], []
+        
+        print(f"--- Running Validation at Step {self.agent.update_step} ---")
+        
+        with torch.no_grad():
+            for nbatch in self.agent.val_dataloader:
+                
+                # 1. Observation Pre-processing
+                if self.config.dataset_mode == 'general':
+                    obs = nbatch['observation']
+                    action = nbatch['action']['default']
+                    nbatch = {v: k for v, k in obs.items()}
+                    nbatch['action'] = action.reshape(*action.shape[:2], -1)
+                    nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
+
+                # Construct composite multi-modal observations
+                if self.config.input_obs == 'rgbd':
+                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask':
+                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask-goal':
+                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_rgb':
+                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_mask':
+                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+
+                B = nbatch[self.config.input_obs].shape[0]
+                input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
+                
+                # 2. Extract Vision and State Features
+                if self.agent.vision_encoder_type == 'original':
+                    image_features = self.agent.nets['vision_encoder'](input_obs)
+                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                else:
+                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) 
+                
+                if getattr(self.agent, 'use_projector', False):
+                    obs_features = self.agent.nets['obs_projector'](obs_features)
+
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+
+                obs_cond = obs_features.flatten(start_dim=1)
+                
+                # 3. Validate State Predictor Representation Learning
+                if self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features)
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors_val = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                        gt_tensors_val.append(gt_state)
+                        
+                        state_dim = self.config.state_dim
+                        num_kpts = state_dim // 2
+                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
+                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
+                        
+                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
+                        val_state_l2.append(l2_dist.item())
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                            gt_tensors_val.append(gt_goal)
+                            
+                    if gt_tensors_val:
+                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
+                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
+                        val_state_mse.append(mse_loss.item())
+
+                # 4. Validate Primitive Classification Head
+                gt_prim_ids = None
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    preds = torch.argmax(prim_logits, dim=-1)
+                    
+                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
+                    
+                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
+                    val_prim_losses.append(loss.item())
+                    all_preds.extend(preds.cpu().numpy())
+                    all_gts.extend(gt_prim_ids.cpu().numpy())
+                    
+                    if self.agent.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                        
+                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
+                else:
+                    gt_action = nbatch['action'].to(self.device)
+
+                # 5. Full Evaluation Denoising Pass
+                eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                loss_type = self.config.get('loss_type', 'diffusion')
+                
+                # Branch: Optimal Transport Flow Matching
+                if loss_type == 'ot_flow_match':
+                    num_steps = self.config.num_diffusion_iters
+                    dt = 1.0 / num_steps
+                    for i in range(num_steps):
+                        t_val = i / num_steps
+                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            v_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (preds == k) 
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{k}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    v_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = eval_naction + v_pred * dt
+                
+                # Branch: Standard DDPM Reverse Diffusion
+                else:
+                    self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                    for k in self.agent.noise_scheduler.timesteps:
+                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for net_idx in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[net_idx]
+                                if dim_k == 0: continue
+                                mask_k = (preds == net_idx)
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    n_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+
+                # 6. Action MSE Calculation
+                pred_action = eval_naction[..., :self.agent.network_action_dim]
+                
+                # Only calculate loss on the valid action dimensions corresponding to the chosen primitive
+                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
+                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                    
+                    diff = (pred_action - gt_action) * mask
+                    valid_count = mask.sum().clamp(min=1.0) # Avoid div by zero
+                    mse = (diff ** 2).sum() / valid_count
+                else:
+                    mse = nn.functional.mse_loss(pred_action, gt_action)
+                
+                val_action_mse.append(mse.item())
+
+        # 7. Metric Aggregation and wandb Integration
+        metrics = {}
+        if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
+        if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
+        if val_action_mse: metrics['val/action_mse'] = np.mean(val_action_mse)
+
+        if val_prim_losses:
+            metrics['val/prim_loss'] = np.mean(val_prim_losses)
+            acc = np.mean(np.array(all_preds) == np.array(all_gts))
+            metrics['val/prim_accuracy'] = acc
+            
+            import wandb
+            if wandb.run is not None and hasattr(self.agent, 'logger'):
+                confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=all_gts,
+                    preds=all_preds,
+                    class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                )}
+                self.agent.logger.log(confusion, step=self.agent.update_step)
+
+        if metrics and hasattr(self.agent, 'logger'):
+            self.agent.logger.log(metrics, step=self.agent.update_step)
+            print(f"Validation Results: {metrics}")
+
+        self.agent.nets.train()
+
+    def train(self, update_steps, arenas):
+        """
+        Executes the main training optimization loop.
+
+        Args:
+            update_steps (int): Total number of gradient steps to take in this call.
+            arenas (list): Simulation environments (required if training from policy).
+        """
+        if not self.agent.dataset_inited:
+            if self.config.train_mode == 'from_dataset':
+                self._init_dataset()
+            elif self.config.train_mode == 'from_policy':
+                self._init_demo_policy_dataset(arenas)
+        
+        # Ensure we don't overshoot total configured steps
+        update_steps = min(self.config.total_update_steps - self.agent.update_step, update_steps)
+        
+        if self.config.get('freeze_encoder', False):
+            self.agent.nets['vision_encoder'].eval()
+            
+        def cycle(dl):
+            while True:
+                for data in dl: yield data
+                    
+        train_iter = iter(cycle(self.agent.dataloader))
+        pbar = tqdm(range(update_steps), desc="Training")
+
+        for i in pbar:
+            nbatch = next(train_iter)
+            
+            # 1. Input Batch Setup
+            if self.config.dataset_mode == 'diffusion':
+                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
+            else:
+                obs, action = nbatch['observation'], nbatch['action']['default']
+                nbatch = {v: k for v, k in obs.items()}
+                nbatch['action'] = action.reshape(*action.shape[:2], -1)
+                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
+
+            if self.config.input_obs == 'rgbd': nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask': nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask-goal': nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_rgb': nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_mask': nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+
+            B = nbatch[self.config.input_obs].shape[0]
+            input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
+
+            device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
+            use_amp = self.config.get('use_amp', False)
+
+            with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
+                # 2. Forward Feature Extraction
+                image_features = self.agent.nets['vision_encoder'](input_obs.to(self.device))
+                obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                
+                if getattr(self.agent, 'use_projector', False):
+                    obs_features = self.agent.nets['obs_projector'](obs_features)
+
+                # Add noise to conditioning features for robustness
+                if self.agent.nets.training:
+                    noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
+                    obs_features = obs_features + noise
+
+                # 3. Representation Learning Auxiliary Losses
+                rep_loss = torch.tensor(0.0, device=self.device)
+                
+                if self.agent.rep_learn == 'auto-encoder':
+                    reconstructed_obs = self.agent.nets['vision_decoder'](image_features)
+                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs.to(self.device))
+                elif self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features) 
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float() 
+                        gt_tensors.append(gt_state.to(self.device))
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float()
+                            gt_tensors.append(gt_goal.to(self.device))
+                    if gt_tensors:
+                        gt_combined = torch.cat(gt_tensors, dim=-1) 
+                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
+
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device)
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+                    
+                obs_cond = obs_features.flatten(start_dim=1)
+
+                # 4. Primitive Classification Loss
+                gt_prim_ids = None
+                prim_loss = torch.tensor(0.0, device=self.device)
+                
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    prim_bin = nbatch['action'][:, 0, 0]
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
+                    
+                    weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
+                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
+                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
+
+                    log_every = self.config.get('log_prim_metrics_every', 200)
+                    
+                    if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
+                        metrics = compute_classification_metrics(prim_logits.detach(), gt_prim_ids.detach(), self.agent.K)
+                        wandb_metrics = {f"train/prim_{k}": v for k, v in metrics.items()}
+                        self.agent.logger.log(wandb_metrics, step=self.agent.update_step)
+                        
+                        import wandb
+                        if wandb.run is not None:
+                            confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                                probs=None, y_true=gt_prim_ids.cpu().numpy(),
+                                preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
+                                class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                            )}
+                            self.agent.logger.log(confusion, step=self.agent.update_step)
+
+                    # Remove primitive bin from action target
+                    nbatch['action'] = nbatch['action'][:, :, 1:] 
+
+                    if self.agent.primitive_integration == 'one-hot-encoding':
+                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+
+                # 5. Build Diffusion Target
+                if self.agent.rep_learn == 'predict-state-with-action':
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state, gt_goal], dim=-1)
+                        else:
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                    else:
+                        diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                else:
+                    diffusion_target = nbatch['action'].to(self.device)
+                    
+                loss_type = self.config.get('loss_type', 'diffusion')
+
+                # 6. Forward Forward Diffusion (Adding Noise)
+                if loss_type == 'ot_flow_match':
+                    noise = torch.randn_like(diffusion_target)
+                    t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
+                    t_expand = t.view(B, 1, 1)
+                    # Interpolate linearly between pure noise (t=0) and data (t=1)
+                    noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
+                    target = diffusion_target - noise
+                    timesteps = t * self.config.num_diffusion_iters
+                else:
+                    noise = torch.randn(diffusion_target.shape, device=self.device)
+                    timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
+                    noisy_actions = self.agent.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
+                    target = noise # DDPM trains to predict the added noise
+
+                # 7. Model Predictions
+                if self.agent.primitive_integration == 'separate_networks':
+                    noise_pred = torch.zeros_like(noisy_actions)
+                    for k in range(self.agent.K):
+                        dim_k = self.agent.diffusion_dims[k]
+                        if dim_k == 0: continue
+                        mask_k = (gt_prim_ids == k)
+                        if mask_k.sum() > 0:
+                            noise_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
+                                noisy_actions[mask_k][..., :dim_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
+                            )
+                else:
+                    noise_pred = self.agent.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
+
+                # 8. Loss Calculations
+                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
+                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                        
+                    # Also unmask state target dims if doing joint diffusion
+                    if self.agent.rep_learn == 'predict-state-with-action':
+                        mask_extra_dim = self.config.state_dim
+                        if getattr(self.agent, 'predict_goal_state', False): mask_extra_dim += getattr(self.agent, 'goal_state_dim', 30)
+                        state_mask = torch.ones((B, self.config.pred_horizon, mask_extra_dim), device=self.device)
+                        mask = torch.cat([mask, state_mask], dim=-1)
+
+                    diff = (noise_pred - target) * mask
+                    valid_count = mask.sum().clamp(min=1.0)
+                    actor_noise_loss = (diff ** 2).sum() / valid_count
+                else:
+                    actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
+                
+                prim_weight = self.config.get('prim_weight', 1.0)
+                total_loss = actor_noise_loss + (prim_loss * prim_weight) 
+                
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
+
+            # 9. Optimizer and Scheduler Updates
+            total_loss.backward()
+            
+            if self.agent.clip_norm > 0:
+                nn.utils.clip_grad_norm_(self.agent.nets.parameters(), self.agent.clip_norm)
+
+            self.agent.optimizer.step()
+            self.agent.optimizer.zero_grad()
+            self.agent.lr_scheduler.step()
+            
+            trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
+            self.agent.ema.step(trainable_params)
+
+            # 10. Training Logging
+            if hasattr(self.agent, 'logger'):
+                metrics_to_log = {
+                    'train/actor_noise_loss': actor_noise_loss.item(),
+                    'train/total_loss': total_loss.item()
+                }
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    metrics_to_log['train/state_pred_loss'] = rep_loss.item()
+                if self.agent.primitive_integration == 'one-hot-encoding':
+                    metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
+                    metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
+                    
+                self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
+
+            # 11. Periodic Full Denoising Metric Evaluation (for Joint Diffusion)
+            log_interval = self.config.get('log_state_eval_every', 500)
+            if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
+                with torch.no_grad():
+                    self.agent.nets.eval()
+                    eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                    
+                    if loss_type == 'ot_flow_match':
+                        num_steps = self.config.num_diffusion_iters
+                        dt = 1.0 / num_steps
+                        for i in range(num_steps):
+                            t_val = i / num_steps
+                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                v_pred = torch.zeros_like(eval_naction)
+                                for k in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[k]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == k)
+                                    if mask_k.sum() > 0:
+                                        v_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                                eval_naction = eval_naction + v_pred * dt
+                            else:
+                                v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                                eval_naction = eval_naction + v_pred * dt
+                    else:
+                        self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                        for step_k in self.agent.noise_scheduler.timesteps:
+                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                n_pred = torch.zeros_like(eval_naction)
+                                for net_idx in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[net_idx]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == net_idx)
+                                    if mask_k.sum() > 0:
+                                        n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{net_idx}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                            else:
+                                n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
+
+                    act_dim = self.agent.network_action_dim
+                    state_dim = self.config.state_dim
+                    num_kpts = state_dim // 2
+                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    
+                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
+                    if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.agent.update_step)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_dim = getattr(self.agent, 'goal_state_dim', 30)
+                        num_goal_kpts = goal_dim // 2
+                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
+                        if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.agent.update_step)
+
+                    self.agent.nets.train()
+
+            if self.agent.validate_training and self.agent.update_step > 0 and self.agent.update_step % self.agent.val_interval == 0:
+                self.validate()
+
+            self.agent.update_step += 1
+
+
+==================================================
+FILE: test_hindsight_dataset.py
+==================================================
+
+import unittest
+import numpy as np
+import os
+import shutil
+import tempfile
+from torch.utils.data import DataLoader
+
+# --- Mocking the class import for the purpose of this script ---
+# Replace this with your actual import path
+from actoris_harena import TrajectoryDataset
+from hindsight_dataset import HindsightDataset 
+
+class TestHindsightDataset(unittest.TestCase):
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.data_path = "test_hindsight_dataset.zarr"
+        self.full_path = os.path.join(self.test_dir, self.data_path)
+
+        # Standard Configs matching your YAML
+        self.obs_config = {
+            'rgb': {'shape': (3, 128, 128), 'output_key': 'rgb'},
+            'depth': {'shape': (1, 128, 128), 'output_key': 'depth'},
+            'semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'semkey_norm_pixel'},
+            # The static goals that should be OVERWRITTEN by the hindsight logic
+            'goal_rgb': {'shape': (3, 128, 128), 'output_key': 'goal_rgb'},
+            'flattened_goal_semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'flattened_goal_semkey_norm_pixel'}
+        }
+        
+        self.act_config = {
+            'default': {'shape': (9,), 'output_key': 'default'}
+        }
+        
+        self.future_goal_mapping = {
+            'rgb': 'goal_rgb',
+            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def generate_temporally_predictable_data(self, num_steps=10):
+        """
+        CRITICAL: Instead of random noise, we fill the tensors with their timestep index 't'.
+        This allows the tests to inspect the sampled goal and know exactly which future 
+        frame the stochastic sampler selected.
+        """
+        obs = {
+            'rgb': np.zeros((num_steps + 1, 3, 128, 128), dtype=np.float32),
+            'depth': np.zeros((num_steps + 1, 1, 128, 128), dtype=np.float32),
+            'semkey_norm_pixel': np.zeros((num_steps + 1, 17, 2), dtype=np.float32),
+            
+            # Fill original static goals with -1.0 so we can prove they get overwritten
+            'goal_rgb': np.full((num_steps + 1, 3, 128, 128), -1.0, dtype=np.float32),
+            'flattened_goal_semkey_norm_pixel': np.full((num_steps + 1, 17, 2), -1.0, dtype=np.float32)
+        }
+        
+        for t in range(num_steps + 1):
+            obs['rgb'][t] += t
+            obs['semkey_norm_pixel'][t] += (t * 10) # Distinct scalar for keypoints
+            
+        act = {
+            'default': np.zeros((num_steps, 9), dtype=np.float32)
+        }
+        
+        return obs, act
+
+    # =========================================================================
+    # TEST 1: HER Mapping and Shape Consistency
+    # =========================================================================
+    def test_hindsight_mapping_and_shapes(self):
+        print("\n--- Test 1: HER Mapping and Shape Consistency ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        # Add trajectory of 10 actions (11 observations stored due to pad)
+        obs, act = self.generate_temporally_predictable_data(10)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 2
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        item = dataset_r[0] # Sampling start_idx = 0, end_idx = 2
+        
+        # 1. Verify shapes. Observation sequences should be (seq_len + 1, ...)
+        expected_obs_seq_len = seq_len + 1
+        self.assertEqual(item['observation']['goal_rgb'].shape, (expected_obs_seq_len, 3, 128, 128))
+        self.assertEqual(item['observation']['flattened_goal_semkey_norm_pixel'].shape, (expected_obs_seq_len, 17, 2))
+
+        # 2. Verify static goals were overwritten (no -1.0 values remain)
+        self.assertTrue(np.all(item['observation']['goal_rgb'] >= 0))
+        
+        # 3. Verify temporal tiling. The goal should be identical across the sequence dimension.
+        # Check if the first frame of the goal equals the last frame of the goal sequence
+        np.testing.assert_array_equal(item['observation']['goal_rgb'][0], item['observation']['goal_rgb'][-1])
+        
+        print("Mapping and shape constraints verified.")
+
+    # =========================================================================
+    # TEST 2: Rigorous Stochastic Future Boundaries & Synchronization
+    # =========================================================================
+    def test_future_sampling_bounds_rigorous(self):
+        print("\n--- Test 2: Rigorous Stochastic Future Boundaries ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        # Use a slightly longer trajectory to give the sampler a wider variance
+        traj_len = 15
+        obs, act = self.generate_temporally_predictable_data(traj_len)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 4
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        # effective_traj_end avoids the dummy pad (traj_len - 1 = 14)
+        effective_traj_end = traj_len - 1 
+
+        # We will test EVERY valid starting index in the trajectory
+        num_valid_starts = len(dataset_r)
+        
+        for start_idx in range(num_valid_starts):
+            end_idx = start_idx + seq_len
+            expected_min = min(end_idx, effective_traj_end)
+            expected_max = effective_traj_end
+            
+            valid_future_range = list(range(expected_min, expected_max + 1))
+            sampled_t_rgb_counts = {t: 0 for t in valid_future_range}
+            
+            # Sample enough times to guarantee hitting every uniform choice.
+            # Using 200 samples makes the probability of missing a valid bin astronomically small.
+            num_samples = 200 
+            
+            for _ in range(num_samples):
+                item = dataset_r[start_idx]
+                
+                # Check RGB temporal mark
+                sampled_t_rgb = int(np.mean(item['observation']['goal_rgb']))
+                
+                # Check Semkey temporal mark. 
+                # Recall we multiplied semkey by 10 in generate_temporally_predictable_data
+                sampled_t_semkey = int(np.mean(item['observation']['flattened_goal_semkey_norm_pixel'])) / 10.0
+                
+                # --- RIGOR CHECK 1: Cross-Modality Synchronization ---
+                self.assertEqual(
+                    sampled_t_rgb, int(sampled_t_semkey), 
+                    f"Temporal mismatch! RGB goal is from t={sampled_t_rgb} but Semkey goal is from t={sampled_t_semkey}"
+                )
+                
+                # --- RIGOR CHECK 2: Absolute Boundaries ---
+                self.assertGreaterEqual(
+                    sampled_t_rgb, expected_min, 
+                    f"Time Travel Bug: Sampled past index {sampled_t_rgb} for start {start_idx} (min allowed: {expected_min})"
+                )
+                self.assertLessEqual(
+                    sampled_t_rgb, expected_max, 
+                    f"Out of Bounds Bug: Sampled index {sampled_t_rgb} for start {start_idx} (max allowed: {expected_max})"
+                )
+                
+                sampled_t_rgb_counts[sampled_t_rgb] += 1
+
+            # --- RIGOR CHECK 3: Uniform Coverage ---
+            # Ensure every single valid future index was sampled at least once
+            if expected_min < expected_max: # If there's an actual range to sample from
+                for t, count in sampled_t_rgb_counts.items():
+                    self.assertGreater(
+                        count, 0, 
+                        f"Coverage Failure: At start_idx={start_idx}, valid future index {t} was NEVER sampled after {num_samples} tries. Sampler is biased."
+                    )
+                    
+        print(f"Rigorous future boundary, synchronization, and coverage checks passed across all {num_valid_starts} sliding windows.")
+
+    # =========================================================================
+    # TEST 3: Edge Case - Sampling at the absolute end of the trajectory
+    # =========================================================================
+    def test_trajectory_end_edge_case(self):
+        print("\n--- Test 3: Trajectory End Edge Case ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        traj_len = 5
+        obs, act = self.generate_temporally_predictable_data(traj_len)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 1
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        # Max valid start_idx = (traj_len) - seq_len = 5 - 1 = 4
+        # At start_idx = 4, end_idx = 5.
+        # effective_traj_end is 4 (indices 0,1,2,3,4 are valid obs, 5 is pad).
+        # In this edge case, end_idx > effective_traj_end, so the sampler MUST 
+        # clamp to effective_traj_end (4) without throwing a ValueError.
+        max_idx = len(dataset_r) - 1
+        
+        try:
+            item = dataset_r[max_idx]
+            sampled_t = int(np.mean(item['observation']['goal_rgb']))
+            
+            # The only valid fallback is clamping to the final valid observation
+            self.assertEqual(sampled_t, 4, "Edge case clamping failed to select the final valid frame.")
+            print("Edge case clamping successful.")
+        except ValueError as e:
+            self.fail(f"Sampler crashed at the end of the trajectory: {e}")
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+==================================================
+FILE: dataset.py
+==================================================
+
+import numpy as np
+import torch
+import zarr
+import os
+
+def create_sample_indices(
+        episode_ends:np.ndarray, sequence_length:int,
+        pad_before: int=0, pad_after: int=0):
+    indices = list()
+    for i in range(len(episode_ends)):
+        start_idx = 0
+        if i > 0:
+            start_idx = episode_ends[i-1]
+        end_idx = episode_ends[i]
+        episode_length = end_idx - start_idx
+
+        min_start = -pad_before
+        max_start = episode_length - sequence_length + pad_after
+
+        # range stops one idx before end
+        for idx in range(min_start, max_start+1):
+            buffer_start_idx = max(idx, 0) + start_idx
+            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
+            start_offset = buffer_start_idx - (idx+start_idx)
+            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
+            sample_start_idx = 0 + start_offset
+            sample_end_idx = sequence_length - end_offset
+            indices.append([
+                buffer_start_idx, buffer_end_idx,
+                sample_start_idx, sample_end_idx])
+    indices = np.array(indices)
+    return indices
+
+
+def sample_sequence(train_data, sequence_length,
+                    buffer_start_idx, buffer_end_idx,
+                    sample_start_idx, sample_end_idx):
+    result = dict()
+    for key, input_arr in train_data.items():
+        sample = input_arr[buffer_start_idx:buffer_end_idx]
+        data = sample
+        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
+            data = np.zeros(
+                shape=(sequence_length,) + input_arr.shape[1:],
+                dtype=input_arr.dtype)
+            if sample_start_idx > 0:
+                data[:sample_start_idx] = sample[0]
+            if sample_end_idx < sequence_length:
+                data[sample_end_idx:] = sample[-1]
+            data[sample_start_idx:sample_end_idx] = sample
+        result[key] = data
+    return result
+
+# normalize data
+def get_data_stats(data):
+    data = data.reshape(-1,data.shape[-1])
+    stats = {
+        'min': np.min(data, axis=0),
+        'max': np.max(data, axis=0)
+    }
+    return stats
+
+def normalize_data(data, stats):
+    # nomalize to [0,1]
+    ndata = (data - stats['min']) / (stats['max'] - stats['min'])
+    # normalize to [-1, 1]
+    ndata = ndata * 2 - 1
+    return ndata
+
+def unnormalize_data(ndata, stats):
+    ndata = (ndata + 1) / 2
+    data = ndata * (stats['max'] - stats['min']) + stats['min']
+    return data
+
+# dataset
+class DiffusionDataset(torch.utils.data.Dataset):
+    def __init__(self,
+                 dataset_path: str,
+                 pred_horizon: int,
+                 obs_horizon: int,
+                 action_horizon: int):
+
+        # read from zarr dataset
+        dataset_path = os.path.join(
+            os.environ['actoris_harena_PATH'],
+            '..',
+            'data',
+            dataset_path)
+        print('dataset_path:', dataset_path)
+        #self.store = zarr.DirectoryStore(dataset_path)
+        dataset_root = zarr.open(dataset_path, mode='r')
+        # the above gives errro zarr.errors.PathNotFoundError: nothing found at path '
+
+        # float32, [0,1], (N,96,96,3)
+        train_image_data = dataset_root['data']['img'][:]
+        train_image_data = np.moveaxis(train_image_data, -1,1)
+        # (N,3,96,96)
+
+        # (N, D)
+        train_data = {
+            # first two dims of state vector are agent (i.e. gripper) locations
+            'agent_pos': dataset_root['data']['state'][:,:2],
+            'action': dataset_root['data']['action'][:]
+        }
+        episode_ends = dataset_root['meta']['episode_ends'][:]
+
+        # compute start and end of each state-action sequence
+        # also handles padding
+        indices = create_sample_indices(
+            episode_ends=episode_ends,
+            sequence_length=pred_horizon,
+            pad_before=obs_horizon-1,
+            pad_after=action_horizon-1)
+
+        # compute statistics and normalized data to [-1,1]
+        stats = dict()
+        normalized_train_data = dict()
+        for key, data in train_data.items():
+            stats[key] = get_data_stats(data)
+            normalized_train_data[key] = normalize_data(data, stats[key])
+
+        # images are already normalized
+        normalized_train_data['image'] = train_image_data
+
+        self.indices = indices
+        self.stats = stats
+        self.normalized_train_data = normalized_train_data
+        self.pred_horizon = pred_horizon
+        self.action_horizon = action_horizon
+        self.obs_horizon = obs_horizon
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        # get the start/end indices for this datapoint
+        buffer_start_idx, buffer_end_idx, \
+            sample_start_idx, sample_end_idx = self.indices[idx]
+
+        # get nomralized data using these indices
+        nsample = sample_sequence(
+            train_data=self.normalized_train_data,
+            sequence_length=self.pred_horizon,
+            buffer_start_idx=buffer_start_idx,
+            buffer_end_idx=buffer_end_idx,
+            sample_start_idx=sample_start_idx,
+            sample_end_idx=sample_end_idx
+        )
+
+        # discard unused observations
+        nsample['image'] = nsample['image']
+        nsample['agent_pos'] = nsample['agent_pos']
+        return nsample
+
 
 
 ==================================================
@@ -3132,162 +3523,116 @@ def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='
 
 
 ==================================================
-FILE: dataset.py
+FILE: combine_files.py
 ==================================================
 
-import numpy as np
-import torch
-import zarr
 import os
+import glob
 
-def create_sample_indices(
-        episode_ends:np.ndarray, sequence_length:int,
-        pad_before: int=0, pad_after: int=0):
-    indices = list()
-    for i in range(len(episode_ends)):
-        start_idx = 0
-        if i > 0:
-            start_idx = episode_ends[i-1]
-        end_idx = episode_ends[i]
-        episode_length = end_idx - start_idx
+def combine_python_files(directory_path, output_filename="combined_code.txt"):
+    """
+    Finds all .py files in a directory and combines them into a single text file.
+    """
+    # Create a search pattern to find all .py files in the specified directory
+    search_pattern = os.path.join(directory_path, "*.py")
+    py_files = glob.glob(search_pattern)
 
-        min_start = -pad_before
-        max_start = episode_length - sequence_length + pad_after
+    # Check if any files were found
+    if not py_files:
+        print(f"No Python files found in '{directory_path}'.")
+        return
 
-        # range stops one idx before end
-        for idx in range(min_start, max_start+1):
-            buffer_start_idx = max(idx, 0) + start_idx
-            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
-            start_offset = buffer_start_idx - (idx+start_idx)
-            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
-            sample_start_idx = 0 + start_offset
-            sample_end_idx = sequence_length - end_offset
-            indices.append([
-                buffer_start_idx, buffer_end_idx,
-                sample_start_idx, sample_end_idx])
-    indices = np.array(indices)
-    return indices
+    try:
+        # Open the output file in write mode
+        with open(output_filename, 'w', encoding='utf-8') as outfile:
+            for file_path in py_files:
+                # Extract just the filename from the full path
+                filename = os.path.basename(file_path)
+                
+                # Write a clear visual header for each file
+                outfile.write(f"{'='*50}\n")
+                outfile.write(f"FILE: {filename}\n")
+                outfile.write(f"{'='*50}\n\n")
+                
+                # Read the contents of the current python file and write it
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as infile:
+                        outfile.write(infile.read())
+                except Exception as e:
+                    outfile.write(f"# Error reading {filename}: {e}\n")
+                
+                # Add some blank space before the next file begins
+                outfile.write("\n\n\n")
+                
+        print(f"Success! Combined {len(py_files)} files into '{output_filename}'.")
+    
+    except Exception as e:
+        print(f"An error occurred while writing the output file: {e}")
+
+# --- Execution ---
+if __name__ == "__main__":
+    # The directory you want to scan. 
+    # "." means the current directory where this script is located.
+    # You can change this to a specific path like "C:/Users/Name/Documents/MyCode"
+    target_directory = "." 
+    
+    # The name of the text file you want to generate
+    output_file = "all_my_python_code.txt"
+    
+    combine_python_files(target_directory, output_file)
 
 
-def sample_sequence(train_data, sequence_length,
-                    buffer_start_idx, buffer_end_idx,
-                    sample_start_idx, sample_end_idx):
-    result = dict()
-    for key, input_arr in train_data.items():
-        sample = input_arr[buffer_start_idx:buffer_end_idx]
-        data = sample
-        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
-            data = np.zeros(
-                shape=(sequence_length,) + input_arr.shape[1:],
-                dtype=input_arr.dtype)
-            if sample_start_idx > 0:
-                data[:sample_start_idx] = sample[0]
-            if sample_end_idx < sequence_length:
-                data[sample_end_idx:] = sample[-1]
-            data[sample_start_idx:sample_end_idx] = sample
-        result[key] = data
-    return result
+==================================================
+FILE: action_sampler.py
+==================================================
 
-# normalize data
-def get_data_stats(data):
-    data = data.reshape(-1,data.shape[-1])
-    stats = {
-        'min': np.min(data, axis=0),
-        'max': np.max(data, axis=0)
-    }
-    return stats
+import torch
 
-def normalize_data(data, stats):
-    # nomalize to [0,1]
-    ndata = (data - stats['min']) / (stats['max'] - stats['min'])
-    # normalize to [-1, 1]
-    ndata = ndata * 2 - 1
-    return ndata
+class NormalSampler:
 
-def unnormalize_data(ndata, stats):
-    ndata = (ndata + 1) / 2
-    data = ndata * (stats['max'] - stats['min']) + stats['min']
-    return data
+    def sample(self, state, horizon, action_dim):
 
-# dataset
-class DiffusionDataset(torch.utils.data.Dataset):
-    def __init__(self,
-                 dataset_path: str,
-                 pred_horizon: int,
-                 obs_horizon: int,
-                 action_horizon: int):
+        return torch.randn((1, horizon, action_dim))
 
-        # read from zarr dataset
-        dataset_path = os.path.join(
-            os.environ['actoris_harena_PATH'],
-            '..',
-            'data',
-            dataset_path)
-        print('dataset_path:', dataset_path)
-        #self.store = zarr.DirectoryStore(dataset_path)
-        dataset_root = zarr.open(dataset_path, mode='r')
-        # the above gives errro zarr.errors.PathNotFoundError: nothing found at path '
+class MaskPickUniformSampler:
 
-        # float32, [0,1], (N,96,96,3)
-        train_image_data = dataset_root['data']['img'][:]
-        train_image_data = np.moveaxis(train_image_data, -1,1)
-        # (N,3,96,96)
+    def sample(self, state, horizon, action_dim):
+        mask = state['mask'][-1][0]
+        target_id = len(state['mask'])
+       
+        H = mask.shape[0]
+       
+        ### for each horizon, sample points from the mask
+        picks = torch.randn((horizon, 2))
+        #print('sampler picks:', picks.shape)
 
-        # (N, D)
-        train_data = {
-            # first two dims of state vector are agent (i.e. gripper) locations
-            'agent_pos': dataset_root['data']['state'][:,:2],
-            'action': dataset_root['data']['action'][:]
-        }
-        episode_ends = dataset_root['meta']['episode_ends'][:]
+        indices = torch.nonzero(mask)
+        num_points = indices.shape[0]
+        idx = torch.randint(0, num_points, (1,))[0]
+        
 
-        # compute start and end of each state-action sequence
-        # also handles padding
-        indices = create_sample_indices(
-            episode_ends=episode_ends,
-            sequence_length=pred_horizon,
-            pad_before=obs_horizon-1,
-            pad_after=action_horizon-1)
+        target_pick = indices[idx]
+        #print('pre target_pick:', target_pick)
 
-        # compute statistics and normalized data to [-1,1]
-        stats = dict()
-        normalized_train_data = dict()
-        for key, data in train_data.items():
-            stats[key] = get_data_stats(data)
-            normalized_train_data[key] = normalize_data(data, stats[key])
+        picks[target_id] = target_pick/H * 2 -1
+        #print('target pick', picks[target_id])
 
-        # images are already normalized
-        normalized_train_data['image'] = train_image_data
+        #print('target pick:', target_pick)
+        
+        #print('sampler picks:', picks.shape)
+        ## uniformly sample places form -1 to 1
+        places = torch.randn((horizon, 2))
+        #print('sampler places:', places.shape)
 
-        self.indices = indices
-        self.stats = stats
-        self.normalized_train_data = normalized_train_data
-        self.pred_horizon = pred_horizon
-        self.action_horizon = action_horizon
-        self.obs_horizon = obs_horizon
+        sample_action = torch.cat([picks, places], dim=-1).unsqueeze(0)
+        #print('sample action:', sample_action.shape)
+        #print('action_dim:', action_dim)
+        return sample_action
 
-    def __len__(self):
-        return len(self.indices)
 
-    def __getitem__(self, idx):
-        # get the start/end indices for this datapoint
-        buffer_start_idx, buffer_end_idx, \
-            sample_start_idx, sample_end_idx = self.indices[idx]
-
-        # get nomralized data using these indices
-        nsample = sample_sequence(
-            train_data=self.normalized_train_data,
-            sequence_length=self.pred_horizon,
-            buffer_start_idx=buffer_start_idx,
-            buffer_end_idx=buffer_end_idx,
-            sample_start_idx=sample_start_idx,
-            sample_end_idx=sample_end_idx
-        )
-
-        # discard unused observations
-        nsample['image'] = nsample['image']
-        nsample['agent_pos'] = nsample['agent_pos']
-        return nsample
-
+ActionSampler = {
+    'normal': NormalSampler,
+    'mask_pick_uniform': MaskPickUniformSampler
+}
 
 

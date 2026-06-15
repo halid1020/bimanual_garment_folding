@@ -8,10 +8,16 @@ import cv2
 import numpy as np
 
 # Display Configuration
-REMOTE = True
-ACTUAL_DISPLAY = os.environ.get("DISPLAY", "localhost:10.0")
-CV2_DISPLAY = "localhost:10.0" if REMOTE else ":0"
-SIM_DISPLAY = "" if REMOTE else ":0"
+REMOTE = False
+# Automatically grabs the active display (e.g., :1) from the OS, defaults to :0 if empty
+ACTUAL_DISPLAY = os.environ.get("DISPLAY", ":0")
+
+# Uses the remote address if REMOTE=True, otherwise uses the automatically detected display
+CV2_DISPLAY = "localhost:10.0" if REMOTE else ACTUAL_DISPLAY
+
+# Runs headlessly if REMOTE=True, otherwise binds to the automatically detected display
+SIM_DISPLAY = "" if REMOTE else ACTUAL_DISPLAY
+
 
 def overlay_workspaces(rgb: np.ndarray, state: dict) -> np.ndarray:
     H, W = rgb.shape[:2]

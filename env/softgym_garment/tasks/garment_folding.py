@@ -130,6 +130,7 @@ class GarmentFoldingTask(GarmentTask):
                 )
             
         arena.set_particle_positions(particle_pos)
+        arena.action_step = 0
 
         return goal
 
@@ -156,7 +157,7 @@ class GarmentFoldingTask(GarmentTask):
                     save_point_cloud_ply(os.path.join(goal_path, f"particles_step_{j}.ply"),
                                         subgoal['observation']["particle_positions"])
 
-                goals.append(goal)
+                goals.append(goal[:-1])
             else:
                 goal = []
                 for j in range(self.config.goal_steps + 1):

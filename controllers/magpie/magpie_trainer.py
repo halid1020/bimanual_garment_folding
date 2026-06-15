@@ -219,7 +219,7 @@ class MagpieTrainer:
                     prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
                     
                     # This guarantees all primitives output an array of the exact same length (e.g., 9)
-                    expected_dim = train_dataset.action_config['default']['shape'][0]
+                    expected_dim = train_dataset.act_config['default']['shape'][0]
                     add_action = np.zeros(expected_dim, dtype=np.float32)
                     
                     add_action[0] = prim_act

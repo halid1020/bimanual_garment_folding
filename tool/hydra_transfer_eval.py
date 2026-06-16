@@ -1,246 +1,109 @@
-# tool/hydra_train_and_transfer.py
-
-"""
-Unified Training and Transfer Evaluation Pipeline for Actoris Harena.
-
-This module dynamically orchestrates the full lifecycle of a robotic manipulation agent. 
-It first parses a target transfer evaluation configuration, dynamically composes the 
-associated base training configuration (`train_exp_config`), executes the training 
-phase, and immediately evaluates the newly trained policy against a suite of transfer arenas.
-
-Features:
-    - Dynamic Hydra configuration composition to prevent namespace collisions.
-    - Automatic memory management and C++ physics environment cleanup to prevent OpenGL leaks.
-    - Support for both single and parallel distributed training environments.
-"""
-
-import os
-from typing import Any
+# tool/hydra_transfer_eval.py
 
 import hydra
 from hydra import compose
 from omegaconf import DictConfig, OmegaConf
-
+import os
 import actoris_harena.api as ag_ar
+
 from registration.agent import register_agents
 from registration.sim_arena import register_arenas
 from registration.task import build_sim_task
 from tool.utils import resolve_save_root
-from env.parallel import Parallel
-
-def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> None:
-    """
-    Executes the training loop based on the global training configuration.
-    
-    Routes execution to either a single-environment or parallel distributed 
-    training loop based on the `train_and_eval` directive.
-    
-    Args:
-        train_cfg (DictConfig): The dynamically composed global training configuration.
-        agent (Any): The initialized Actoris Harena agent/policy.
-        save_dir (str): Absolute path to the logging and checkpoint directory.
-    
-    Raises:
-        ValueError: If the specified `train_and_eval` mode is not recognized.
-    """
-    print("[INFO] Initializing Training Phase...")
-    
-    if train_cfg.train_and_eval == 'train_and_evaluate_single':
-        arena = ag_ar.build_arena(
-            train_cfg.arena.name, 
-            train_cfg.arena,
-            project_name=train_cfg.project_name,
-            exp_name=train_cfg.exp_name,
-            save_dir=save_dir
-        )
-            
-        task = build_sim_task(train_cfg.task)
-        arena.set_task(task)
-
-        ag_ar.train_and_evaluate_single(
-            agent,
-            arena,
-            train_cfg.agent.validation_interval,
-            train_cfg.agent.total_update_steps,
-            eval_last_check=True,
-            eval_best_check=True,
-            policy_terminate=False,
-            env_success_stop=False
-        )
-        arena.close()
-
-    elif train_cfg.train_and_eval == 'train_plural_eval_single':
-        # NOTE: registered_arena mapping must be accessible or passed through ag_ar
-        from train.utils import registered_arena 
-        
-        train_arenas = [registered_arena[train_cfg.arena.name](train_cfg.arena) for _ in range(train_cfg.num_train_envs)]
-        train_arenas = [Parallel(arn, "process") for arn in train_arenas]
-        task = build_sim_task(train_cfg.task)
-        
-        for i, arn in enumerate(train_arenas):
-            arn.set_task(task)
-            arn.set_log_dir(save_dir)
-            arn.set_id(i)
-
-        eval_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
-        eval_arena.set_task(task)
-        eval_arena.set_log_dir(save_dir)
-        
-        val_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
-        val_arena.set_task(task)
-        val_arena.set_log_dir(save_dir)
-
-        ag_ar.train_plural_eval_single(
-            agent,
-            train_arenas,
-            eval_arena,
-            val_arena,
-            train_cfg.agent.validation_interval,
-            train_cfg.agent.total_update_steps,
-            train_cfg.agent.eval_checkpoint,
-            policy_terminate=False,
-            env_success_stop=False
-        )
-        
-        for arn in train_arenas:
-            arn.close()
-        eval_arena.close()
-        val_arena.close()
-        
-    else:
-        raise ValueError(f"Unrecognized training mode: {train_cfg.train_and_eval}")
-
-
-def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictConfig, agent: Any, save_root: str) -> None:
-    """
-    Evaluates the trained agent across multiple transfer arenas.
-    
-    Iterates through the requested transfer arenas, dynamically composes their 
-    isolated configurations, and runs the evaluation protocol.
-    
-    Args:
-        transfer_cfg (DictConfig): The transfer evaluation specific configuration block.
-        train_cfg (DictConfig): The base training configuration (used for project metadata).
-        agent (Any): The trained Actoris Harena agent.
-        save_root (str): The resolved root directory for saving output data.
-    """
-    print("[INFO] Initializing Transfer Evaluation Phase...")
-
-    eval_arenas = transfer_cfg.get("eval_arenas", [])
-    if not eval_arenas:
-        print("[WARNING] No 'eval_arenas' found in configuration. Skipping transfer phase.")
-        return
-
-    # Create transfer-specific logging directory using the eval_name
-    eval_name = transfer_cfg.get("eval_name", "transfer_evaluation")
-    transfer_eval_dir = os.path.join(save_root, eval_name)
-    os.makedirs(transfer_eval_dir, exist_ok=True)
-
-    for i, eval_setup in enumerate(eval_arenas):
-        try:
-            # Dynamically compose the target Arena and Task configs based on the YAML strings
-            arena_cfg = compose(config_name=f"arena/{eval_setup.arena}")
-            task_cfg = compose(config_name=f"task/{eval_setup.task}")
-            
-            # Safety Check: Unwrap @package directives if Hydra nested them
-            arena_cfg = arena_cfg.get("arena", arena_cfg)
-            task_cfg = task_cfg.get("task", task_cfg)
-
-            print(f"[INFO] --- Starting Evaluation {i+1}/{len(eval_arenas)} ---")
-            print(f"[INFO] Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")
-
-            transfer_eval_dir_spe = os.path.join(transfer_eval_dir, eval_setup.arena)
-            os.makedirs(transfer_eval_dir_spe, exist_ok=True)
-
-            # Build Arena utilizing metadata from the base training config
-            arena = ag_ar.build_arena(
-                arena_cfg.name, 
-                arena_cfg,
-                project_name=train_cfg.project_name,
-                exp_name=f"{eval_name}_arena_{i}", 
-                save_dir=transfer_eval_dir_spe
-            )
-                
-            task = build_sim_task(task_cfg)
-            arena.set_task(task)
-            arena.reset()
-
-            # Execute evaluation against the best checkpoint generated during the training phase
-            res = ag_ar.evaluate(
-                agent,
-                arena,
-                checkpoint=-2, 
-                policy_terminate=False,
-                env_success_stop=False
-            )
-            
-            print(f"[INFO] Evaluation {i+1} completed. Results: {res}")
-
-        except AttributeError as e:
-            print(f"[ERROR] API Interface Error during transfer eval {i+1}: {e}")
-            print("[ERROR] Please ensure the evaluation function signature matches the actoris_harena API.")
-        except Exception as e:
-            print(f"[ERROR] Unexpected error during transfer eval {i+1}: {e}")
-        finally:
-            # Clean up the C++ physics environment to prevent OpenGL memory leaks
-            if 'arena' in locals():
-                arena.close()
-
 
 @hydra.main(config_path="../conf", config_name="transfer_eval/comp_gc_diffusion", version_base=None)
-def main(cfg: DictConfig) -> None:
-    """
-    Main execution entry point. 
-    
-    1. Extracts the transfer configuration.
-    2. Dynamically composes the specified global training configuration.
-    3. Builds the agent and executes the training pipeline.
-    4. Evaluates the resulting policy against the requested transfer arenas.
-    """
+def main(cfg: DictConfig):
     register_agents()
     register_arenas()
 
-    # 1. Unlock Struct for Dynamic Access
+    # 1. Turn off struct mode immediately so we can dynamically check keys without crashing
     OmegaConf.set_struct(cfg, False)
 
-    # Handle nesting based on how the config was passed (direct vs @package)
-    transfer_cfg = cfg.transfer_eval if "transfer_eval" in cfg else cfg
+    print("\n[tool.hydra_transfer] --- Parsed Evaluation Configuration ---")
+    print(OmegaConf.to_yaml(cfg, resolve=True))
+    cfg = cfg.transfer_eval
+    print("[tool.hydra_transfer] ---------------------------------------\n")
 
-    print("[INFO] --- Parsed Transfer Configuration ---")
-    print(f"\n{OmegaConf.to_yaml(transfer_cfg, resolve=True)}")
-    print("[INFO] -------------------------------------")
+    # 2. Compose the training config dynamically
+    # Using compose() here prevents the @package _global_ tag in the source config 
+    # from accidentally overwriting this script's variables.
+    print(f"[tool.hydra_transfer] Composing training config from: {cfg.train_exp_config}")
+    train_cfg = compose(config_name=cfg.train_exp_config)
 
-    # 2. Compose the global training configuration dynamically
-    print(f"[INFO] Composing training config from: {transfer_cfg.train_exp_config}")
-    train_cfg = compose(config_name=transfer_cfg.train_exp_config)
-
-    # Expose active agent name for downstream dependencies
-    os.environ['MEGPIE_ACTIVE_AGENT'] = train_cfg.agent.name
-
-    # 3. Resolve and lock paths for the training configuration
-    OmegaConf.set_struct(train_cfg, False)
     new_save_root = resolve_save_root(train_cfg.save_root)
-    train_cfg.save_root = new_save_root
-    OmegaConf.set_struct(train_cfg, True)
-    
-    save_dir = os.path.join(train_cfg.save_root, train_cfg.exp_name)
-    print(f"[INFO] Using Global Save Directory: {save_dir}")
+    print(f"[tool.hydra_transfer] Using Source Save Root: {train_cfg.save_root}")
 
-    # 4. Build the Agent based on the training configuration
-    print(f"[INFO] Building Agent: {train_cfg.agent.name}")
+    # Reconstruct the original save directory to load the checkpoint
+    source_save_dir = os.path.join(new_save_root, train_cfg.exp_name)
+    
+    # Create the output directory for this transfer evaluation
+    transfer_eval_dir = os.path.join(new_save_root, cfg.eval_name)
+    os.makedirs(transfer_eval_dir, exist_ok=True)
+
+    # 3. Build the Agent based on the training configuration
     agent = ag_ar.build_agent(
         train_cfg.agent.name, 
         train_cfg.agent,
         project_name=train_cfg.project_name,
         exp_name=train_cfg.exp_name,
-        save_dir=save_dir
+        save_dir=source_save_dir,
+        disable_wandb=True
     )
+    
+    # 4. Iterate through the assigned arenas and evaluate
+    eval_arenas = cfg.get("eval_arenas", [])
+    if not eval_arenas:
+        print("WARNING: No eval_arenas found in your config! Check your YAML formatting.")
+        return
 
-    # 5. Execute Phases Sequentially
-    execute_training_phase(train_cfg, agent, save_dir)
-    execute_transfer_evaluation_phase(transfer_cfg, train_cfg, agent, new_save_root)
+    for i, eval_setup in enumerate(eval_arenas):
+        
+        # Dynamically compose the Arena and Task configs based on the strings in the YAML
+        arena_cfg = compose(config_name=f"arena/{eval_setup.arena}")
+        task_cfg = compose(config_name=f"task/{eval_setup.task}")
+        
+        # Safety Check: If the configs use @package directives, unwrap them
+        if "arena" in arena_cfg and "name" not in arena_cfg:
+            arena_cfg = arena_cfg.arena
+        if "task" in task_cfg and "name" not in task_cfg:
+            task_cfg = task_cfg.task
 
-    print("[INFO] Unified Train and Transfer pipeline execution completed successfully.")
+        print(f"\n>>> Starting Evaluation {i+1}/{len(eval_arenas)}")
+        print(f">>> Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")
+
+        transfer_eval_dir_spe = os.path.join(transfer_eval_dir, eval_setup.arena)
+        os.makedirs(transfer_eval_dir_spe, exist_ok=True)
+        # Build Arena
+        arena = ag_ar.build_arena(
+            arena_cfg.name, 
+            arena_cfg,
+            project_name=train_cfg.project_name,
+            exp_name=f"{cfg.eval_name}_arena_{i}", 
+            save_dir=transfer_eval_dir_spe
+        )
+            
+        # Build and set Task
+        task = build_sim_task(task_cfg)
+        arena.set_task(task)
+
+        # 5. Run the evaluation
+        try:
+            arena.reset()
+            res = ag_ar.evaluate(
+                agent,
+                arena,
+                checkpoint=-2, # Load best checkpoint
+                policy_terminate=False,
+                env_success_stop=False
+            )
+            print(f">>> Evaluation {i+1} completed. Results: {res}")
+            
+            # Clean up the C++ physics environment to prevent OpenGL memory leaks
+            arena.close() 
+            
+        except AttributeError as e:
+            print(f"ERROR: {e}")
+            print("Please update the evaluation function call to match your actoris_harena evaluation API.")
 
 if __name__ == "__main__":
     main()

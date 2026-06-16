@@ -28,84 +28,102 @@ from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 from env.parallel import Parallel
 
-def execute_training_phase(cfg: DictConfig, agent: Any, save_dir: str) -> None:
+
+def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> None:
     """
     Executes the training loop based on the configuration parameters.
-    
-    Args:
-        cfg (DictConfig): The global Hydra configuration object.
-        agent (Any): The initialized Actoris Harena agent/policy.
-        save_dir (str): Absolute path to the logging and checkpoint directory.
-    
-    Raises:
-        ValueError: If the specified `train_and_eval` mode is not recognized.
+    Catches SystemExit to prevent the API from forcefully closing the pipeline,
+    and guarantees C++ physics cleanup via a finally block.
     """
-    print("Initializing Training Phase...")
+    print("[INFO] Initializing Training Phase...", flush=True)
     
-    if cfg.train_and_eval == 'train_and_evaluate_single':
-        arena = ag_ar.build_arena(
-            cfg.arena.name, 
-            cfg.arena,
-            project_name=cfg.project_name,
-            exp_name=cfg.exp_name,
-            save_dir=save_dir
-        )
+    # Initialize variables to None so we can safely check them during cleanup
+    arena = None
+    train_arenas = []
+    eval_arena = None
+    val_arena = None
+
+    try:
+        if train_cfg.train_and_eval == 'train_and_evaluate_single':
+            arena = ag_ar.build_arena(
+                train_cfg.arena.name, 
+                train_cfg.arena,
+                project_name=train_cfg.project_name,
+                exp_name=train_cfg.exp_name,
+                save_dir=save_dir
+            )
+                
+            task = build_sim_task(train_cfg.task)
+            arena.set_task(task)
+
+            ag_ar.train_and_evaluate_single(
+                agent,
+                arena,
+                train_cfg.agent.validation_interval,
+                train_cfg.agent.total_update_steps,
+                eval_last_check=True,
+                eval_best_check=True,
+                policy_terminate=False,
+                env_success_stop=False
+            )
+
+        elif train_cfg.train_and_eval == 'train_plural_eval_single':
+            from train.utils import registered_arena 
             
-        task = build_sim_task(cfg.task)
-        arena.set_task(task)
+            train_arenas = [registered_arena[train_cfg.arena.name](train_cfg.arena) for _ in range(train_cfg.num_train_envs)]
+            train_arenas = [Parallel(arn, "process") for arn in train_arenas]
+            task = build_sim_task(train_cfg.task)
+            
+            for i, arn in enumerate(train_arenas):
+                arn.set_task(task)
+                arn.set_log_dir(save_dir)
+                arn.set_id(i)
 
-        ag_ar.train_and_evaluate_single(
-            agent,
-            arena,
-            cfg.agent.validation_interval,
-            cfg.agent.total_update_steps,
-            eval_last_check=True,
-            eval_best_check=True,
-            policy_terminate=False,
-            env_success_stop=False
-        )
-        arena.close()
+            eval_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
+            eval_arena.set_task(task)
+            eval_arena.set_log_dir(save_dir)
+            
+            val_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
+            val_arena.set_task(task)
+            val_arena.set_log_dir(save_dir)
 
-    elif cfg.train_and_eval == 'train_plural_eval_single':
-        # NOTE: registered_arena mapping must be accessible or passed through ag_ar
-        from train.utils import registered_arena 
-        
-        train_arenas = [registered_arena[cfg.arena.name](cfg.arena) for _ in range(cfg.num_train_envs)]
-        train_arenas = [Parallel(arn, "process") for arn in train_arenas]
-        task = build_sim_task(cfg.task)
-        
-        for i, arn in enumerate(train_arenas):
-            arn.set_task(task)
-            arn.set_log_dir(save_dir)
-            arn.set_id(i)
+            ag_ar.train_plural_eval_single(
+                agent,
+                train_arenas,
+                eval_arena,
+                val_arena,
+                train_cfg.agent.validation_interval,
+                train_cfg.agent.total_update_steps,
+                train_cfg.agent.eval_checkpoint,
+                policy_terminate=False,
+                env_success_stop=False
+            )
+            
+        else:
+            raise ValueError(f"Unrecognized training mode: {train_cfg.train_and_eval}")
 
-        eval_arena = registered_arena[cfg.arena.name](cfg.arena)
-        eval_arena.set_task(task)
-        eval_arena.set_log_dir(save_dir)
-        
-        val_arena = registered_arena[cfg.arena.name](cfg.arena)
-        val_arena.set_task(task)
-        val_arena.set_log_dir(save_dir)
-
-        ag_ar.train_plural_eval_single(
-            agent,
-            train_arenas,
-            eval_arena,
-            val_arena,
-            cfg.agent.validation_interval,
-            cfg.agent.total_update_steps,
-            cfg.agent.eval_checkpoint,
-            policy_terminate=False,
-            env_success_stop=False
-        )
-        
+    except SystemExit as e:
+        print(f"\n[INFO] Training API attempted an automatic system exit (code {e.code}).", flush=True)
+        print("[INFO] Intercepting exit to proceed to the Transfer Evaluation phase...\n", flush=True)
+    
+    finally:
+        # Guarantee that all C++ environments are destroyed before moving on
+        print("[INFO] Cleaning up training environments...", flush=True)
+        if arena is not None:
+            try: arena.close()
+            except Exception: pass
+            
         for arn in train_arenas:
-            arn.close()
-        eval_arena.close()
-        val_arena.close()
-        
-    else:
-        raise ValueError(f"Unrecognized training mode: {cfg.train_and_eval}")
+            try: arn.close()
+            except Exception: pass
+            
+        if eval_arena is not None:
+            try: eval_arena.close()
+            except Exception: pass
+            
+        if val_arena is not None:
+            try: val_arena.close()
+            except Exception: pass
 
 def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictConfig, agent: Any, save_root: str) -> None:
     """
@@ -141,7 +159,11 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
             task_cfg = task_cfg.get("task", task_cfg)
 
             print(f"[INFO] --- Starting Evaluation {i+1}/{len(eval_arenas)} ---")
-            print(f"[INFO] Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")
+            
+            # Safely extract names for logging without crashing Hydra
+            safe_arena_name = arena_cfg.get("name", "Unknown_Arena")
+            safe_task_name = task_cfg.get("name", task_cfg.get("    name", "Unknown_Task"))
+            print(f"[INFO] Arena: {safe_arena_name} | Task: {safe_task_name}")
 
             # 2. Extract ONLY the last bit for the folder names
             clean_arena_name = eval_setup.arena.split('/')[-1]
@@ -156,7 +178,7 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
                 clean_task_name
             )
             os.makedirs(transfer_eval_dir_spe, exist_ok=True)
-
+            print('About to Build arena')
             # Build Arena utilizing metadata from the base training config
             arena = ag_ar.build_arena(
                 arena_cfg.name, 
@@ -165,11 +187,12 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
                 exp_name=f"transfer_arena_{i}", 
                 save_dir=transfer_eval_dir_spe
             )
-                
+            print('About to Build task')
             task = build_sim_task(task_cfg)
             arena.set_task(task)
+            print('About to Build reset arena')
             arena.reset()
-
+            print('Finished resetting arena')
             # Execute evaluation against the best checkpoint generated during the training phase
             res = ag_ar.evaluate(
                 agent,

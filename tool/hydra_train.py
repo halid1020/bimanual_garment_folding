@@ -1,4 +1,4 @@
-# hydra_eval.py
+# hydra_train.py
 
 import hydra
 from omegaconf import DictConfig, OmegaConf

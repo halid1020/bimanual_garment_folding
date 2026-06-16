@@ -21,6 +21,7 @@ usage() {
     echo "  -g  GRES/GPU config (Default: gpu:1)"
     echo "  -e  Run hydra_eval.py instead of hydra_train.py"
     echo "  -r  Run hydra_transfer_eval.py (uses transfer_eval/ configs)"
+    echo "  -a  Run hydra_train_and_transfer.py (uses transfer_eval/ configs)"
     exit 1
 }
 
@@ -35,8 +36,8 @@ EXP_NAME=${EXP_NAME#sim_exp/}
 EXP_NAME=${EXP_NAME#transfer_eval/}
 shift
 
-# Added 'r' to getopts
-while getopts "t:m:c:p:g:er" opt; do
+# Added 'a' to getopts
+while getopts "t:m:c:p:g:era" opt; do
   case $opt in
     t) 
       # Smart time parsing
@@ -60,6 +61,11 @@ while getopts "t:m:c:p:g:er" opt; do
     r) 
       # Switch to transfer eval script and config directory
       PY_SCRIPT="hydra_transfer_eval.py" 
+      CONFIG_DIR="transfer_eval"
+      ;; 
+    a) 
+      # Switch to unified train and transfer eval script
+      PY_SCRIPT="hydra_train_and_transfer.py" 
       CONFIG_DIR="transfer_eval"
       ;; 
     *) usage ;;

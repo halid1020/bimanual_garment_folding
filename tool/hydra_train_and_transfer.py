@@ -3,19 +3,19 @@
 """
 Unified Training and Transfer Evaluation Pipeline for Actoris Harena.
 
-This module dynamically orchestrates the full lifecycle of a robotic manipulation agent. 
-It first parses a target transfer evaluation configuration, dynamically composes the 
-associated base training configuration (`train_exp_config`), executes the training 
-phase, and immediately evaluates the newly trained policy against a suite of transfer arenas.
+This module orchestrates the full lifecycle of a robotic manipulation agent. 
+It first trains the policy using the primary environment configurations, and upon 
+completion, dynamically loads a suite of transfer arenas to evaluate the zero-shot 
+or fine-tuned performance of the resulting checkpoints.
 
 Features:
-    - Dynamic Hydra configuration composition to prevent namespace collisions.
+    - Dynamic Hydra configuration composition for cross-domain evaluation.
     - Automatic memory management and C++ physics environment cleanup to prevent OpenGL leaks.
     - Support for both single and parallel distributed training environments.
 """
 
 import os
-from typing import Any
+from typing import List, Dict, Any
 
 import hydra
 from hydra import compose
@@ -28,40 +28,37 @@ from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 from env.parallel import Parallel
 
-def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> None:
+def execute_training_phase(cfg: DictConfig, agent: Any, save_dir: str) -> None:
     """
-    Executes the training loop based on the global training configuration.
-    
-    Routes execution to either a single-environment or parallel distributed 
-    training loop based on the `train_and_eval` directive.
+    Executes the training loop based on the configuration parameters.
     
     Args:
-        train_cfg (DictConfig): The dynamically composed global training configuration.
+        cfg (DictConfig): The global Hydra configuration object.
         agent (Any): The initialized Actoris Harena agent/policy.
         save_dir (str): Absolute path to the logging and checkpoint directory.
     
     Raises:
         ValueError: If the specified `train_and_eval` mode is not recognized.
     """
-    print("[INFO] Initializing Training Phase...")
+    print("Initializing Training Phase...")
     
-    if train_cfg.train_and_eval == 'train_and_evaluate_single':
+    if cfg.train_and_eval == 'train_and_evaluate_single':
         arena = ag_ar.build_arena(
-            train_cfg.arena.name, 
-            train_cfg.arena,
-            project_name=train_cfg.project_name,
-            exp_name=train_cfg.exp_name,
+            cfg.arena.name, 
+            cfg.arena,
+            project_name=cfg.project_name,
+            exp_name=cfg.exp_name,
             save_dir=save_dir
         )
             
-        task = build_sim_task(train_cfg.task)
+        task = build_sim_task(cfg.task)
         arena.set_task(task)
 
         ag_ar.train_and_evaluate_single(
             agent,
             arena,
-            train_cfg.agent.validation_interval,
-            train_cfg.agent.total_update_steps,
+            cfg.agent.validation_interval,
+            cfg.agent.total_update_steps,
             eval_last_check=True,
             eval_best_check=True,
             policy_terminate=False,
@@ -69,24 +66,24 @@ def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> 
         )
         arena.close()
 
-    elif train_cfg.train_and_eval == 'train_plural_eval_single':
+    elif cfg.train_and_eval == 'train_plural_eval_single':
         # NOTE: registered_arena mapping must be accessible or passed through ag_ar
         from train.utils import registered_arena 
         
-        train_arenas = [registered_arena[train_cfg.arena.name](train_cfg.arena) for _ in range(train_cfg.num_train_envs)]
+        train_arenas = [registered_arena[cfg.arena.name](cfg.arena) for _ in range(cfg.num_train_envs)]
         train_arenas = [Parallel(arn, "process") for arn in train_arenas]
-        task = build_sim_task(train_cfg.task)
+        task = build_sim_task(cfg.task)
         
         for i, arn in enumerate(train_arenas):
             arn.set_task(task)
             arn.set_log_dir(save_dir)
             arn.set_id(i)
 
-        eval_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
+        eval_arena = registered_arena[cfg.arena.name](cfg.arena)
         eval_arena.set_task(task)
         eval_arena.set_log_dir(save_dir)
         
-        val_arena = registered_arena[train_cfg.arena.name](train_cfg.arena)
+        val_arena = registered_arena[cfg.arena.name](cfg.arena)
         val_arena.set_task(task)
         val_arena.set_log_dir(save_dir)
 
@@ -95,9 +92,9 @@ def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> 
             train_arenas,
             eval_arena,
             val_arena,
-            train_cfg.agent.validation_interval,
-            train_cfg.agent.total_update_steps,
-            train_cfg.agent.eval_checkpoint,
+            cfg.agent.validation_interval,
+            cfg.agent.total_update_steps,
+            cfg.agent.eval_checkpoint,
             policy_terminate=False,
             env_success_stop=False
         )
@@ -108,8 +105,7 @@ def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> 
         val_arena.close()
         
     else:
-        raise ValueError(f"Unrecognized training mode: {train_cfg.train_and_eval}")
-
+        raise ValueError(f"Unrecognized training mode: {cfg.train_and_eval}")
 
 def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictConfig, agent: Any, save_root: str) -> None:
     """
@@ -131,14 +127,12 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
         print("[WARNING] No 'eval_arenas' found in configuration. Skipping transfer phase.")
         return
 
-    # Create transfer-specific logging directory using the eval_name
-    eval_name = transfer_cfg.get("eval_name", "transfer_evaluation")
-    transfer_eval_dir = os.path.join(save_root, eval_name)
-    os.makedirs(transfer_eval_dir, exist_ok=True)
+    # Extract the base training configuration name and strip any preceding folders
+    train_config_name = train_cfg.exp_name.split('/')[-1]
 
     for i, eval_setup in enumerate(eval_arenas):
         try:
-            # Dynamically compose the target Arena and Task configs based on the YAML strings
+            # 1. Compose configs using the FULL path string
             arena_cfg = compose(config_name=f"arena/{eval_setup.arena}")
             task_cfg = compose(config_name=f"task/{eval_setup.task}")
             
@@ -149,7 +143,18 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
             print(f"[INFO] --- Starting Evaluation {i+1}/{len(eval_arenas)} ---")
             print(f"[INFO] Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")
 
-            transfer_eval_dir_spe = os.path.join(transfer_eval_dir, eval_setup.arena)
+            # 2. Extract ONLY the last bit for the folder names
+            clean_arena_name = eval_setup.arena.split('/')[-1]
+            clean_task_name = eval_setup.task.split('/')[-1]
+
+            # 3. Construct the flattened directory structure
+            transfer_eval_dir_spe = os.path.join(
+                save_root, 
+                "transfer_eval", 
+                train_config_name, 
+                clean_arena_name, 
+                clean_task_name
+            )
             os.makedirs(transfer_eval_dir_spe, exist_ok=True)
 
             # Build Arena utilizing metadata from the base training config
@@ -157,7 +162,7 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
                 arena_cfg.name, 
                 arena_cfg,
                 project_name=train_cfg.project_name,
-                exp_name=f"{eval_name}_arena_{i}", 
+                exp_name=f"transfer_arena_{i}", 
                 save_dir=transfer_eval_dir_spe
             )
                 
@@ -186,61 +191,39 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
             if 'arena' in locals():
                 arena.close()
 
-
-@hydra.main(config_path="../conf", config_name="transfer_eval/comp_gc_diffusion", version_base=None)
+@hydra.main(config_path="../conf", config_name="train_and_transfer", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
-    Main execution entry point. 
-    
-    1. Extracts the transfer configuration.
-    2. Dynamically composes the specified global training configuration.
-    3. Builds the agent and executes the training pipeline.
-    4. Evaluates the resulting policy against the requested transfer arenas.
+    Main execution entry point. Bootstraps environment, handles path resolutions,
+    and sequentially triggers training and transfer evaluation.
     """
+    os.environ['MEGPIE_ACTIVE_AGENT'] = cfg.agent.name
     register_agents()
     register_arenas()
 
-    # 1. Unlock Struct for Dynamic Access
+    # 1. Resolve and lock paths
     OmegaConf.set_struct(cfg, False)
-
-    # Handle nesting based on how the config was passed (direct vs @package)
-    transfer_cfg = cfg.transfer_eval if "transfer_eval" in cfg else cfg
-
-    print("[INFO] --- Parsed Transfer Configuration ---")
-    print(f"\n{OmegaConf.to_yaml(transfer_cfg, resolve=True)}")
-    print("[INFO] -------------------------------------")
-
-    # 2. Compose the global training configuration dynamically
-    print(f"[INFO] Composing training config from: {transfer_cfg.train_exp_config}")
-    train_cfg = compose(config_name=transfer_cfg.train_exp_config)
-
-    # Expose active agent name for downstream dependencies
-    os.environ['MEGPIE_ACTIVE_AGENT'] = train_cfg.agent.name
-
-    # 3. Resolve and lock paths for the training configuration
-    OmegaConf.set_struct(train_cfg, False)
-    new_save_root = resolve_save_root(train_cfg.save_root)
-    train_cfg.save_root = new_save_root
-    OmegaConf.set_struct(train_cfg, True)
+    cfg.save_root = resolve_save_root(cfg.save_root)
+    OmegaConf.set_struct(cfg, True)
     
-    save_dir = os.path.join(train_cfg.save_root, train_cfg.exp_name)
-    print(f"[INFO] Using Global Save Directory: {save_dir}")
+    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
+    print(f"Using Save Directory: {save_dir}")
 
-    # 4. Build the Agent based on the training configuration
-    print(f"[INFO] Building Agent: {train_cfg.agent.name}")
+    # 2. Build the Agent
+    print(f"Building Agent: {cfg.agent.name}")
     agent = ag_ar.build_agent(
-        train_cfg.agent.name, 
-        train_cfg.agent,
-        project_name=train_cfg.project_name,
-        exp_name=train_cfg.exp_name,
+        cfg.agent.name, 
+        cfg.agent,
+        project_name=cfg.project_name,
+        exp_name=cfg.exp_name,
         save_dir=save_dir
     )
 
-    # 5. Execute Phases Sequentially
-    execute_training_phase(train_cfg, agent, save_dir)
-    execute_transfer_evaluation_phase(transfer_cfg, train_cfg, agent, new_save_root)
+    # 3. Execute Phases
+    execute_training_phase(cfg, agent, save_dir)
+    execute_transfer_evaluation_phase(cfg, agent, save_dir)
 
-    print("[INFO] Unified Train and Transfer pipeline execution completed successfully.")
+    print("Unified pipeline execution completed successfully.")
 
 if __name__ == "__main__":
     main()

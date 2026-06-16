@@ -9,7 +9,16 @@ train_exp_config: sim_exp/magpie/magpie_ctr_align_longsleeve_p4_v78
 eval_arenas:
 
   - arena: magpie/multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace_height_2
-    task: canonicalisation_alignment
+    task: magpie/canonicalisation_alignment
 
   - arena: magpie/multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace
-    task: canonicalisation_alignment
+    task: magpie/canonicalisation_alignment
+  
+  - arena: magpie/multi_dress_provide_semkey_pixel_no_success_stop_resol_128_workspace
+    task: magpie/central_alignment
+  
+  - arena: magpie/multi_skirt_provide_semkey_pixel_no_success_stop_resol_128_workspace
+    task: magpie/central_alignment
+
+  - arena: magpie/multi_trousers_provide_semkey_pixel_no_success_stop_resol_128_workspace
+    task: magpie/central_alignment

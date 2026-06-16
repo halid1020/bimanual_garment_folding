@@ -29,84 +29,6 @@ class MultiGarmentEnv(GarmentEnv):
             
         super().__init__(config)
 
-    # def reset(self, episode_config=None):
-    #     if episode_config is None:
-    #         episode_config = {}
-            
-    #     episode_config.setdefault('save_video', False)
-        
-    #     if episode_config.get('eid') is None:
-    #         # Randomly select an episode ID based on the current mode's trial limits
-    #         mode_trials = {
-    #             'train': self.num_train_trials,
-    #             'val': self.num_val_trials,
-    #             'eval': self.num_eval_trials
-    #         }
-    #         # Default to eval limits if the mode isn't explicitly found
-    #         max_trials = mode_trials.get(getattr(self, 'mode', 'eval'), self.num_eval_trials)
-    #         episode_config['eid'] = np.random.randint(max_trials)
-           
-    #     self.eid = episode_config['eid']
-    #     self.save_video = episode_config['save_video']
-    #     self.episode_config = episode_config
-
-    #     # Generate unique ID for the episode
-    #     timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-    #     self.uid = f'{timestamp}-{str(uuid.uuid4().hex)}-{self.aid}'
-
-    #     # Fetch physical parameters for the chosen episode
-    #     init_state_params = self._get_init_state_params(self.eid)
-    #     init_state_params['scene_config'] = self.scene_config
-    #     init_state_params.update(self.default_config)
-        
-    #     self.num_mesh_particles = int(len(init_state_params['mesh_verts']) / 3)
-    #     print(f'[MultiGarmentEnv] mesh particles: {self.num_mesh_particles}')
-    #     self.init_state_params = init_state_params
-
-    #     print('[MultiGarmentEnv] Ready to set scene')
-    #     set_scene(config=init_state_params, state=init_state_params)
-        
-    #     self.pickers.reset(self.picker_initial_pos)
-    #     self.low_level_mesh_particles = []
-    #     self.low_level_visible_pcs = []
-
-    #     self.action_tool.reset(self) # Get out of camera view and open the gripper
-    #     self._step_sim()
-
-    #     # State tracking resets
-    #     self.draw_fatten_contour = ('alignment' in self.task.name)
-    #     self.sim_step = 0
-    #     self.video_frames = []
-    #     self.is_recording_low_level = False
-       
-    #     self.picker_poses = []
-    #     self.last_flattened_step = -100
-    #     self.action_step = 0
-    #     self.overstretch = 0
-    #     self.evaluate_result = None
-
-    #     # Get environment coverage and flattened observation
-    #     self.init_coverae = self._get_coverage() 
-    #     self.flattened_obs = None
-    #     self.get_flattened_obs()
-       
-    #     # Task and trajectory initialization
-    #     self.task.reset(self)
-    #     self._initialise_trajectory() 
-        
-    #     # Process initial info dictionary
-    #     self.info = {}
-    #     self.last_info = None
-    #     self.all_infos = [self.info]
-    #     self.info = self._process_info(self.info)
-    #     self.clear_frames()
-
-    #     # Final flag tracking
-    #     self.info['observation']['is_first'] = True
-    #     self.info['observation']['is_terminal'] = self.info.get('terminated', False)
-        
-    #     return self.info
-
     def reset(self, episode_config=None):
         if episode_config is None:
             episode_config = {}
@@ -161,7 +83,7 @@ class MultiGarmentEnv(GarmentEnv):
             
             print(f"[MultiGarmentEnv] Episode {self.eid} initialized out of view. Trying next episode...")
             self.eid += 1
-            self.episode_config['eid'] = self.eid
+            #self.episode_config['eid'] = self.eid
             
         else:
             print("[MultiGarmentEnv] WARNING: Reached max retries looking for a visible garment!")

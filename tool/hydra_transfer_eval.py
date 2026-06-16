@@ -62,11 +62,8 @@ def main(cfg: DictConfig):
         arena_cfg = compose(config_name=f"arena/{eval_setup.arena}")
         task_cfg = compose(config_name=f"task/{eval_setup.task}")
         
-        # Safety Check: If the configs use @package directives, unwrap them
-        if "arena" in arena_cfg and "name" not in arena_cfg:
-            arena_cfg = arena_cfg.arena
-        if "task" in task_cfg and "name" not in task_cfg:
-            task_cfg = task_cfg.task
+        arena_cfg = arena_cfg
+        task_cfg = task_cfg.task.magpie
 
         print(f"\n>>> Starting Evaluation {i+1}/{len(eval_arenas)}")
         print(f">>> Arena: {arena_cfg.name} | Task: {task_cfg.task_name}")

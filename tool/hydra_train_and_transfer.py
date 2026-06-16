@@ -191,39 +191,50 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
             if 'arena' in locals():
                 arena.close()
 
-@hydra.main(config_path="../conf", config_name="train_and_transfer", version_base=None)
+@hydra.main(config_path="../conf", config_name="transfer_eval/comp_gc_diffusion", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
     Main execution entry point. Bootstraps environment, handles path resolutions,
-    and sequentially triggers training and transfer evaluation.
+    dynamically loads the training config, and sequentially triggers training and transfer evaluation.
     """
-    os.environ['MEGPIE_ACTIVE_AGENT'] = cfg.agent.name
     register_agents()
     register_arenas()
 
-    # 1. Resolve and lock paths
+    # 1. Unlock Struct for Dynamic Access and parse Transfer Config
     OmegaConf.set_struct(cfg, False)
-    cfg.save_root = resolve_save_root(cfg.save_root)
-    OmegaConf.set_struct(cfg, True)
-    
-    save_dir = os.path.join(cfg.save_root, cfg.exp_name)
-    print(f"Using Save Directory: {save_dir}")
+    transfer_cfg = cfg.transfer_eval if "transfer_eval" in cfg else cfg
 
-    # 2. Build the Agent
-    print(f"Building Agent: {cfg.agent.name}")
+    # 2. Dynamically compose the training configuration using the path in your transfer yaml
+    print(f"[INFO] Composing training config from: {transfer_cfg.train_exp_config}")
+    train_cfg = compose(config_name=transfer_cfg.train_exp_config)
+
+    # 3. NOW we can safely expose the agent name because train_cfg has it
+    os.environ['MEGPIE_ACTIVE_AGENT'] = train_cfg.agent.name
+
+    # 4. Resolve and lock paths using the training config
+    OmegaConf.set_struct(train_cfg, False)
+    new_save_root = resolve_save_root(train_cfg.save_root)
+    train_cfg.save_root = new_save_root
+    OmegaConf.set_struct(train_cfg, True)
+    
+    save_dir = os.path.join(train_cfg.save_root, train_cfg.exp_name)
+    print(f"[INFO] Using Save Directory: {save_dir}")
+
+    # 5. Build the Agent
+    print(f"[INFO] Building Agent: {train_cfg.agent.name}")
     agent = ag_ar.build_agent(
-        cfg.agent.name, 
-        cfg.agent,
-        project_name=cfg.project_name,
-        exp_name=cfg.exp_name,
+        train_cfg.agent.name, 
+        train_cfg.agent,
+        project_name=train_cfg.project_name,
+        exp_name=train_cfg.exp_name,
         save_dir=save_dir
     )
 
-    # 3. Execute Phases
-    execute_training_phase(cfg, agent, save_dir)
-    execute_transfer_evaluation_phase(cfg, agent, save_dir)
+    # 6. Execute Phases sequentially with the correct variables
+    execute_training_phase(train_cfg, agent, save_dir)
+    execute_transfer_evaluation_phase(transfer_cfg, train_cfg, agent, new_save_root)
 
-    print("Unified pipeline execution completed successfully.")
+    print("[INFO] Unified pipeline execution completed successfully.")
 
 if __name__ == "__main__":
     main()

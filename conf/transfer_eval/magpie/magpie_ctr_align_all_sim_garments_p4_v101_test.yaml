@@ -1,7 +1,7 @@
 # @package transfer_eval
 
 # Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
-train_exp_config: sim_exp/magpie/magpie_ctr_align_longsleeve_p4_v101_test
+train_exp_config: sim_exp/magpie/magpie_ctr_align_all_sim_garments_p4_v101_test
 
 # Define evaluation arenas & tasks as a standard list of strings
 eval_arenas:

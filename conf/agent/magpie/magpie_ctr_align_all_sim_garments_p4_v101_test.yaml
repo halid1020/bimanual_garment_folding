@@ -27,7 +27,7 @@ validation_interval: 5
 val_interval: 5            # Increased so validation doesn't bottleneck the longer training run
 validate_training: True
 
-total_update_steps: 100    # Scaled up to account for the 4x larger dataset
+total_update_steps: 20    # Scaled up to account for the 4x larger dataset
 grad_clip_norm: 1.0           # Added to prevent early gradient explosions in the deep MLP
 eval_checkpoint: -1
 debug: False

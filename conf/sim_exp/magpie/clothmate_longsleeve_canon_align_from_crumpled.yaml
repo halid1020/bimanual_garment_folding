@@ -2,7 +2,7 @@
 defaults:
   - /agent/magpie@agent: clothmate_longsleeve_canon_align_from_crumpled
   - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_480_workspace_height_2
-  - /task@task: canonicalisation_alignment
+  - /task/magpie@task: canonicalisation_alignment
   # - data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_3 # enable colour jitting, channel permuatation, rotation, action clip.
 
 

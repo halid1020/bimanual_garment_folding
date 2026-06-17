@@ -23,20 +23,20 @@ provide_flattened_semkey_norm_pixel: true
 stop_on_success: False
 debug: false
 apply_workspace: true
-robot0_radius: [0.25, 0.9] #left
-robot1_radius:  [0.1, 0.85]  #right
-robot0_base: [-0.8, 0,  0] 
-robot1_base: [0.8, 0, 0]
-readjust_to_workspace: true #true
+robot0_radius: [0, 1.5] #left
+robot1_radius:  [0, 1.5]  #right
+robot0_base: [-0.765, 0,  0] 
+robot1_base: [0.765, 0, 0]
+readjust_to_workspace: True #true
 add_final_goal_to_obs: True
 camera_height: 2 #clothmate, clothfunnel default
 crop_offset_x: 0 # let the intersection at the view centre.
 random_displacement_range: [-0.1, 0.1] # this is used for alignment target pos generation.
 hard_shift_x: 0 # let the garment to be at the middle of intersecton.
 
-field_of_view: [69, 42] # in degrees, clothmate, clothfunnels are 45.
-camera_resolution: [1280, 720] # clothmate, clothfunnels are 480x480
-frame_resolution: [256, 148]
+field_of_view: [45, 45] # in degrees, clothmate, clothfunnels are 45.
+camera_resolution: [480, 480] # clothmate, clothfunnels are 480x480
+frame_resolution: [256, 256]
 
 particle_radius: 0.014 #this is clothmate, clothfunnel default
 cloth_stiffness: [0.75, 0.02, 0.02] #this is clothmate, clothfunnel default

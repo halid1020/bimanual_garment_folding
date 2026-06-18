@@ -9,7 +9,7 @@ def resolve_save_root(default_root):
     hostname = socket.gethostname()
     print(f"[tool.utils, resolve_save_root] Detected Host: {socket.gethostname()}")
     if "pc282" in hostname:
-        return '/media/hcv530/T7/garment_folding_data'
+        return './results'
     elif "thanos" in hostname:
         return '/data/ah390/bimanual_garment_folding'
     elif "viking" in hostname:

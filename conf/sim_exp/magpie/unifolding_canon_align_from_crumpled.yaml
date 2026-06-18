@@ -2,7 +2,7 @@
 defaults:
   - /agent/magpie@agent: unifolding_canon_align_from_crumpled
   - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_480_workspace_height_2
-  - /task@task: canonicalisation_alignment
+  - /task/magpie@task: canonicalisation_alignment
 
 exp_name:  unifolding_canon_align_from_crumpled
 project_name: bimanual_garment_folding

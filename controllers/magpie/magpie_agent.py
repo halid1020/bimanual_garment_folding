@@ -91,7 +91,7 @@ class MagpieAgent(TrainableAgent):
                 self.network_action_dim += 1 # Reserve idx 0 for the continuous bin selector
                 
             self.data_save_action_dim = self.network_action_dim
-            if self.primitive_integration == 'one-hot-encoding':
+            if self.primitive_integration in ['one_hot_encoding', 'ordinary_encoding']:
                 self.data_save_action_dim += 1
                 
             self.mask_out_irrelavent_action_dim = self.config.get('mask_out_irrelavent_action_dim', False)
@@ -367,7 +367,7 @@ class MagpieAgent(TrainableAgent):
         cur_prim_id = 0
         prim_probs_log = None
         
-        if self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+        if self.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
             prim_logits = self.nets['prim_class_head'](obs_features)
             prim_probs_log = torch.softmax(prim_logits, dim=-1).cpu().detach().numpy()
             prim_id = torch.argmax(prim_logits, dim=-1)
@@ -376,10 +376,16 @@ class MagpieAgent(TrainableAgent):
             p_obj = self.primitives[cur_prim_id]
             info['prim_name'] = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
 
-            if self.primitive_integration == 'one-hot-encoding':
+            if self.primitive_integration == 'one_hot_encoding':
                 prim_enc = torch.nn.functional.one_hot(prim_id, num_classes=self.K).float()
                 obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
                 # Ensure the one-hot appended tensor is flattened identically for the denoiser
+                return obs_cond.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
+        
+            elif self.primitive_integration == 'ordinary_encoding':
+                # Convert the primitive ID to a continuous [-1, 1] normalized scalar bin
+                prim_enc = (1.0 * (prim_id.float() + 0.5) / self.K * 2.0 - 1.0).unsqueeze(-1)
+                obs_cond = torch.cat([obs_features, prim_enc], dim=-1)
                 return obs_cond.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
                 
         return obs_features.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
@@ -403,8 +409,23 @@ class MagpieAgent(TrainableAgent):
         # Select network based on routing strategy
         active_net = self.nets[f'noise_pred_net_{cur_prim_id}'] if self.primitive_integration == 'separate_networks' else self.nets['noise_pred_net']
         
+        # Forward Pass: Direct MSE Prediction (Regression)
+        if self.config.get('loss_type', 'diffusion') == 'mse':
+            # Feed dummy noise and timestep to leverage the same architecture for 1-step prediction
+            dummy_sample = torch.zeros_like(naction[..., :dim_k])
+            dummy_t = torch.zeros((1,), device=self.device, dtype=torch.long)
+            
+            act_pred = active_net(sample=dummy_sample, timestep=dummy_t, global_cond=obs_cond)
+            naction[..., :dim_k] = act_pred
+            
+            if self.primitive_integration in ['one_hot_encoding', 'ordinary_encoding']:
+                naction = self._apply_action_constraints(naction, info, 1.0)
+                
+            noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
+            return naction, noise_actions
+        
         # Forward Pass: Optimal Transport Flow Matching
-        if self.config.get('loss_type', 'diffusion') == 'ot_flow_match':
+        elif self.config.get('loss_type', 'diffusion') == 'ot_flow_match':
             num_steps = self.config.num_diffusion_iters
             dt = 1.0 / num_steps
             for i in range(num_steps):
@@ -417,8 +438,8 @@ class MagpieAgent(TrainableAgent):
                 # Euler Integration Step
                 naction[..., :dim_k] += v_pred * dt
                 
-                # Enforce physical constraints on the evolving trajectory
-                if self.primitive_integration == 'one-hot-encoding':
+                # Enforce physical constraints on the evolving trajectory (OT Flow Match)
+                if self.primitive_integration in ['one_hot_encoding', 'ordinary_encoding']:
                     naction = self._apply_action_constraints(naction, info, t_val)
                     
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
@@ -431,7 +452,8 @@ class MagpieAgent(TrainableAgent):
                 noise_pred = active_net(sample=naction[..., :dim_k], timestep=k, global_cond=obs_cond)
                 naction[..., :dim_k] = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction[..., :dim_k]).prev_sample
                 
-                if self.primitive_integration == 'one-hot-encoding':
+                # Enforce physical constraints on the evolving trajectory (DDPM)
+                if self.primitive_integration in ['one_hot_encoding', 'ordinary_encoding']:
                     # DDPM steps count backwards (~1000 to 0). Normalize to [0, 1] for constraint logic.
                     progress = 1.0 - (k.item() / total_ddpm_steps) 
                     naction = self._apply_action_constraints(naction, info, progress)
@@ -465,7 +487,7 @@ class MagpieAgent(TrainableAgent):
             p_obj = self.primitives[prim_idx]
             prim_name = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
             return {prim_name: action[1:]}
-        elif self.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+        elif self.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
             p_obj = self.primitives[cur_prim_id]
             prim_name = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
             return {prim_name: action[:self.action_dims[cur_prim_id]]}

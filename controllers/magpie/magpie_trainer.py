@@ -210,7 +210,7 @@ class MagpieTrainer:
                 
                 # Handle primitive action mapping
                 add_action = action
-                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks']: 
+                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks', 'ordinary_encoding']: 
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.agent.prim_name2id[action_name]
@@ -360,7 +360,7 @@ class MagpieTrainer:
 
                 # 4. Validate Primitive Classification Head
                 gt_prim_ids = None
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     preds = torch.argmax(prim_logits, dim=-1)
                     
@@ -376,7 +376,12 @@ class MagpieTrainer:
                     if self.agent.primitive_integration == 'one-hot-encoding':
                         prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-                        
+
+                    elif self.agent.primitive_integration == 'ordinary_encoding':
+                        # Append the continuous [-1, 1] bin prediction to the observation
+                        prim_enc = (1.0 * (preds.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
+                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+
                     gt_action = nbatch['action'][:, :, 1:].to(self.device)
                 else:
                     gt_action = nbatch['action'].to(self.device)
@@ -385,8 +390,29 @@ class MagpieTrainer:
                 eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
                 loss_type = self.config.get('loss_type', 'diffusion')
                 
+                # Branch: Direct MSE Prediction
+                if loss_type == 'mse':
+                    dummy_sample = torch.zeros_like(eval_naction)
+                    timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
+                    
+                    if self.agent.primitive_integration == 'separate_networks':
+                        n_pred = torch.zeros_like(eval_naction)
+                        for net_idx in range(self.agent.K):
+                            dim_k = self.agent.diffusion_dims[net_idx]
+                            if dim_k == 0: continue
+                            mask_k = (preds == net_idx)
+                            if mask_k.sum() > 0:
+                                net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
+                                    sample=dummy_sample[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                )
+                                n_pred[mask_k, :, :dim_k] = net_out
+                    else:
+                        n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
+                        
+                    eval_naction = n_pred
+
                 # Branch: Optimal Transport Flow Matching
-                if loss_type == 'ot_flow_match':
+                elif loss_type == 'ot_flow_match':
                     num_steps = self.config.num_diffusion_iters
                     dt = 1.0 / num_steps
                     for i in range(num_steps):
@@ -582,7 +608,7 @@ class MagpieTrainer:
                 gt_prim_ids = None
                 prim_loss = torch.tensor(0.0, device=self.device)
                 
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     prim_bin = nbatch['action'][:, 0, 0]
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
@@ -615,6 +641,11 @@ class MagpieTrainer:
                         prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
+                    elif self.agent.primitive_integration == 'ordinary_encoding':
+                        # Condition the target using the Ground Truth scalar bin
+                        prim_enc = (1.0 * (gt_prim_ids.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
+                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+
                 # 5. Build Diffusion Target
                 if self.agent.rep_learn == 'predict-state-with-action':
                     state_key = self.config.get('state_key', 'semkey_norm_pixel')
@@ -643,6 +674,11 @@ class MagpieTrainer:
                     noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
                     target = diffusion_target - noise
                     timesteps = t * self.config.num_diffusion_iters
+                elif loss_type == 'mse':
+                    # For direct regression, we feed dummy zeros to the network and target the raw action.
+                    noisy_actions = torch.zeros_like(diffusion_target)
+                    timesteps = torch.zeros((B,), device=self.device, dtype=torch.long)
+                    target = diffusion_target
                 else:
                     noise = torch.randn(diffusion_target.shape, device=self.device)
                     timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
@@ -710,7 +746,7 @@ class MagpieTrainer:
                 if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
                     metrics_to_log['train/state_pred_loss'] = rep_loss.item()
                 
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
                     metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
                     metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
                     
@@ -723,7 +759,25 @@ class MagpieTrainer:
                     self.agent.nets.eval()
                     eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
                     
-                    if loss_type == 'ot_flow_match':
+                    if loss_type == 'mse':
+                        dummy_sample = torch.zeros_like(eval_naction)
+                        timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
+                        if self.agent.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (gt_prim_ids == k)
+                                if mask_k.sum() > 0:
+                                    n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
+                                        dummy_sample[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                            eval_naction = n_pred
+                        else:
+                            n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = n_pred
+
+                    elif loss_type == 'ot_flow_match':
                         num_steps = self.config.num_diffusion_iters
                         dt = 1.0 / num_steps
                         for i in range(num_steps):

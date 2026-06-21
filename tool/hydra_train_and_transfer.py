@@ -44,6 +44,7 @@ def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> 
                 
             task = build_sim_task(train_cfg.task)
             arena.set_task(task)
+            arena.reset()
 
             ag_ar.train_and_evaluate_single(
                 agent,

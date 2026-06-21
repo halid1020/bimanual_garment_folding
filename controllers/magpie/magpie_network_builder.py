@@ -120,7 +120,7 @@ def build_networks_and_optimizers(agent):
     prim_class_head = None
     global_cond_dim = agent.effective_obs_dim * config.obs_horizon
     
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
         cls_cfg = config.get("primitive_classifier", {}) 
         prim_class_head = MLPNetwork(
             input_dim=agent.effective_obs_dim, output_dim=agent.K,
@@ -130,6 +130,10 @@ def build_networks_and_optimizers(agent):
         if agent.primitive_integration == 'one-hot-encoding':
             # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
             global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
+        
+        elif agent.primitive_integration == 'ordinary_encoding':
+            # Expand the global conditioning dimension by 1 to accommodate the continuous bin
+            global_cond_dim = (agent.effective_obs_dim + 1) * config.obs_horizon
 
     # =========================================================================
     # 4. Diffusion Network Setup
@@ -282,10 +286,11 @@ def build_primitive_action_masks(agent):
     
     start = None
     # Determine the offset index based on whether we reserve dimension 0 for the primitive bin
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks']:
+    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
         start = 0
     elif agent.primitive_integration == 'bin_as_output':
         start = 1
+    
 
     for pid, prim in enumerate(agent.primitives):
         mask = torch.zeros(agent.network_action_dim, dtype=torch.float32)

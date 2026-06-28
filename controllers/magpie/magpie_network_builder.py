@@ -156,6 +156,10 @@ def build_networks_and_optimizers(agent):
 
     backbone_type = config.get('noise_pred_net', 'unet')
     mlp_cfg = config.get('mlp_backbone_config', {})
+    
+    # NEW: Check if consistency training is requested in the config
+    loss_type = config.get('loss_type', 'diffusion')
+    use_consistency = 'consistency' in loss_type
 
     # 'separate_networks' instantiates an independent denoiser for *each* primitive skill
     if agent.primitive_integration == 'separate_networks':
@@ -164,18 +168,18 @@ def build_networks_and_optimizers(agent):
             if dim_k == 0: continue
             
             if backbone_type == 'mlp':
-                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
+                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, use_delta_t=use_consistency, **mlp_cfg)
             else:
-                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
+                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False), use_delta_t=use_consistency)
             
             setattr(agent, f'noise_pred_net_{k}', net)
             net_dict[f'noise_pred_net_{k}'] = net
     else:
         # Standard monolithic denoiser handling all actions
         if backbone_type == 'mlp':
-            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
+            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, use_delta_t=use_consistency, **mlp_cfg)
         else:
-            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
+            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False), use_delta_t=use_consistency)
             
         setattr(agent, 'noise_pred_net', noise_pred_net)
         net_dict['noise_pred_net'] = noise_pred_net

@@ -204,7 +204,8 @@ class ConditionalUnet1D(nn.Module):
         down_dims=[256,512,1024],
         kernel_size=5,
         n_groups=8,
-        diable_updown=False): # Note: retained original typo 'diable_updown' for compatibility
+        diable_updown=False,
+        use_delta_t=False): # Note: retained original typo 'diable_updown' for compatibility
         """
         Args:
             input_dim: Action dimension (e.g., 7 DoF).
@@ -269,6 +270,16 @@ class ConditionalUnet1D(nn.Module):
         )
 
         self.diffusion_step_encoder = diffusion_step_encoder
+        
+        if use_delta_t:
+            self.delta_t_encoder = nn.Sequential(
+                nn.Linear(1, dsed),
+                nn.Mish(),
+                nn.Linear(dsed, dsed)
+            )
+        else:
+            self.delta_t_encoder = None
+
         self.up_modules = up_modules
         self.down_modules = down_modules
         self.final_conv = final_conv
@@ -278,7 +289,8 @@ class ConditionalUnet1D(nn.Module):
     def forward(self,
             sample: torch.Tensor,
             timestep: Union[torch.Tensor, float, int],
-            global_cond=None):
+            global_cond=None,
+            delta_t=None):
         """
         Args:
             sample (torch.Tensor): Noisy action sequence (Batch, Horizon, ActionDim).
@@ -299,10 +311,18 @@ class ConditionalUnet1D(nn.Module):
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
             
-        # Broadcast to batch dimension
         timesteps = timesteps.expand(sample.shape[0])
-
         global_feature = self.diffusion_step_encoder(timesteps)
+
+        # NEW: 1.5 Process Delta T (Consistency Training)
+        if self.delta_t_encoder is not None:
+            if delta_t is not None:
+                dt_tensor = delta_t.clone().detach().to(dtype=torch.float32, device=sample.device)
+            else:
+                dt_tensor = torch.zeros((sample.shape[0],), dtype=torch.float32, device=sample.device)
+            
+            dt_tensor = dt_tensor.expand(sample.shape[0]).view(-1, 1)
+            global_feature = global_feature + self.delta_t_encoder(dt_tensor)
 
         # 2. Fuse Timestep and Vision features
         if global_cond is not None:
@@ -411,8 +431,8 @@ class ConditionalMLP1D(nn.Module):
         diffusion_step_embed_dim=256,
         hidden_dims=[512, 512, 512],
         activation="relu",
-        dropout=0.1
-    ):
+        dropout=0.1,
+        use_delta_t=False):
         """
         Args:
             input_dim: Dim of a single action step.
@@ -433,6 +453,15 @@ class ConditionalMLP1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
+
+        if use_delta_t:
+            self.delta_t_encoder = nn.Sequential(
+                nn.Linear(1, dsed),
+                nn.Mish(),
+                nn.Linear(dsed, dsed)
+            )
+        else:
+            self.delta_t_encoder = None
 
         # The MLP takes the flattened action + time embedding + global conditioning
         cond_dim = dsed + global_cond_dim
@@ -462,7 +491,8 @@ class ConditionalMLP1D(nn.Module):
         self,
         sample: torch.Tensor,
         timestep: Union[torch.Tensor, float, int],
-        global_cond=None
+        global_cond=None,
+        delta_t=None
     ):
         """
         Args:
@@ -484,6 +514,16 @@ class ConditionalMLP1D(nn.Module):
         timesteps = timesteps.expand(B)
 
         global_feature = self.diffusion_step_encoder(timesteps)
+
+        # NEW: Only apply Delta T if the encoder exists
+        if self.delta_t_encoder is not None:
+            if delta_t is not None:
+                dt_tensor = delta_t.clone().detach().to(dtype=torch.float32, device=sample.device)
+            else:
+                dt_tensor = torch.zeros((sample.shape[0],), dtype=torch.float32, device=sample.device)
+            
+            dt_tensor = dt_tensor.expand(sample.shape[0]).view(-1, 1)
+            global_feature = global_feature + self.delta_t_encoder(dt_tensor)
 
         # 2. Concatenate conditioning features
         if global_cond is not None:

@@ -1,4 +1,259 @@
 ==================================================
+FILE: dataset.py
+==================================================
+
+import numpy as np
+import torch
+import zarr
+import os
+
+def create_sample_indices(
+        episode_ends:np.ndarray, sequence_length:int,
+        pad_before: int=0, pad_after: int=0):
+    indices = list()
+    for i in range(len(episode_ends)):
+        start_idx = 0
+        if i > 0:
+            start_idx = episode_ends[i-1]
+        end_idx = episode_ends[i]
+        episode_length = end_idx - start_idx
+
+        min_start = -pad_before
+        max_start = episode_length - sequence_length + pad_after
+
+        # range stops one idx before end
+        for idx in range(min_start, max_start+1):
+            buffer_start_idx = max(idx, 0) + start_idx
+            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
+            start_offset = buffer_start_idx - (idx+start_idx)
+            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
+            sample_start_idx = 0 + start_offset
+            sample_end_idx = sequence_length - end_offset
+            indices.append([
+                buffer_start_idx, buffer_end_idx,
+                sample_start_idx, sample_end_idx])
+    indices = np.array(indices)
+    return indices
+
+
+def sample_sequence(train_data, sequence_length,
+                    buffer_start_idx, buffer_end_idx,
+                    sample_start_idx, sample_end_idx):
+    result = dict()
+    for key, input_arr in train_data.items():
+        sample = input_arr[buffer_start_idx:buffer_end_idx]
+        data = sample
+        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
+            data = np.zeros(
+                shape=(sequence_length,) + input_arr.shape[1:],
+                dtype=input_arr.dtype)
+            if sample_start_idx > 0:
+                data[:sample_start_idx] = sample[0]
+            if sample_end_idx < sequence_length:
+                data[sample_end_idx:] = sample[-1]
+            data[sample_start_idx:sample_end_idx] = sample
+        result[key] = data
+    return result
+
+# normalize data
+def get_data_stats(data):
+    data = data.reshape(-1,data.shape[-1])
+    stats = {
+        'min': np.min(data, axis=0),
+        'max': np.max(data, axis=0)
+    }
+    return stats
+
+def normalize_data(data, stats):
+    # nomalize to [0,1]
+    ndata = (data - stats['min']) / (stats['max'] - stats['min'])
+    # normalize to [-1, 1]
+    ndata = ndata * 2 - 1
+    return ndata
+
+def unnormalize_data(ndata, stats):
+    ndata = (ndata + 1) / 2
+    data = ndata * (stats['max'] - stats['min']) + stats['min']
+    return data
+
+# dataset
+class DiffusionDataset(torch.utils.data.Dataset):
+    def __init__(self,
+                 dataset_path: str,
+                 pred_horizon: int,
+                 obs_horizon: int,
+                 action_horizon: int):
+
+        # read from zarr dataset
+        dataset_path = os.path.join(
+            os.environ['actoris_harena_PATH'],
+            '..',
+            'data',
+            dataset_path)
+        print('dataset_path:', dataset_path)
+        #self.store = zarr.DirectoryStore(dataset_path)
+        dataset_root = zarr.open(dataset_path, mode='r')
+        # the above gives errro zarr.errors.PathNotFoundError: nothing found at path '
+
+        # float32, [0,1], (N,96,96,3)
+        train_image_data = dataset_root['data']['img'][:]
+        train_image_data = np.moveaxis(train_image_data, -1,1)
+        # (N,3,96,96)
+
+        # (N, D)
+        train_data = {
+            # first two dims of state vector are agent (i.e. gripper) locations
+            'agent_pos': dataset_root['data']['state'][:,:2],
+            'action': dataset_root['data']['action'][:]
+        }
+        episode_ends = dataset_root['meta']['episode_ends'][:]
+
+        # compute start and end of each state-action sequence
+        # also handles padding
+        indices = create_sample_indices(
+            episode_ends=episode_ends,
+            sequence_length=pred_horizon,
+            pad_before=obs_horizon-1,
+            pad_after=action_horizon-1)
+
+        # compute statistics and normalized data to [-1,1]
+        stats = dict()
+        normalized_train_data = dict()
+        for key, data in train_data.items():
+            stats[key] = get_data_stats(data)
+            normalized_train_data[key] = normalize_data(data, stats[key])
+
+        # images are already normalized
+        normalized_train_data['image'] = train_image_data
+
+        self.indices = indices
+        self.stats = stats
+        self.normalized_train_data = normalized_train_data
+        self.pred_horizon = pred_horizon
+        self.action_horizon = action_horizon
+        self.obs_horizon = obs_horizon
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        # get the start/end indices for this datapoint
+        buffer_start_idx, buffer_end_idx, \
+            sample_start_idx, sample_end_idx = self.indices[idx]
+
+        # get nomralized data using these indices
+        nsample = sample_sequence(
+            train_data=self.normalized_train_data,
+            sequence_length=self.pred_horizon,
+            buffer_start_idx=buffer_start_idx,
+            buffer_end_idx=buffer_end_idx,
+            sample_start_idx=sample_start_idx,
+            sample_end_idx=sample_end_idx
+        )
+
+        # discard unused observations
+        nsample['image'] = nsample['image']
+        nsample['agent_pos'] = nsample['agent_pos']
+        return nsample
+
+
+
+==================================================
+FILE: hindsight_dataset.py
+==================================================
+
+from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+import numpy as np
+
+class HindsightDataset(TrajectoryDataset):
+    """
+    A tailored dataset for Hindsight Experience Replay (HER) in RL pipelines.
+    
+    Overrides observation fetching to dynamically sample goal states from 
+    future time steps within the same trajectory. It mixes hindsight goals 
+    with actual goals based on a probability threshold.
+    """
+    def __init__(self, future_goal_mapping=None, hindsight_prob=0.8, **kwargs):
+        # Pop the mapping before passing the rest to TrajectoryDataset
+        self.future_goal_mapping = future_goal_mapping or {
+            'rgb': 'goal_rgb',
+            'depth': 'goal_depth',
+            'mask': 'goal_mask',
+            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
+        }
+        # Probability of using a hindsight goal vs the actual goal
+        self.hindsight_prob = hindsight_prob
+        super().__init__(**kwargs)
+
+    def __getitem__(self, idx: int):
+        # 1. Temporarily disable transforms to retrieve the raw data.
+        current_transform = self.transform
+        self.transform = None
+        ret = super().__getitem__(idx)  # This fetches the actual goals by default
+        self.transform = current_transform
+        
+        # 2. Recalculate trajectory bounds to find a valid future index
+        idx_offset = idx + self.start_sample
+        
+        if self.whole_trajectory:
+            traj_idx = idx_offset
+            start_idx = self.traj_starts[traj_idx]
+            end_idx = start_idx + self.traj_lengths[traj_idx] - 1
+        elif self.cross_trajectory:
+            start_idx = idx_offset if self.return_trj_last else self.valid_indices[idx_offset]
+            traj_idx = np.searchsorted(self.traj_starts, start_idx, side='right') - 1
+            end_idx = start_idx + self.seq_length
+        else:
+            traj_idx, start_idx = self.flat_ranges[idx_offset]
+            end_idx = start_idx + self.seq_length
+
+        # 3. Determine the effective bounds of the current trajectory
+        # traj_lengths includes the padded terminal state, so valid observations end at (length - 2)
+        effective_traj_end = self.traj_starts[traj_idx] + self.traj_lengths[traj_idx] - 2
+        
+        # strictly in the future of the current sequence (avoids distance 0)
+        min_future_idx = end_idx
+        
+        # 4. Decide whether to use Hindsight or the Actual Goal
+        # We can only use hindsight if there are future frames available to sample.
+        can_sample_future = min_future_idx <= effective_traj_end
+        use_hindsight = can_sample_future and (np.random.rand() < self.hindsight_prob)
+        
+        if use_hindsight:
+            # Sample a strictly future state index
+            future_idx = np.random.randint(min_future_idx, effective_traj_end + 1)
+            
+            # Overwrite the static goal keys in the observation dict with the sampled future observation
+            for src_key, goal_key in self.future_goal_mapping.items():
+                if src_key in self.obs_source and goal_key in ret['observation']:
+                    # Extract the single raw future observation frame
+                    future_obs = self.obs_source[src_key][future_idx].reshape(-1, *self.obs_shapes[src_key])
+                    
+                    # The returned observation dictionary contains sequences of shape (seq_length, ...)
+                    # The goal should remain constant across the sequence steps, so we tile it.
+                    seq_len = ret['observation'][goal_key].shape[0]
+                    ret['observation'][goal_key] = np.repeat(future_obs, seq_len, axis=0)
+            
+            dist = future_idx - start_idx
+        else:
+            # Use the Actual Goal (keep the original 'ret' as fetched by super().__getitem__)
+            # We assume the actual goal is the end of the trajectory for distance calculations
+            dist = max(0, effective_traj_end - start_idx)
+
+        # 5. Apply the transform now that the goals have been resolved
+        if self.transform is not None:
+            ret_ = self.transform(ret)
+            for key in ret['observation'].keys():
+                if key not in ret_:
+                    ret_[key] = ret['observation'][key]
+            ret = ret_
+
+        # Record the distance for visualizer or network ingestion
+        ret['goal_distance'] = np.array(dist, dtype=np.int32)
+        return ret
+
+
+==================================================
 FILE: magpie_network_builder.py
 ==================================================
 
@@ -124,14 +379,14 @@ def build_networks_and_optimizers(agent):
     prim_class_head = None
     global_cond_dim = agent.effective_obs_dim * config.obs_horizon
     
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+    if agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
         cls_cfg = config.get("primitive_classifier", {}) 
         prim_class_head = MLPNetwork(
             input_dim=agent.effective_obs_dim, output_dim=agent.K,
             hidden_dims=cls_cfg.get("hidden_dims", []), activation=cls_cfg.get("activation", "relu"),
             dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),
         )
-        if agent.primitive_integration == 'one-hot-encoding':
+        if agent.primitive_integration == 'one_hot_encoding':
             # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
             global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
         
@@ -160,6 +415,10 @@ def build_networks_and_optimizers(agent):
 
     backbone_type = config.get('noise_pred_net', 'unet')
     mlp_cfg = config.get('mlp_backbone_config', {})
+    
+    # NEW: Check if consistency training is requested in the config
+    loss_type = config.get('loss_type', 'diffusion')
+    use_consistency = 'consistency' in loss_type
 
     # 'separate_networks' instantiates an independent denoiser for *each* primitive skill
     if agent.primitive_integration == 'separate_networks':
@@ -168,18 +427,18 @@ def build_networks_and_optimizers(agent):
             if dim_k == 0: continue
             
             if backbone_type == 'mlp':
-                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
+                net = ConditionalMLP1D(input_dim=dim_k, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, use_delta_t=use_consistency, **mlp_cfg)
             else:
-                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
+                net = ConditionalUnet1D(input_dim=dim_k, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False), use_delta_t=use_consistency)
             
             setattr(agent, f'noise_pred_net_{k}', net)
             net_dict[f'noise_pred_net_{k}'] = net
     else:
         # Standard monolithic denoiser handling all actions
         if backbone_type == 'mlp':
-            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, **mlp_cfg)
+            noise_pred_net = ConditionalMLP1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, pred_horizon=config.pred_horizon, use_delta_t=use_consistency, **mlp_cfg)
         else:
-            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False))
+            noise_pred_net = ConditionalUnet1D(input_dim=agent.diffusion_dim, global_cond_dim=global_cond_dim, diable_updown=config.get('disable_updown', False), use_delta_t=use_consistency)
             
         setattr(agent, 'noise_pred_net', noise_pred_net)
         net_dict['noise_pred_net'] = noise_pred_net
@@ -307,90 +566,6 @@ def build_primitive_action_masks(agent):
         masks[pid] = mask
         
     return masks
-
-
-==================================================
-FILE: hindsight_dataset.py
-==================================================
-
-from actoris_harena import TrajectoryDataset
-import numpy as np
-
-class HindsightDataset(TrajectoryDataset):
-    """
-    A tailored dataset for Hindsight Experience Replay (HER) in RL pipelines.
-    
-    Overrides observation fetching to dynamically sample goal states from 
-    future time steps within the same trajectory, replacing the static 
-    goals defined in the obs_config.
-    """
-    def __init__(self, future_goal_mapping=None, **kwargs):
-        # Pop the mapping before passing the rest to TrajectoryDataset
-        self.future_goal_mapping = future_goal_mapping or {
-            'rgb': 'goal_rgb',
-            'depth': 'goal_depth',
-            'mask': 'goal_mask',
-            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
-        }
-        super().__init__(**kwargs)
-
-    def __getitem__(self, idx: int):
-        # 1. Temporarily disable transforms to retrieve the raw data.
-        # We MUST apply the transform *after* injecting the new hindsight goals
-        # to ensure augmentations (like color jittering/scaling) are uniform.
-        current_transform = self.transform
-        self.transform = None
-        ret = super().__getitem__(idx)
-        self.transform = current_transform
-        
-        # 2. Recalculate trajectory bounds to find a valid future index
-        idx_offset = idx + self.start_sample
-        
-        if self.whole_trajectory:
-            traj_idx = idx_offset
-            start_idx = self.traj_starts[traj_idx]
-            end_idx = start_idx + self.traj_lengths[traj_idx] - 1
-        elif self.cross_trajectory:
-            start_idx = idx_offset if self.return_trj_last else self.valid_indices[idx_offset]
-            traj_idx = np.searchsorted(self.traj_starts, start_idx, side='right') - 1
-            end_idx = start_idx + self.seq_length
-        else:
-            traj_idx, start_idx = self.flat_ranges[idx_offset]
-            end_idx = start_idx + self.seq_length
-
-        # 3. Determine the effective bounds of the current trajectory
-        # traj_lengths includes the padded terminal state, so valid observations end at (length - 2)
-        effective_traj_end = self.traj_starts[traj_idx] + self.traj_lengths[traj_idx] - 2
-        
-        # Define the sampling window strictly in the future of the current sequence
-        min_future_idx = min(end_idx, effective_traj_end)
-        
-        # Sample a future state index uniformly
-        if min_future_idx >= effective_traj_end:
-            future_idx = effective_traj_end
-        else:
-            future_idx = np.random.randint(min_future_idx, effective_traj_end + 1)
-            
-        # 4. Overwrite the static goal keys in the observation dictionary with the sampled future observation
-        for src_key, goal_key in self.future_goal_mapping.items():
-            if src_key in self.obs_source and goal_key in ret['observation']:
-                # Extract the single raw future observation frame
-                future_obs = self.obs_source[src_key][future_idx].reshape(-1, *self.obs_shapes[src_key])
-                
-                # The returned observation dictionary contains sequences of shape (seq_length, ...)
-                # The goal should remain constant across the sequence steps, so we tile it.
-                seq_len = ret['observation'][goal_key].shape[0]
-                ret['observation'][goal_key] = np.repeat(future_obs, seq_len, axis=0)
-
-        # 5. Apply the transform now that the goals have been dynamically injected
-        if self.transform is not None:
-            ret_ = self.transform(ret)
-            for key in ret['observation'].keys():
-                if key not in ret_:
-                    ret_[key] = ret['observation'][key]
-            return ret_
-
-        return ret
 
 
 ==================================================
@@ -772,59 +947,920 @@ name2func = {
 
 
 ==================================================
-FILE: magpie_transform.py
+FILE: magpie_trainer.py
 ==================================================
 
+"""
+Magpie Trainer Module.
+
+This module contains the MagpieTrainer class, which orchestrates the data loading, 
+validation, and training loops for the Magpie diffusion-based robotics agent. It 
+supports both standard Denoising Diffusion Probabilistic Models (DDPM) and 
+Optimal Transport (OT) Flow Matching, along with primitive action integration.
+"""
+
+import os
+import torch
+import torch.nn as nn
 import numpy as np
-from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
-from .dataset import normalize_data, unnormalize_data
+import cv2
+from tqdm import tqdm
+from dotmap import DotMap
 
-class DiffusionTransform:
-    def __init__(self, config, stats):
-        self.config = config
-        self.device = self.config.get('device', 'cpu')
-        self.stats = stats
+from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
+from actoris_harena.utilities.save_utils import save_mask
+from .dataset import DiffusionDataset
+from .utils import compute_classification_metrics
 
-    def __call__(self, data, train=True):
-        ret_data = {}
-        
-        if not train:
-            ret_data[self.config.input_obs] = data[self.config.input_obs].astype(np.float32) / 255.0
-            
-            if len(ret_data[self.config.input_obs].shape) == 3:
-                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
-                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
+class MagpieTrainer:
+    """
+    Coordinates the training and validation pipelines for the MagpieAgent.
 
-            ret_data[self.config.input_obs] = ret_data[self.config.input_obs].transpose(0, 1, 4, 2, 3)
-            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs], self.device)
-            
-            ret_data['vector_state'] = normalize_data(
-                data['vector_state'], 
-                self.stats[self.config.data_state]
+    Attributes:
+        agent: The core diffusion agent containing the networks and state.
+        config (DotMap): Configuration dictionary containing hyperparameters.
+        device (torch.device): Hardware device (CPU/GPU) for tensor operations.
+    """
+
+    def __init__(self, agent):
+        """
+        Initializes the MagpieTrainer with a reference to the main agent.
+
+        Args:
+            agent: The MagpieAgent instance containing neural networks and config.
+        """
+        self.agent = agent
+        self.config = agent.config
+        self.device = agent.device
+
+    def _init_dataset(self):
+        """
+        Initializes the standard trajectory dataset and prepares PyTorch DataLoaders.
+
+        Configures either a 'diffusion' or 'general' dataset mode. If primitive 
+        integration is enabled, it sets up Random Oversampling (ROS) using a 
+        WeightedRandomSampler to mitigate class imbalance among primitive actions.
+
+        Raises:
+            ValueError: If an unsupported `dataset_mode` is provided.
+        """
+        # 1. Dataset Instantiation
+        if self.config.dataset_mode == 'diffusion':
+            train_dataset = DiffusionDataset(
+                dataset_path=self.config.dataset_path,
+                pred_horizon=self.config.pred_horizon,
+                obs_horizon=self.config.obs_horizon,
+                action_horizon=self.config.action_horizon
             )
-            ret_data['vector_state'] = np_to_ts(ret_data['vector_state'], self.device)
+            self.agent.stats = train_dataset.stats
             
-            if len(ret_data['vector_state'].shape) == 1:
-                ret_data['vector_state'] = ret_data['vector_state'].unsqueeze(0)
+        elif self.config.dataset_mode == 'general':
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+            config_dict = self.config.dataset_config.toDict()
+            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
+
+            if self.agent.validate_training:
+                val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
+        
+        elif self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            config_dict = self.config.dataset_config.toDict()
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+
+            if self.agent.validate_training:
+                val_dataset = HindsightDataset(**config_dict, sample_mode='val')
 
         else:
-            ret_data[self.config.input_obs] = data[self.config.data_obs]
-            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs][:, :self.config.obs_horizon], self.device)
-            ret_data['vector_state'] = np_to_ts(data[self.config.data_state][:, :self.config.obs_horizon], self.device)
-            ret_data['action'] = np_to_ts(data['action'], self.device)
+            raise ValueError('Invalid dataset mode. Expected "diffusion", "hindsignt", "general".')
 
-        return ret_data
+        # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
+        use_ros = self.config.get('use_random_oversampling', False)
+        sampler = None
+        shuffle_data = True
+        
+        if use_ros and self.agent.primitive_integration != 'none':
+            print("[MultiPrimitiveDiffusionAdapter] Initializing WeightedRandomSampler for ROS...")
+            from torch.utils.data import WeightedRandomSampler
+            
+            class_counts = np.zeros(self.agent.K)
+            sample_classes = []
+            
+            # Tally occurrences of each primitive class
+            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
+                action_data = train_dataset[i]['action']
+                act_key = list(action_data.keys())[0]
+                prim_bin = action_data[act_key][0][0] 
+                
+                # Extract and normalize the primitive ID
+                prim_id = int(np.clip((((prim_bin + 1) / 2) * self.agent.K), 0, self.agent.K - 1))
+                class_counts[prim_id] += 1
+                sample_classes.append(prim_id)
+                
+            # Assign higher selection weights to underrepresented classes
+            class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
+            sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
+            
+            sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+            shuffle_data = False # Must disable native shuffling when using a custom sampler
+            print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
 
-    def postprocess(self, data):
-        ret_data = {}
-        if 'action' in data.keys():
-            data['action'] = unnormalize_data(data['action'], self.stats[self.config.data_action])
-            ret_data['action'] = data['action']
+        # 3. DataLoader Performance Optimization
+        torch.backends.cudnn.benchmark = True
+        num_workers = self.config.get('num_workers', 0)
+        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
+        prefetch_factor = self.config.get('prefetch_factor', None)
+
+        self.agent.dataloader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.config.batch_size, shuffle=shuffle_data,   
+            sampler=sampler, num_workers=num_workers, pin_memory=self.config.get('pin_memory', False),
+            persistent_workers=persistent, prefetch_factor=prefetch_factor
+        )
+
+        if self.agent.validate_training:
+            self.agent.val_dataloader = torch.utils.data.DataLoader(
+                val_dataset, batch_size=self.config.batch_size, shuffle=False, 
+                num_workers=max(1, num_workers // 4), pin_memory=self.config.get('pin_memory', False),
+                persistent_workers=persistent
+            )
+        self.agent.dataset_inited = True
+
+    def _init_demo_policy_dataset(self, arenas):
+        """
+        Initializes the dataset by rolling out a demonstrator policy in the environment.
+
+        Instead of loading pre-collected data, this method actively collects 
+        trajectories from an expert policy until the desired number of demos is reached.
+
+        Args:
+            arenas (list): A list containing the simulation environments to roll out in.
+        """
+        arena = arenas[0]
+        org_horizon = arena.action_horizon
+        arena.action_horizon = self.config.get('demo_horizon', org_horizon)
+        
+        # Safely convert to a standard dict to prevent mutating the global config
+        config_dict = self.config.dataset_config.toDict() if hasattr(self.config.dataset_config, 'toDict') else dict(self.config.dataset_config)
+        config_dict['io_mode'] = 'a' # Append mode
+        
+        # Route dataset instantiation based on the config mode
+        if self.config.dataset_mode == 'hindsight':
+            from .hindsight_dataset import HindsightDataset
+            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
+        else:
+            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
+            # Strip the HER mapping if falling back to the general base class
+            config_dict.pop('future_goal_mapping', None)
+            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
+
+        import actoris_harena as ag_ar
+        policy = ag_ar.build_agent(self.config.demo_policy, self.config.get('demo_policy_config', DotMap({})), disable_wandb=True)
+
+        qbar = tqdm(total=self.config.num_demos, desc='Collecting data from policy ...')
+        qbar.update(train_dataset.num_trajectories())
+        qbar.refresh()
+        
+        episode_id = train_dataset.num_trajectories()
+        train_configs = arena.get_train_configs()
+        
+        # 1. Trajectory Collection Loop
+        while train_dataset.num_trajectories() < self.config.num_demos:
+            observations = {obs_type: [] for obs_type in train_dataset.obs_types}
+            actions = {act_type: [] for act_type in train_dataset.action_types}
+
+            policy.reset([arena.id])
+            info = arena.reset(train_configs[episode_id])
+
+            # Check if all requested keys exist in the environment's observation output
+            missing_keys = [k for k in train_dataset.obs_types if k not in info['observation']]
+            if missing_keys:
+                raise ValueError(
+                    f"\n[MagpieTrainer] CONFIGURATION ERROR: \n"
+                    f"Your dataset configuration is requesting the following keys: {missing_keys}\n"
+                    f"However, the environment (or task) is not outputting them in info['observation'].\n"
+                    f"Please either remove these keys from your dataset config (yaml) or update your environment to generate them."
+                )
             
-        if self.config.input_obs in data.keys():
-            ret_data[self.config.input_obs] = (ts_to_np(data[self.config.input_obs]) * 255.0).clip(0, 255).astype(np.uint8)
+            policy.init([info])
+            info['reward'] = 0
+            done = info['done']
             
-        return ret_data
+            while not done:
+                action = policy.single_act(info)
+                if action is None: break
+                
+                # Store and format vision/mask observations
+                for k, v in info['observation'].items():
+                    if k in observations.keys():
+                        if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                            v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                            observations[k].append(v_)
+                        elif k in ['mask', 'goal_mask']:
+                            v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                            observations[k].append(v_ > 0.9)
+                        else:
+                            observations[k].append(v)
+                
+                # Handle primitive action mapping
+                add_action = action
+                if self.config.primitive_integration in ['bin_as_output', 'one_hot_encoding', 'separate_networks', 'ordinary_encoding']: 
+                    action_name = list(action.keys())[0]
+                    action_param = action[action_name]
+                    prim_id = self.agent.prim_name2id[action_name]
+                    
+                    # Convert primitive ID back to normalized [-1, 1] bin format
+                    prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
+                    
+                    # This guarantees all primitives output an array of the exact same length (e.g., 9)
+                    expected_dim = train_dataset.act_config['default']['shape'][0]
+                    add_action = np.zeros(expected_dim, dtype=np.float32)
+                    
+                    add_action[0] = prim_act
+                    
+                    # Copy the primitive parameters into the zero-padded array safely
+                    copy_len = min(action_param.shape[0], expected_dim - 1)
+                    add_action[1:copy_len+1] = action_param[:copy_len]
+                    
+                elif self.config.primitive_integration == 'none':
+                    add_action = action
+                
+                actions['default'].append(add_action)  
+                info = arena.step(action)
+                policy.update(info, add_action)
+                info['reward'] = 0
+                done = info['done']
+                if self.agent.collect_on_success and info['success']: break
+            
+            # Capture final terminal observation
+            for k, v in info['observation'].items():
+                if k in observations.keys():
+                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
+                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_)
+                    elif k in ['mask', 'goal_mask']:
+                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
+                        observations[k].append(v_ > 0.9)
+                    else:
+                        observations[k].append(v)
+                        
+            # Save successful trajectories
+            if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
+                for k, v in observations.items():
+                    observations[k] = np.stack(v)
+                actions['default'] = np.stack(actions['default'])
+                train_dataset.add_trajectory(observations, actions)
+                qbar.update(1)
+                
+            episode_id = (episode_id + 1) % arena.get_num_episodes()
+
+        arena.action_horizon = org_horizon
+        
+        # ROS setup skipped here for brevity, mirrors logic from _init_dataset
+        self.agent.dataloader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.config.batch_size, shuffle=True, pin_memory=self.config.get('pin_memory', False)
+        )
+        self.agent.dataset_inited = True
+
+    def validate(self):
+        """
+        Executes the validation loop across the validation dataloader.
+
+        Computes action MSE, state prediction L2 distance, and primitive 
+        classification accuracy (if applicable). Logs all metrics to wandb.
+        """
+        if not hasattr(self.agent, 'val_dataloader'):
+            print("[Validation] No validation dataloader found. Skipping.")
+            return
+
+        self.agent.nets.eval() 
+        
+        # Metrics Accumulators
+        val_prim_losses, val_state_mse, val_state_l2, val_action_mse = [], [], [], []
+        all_preds, all_gts = [], []
+        
+        print(f"--- Running Validation at Step {self.agent.update_step} ---")
+        
+        with torch.no_grad():
+            for nbatch in self.agent.val_dataloader:
+                
+                # 1. Observation Pre-processing
+                if self.config.dataset_mode == 'general':
+                    obs = nbatch['observation']
+                    action = nbatch['action']['default']
+                    nbatch = {v: k for v, k in obs.items()}
+                    nbatch['action'] = action.reshape(*action.shape[:2], -1)
+                    nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
+
+                # Construct composite multi-modal observations
+                if self.config.input_obs == 'rgbd':
+                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask':
+                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+                if self.config.input_obs == 'rgb-workspace-mask-goal':
+                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_rgb':
+                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+                if self.config.input_obs == 'rgb+goal_mask':
+                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+
+                B = nbatch[self.config.input_obs].shape[0]
+                input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
+                
+                # 2. Extract Vision and State Features
+                if self.agent.vision_encoder_type == 'original':
+                    image_features = self.agent.nets['vision_encoder'](input_obs)
+                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                else:
+                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) 
+                
+                if getattr(self.agent, 'use_projector', False):
+                    obs_features = self.agent.nets['obs_projector'](obs_features)
+
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+
+                obs_cond = obs_features.flatten(start_dim=1)
+                
+                # 3. Validate State Predictor Representation Learning
+                if self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features)
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors_val = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                        gt_tensors_val.append(gt_state)
+                        
+                        state_dim = self.config.state_dim
+                        num_kpts = state_dim // 2
+                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
+                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
+                        
+                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
+                        val_state_l2.append(l2_dist.item())
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
+                            gt_tensors_val.append(gt_goal)
+                            
+                    if gt_tensors_val:
+                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
+                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
+                        val_state_mse.append(mse_loss.item())
+
+                # 4. Validate Primitive Classification Head
+                gt_prim_ids = None
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    preds = torch.argmax(prim_logits, dim=-1)
+                    
+                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
+                    
+                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
+                    val_prim_losses.append(loss.item())
+                    all_preds.extend(preds.cpu().numpy())
+                    all_gts.extend(gt_prim_ids.cpu().numpy())
+                    
+                    if self.agent.primitive_integration == 'one_hot_encoding':
+                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+
+                    elif self.agent.primitive_integration == 'ordinary_encoding':
+                        # Append the continuous [-1, 1] bin prediction to the observation
+                        prim_enc = (1.0 * (preds.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
+                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+
+                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
+                else:
+                    gt_action = nbatch['action'].to(self.device)
+
+                # 5. Full Evaluation Denoising Pass
+                eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                loss_type = self.config.get('loss_type', 'diffusion')
+                
+                # Branch: Direct MSE Prediction
+                if loss_type == 'mse':
+                    dummy_sample = torch.zeros_like(eval_naction)
+                    timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
+                    
+                    if self.agent.primitive_integration == 'separate_networks':
+                        n_pred = torch.zeros_like(eval_naction)
+                        for net_idx in range(self.agent.K):
+                            dim_k = self.agent.diffusion_dims[net_idx]
+                            if dim_k == 0: continue
+                            mask_k = (preds == net_idx)
+                            if mask_k.sum() > 0:
+                                net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
+                                    sample=dummy_sample[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                )
+                                n_pred[mask_k, :, :dim_k] = net_out
+                    else:
+                        n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
+                        
+                    eval_naction = n_pred
+
+                # Branch: Optimal Transport Flow Matching
+                elif loss_type == 'ot_flow_match':
+                    num_steps = self.config.num_diffusion_iters
+                    dt = 1.0 / num_steps
+                    for i in range(num_steps):
+                        t_val = i / num_steps
+                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            v_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (preds == k) 
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{k}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    v_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = eval_naction + v_pred * dt
+                
+                # Branch: Standard DDPM Reverse Diffusion
+                else:
+                    self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                    for k in self.agent.noise_scheduler.timesteps:
+                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
+                        
+                        if self.agent.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for net_idx in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[net_idx]
+                                if dim_k == 0: continue
+                                mask_k = (preds == net_idx)
+                                if mask_k.sum() > 0:
+                                    net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
+                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                                    n_pred[mask_k, :, :dim_k] = net_out
+                        else:
+                            n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            
+                        eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
+
+                # 6. Action MSE Calculation
+                pred_action = eval_naction[..., :self.agent.network_action_dim]
+                
+                # Only calculate loss on the valid action dimensions corresponding to the chosen primitive
+                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
+                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                    
+                    diff = (pred_action - gt_action) * mask
+                    valid_count = mask.sum().clamp(min=1.0) # Avoid div by zero
+                    mse = (diff ** 2).sum() / valid_count
+                else:
+                    mse = nn.functional.mse_loss(pred_action, gt_action)
+                
+                val_action_mse.append(mse.item())
+
+        # 7. Metric Aggregation and wandb Integration
+        metrics = {}
+        if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
+        if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
+        if val_action_mse: metrics['val/action_mse'] = np.mean(val_action_mse)
+
+        if val_prim_losses:
+            metrics['val/prim_loss'] = np.mean(val_prim_losses)
+            acc = np.mean(np.array(all_preds) == np.array(all_gts))
+            metrics['val/prim_accuracy'] = acc
+            
+            # 1. Log the safe scalar metrics FIRST so they are never lost
+            if metrics and hasattr(self.agent, 'logger'):
+                self.agent.logger.log(metrics, step=self.agent.update_step)
+                print(f"Validation Results: {metrics}")
+
+            # 2. Attempt the W&B confusion matrix plot safely
+            if val_prim_losses:
+                import wandb
+                if wandb.run is not None and hasattr(self.agent, 'logger'):
+                    try:
+                        confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                            probs=None,
+                            y_true=all_gts,
+                            preds=all_preds,
+                            class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                        )}
+                        self.agent.logger.log(confusion, step=self.agent.update_step)
+                    except Exception as e:
+                        print(f"W&B Confusion Matrix failed to log: {e}")
+
+        if metrics and hasattr(self.agent, 'logger'):
+            self.agent.logger.log(metrics, step=self.agent.update_step)
+            print(f"Validation Results: {metrics}")
+
+        self.agent.nets.train()
+
+    def train(self, update_steps, arenas):
+        """
+        Executes the main training optimization loop.
+
+        Args:
+            update_steps (int): Total number of gradient steps to take in this call.
+            arenas (list): Simulation environments (required if training from policy).
+        """
+        if not self.agent.dataset_inited:
+            if self.config.train_mode == 'from_dataset':
+                self._init_dataset()
+            elif self.config.train_mode == 'from_policy':
+                self._init_demo_policy_dataset(arenas)
+        
+        # Ensure we don't overshoot total configured steps
+        update_steps = min(self.config.total_update_steps - self.agent.update_step, update_steps)
+        
+        if self.config.get('freeze_encoder', False):
+            self.agent.nets['vision_encoder'].eval()
+            
+        def cycle(dl):
+            while True:
+                for data in dl: yield data
+                    
+        train_iter = iter(cycle(self.agent.dataloader))
+        pbar = tqdm(range(update_steps), desc="Training")
+
+        for i in pbar:
+            nbatch = next(train_iter)
+            
+            # 1. Input Batch Setup
+            if self.config.dataset_mode == 'diffusion':
+                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
+            else:
+                obs, action = nbatch['observation'], nbatch['action']['default']
+                nbatch = {v: k for v, k in obs.items()}
+                nbatch['action'] = action.reshape(*action.shape[:2], -1)
+                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
+
+            if self.config.input_obs == 'rgbd': nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask': nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
+            if self.config.input_obs == 'rgb-workspace-mask-goal': nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_rgb': nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
+            if self.config.input_obs == 'rgb+goal_mask': nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
+
+            B = nbatch[self.config.input_obs].shape[0]
+            input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
+
+            device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
+            use_amp = self.config.get('use_amp', False)
+
+            with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
+                # 2. Forward Feature Extraction
+                image_features = self.agent.nets['vision_encoder'](input_obs.to(self.device))
+                obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
+                
+                if getattr(self.agent, 'use_projector', False):
+                    obs_features = self.agent.nets['obs_projector'](obs_features)
+
+                # Add noise to conditioning features for robustness
+                if self.agent.nets.training:
+                    noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
+                    obs_features = obs_features + noise
+
+                # 3. Representation Learning Auxiliary Losses
+                rep_loss = torch.tensor(0.0, device=self.device)
+                
+                if self.agent.rep_learn == 'auto-encoder':
+                    reconstructed_obs = self.agent.nets['vision_decoder'](image_features)
+                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs.to(self.device))
+                elif self.agent.rep_learn == 'predict-state':
+                    pred_combined = self.agent.nets['state_predictor'](obs_features) 
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_tensors = []
+                    
+                    if state_key in nbatch:
+                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float() 
+                        gt_tensors.append(gt_state.to(self.device))
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float()
+                            gt_tensors.append(gt_goal.to(self.device))
+                    if gt_tensors:
+                        gt_combined = torch.cat(gt_tensors, dim=-1) 
+                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
+
+                if self.config.include_state:
+                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device)
+                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
+                    
+                obs_cond = obs_features.flatten(start_dim=1)
+
+                # 4. Primitive Classification Loss
+                gt_prim_ids = None
+                prim_loss = torch.tensor(0.0, device=self.device)
+                
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
+                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    prim_bin = nbatch['action'][:, 0, 0]
+                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
+                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
+                    
+                    weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
+                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
+                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
+
+                    log_every = self.config.get('log_prim_metrics_every', 200)
+                    
+                    if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
+                        metrics = compute_classification_metrics(prim_logits.detach(), gt_prim_ids.detach(), self.agent.K)
+                        wandb_metrics = {f"train/prim_{k}": v for k, v in metrics.items()}
+                        self.agent.logger.log(wandb_metrics, step=self.agent.update_step)
+                        
+                        import wandb
+                        if wandb.run is not None:
+                            confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
+                                probs=None, y_true=gt_prim_ids.cpu().numpy(),
+                                preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
+                                class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
+                            )}
+                            self.agent.logger.log(confusion, step=self.agent.update_step)
+
+                    # Remove primitive bin from action target
+                    nbatch['action'] = nbatch['action'][:, :, 1:] 
+
+                    if self.agent.primitive_integration == 'one_hot_encoding':
+                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
+                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+
+                    elif self.agent.primitive_integration == 'ordinary_encoding':
+                        # Condition the target using the Ground Truth scalar bin
+                        prim_enc = (1.0 * (gt_prim_ids.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
+                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+
+                # 5. Build Diffusion Target
+                if self.agent.rep_learn == 'predict-state-with-action':
+                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
+                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
+                        if goal_key in nbatch:
+                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state, gt_goal], dim=-1)
+                        else:
+                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                    else:
+                        diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
+                else:
+                    diffusion_target = nbatch['action'].to(self.device)
+                    
+                loss_type = self.config.get('loss_type', 'diffusion')
+
+                # 6. Forward Forward Diffusion (Adding Noise)
+                delta_t_inputs = None
+                if loss_type in ['ot_flow_match', 'ot_flow_match+consistency']:
+                    noise = torch.randn_like(diffusion_target)
+                    t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
+                    t_expand = t.view(B, 1, 1)
+                    noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
+                    
+                    target = diffusion_target - noise # Default FM target
+                    timesteps = t * self.config.num_diffusion_iters
+                    
+                    # --- NEW: Consistency Training Logic ---
+                    if loss_type == 'ot_flow_match+consistency':
+                        consistency_ratio = self.config.get('consistency_ratio', 0.25)
+                        ct_mask = torch.rand((B,), device=self.device) < consistency_ratio
+                        
+                        delta_t_inputs = torch.zeros((B,), device=self.device, dtype=diffusion_target.dtype)
+                        delta_t_inputs[ct_mask] = torch.rand((ct_mask.sum(),), device=self.device, dtype=diffusion_target.dtype)
+                        
+                        if ct_mask.any():
+                            # Sync EMA shadow network
+                            if not hasattr(self, 'ema_nets'):
+                                import copy
+                                self.ema_nets = copy.deepcopy(self.agent.nets)
+                                self.ema_nets.eval()
+                                for p in self.ema_nets.parameters(): p.requires_grad = False
+                            
+                            self.agent.ema.copy_to(self.ema_nets.parameters())
+                            
+                            # Gather masked variables
+                            t_ct = t[ct_mask]
+                            dt_ct = delta_t_inputs[ct_mask]
+                            t1_ct = torch.clamp(t_ct + dt_ct, 0.0, 1.0)
+                            t1_expand = t1_ct.view(-1, 1, 1)
+                            
+                            x0_ct = noise[ct_mask]
+                            x1_ct = diffusion_target[ct_mask]
+                            xt_ct = noisy_actions[ct_mask]
+                            
+                            # Compute x_{t1}
+                            x_t1 = (1 - t1_expand) * x0_ct + t1_expand * x1_ct
+                            
+                            # Predict v_{t1} using EMA network
+                            dt_prime = torch.rand_like(t_ct)
+                            
+                            with torch.no_grad():
+                                if self.agent.primitive_integration == 'separate_networks':
+                                    v_t1 = torch.zeros_like(x_t1)
+                                    gt_prim_ids_ct = gt_prim_ids[ct_mask]
+                                    for k in range(self.agent.K):
+                                        dim_k = self.agent.diffusion_dims[k]
+                                        if dim_k == 0: continue
+                                        mask_k = (gt_prim_ids_ct == k)
+                                        if mask_k.sum() > 0:
+                                            v_t1[mask_k, :, :dim_k] = self.ema_nets[f'noise_pred_net_{k}'](
+                                                sample=x_t1[mask_k][..., :dim_k], 
+                                                timestep=t1_ct[mask_k] * self.config.num_diffusion_iters, 
+                                                global_cond=obs_cond[ct_mask][mask_k],
+                                                delta_t=dt_prime[mask_k]
+                                            )
+                                else:
+                                    v_t1 = self.ema_nets['noise_pred_net'](
+                                        sample=x_t1, 
+                                        timestep=t1_ct * self.config.num_diffusion_iters, 
+                                        global_cond=obs_cond[ct_mask],
+                                        delta_t=dt_prime
+                                    )
+                            
+                            # Calculate \tilde{x}_1 and target velocity
+                            x1_tilde = x_t1 + (1 - t1_expand) * v_t1
+                            eps = 1e-5
+                            v_target_ct = (x1_tilde - xt_ct) / (1 - t_ct.view(-1, 1, 1) + eps)
+                            
+                            target[ct_mask] = v_target_ct
+                elif loss_type == 'mse':
+                    # For direct regression, we feed dummy zeros to the network and target the raw action.
+                    noisy_actions = torch.zeros_like(diffusion_target)
+                    timesteps = torch.zeros((B,), device=self.device, dtype=torch.long)
+                    target = diffusion_target
+                else:
+                    noise = torch.randn(diffusion_target.shape, device=self.device)
+                    timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
+                    noisy_actions = self.agent.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
+                    target = noise # DDPM trains to predict the added noise
+
+                # 7. Model Predictions
+                if self.agent.primitive_integration == 'separate_networks':
+                    noise_pred = torch.zeros_like(noisy_actions)
+                    for k in range(self.agent.K):
+                        dim_k = self.agent.diffusion_dims[k]
+                        if dim_k == 0: continue
+                        mask_k = (gt_prim_ids == k)
+                        if mask_k.sum() > 0:
+                            # Pass delta_t_inputs to the network if available
+                            dt_in = delta_t_inputs[mask_k] if delta_t_inputs is not None else None
+                            noise_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
+                                noisy_actions[mask_k][..., :dim_k], 
+                                timesteps[mask_k], 
+                                global_cond=obs_cond[mask_k],
+                                delta_t=dt_in
+                            )
+                else:
+                    noise_pred = self.agent.nets['noise_pred_net'](
+                        noisy_actions, 
+                        timesteps, 
+                        global_cond=obs_cond,
+                        delta_t=delta_t_inputs
+                    )
+
+                # 8. Loss Calculations
+                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
+                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
+                    for b in range(B):
+                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
+                        
+                    # Also unmask state target dims if doing joint diffusion
+                    if self.agent.rep_learn == 'predict-state-with-action':
+                        mask_extra_dim = self.config.state_dim
+                        if getattr(self.agent, 'predict_goal_state', False): mask_extra_dim += getattr(self.agent, 'goal_state_dim', 30)
+                        state_mask = torch.ones((B, self.config.pred_horizon, mask_extra_dim), device=self.device)
+                        mask = torch.cat([mask, state_mask], dim=-1)
+
+                    diff = (noise_pred - target) * mask
+                    valid_count = mask.sum().clamp(min=1.0)
+                    actor_noise_loss = (diff ** 2).sum() / valid_count
+                else:
+                    actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
+                
+                prim_weight = self.config.get('prim_weight', 1.0)
+                total_loss = actor_noise_loss + (prim_loss * prim_weight) 
+                
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
+
+            # 9. Optimizer and Scheduler Updates
+            total_loss.backward()
+            
+            if self.agent.clip_norm > 0:
+                nn.utils.clip_grad_norm_(self.agent.nets.parameters(), self.agent.clip_norm)
+
+            self.agent.optimizer.step()
+            self.agent.optimizer.zero_grad()
+            self.agent.lr_scheduler.step()
+            
+            trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
+            self.agent.ema.step(trainable_params)
+
+            # 10. Training Logging
+            if hasattr(self.agent, 'logger'):
+                metrics_to_log = {
+                    'train/actor_noise_loss': actor_noise_loss.item(),
+                    'train/total_loss': total_loss.item()
+                }
+                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
+                    metrics_to_log['train/state_pred_loss'] = rep_loss.item()
+                
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
+                    metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
+                    metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
+                    
+                self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
+
+            # 11. Periodic Full Denoising Metric Evaluation (for Joint Diffusion)
+            log_interval = self.config.get('log_state_eval_every', 500)
+            if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
+                with torch.no_grad():
+                    self.agent.nets.eval()
+                    eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
+                    
+                    if loss_type == 'mse':
+                        dummy_sample = torch.zeros_like(eval_naction)
+                        timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
+                        if self.agent.primitive_integration == 'separate_networks':
+                            n_pred = torch.zeros_like(eval_naction)
+                            for k in range(self.agent.K):
+                                dim_k = self.agent.diffusion_dims[k]
+                                if dim_k == 0: continue
+                                mask_k = (gt_prim_ids == k)
+                                if mask_k.sum() > 0:
+                                    n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
+                                        dummy_sample[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
+                                    )
+                            eval_naction = n_pred
+                        else:
+                            n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = n_pred
+
+                    elif loss_type == 'ot_flow_match':
+                        num_steps = self.config.num_diffusion_iters
+                        dt = 1.0 / num_steps
+                        for i in range(num_steps):
+                            t_val = i / num_steps
+                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                v_pred = torch.zeros_like(eval_naction)
+                                for k in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[k]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == k)
+                                    if mask_k.sum() > 0:
+                                        v_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                                eval_naction = eval_naction + v_pred * dt
+                            else:
+                                v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                                eval_naction = eval_naction + v_pred * dt
+                    else:
+                        self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
+                        for step_k in self.agent.noise_scheduler.timesteps:
+                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
+                            if self.agent.primitive_integration == 'separate_networks':
+                                n_pred = torch.zeros_like(eval_naction)
+                                for net_idx in range(self.agent.K):
+                                    dim_k = self.agent.diffusion_dims[net_idx]
+                                    if dim_k == 0: continue
+                                    mask_k = (gt_prim_ids == net_idx)
+                                    if mask_k.sum() > 0:
+                                        n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{net_idx}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
+                            else:
+                                n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
+                            eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
+
+                    act_dim = self.agent.network_action_dim
+                    state_dim = self.config.state_dim
+                    num_kpts = state_dim // 2
+                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
+                    
+                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
+                    if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.agent.update_step)
+                    
+                    if getattr(self.agent, 'predict_goal_state', False):
+                        goal_dim = getattr(self.agent, 'goal_state_dim', 30)
+                        num_goal_kpts = goal_dim // 2
+                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
+                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
+                        if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.agent.update_step)
+
+                    self.agent.nets.train()
+
+            if self.agent.validate_training and self.agent.update_step > 0 and self.agent.update_step % self.agent.val_interval == 0:
+                self.validate()
+
+            self.agent.update_step += 1
 
 
 ==================================================
@@ -1462,513 +2498,6 @@ class MagpieAgent(TrainableAgent):
 
 
 ==================================================
-FILE: networks.py
-==================================================
-
-"""
-Magpie Core Networks Module.
-
-This module contains the foundational neural network architectures for the diffusion 
-policy. It includes the 1D U-Net and MLP backbones for the reverse diffusion process, 
-positional embeddings for timestep conditioning, FiLM-modulated residual blocks for 
-state conditioning, and auxiliary networks for representation learning and classification.
-"""
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import math
-from typing import Union
-
-class ResNetDecoder(nn.Module):
-    """
-    Decodes a 1D latent representation back into a 2D spatial image mask or observation.
-
-    Typically used as an auxiliary task (Auto-Encoder) during representation learning 
-    to force the vision encoder to capture geometrically meaningful features.
-    """
-    def __init__(self, input_dim=512, output_channel=3):
-        super().__init__()
-        # Map the flat 512-dim vector into a low-resolution spatial feature map (6x6)
-        self.fc = nn.Linear(input_dim, 256 * 6 * 6)
-        
-        # Sequentially upsample: 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            
-            nn.ConvTranspose2d(32, output_channel, kernel_size=4, stride=2, padding=1),
-            # Squash output to [0, 1] range to match normalized image inputs
-            nn.Sigmoid() 
-        )
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.Tensor): Latent vector of shape (Batch, 512).
-        Returns:
-            torch.Tensor: Reconstructed spatial tensor of shape (Batch, C, 96, 96).
-        """
-        x = self.fc(x)
-        x = x.view(-1, 256, 6, 6)
-        x = self.decoder(x)
-        return x
-    
-class SinusoidalPosEmb(nn.Module):
-    """
-    Standard sinusoidal positional embedding.
-    
-    Used to encode the scalar diffusion timestep `k` into a high-dimensional 
-    vector so the neural network can condition its denoising logic on the current 
-    noise level.
-    """
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.Tensor): 1D tensor of timesteps (Batch,).
-        Returns:
-            torch.Tensor: Embedded timesteps of shape (Batch, dim).
-        """
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
-
-
-class Downsample1d(nn.Module):
-    """Halves the temporal resolution of the action sequence."""
-    def __init__(self, dim, disable=False):
-        super().__init__()
-        self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
-        self.disable = disable
-
-    def forward(self, x):
-        if self.disable:
-            return x
-        return self.conv(x)
-
-class Upsample1d(nn.Module):
-    """Doubles the temporal resolution of the action sequence."""
-    def __init__(self, dim, disable=False):
-        super().__init__()
-        self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
-        self.disable = disable
-
-    def forward(self, x):
-        if self.disable:
-            return x
-        return self.conv(x)
-
-
-class Conv1dBlock(nn.Module):
-    """
-    Standard 1D Convolutional Block using GroupNorm and Mish activation.
-
-    GroupNorm is preferred over BatchNorm in sequence modeling and RL because 
-    batch sizes are often small or highly correlated, which destabilizes BatchNorm.
-    Mish provides a smooth, non-monotonic gradient flow.
-    """
-    def __init__(self, inp_channels, out_channels, kernel_size, n_groups=8):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv1d(inp_channels, out_channels, kernel_size, padding=kernel_size // 2),
-            nn.GroupNorm(n_groups, out_channels),
-            nn.Mish(),
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
-class ConditionalResidualBlock1D(nn.Module):
-    """
-    A 1D Residual Block modulated by global conditioning features via FiLM.
-
-    Feature-wise Linear Modulation (FiLM) is the standard mechanism to inject 
-    the environmental observation (image features) and the diffusion timestep 
-    into the action denoiser. It predicts a per-channel scale and bias to shift 
-    the convolutional activations.
-    """
-    def __init__(self,
-            in_channels,
-            out_channels,
-            cond_dim,
-            kernel_size=3,
-            n_groups=8):
-        super().__init__()
-
-        self.blocks = nn.ModuleList([
-            Conv1dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups),
-            Conv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
-        ])
-
-        # FiLM Modulator: maps the global condition to scale and bias vectors
-        cond_channels = out_channels * 2
-        self.out_channels = out_channels
-        self.cond_encoder = nn.Sequential(
-            nn.Mish(),
-            nn.Linear(cond_dim, cond_channels),
-            nn.Unflatten(-1, (-1, 1)) # Prepare for broadcasting over the time dimension
-        )
-
-        # 1x1 conv to match channel dimensions for the residual connection
-        self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
-            if in_channels != out_channels else nn.Identity()
-
-    def forward(self, x, cond):
-        """
-        Args:
-            x (torch.Tensor): Action sequence of shape (Batch, in_channels, Horizon).
-            cond (torch.Tensor): Global condition (vision + timestep) of shape (Batch, cond_dim).
-
-        Returns:
-            torch.Tensor: Modulated action sequence of shape (Batch, out_channels, Horizon).
-        """
-        out = self.blocks[0](x)
-        
-        # Generate FiLM scale and bias
-        embed = self.cond_encoder(cond)
-        embed = embed.reshape(embed.shape[0], 2, self.out_channels, 1)
-        scale = embed[:, 0, ...]
-        bias = embed[:, 1, ...]
-        
-        # Apply affine modulation
-        out = scale * out + bias
-
-        out = self.blocks[1](out)
-        out = out + self.residual_conv(x)
-        return out
-
-
-class ConditionalUnet1D(nn.Module):
-    """
-    The core Diffusion Backbone: A 1D U-Net.
-
-    Unlike standard 2D U-Nets used for images, this operates over the temporal 
-    horizon of the action trajectory. The spatial dimension is `T` (prediction horizon), 
-    and the "channels" are the action dimensions.
-    """
-    def __init__(self,
-        input_dim,
-        global_cond_dim,
-        diffusion_step_embed_dim=256,
-        down_dims=[256,512,1024],
-        kernel_size=5,
-        n_groups=8,
-        diable_updown=False): # Note: retained original typo 'diable_updown' for compatibility
-        """
-        Args:
-            input_dim: Action dimension (e.g., 7 DoF).
-            global_cond_dim: Dimension of the flattened vision/state features.
-            diffusion_step_embed_dim: Dimension of the sinusoidal time embedding.
-            down_dims: List of channel dimensions for the UNet hierarchy.
-            kernel_size: Convolutional kernel size along the time axis.
-            n_groups: Group count for GroupNorm.
-            diable_updown: If True, skips spatial downsampling/upsampling.
-        """
-        print('disable_updown', diable_updown)
-        super().__init__()
-        all_dims = [input_dim] + list(down_dims)
-        start_dim = down_dims[0]
-
-        # Process diffusion timestep `k` into an embedding
-        dsed = diffusion_step_embed_dim
-        diffusion_step_encoder = nn.Sequential(
-            SinusoidalPosEmb(dsed),
-            nn.Linear(dsed, dsed * 4),
-            nn.Mish(),
-            nn.Linear(dsed * 4, dsed),
-        )
-        
-        # The total conditioning dimension injected into every FiLM block
-        cond_dim = dsed + global_cond_dim
-
-        in_out = list(zip(all_dims[:-1], all_dims[1:]))
-        mid_dim = all_dims[-1]
-        
-        # Bottleneck blocks
-        self.mid_modules = nn.ModuleList([
-            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-        ])
-
-        # Contracting Path
-        down_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = ind >= (len(in_out) - 1)
-            down_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(dim_in, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(dim_out, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-                Downsample1d(dim_out, diable_updown) if not is_last else nn.Identity()
-            ]))
-
-        # Expanding Path
-        up_modules = nn.ModuleList([])
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (len(in_out) - 1)
-            up_modules.append(nn.ModuleList([
-                # dim_out * 2 because of skip connections concatenated from down_modules
-                ConditionalResidualBlock1D(dim_out*2, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-                ConditionalResidualBlock1D(dim_in, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
-                Upsample1d(dim_in, diable_updown) if not is_last else nn.Identity()
-            ]))
-
-        # Final projection back to action dimensions
-        final_conv = nn.Sequential(
-            Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
-            nn.Conv1d(start_dim, input_dim, 1),
-        )
-
-        self.diffusion_step_encoder = diffusion_step_encoder
-        self.up_modules = up_modules
-        self.down_modules = down_modules
-        self.final_conv = final_conv
-
-        print("number of parameters: {:e}".format(sum(p.numel() for p in self.parameters())))
-
-    def forward(self,
-            sample: torch.Tensor,
-            timestep: Union[torch.Tensor, float, int],
-            global_cond=None):
-        """
-        Args:
-            sample (torch.Tensor): Noisy action sequence (Batch, Horizon, ActionDim).
-            timestep (Tensor/int): Current diffusion step.
-            global_cond (torch.Tensor): Visual/State conditioning (Batch, CondDim).
-
-        Returns:
-            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim).
-        """
-        # PyTorch 1D Convs expect (Batch, Channels, Length). We swap ActionDim and Horizon.
-        # (B, T, C) -> (B, C, T)
-        sample = sample.moveaxis(-1,-2)
-
-        # 1. Process Timesteps
-        timesteps = timestep
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
-        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
-            timesteps = timesteps[None].to(sample.device)
-            
-        # Broadcast to batch dimension
-        timesteps = timesteps.expand(sample.shape[0])
-
-        global_feature = self.diffusion_step_encoder(timesteps)
-
-        # 2. Fuse Timestep and Vision features
-        if global_cond is not None:
-            global_feature = torch.cat([global_feature, global_cond], axis=-1)
-
-        x = sample
-        h = []
-        
-        # 3. Contracting Path
-        for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
-            x = resnet(x, global_feature)
-            x = resnet2(x, global_feature)
-            h.append(x) # Save for skip connection
-            x = downsample(x)
-
-        # 4. Bottleneck
-        for mid_module in self.mid_modules:
-            x = mid_module(x, global_feature)
-
-        # 5. Expanding Path
-        for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
-            # Concatenate skip connection
-            x = torch.cat((x, h.pop()), dim=1)
-            x = resnet(x, global_feature)
-            x = resnet2(x, global_feature)
-            x = upsample(x)
-
-        x = self.final_conv(x)
-
-        # Revert back to (Batch, Horizon, ActionDim)
-        x = x.moveaxis(-1,-2)
-        return x
-
-
-def get_activation(name: str):
-    """Utility to map string names to PyTorch activation modules."""
-    name = name.lower()
-    if name == "relu":
-        return nn.ReLU()
-    elif name == "gelu":
-        return nn.GELU()
-    elif name == "silu" or name == "swish":
-        return nn.SiLU()
-    elif name == "tanh":
-        return nn.Tanh()
-    elif name == "leaky_relu":
-        return nn.LeakyReLU(0.01)
-    else:
-        raise ValueError(f"Unsupported activation: {name}")
-
-
-class MLPNetwork(nn.Module):
-    """
-    Standard Multi-Layer Perceptron.
-
-    Used primarily as the classification head for primitive skill selection 
-    (e.g., determining whether to execute a pick, place, or dual-arm operation).
-    """
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dims,
-        activation="relu",
-        dropout=0.0,
-        use_layernorm=False,
-    ):
-        super().__init__()
-
-        layers = []
-        dims = [input_dim] + list(hidden_dims)
-        act = get_activation(activation)
-
-        for i in range(len(hidden_dims)):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-
-            if use_layernorm:
-                layers.append(nn.LayerNorm(dims[i + 1]))
-
-            layers.append(act)
-
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
-
-        layers.append(nn.Linear(dims[-1], output_dim))
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.net(x)
-
-class ConditionalMLP1D(nn.Module):
-    """
-    An alternative Diffusion Backbone: A Dense MLP.
-
-    While the U-Net leverages temporal convolutions to maintain structural awareness 
-    across the trajectory horizon, the MLP flattens the entire horizon into a single 
-    vector. This is faster and uses fewer parameters, but generally performs worse 
-    on highly complex continuous control tasks compared to the U-Net.
-    """
-    def __init__(
-        self,
-        input_dim,
-        global_cond_dim,
-        pred_horizon,
-        diffusion_step_embed_dim=256,
-        hidden_dims=[512, 512, 512],
-        activation="relu",
-        dropout=0.1
-    ):
-        """
-        Args:
-            input_dim: Dim of a single action step.
-            global_cond_dim: Dim of global conditioning.
-            pred_horizon: The length of the action sequence (needed to flatten/unflatten).
-            diffusion_step_embed_dim: Size of positional encoding for diffusion iteration.
-            hidden_dims: List of hidden layer dimensions.
-        """
-        super().__init__()
-        self.input_dim = input_dim
-        self.pred_horizon = pred_horizon
-
-        # Time step embedding (identical to ConditionalUnet1D for consistent scaling)
-        dsed = diffusion_step_embed_dim
-        self.diffusion_step_encoder = nn.Sequential(
-            SinusoidalPosEmb(dsed),
-            nn.Linear(dsed, dsed * 4),
-            nn.Mish(),
-            nn.Linear(dsed * 4, dsed),
-        )
-
-        # The MLP takes the flattened action + time embedding + global conditioning
-        cond_dim = dsed + global_cond_dim
-        mlp_input_dim = (pred_horizon * input_dim) + cond_dim
-        output_dim = pred_horizon * input_dim
-
-        # Build the dense layers
-        layers = []
-        dims = [mlp_input_dim] + list(hidden_dims)
-        act = get_activation(activation)
-
-        for i in range(len(hidden_dims)):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(act)
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
-
-        # Final projection to the flattened action shape
-        layers.append(nn.Linear(dims[-1], output_dim))
-        self.net = nn.Sequential(*layers)
-
-        print("number of parameters (MLP backbone): {:e}".format(
-            sum(p.numel() for p in self.parameters()))
-        )
-
-    def forward(
-        self,
-        sample: torch.Tensor,
-        timestep: Union[torch.Tensor, float, int],
-        global_cond=None
-    ):
-        """
-        Args:
-            sample: (Batch, Horizon, ActionDim)
-            timestep: (Batch,) or int
-            global_cond: (Batch, CondDim)
-            
-        Returns:
-            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim)
-        """
-        B, T, C = sample.shape
-
-        # 1. Process time steps
-        timesteps = timestep
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
-        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
-            timesteps = timesteps[None].to(sample.device)
-        timesteps = timesteps.expand(B)
-
-        global_feature = self.diffusion_step_encoder(timesteps)
-
-        # 2. Concatenate conditioning features
-        if global_cond is not None:
-            global_feature = torch.cat([global_feature, global_cond], dim=-1)
-
-        # 3. Flatten the action sample (B, T*C) and concat with conditioning
-        sample_flat = sample.reshape(B, -1) 
-        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) 
-
-        # 4. Forward pass
-        out_flat = self.net(mlp_in) 
-
-        # 5. Unflatten back to original temporal shape
-        out = out_flat.reshape(B, T, C)
-        return out
-
-
-==================================================
 FILE: draw_utils.py
 ==================================================
 
@@ -2038,1246 +2567,6 @@ def plot_rgb_workspace_mask_goal_features(image_tensor, save_dir='tmp'):
     cv2.imwrite(os.path.join(save_dir, 'mask_ch4_robot1.png'), (mask1 * 255).astype(np.uint8))
     
     print(f"Saved individual mask channels to {save_dir}/")
-
-
-==================================================
-FILE: magpie_trainer.py
-==================================================
-
-"""
-Magpie Trainer Module.
-
-This module contains the MagpieTrainer class, which orchestrates the data loading, 
-validation, and training loops for the Magpie diffusion-based robotics agent. It 
-supports both standard Denoising Diffusion Probabilistic Models (DDPM) and 
-Optimal Transport (OT) Flow Matching, along with primitive action integration.
-"""
-
-import os
-import torch
-import torch.nn as nn
-import numpy as np
-import cv2
-from tqdm import tqdm
-from dotmap import DotMap
-
-from actoris_harena.utilities.visual_utils import save_numpy_as_gif, save_video
-from actoris_harena.utilities.save_utils import save_mask
-from .dataset import DiffusionDataset
-from .utils import compute_classification_metrics
-
-class MagpieTrainer:
-    """
-    Coordinates the training and validation pipelines for the MagpieAgent.
-
-    Attributes:
-        agent: The core diffusion agent containing the networks and state.
-        config (DotMap): Configuration dictionary containing hyperparameters.
-        device (torch.device): Hardware device (CPU/GPU) for tensor operations.
-    """
-
-    def __init__(self, agent):
-        """
-        Initializes the MagpieTrainer with a reference to the main agent.
-
-        Args:
-            agent: The MagpieAgent instance containing neural networks and config.
-        """
-        self.agent = agent
-        self.config = agent.config
-        self.device = agent.device
-
-    def _init_dataset(self):
-        """
-        Initializes the standard trajectory dataset and prepares PyTorch DataLoaders.
-
-        Configures either a 'diffusion' or 'general' dataset mode. If primitive 
-        integration is enabled, it sets up Random Oversampling (ROS) using a 
-        WeightedRandomSampler to mitigate class imbalance among primitive actions.
-
-        Raises:
-            ValueError: If an unsupported `dataset_mode` is provided.
-        """
-        # 1. Dataset Instantiation
-        if self.config.dataset_mode == 'diffusion':
-            train_dataset = DiffusionDataset(
-                dataset_path=self.config.dataset_path,
-                pred_horizon=self.config.pred_horizon,
-                obs_horizon=self.config.obs_horizon,
-                action_horizon=self.config.action_horizon
-            )
-            self.agent.stats = train_dataset.stats
-            
-        elif self.config.dataset_mode == 'general':
-            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-            config_dict = self.config.dataset_config.toDict()
-            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
-
-            if self.agent.validate_training:
-                val_dataset = TrajectoryDataset(**config_dict, sample_mode='val')
-        
-        elif self.config.dataset_mode == 'hindsight':
-            from .hindsight_dataset import HindsightDataset
-            config_dict = self.config.dataset_config.toDict()
-            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
-
-            if self.agent.validate_training:
-                val_dataset = HindsightDataset(**config_dict, sample_mode='val')
-
-        else:
-            raise ValueError('Invalid dataset mode. Expected "diffusion", "hindsignt", "general".')
-
-        # 2. Random Oversampling (ROS) Logic for Imbalanced Primitives
-        use_ros = self.config.get('use_random_oversampling', False)
-        sampler = None
-        shuffle_data = True
-        
-        if use_ros and self.agent.primitive_integration != 'none':
-            print("[MultiPrimitiveDiffusionAdapter] Initializing WeightedRandomSampler for ROS...")
-            from torch.utils.data import WeightedRandomSampler
-            
-            class_counts = np.zeros(self.agent.K)
-            sample_classes = []
-            
-            # Tally occurrences of each primitive class
-            for i in tqdm(range(len(train_dataset)), desc="Calculating ROS Weights"):
-                action_data = train_dataset[i]['action']
-                act_key = list(action_data.keys())[0]
-                prim_bin = action_data[act_key][0][0] 
-                
-                # Extract and normalize the primitive ID
-                prim_id = int(np.clip((((prim_bin + 1) / 2) * self.agent.K), 0, self.agent.K - 1))
-                class_counts[prim_id] += 1
-                sample_classes.append(prim_id)
-                
-            # Assign higher selection weights to underrepresented classes
-            class_weights = np.where(class_counts > 0, 1.0 / class_counts, 0.0)
-            sample_weights = [class_weights[cls_id] for cls_id in sample_classes]
-            
-            sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
-            shuffle_data = False # Must disable native shuffling when using a custom sampler
-            print(f"[MultiPrimitiveDiffusionAdapter] ROS Class Counts: {class_counts}")
-
-        # 3. DataLoader Performance Optimization
-        torch.backends.cudnn.benchmark = True
-        num_workers = self.config.get('num_workers', 0)
-        persistent = self.config.get('persistent_workers', False) if num_workers > 0 else False
-        prefetch_factor = self.config.get('prefetch_factor', None)
-
-        self.agent.dataloader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=shuffle_data,   
-            sampler=sampler, num_workers=num_workers, pin_memory=self.config.get('pin_memory', False),
-            persistent_workers=persistent, prefetch_factor=prefetch_factor
-        )
-
-        if self.agent.validate_training:
-            self.agent.val_dataloader = torch.utils.data.DataLoader(
-                val_dataset, batch_size=self.config.batch_size, shuffle=False, 
-                num_workers=max(1, num_workers // 4), pin_memory=self.config.get('pin_memory', False),
-                persistent_workers=persistent
-            )
-        self.agent.dataset_inited = True
-
-    def _init_demo_policy_dataset(self, arenas):
-        """
-        Initializes the dataset by rolling out a demonstrator policy in the environment.
-
-        Instead of loading pre-collected data, this method actively collects 
-        trajectories from an expert policy until the desired number of demos is reached.
-
-        Args:
-            arenas (list): A list containing the simulation environments to roll out in.
-        """
-        arena = arenas[0]
-        org_horizon = arena.action_horizon
-        arena.action_horizon = self.config.get('demo_horizon', org_horizon)
-        
-        # Safely convert to a standard dict to prevent mutating the global config
-        config_dict = self.config.dataset_config.toDict() if hasattr(self.config.dataset_config, 'toDict') else dict(self.config.dataset_config)
-        config_dict['io_mode'] = 'a' # Append mode
-        
-        # Route dataset instantiation based on the config mode
-        if self.config.dataset_mode == 'hindsight':
-            from .hindsight_dataset import HindsightDataset
-            train_dataset = HindsightDataset(**config_dict, sample_mode='train')
-        else:
-            from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
-            # Strip the HER mapping if falling back to the general base class
-            config_dict.pop('future_goal_mapping', None)
-            train_dataset = TrajectoryDataset(**config_dict, sample_mode='train')
-
-        import actoris_harena as ag_ar
-        policy = ag_ar.build_agent(self.config.demo_policy, self.config.get('demo_policy_config', DotMap({})), disable_wandb=True)
-
-        qbar = tqdm(total=self.config.num_demos, desc='Collecting data from policy ...')
-        qbar.update(train_dataset.num_trajectories())
-        qbar.refresh()
-        
-        episode_id = train_dataset.num_trajectories()
-        train_configs = arena.get_train_configs()
-        
-        # 1. Trajectory Collection Loop
-        while train_dataset.num_trajectories() < self.config.num_demos:
-            observations = {obs_type: [] for obs_type in train_dataset.obs_types}
-            actions = {act_type: [] for act_type in train_dataset.action_types}
-
-            policy.reset([arena.id])
-            info = arena.reset(train_configs[episode_id])
-
-            # Check if all requested keys exist in the environment's observation output
-            missing_keys = [k for k in train_dataset.obs_types if k not in info['observation']]
-            if missing_keys:
-                raise ValueError(
-                    f"\n[MagpieTrainer] CONFIGURATION ERROR: \n"
-                    f"Your dataset configuration is requesting the following keys: {missing_keys}\n"
-                    f"However, the environment (or task) is not outputting them in info['observation'].\n"
-                    f"Please either remove these keys from your dataset config (yaml) or update your environment to generate them."
-                )
-            
-            policy.init([info])
-            info['reward'] = 0
-            done = info['done']
-            
-            while not done:
-                action = policy.single_act(info)
-                if action is None: break
-                
-                # Store and format vision/mask observations
-                for k, v in info['observation'].items():
-                    if k in observations.keys():
-                        if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
-                            v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                            observations[k].append(v_)
-                        elif k in ['mask', 'goal_mask']:
-                            v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                            observations[k].append(v_ > 0.9)
-                        else:
-                            observations[k].append(v)
-                
-                # Handle primitive action mapping
-                add_action = action
-                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks', 'ordinary_encoding']: 
-                    action_name = list(action.keys())[0]
-                    action_param = action[action_name]
-                    prim_id = self.agent.prim_name2id[action_name]
-                    
-                    # Convert primitive ID back to normalized [-1, 1] bin format
-                    prim_act = (1.0*(prim_id+0.5)/self.agent.K *2 - 1)
-                    
-                    # This guarantees all primitives output an array of the exact same length (e.g., 9)
-                    expected_dim = train_dataset.act_config['default']['shape'][0]
-                    add_action = np.zeros(expected_dim, dtype=np.float32)
-                    
-                    add_action[0] = prim_act
-                    
-                    # Copy the primitive parameters into the zero-padded array safely
-                    copy_len = min(action_param.shape[0], expected_dim - 1)
-                    add_action[1:copy_len+1] = action_param[:copy_len]
-                    
-                elif self.config.primitive_integration == 'none':
-                    add_action = action
-                
-                actions['default'].append(add_action)  
-                info = arena.step(action)
-                policy.update(info, add_action)
-                info['reward'] = 0
-                done = info['done']
-                if self.agent.collect_on_success and info['success']: break
-            
-            # Capture final terminal observation
-            for k, v in info['observation'].items():
-                if k in observations.keys():
-                    if k in ['rgb', 'depth', 'goal_rgb', 'goal_depth']:
-                        v_ = cv2.resize(v, (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                        observations[k].append(v_)
-                    elif k in ['mask', 'goal_mask']:
-                        v_ = cv2.resize(v.astype(np.float32), (train_dataset.obs_config[k]['shape'][0], train_dataset.obs_config[k]['shape'][1]))
-                        observations[k].append(v_ > 0.9)
-                    else:
-                        observations[k].append(v)
-                        
-            # Save successful trajectories
-            if info['success'] or (self.config.get('add_all_demos', False) and not info['terminated']):
-                for k, v in observations.items():
-                    observations[k] = np.stack(v)
-                actions['default'] = np.stack(actions['default'])
-                train_dataset.add_trajectory(observations, actions)
-                qbar.update(1)
-                
-            episode_id = (episode_id + 1) % arena.get_num_episodes()
-
-        arena.action_horizon = org_horizon
-        
-        # ROS setup skipped here for brevity, mirrors logic from _init_dataset
-        self.agent.dataloader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=True, pin_memory=self.config.get('pin_memory', False)
-        )
-        self.agent.dataset_inited = True
-
-    def validate(self):
-        """
-        Executes the validation loop across the validation dataloader.
-
-        Computes action MSE, state prediction L2 distance, and primitive 
-        classification accuracy (if applicable). Logs all metrics to wandb.
-        """
-        if not hasattr(self.agent, 'val_dataloader'):
-            print("[Validation] No validation dataloader found. Skipping.")
-            return
-
-        self.agent.nets.eval() 
-        
-        # Metrics Accumulators
-        val_prim_losses, val_state_mse, val_state_l2, val_action_mse = [], [], [], []
-        all_preds, all_gts = [], []
-        
-        print(f"--- Running Validation at Step {self.agent.update_step} ---")
-        
-        with torch.no_grad():
-            for nbatch in self.agent.val_dataloader:
-                
-                # 1. Observation Pre-processing
-                if self.config.dataset_mode == 'general':
-                    obs = nbatch['observation']
-                    action = nbatch['action']['default']
-                    nbatch = {v: k for v, k in obs.items()}
-                    nbatch['action'] = action.reshape(*action.shape[:2], -1)
-                    nbatch = self.agent.data_augmenter(nbatch, train=False, device=self.device)
-
-                # Construct composite multi-modal observations
-                if self.config.input_obs == 'rgbd':
-                    nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
-                if self.config.input_obs == 'rgb-workspace-mask':
-                    nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
-                if self.config.input_obs == 'rgb-workspace-mask-goal':
-                    nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
-                if self.config.input_obs == 'rgb+goal_rgb':
-                    nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
-                if self.config.input_obs == 'rgb+goal_mask':
-                    nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
-
-                B = nbatch[self.config.input_obs].shape[0]
-                input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float().to(self.device)
-                
-                # 2. Extract Vision and State Features
-                if self.agent.vision_encoder_type == 'original':
-                    image_features = self.agent.nets['vision_encoder'](input_obs)
-                    obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
-                else:
-                    obs_features = self.agent.nets['vision_encoder'](input_obs).reshape(B, self.config.obs_horizon, -1) 
-                
-                if getattr(self.agent, 'use_projector', False):
-                    obs_features = self.agent.nets['obs_projector'](obs_features)
-
-                if self.config.include_state:
-                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device).float()
-                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
-
-                obs_cond = obs_features.flatten(start_dim=1)
-                
-                # 3. Validate State Predictor Representation Learning
-                if self.agent.rep_learn == 'predict-state':
-                    pred_combined = self.agent.nets['state_predictor'](obs_features)
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_tensors_val = []
-                    
-                    if state_key in nbatch:
-                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
-                        gt_tensors_val.append(gt_state)
-                        
-                        state_dim = self.config.state_dim
-                        num_kpts = state_dim // 2
-                        pred_kpts = pred_combined[..., :state_dim].view(-1, num_kpts, 2)
-                        gt_kpts = gt_state[..., :state_dim].view(-1, num_kpts, 2)
-                        
-                        l2_dist = torch.norm(pred_kpts - gt_kpts, dim=-1).mean()
-                        val_state_l2.append(l2_dist.item())
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float().to(self.device)
-                            gt_tensors_val.append(gt_goal)
-                            
-                    if gt_tensors_val:
-                        gt_combined_val = torch.cat(gt_tensors_val, dim=-1)
-                        mse_loss = nn.functional.mse_loss(pred_combined, gt_combined_val)
-                        val_state_mse.append(mse_loss.item())
-
-                # 4. Validate Primitive Classification Head
-                gt_prim_ids = None
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
-                    preds = torch.argmax(prim_logits, dim=-1)
-                    
-                    prim_bin = nbatch['action'][:, 0, 0].to(self.device)
-                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
-                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1)
-                    
-                    loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids)
-                    val_prim_losses.append(loss.item())
-                    all_preds.extend(preds.cpu().numpy())
-                    all_gts.extend(gt_prim_ids.cpu().numpy())
-                    
-                    if self.agent.primitive_integration == 'one-hot-encoding':
-                        prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-
-                    elif self.agent.primitive_integration == 'ordinary_encoding':
-                        # Append the continuous [-1, 1] bin prediction to the observation
-                        prim_enc = (1.0 * (preds.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
-                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
-
-                    gt_action = nbatch['action'][:, :, 1:].to(self.device)
-                else:
-                    gt_action = nbatch['action'].to(self.device)
-
-                # 5. Full Evaluation Denoising Pass
-                eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
-                loss_type = self.config.get('loss_type', 'diffusion')
-                
-                # Branch: Direct MSE Prediction
-                if loss_type == 'mse':
-                    dummy_sample = torch.zeros_like(eval_naction)
-                    timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
-                    
-                    if self.agent.primitive_integration == 'separate_networks':
-                        n_pred = torch.zeros_like(eval_naction)
-                        for net_idx in range(self.agent.K):
-                            dim_k = self.agent.diffusion_dims[net_idx]
-                            if dim_k == 0: continue
-                            mask_k = (preds == net_idx)
-                            if mask_k.sum() > 0:
-                                net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
-                                    sample=dummy_sample[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                )
-                                n_pred[mask_k, :, :dim_k] = net_out
-                    else:
-                        n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
-                        
-                    eval_naction = n_pred
-
-                # Branch: Optimal Transport Flow Matching
-                elif loss_type == 'ot_flow_match':
-                    num_steps = self.config.num_diffusion_iters
-                    dt = 1.0 / num_steps
-                    for i in range(num_steps):
-                        t_val = i / num_steps
-                        timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                        
-                        if self.agent.primitive_integration == 'separate_networks':
-                            v_pred = torch.zeros_like(eval_naction)
-                            for k in range(self.agent.K):
-                                dim_k = self.agent.diffusion_dims[k]
-                                if dim_k == 0: continue
-                                mask_k = (preds == k) 
-                                if mask_k.sum() > 0:
-                                    net_out = self.agent.nets[f'noise_pred_net_{k}'](
-                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                    )
-                                    v_pred[mask_k, :, :dim_k] = net_out
-                        else:
-                            v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            
-                        eval_naction = eval_naction + v_pred * dt
-                
-                # Branch: Standard DDPM Reverse Diffusion
-                else:
-                    self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                    for k in self.agent.noise_scheduler.timesteps:
-                        timestep_tensor = torch.full((B,), k.item(), device=self.device, dtype=torch.long)
-                        
-                        if self.agent.primitive_integration == 'separate_networks':
-                            n_pred = torch.zeros_like(eval_naction)
-                            for net_idx in range(self.agent.K):
-                                dim_k = self.agent.diffusion_dims[net_idx]
-                                if dim_k == 0: continue
-                                mask_k = (preds == net_idx)
-                                if mask_k.sum() > 0:
-                                    net_out = self.agent.nets[f'noise_pred_net_{net_idx}'](
-                                        sample=eval_naction[mask_k][..., :dim_k], timestep=timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                    )
-                                    n_pred[mask_k, :, :dim_k] = net_out
-                        else:
-                            n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            
-                        eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=k, sample=eval_naction).prev_sample
-
-                # 6. Action MSE Calculation
-                pred_action = eval_naction[..., :self.agent.network_action_dim]
-                
-                # Only calculate loss on the valid action dimensions corresponding to the chosen primitive
-                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
-                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
-                    for b in range(B):
-                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
-                    
-                    diff = (pred_action - gt_action) * mask
-                    valid_count = mask.sum().clamp(min=1.0) # Avoid div by zero
-                    mse = (diff ** 2).sum() / valid_count
-                else:
-                    mse = nn.functional.mse_loss(pred_action, gt_action)
-                
-                val_action_mse.append(mse.item())
-
-        # 7. Metric Aggregation and wandb Integration
-        metrics = {}
-        if val_state_l2: metrics['val/state_keypoint_l2_avg'] = np.mean(val_state_l2)
-        if val_state_mse: metrics['val/state_pred_loss'] = np.mean(val_state_mse)
-        if val_action_mse: metrics['val/action_mse'] = np.mean(val_action_mse)
-
-        if val_prim_losses:
-            metrics['val/prim_loss'] = np.mean(val_prim_losses)
-            acc = np.mean(np.array(all_preds) == np.array(all_gts))
-            metrics['val/prim_accuracy'] = acc
-            
-            # 1. Log the safe scalar metrics FIRST so they are never lost
-            if metrics and hasattr(self.agent, 'logger'):
-                self.agent.logger.log(metrics, step=self.agent.update_step)
-                print(f"Validation Results: {metrics}")
-
-            # 2. Attempt the W&B confusion matrix plot safely
-            if val_prim_losses:
-                import wandb
-                if wandb.run is not None and hasattr(self.agent, 'logger'):
-                    try:
-                        confusion = {"val/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                            probs=None,
-                            y_true=all_gts,
-                            preds=all_preds,
-                            class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
-                        )}
-                        self.agent.logger.log(confusion, step=self.agent.update_step)
-                    except Exception as e:
-                        print(f"W&B Confusion Matrix failed to log: {e}")
-
-        if metrics and hasattr(self.agent, 'logger'):
-            self.agent.logger.log(metrics, step=self.agent.update_step)
-            print(f"Validation Results: {metrics}")
-
-        self.agent.nets.train()
-
-    def train(self, update_steps, arenas):
-        """
-        Executes the main training optimization loop.
-
-        Args:
-            update_steps (int): Total number of gradient steps to take in this call.
-            arenas (list): Simulation environments (required if training from policy).
-        """
-        if not self.agent.dataset_inited:
-            if self.config.train_mode == 'from_dataset':
-                self._init_dataset()
-            elif self.config.train_mode == 'from_policy':
-                self._init_demo_policy_dataset(arenas)
-        
-        # Ensure we don't overshoot total configured steps
-        update_steps = min(self.config.total_update_steps - self.agent.update_step, update_steps)
-        
-        if self.config.get('freeze_encoder', False):
-            self.agent.nets['vision_encoder'].eval()
-            
-        def cycle(dl):
-            while True:
-                for data in dl: yield data
-                    
-        train_iter = iter(cycle(self.agent.dataloader))
-        pbar = tqdm(range(update_steps), desc="Training")
-
-        for i in pbar:
-            nbatch = next(train_iter)
-            
-            # 1. Input Batch Setup
-            if self.config.dataset_mode == 'diffusion':
-                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
-            else:
-                obs, action = nbatch['observation'], nbatch['action']['default']
-                nbatch = {v: k for v, k in obs.items()}
-                nbatch['action'] = action.reshape(*action.shape[:2], -1)
-                nbatch = self.agent.data_augmenter(nbatch, train=True, device=self.device)
-
-            if self.config.input_obs == 'rgbd': nbatch['rgbd'] = torch.cat([nbatch['rgb'], nbatch['depth']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask': nbatch['rgb-workspace-mask'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask']], dim=2)
-            if self.config.input_obs == 'rgb-workspace-mask-goal': nbatch['rgb-workspace-mask-goal'] = torch.cat([nbatch['rgb'], nbatch['robot0_mask'], nbatch['robot1_mask'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_rgb': nbatch['rgb+goal_rgb'] = torch.cat([nbatch['rgb'], nbatch['goal_rgb']], dim=2)
-            if self.config.input_obs == 'rgb+goal_mask': nbatch['rgb+goal_mask'] = torch.cat([nbatch['rgb'], nbatch['goal_mask']], dim=2)
-
-            B = nbatch[self.config.input_obs].shape[0]
-            input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
-
-            device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
-            use_amp = self.config.get('use_amp', False)
-
-            with torch.autocast(device_type=device_type, dtype=torch.bfloat16, enabled=use_amp):
-                # 2. Forward Feature Extraction
-                image_features = self.agent.nets['vision_encoder'](input_obs.to(self.device))
-                obs_features = image_features.reshape(B, self.config.obs_horizon, -1)
-                
-                if getattr(self.agent, 'use_projector', False):
-                    obs_features = self.agent.nets['obs_projector'](obs_features)
-
-                # Add noise to conditioning features for robustness
-                if self.agent.nets.training:
-                    noise = torch.randn_like(obs_features) * self.config.get('feature_noise_factor', 0)
-                    obs_features = obs_features + noise
-
-                # 3. Representation Learning Auxiliary Losses
-                rep_loss = torch.tensor(0.0, device=self.device)
-                
-                if self.agent.rep_learn == 'auto-encoder':
-                    reconstructed_obs = self.agent.nets['vision_decoder'](image_features)
-                    rep_loss = nn.functional.mse_loss(reconstructed_obs, input_obs.to(self.device))
-                elif self.agent.rep_learn == 'predict-state':
-                    pred_combined = self.agent.nets['state_predictor'](obs_features) 
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_tensors = []
-                    
-                    if state_key in nbatch:
-                        gt_state = nbatch[state_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float() 
-                        gt_tensors.append(gt_state.to(self.device))
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.obs_horizon].reshape(B, self.config.obs_horizon, -1).float()
-                            gt_tensors.append(gt_goal.to(self.device))
-                    if gt_tensors:
-                        gt_combined = torch.cat(gt_tensors, dim=-1) 
-                        rep_loss = nn.functional.mse_loss(pred_combined, gt_combined)
-
-                if self.config.include_state:
-                    vector_state = nbatch['vector_state'][:, :self.config.obs_horizon].to(self.device)
-                    obs_features = torch.cat([obs_features, vector_state], dim=-1)
-                    
-                obs_cond = obs_features.flatten(start_dim=1)
-
-                # 4. Primitive Classification Loss
-                gt_prim_ids = None
-                prim_loss = torch.tensor(0.0, device=self.device)
-                
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
-                    prim_bin = nbatch['action'][:, 0, 0]
-                    gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
-                    gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
-                    
-                    weights_list = self.config.get('prim_class_weights', [1.0] * self.agent.K)
-                    class_weights = torch.tensor(weights_list, device=self.device, dtype=torch.float32)
-                    prim_loss = nn.functional.cross_entropy(prim_logits, gt_prim_ids, weight=class_weights)
-
-                    log_every = self.config.get('log_prim_metrics_every', 200)
-                    
-                    if hasattr(self.agent, 'logger') and self.agent.update_step % log_every == 0:
-                        metrics = compute_classification_metrics(prim_logits.detach(), gt_prim_ids.detach(), self.agent.K)
-                        wandb_metrics = {f"train/prim_{k}": v for k, v in metrics.items()}
-                        self.agent.logger.log(wandb_metrics, step=self.agent.update_step)
-                        
-                        import wandb
-                        if wandb.run is not None:
-                            confusion = {"train/prim_confusion_matrix": wandb.plot.confusion_matrix(
-                                probs=None, y_true=gt_prim_ids.cpu().numpy(),
-                                preds=torch.argmax(prim_logits, dim=-1).cpu().numpy(),
-                                class_names=[p['name'] if isinstance(p, dict) else p.name for p in self.agent.primitives]
-                            )}
-                            self.agent.logger.log(confusion, step=self.agent.update_step)
-
-                    # Remove primitive bin from action target
-                    nbatch['action'] = nbatch['action'][:, :, 1:] 
-
-                    if self.agent.primitive_integration == 'one-hot-encoding':
-                        prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
-
-                    elif self.agent.primitive_integration == 'ordinary_encoding':
-                        # Condition the target using the Ground Truth scalar bin
-                        prim_enc = (1.0 * (gt_prim_ids.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
-                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
-
-                # 5. Build Diffusion Target
-                if self.agent.rep_learn == 'predict-state-with-action':
-                    state_key = self.config.get('state_key', 'semkey_norm_pixel')
-                    gt_state = nbatch[state_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_key = self.config.get('goal_state_key', 'flattened_goal_semkey_norm_pixel')
-                        if goal_key in nbatch:
-                            gt_goal = nbatch[goal_key][:, :self.config.pred_horizon].float().reshape(B, self.config.pred_horizon, -1).to(self.device)
-                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state, gt_goal], dim=-1)
-                        else:
-                            diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
-                    else:
-                        diffusion_target = torch.cat([nbatch['action'].to(self.device), gt_state], dim=-1)
-                else:
-                    diffusion_target = nbatch['action'].to(self.device)
-                    
-                loss_type = self.config.get('loss_type', 'diffusion')
-
-                # 6. Forward Forward Diffusion (Adding Noise)
-                if loss_type == 'ot_flow_match':
-                    noise = torch.randn_like(diffusion_target)
-                    t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
-                    t_expand = t.view(B, 1, 1)
-                    # Interpolate linearly between pure noise (t=0) and data (t=1)
-                    noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
-                    target = diffusion_target - noise
-                    timesteps = t * self.config.num_diffusion_iters
-                elif loss_type == 'mse':
-                    # For direct regression, we feed dummy zeros to the network and target the raw action.
-                    noisy_actions = torch.zeros_like(diffusion_target)
-                    timesteps = torch.zeros((B,), device=self.device, dtype=torch.long)
-                    target = diffusion_target
-                else:
-                    noise = torch.randn(diffusion_target.shape, device=self.device)
-                    timesteps = torch.randint(0, self.agent.noise_scheduler.config.num_train_timesteps, (B,), device=self.device).long()
-                    noisy_actions = self.agent.noise_scheduler.add_noise(diffusion_target, noise, timesteps)
-                    target = noise # DDPM trains to predict the added noise
-
-                # 7. Model Predictions
-                if self.agent.primitive_integration == 'separate_networks':
-                    noise_pred = torch.zeros_like(noisy_actions)
-                    for k in range(self.agent.K):
-                        dim_k = self.agent.diffusion_dims[k]
-                        if dim_k == 0: continue
-                        mask_k = (gt_prim_ids == k)
-                        if mask_k.sum() > 0:
-                            noise_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
-                                noisy_actions[mask_k][..., :dim_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
-                            )
-                else:
-                    noise_pred = self.agent.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
-
-                # 8. Loss Calculations
-                if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
-                    mask = torch.zeros((B, self.config.pred_horizon, self.agent.network_action_dim), device=self.device)
-                    for b in range(B):
-                        mask[b] = self.agent.primitive_action_masks[gt_prim_ids[b].item()].to(self.device)
-                        
-                    # Also unmask state target dims if doing joint diffusion
-                    if self.agent.rep_learn == 'predict-state-with-action':
-                        mask_extra_dim = self.config.state_dim
-                        if getattr(self.agent, 'predict_goal_state', False): mask_extra_dim += getattr(self.agent, 'goal_state_dim', 30)
-                        state_mask = torch.ones((B, self.config.pred_horizon, mask_extra_dim), device=self.device)
-                        mask = torch.cat([mask, state_mask], dim=-1)
-
-                    diff = (noise_pred - target) * mask
-                    valid_count = mask.sum().clamp(min=1.0)
-                    actor_noise_loss = (diff ** 2).sum() / valid_count
-                else:
-                    actor_noise_loss = nn.functional.mse_loss(noise_pred, target)
-                
-                prim_weight = self.config.get('prim_weight', 1.0)
-                total_loss = actor_noise_loss + (prim_loss * prim_weight) 
-                
-                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
-                    total_loss += rep_loss * self.config.get('rep_weight', 0.1)
-
-            # 9. Optimizer and Scheduler Updates
-            total_loss.backward()
-            
-            if self.agent.clip_norm > 0:
-                nn.utils.clip_grad_norm_(self.agent.nets.parameters(), self.agent.clip_norm)
-
-            self.agent.optimizer.step()
-            self.agent.optimizer.zero_grad()
-            self.agent.lr_scheduler.step()
-            
-            trainable_params = [p for p in self.agent.nets.parameters() if p.requires_grad]
-            self.agent.ema.step(trainable_params)
-
-            # 10. Training Logging
-            if hasattr(self.agent, 'logger'):
-                metrics_to_log = {
-                    'train/actor_noise_loss': actor_noise_loss.item(),
-                    'train/total_loss': total_loss.item()
-                }
-                if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
-                    metrics_to_log['train/state_pred_loss'] = rep_loss.item()
-                
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
-                    metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
-                    metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
-                    
-                self.agent.logger.log(metrics_to_log, step=self.agent.update_step)
-
-            # 11. Periodic Full Denoising Metric Evaluation (for Joint Diffusion)
-            log_interval = self.config.get('log_state_eval_every', 500)
-            if self.agent.rep_learn == 'predict-state-with-action' and self.agent.update_step % log_interval == 0:
-                with torch.no_grad():
-                    self.agent.nets.eval()
-                    eval_naction = torch.randn((B, self.config.pred_horizon, self.agent.diffusion_dim), device=self.device)
-                    
-                    if loss_type == 'mse':
-                        dummy_sample = torch.zeros_like(eval_naction)
-                        timestep_tensor = torch.zeros((B,), device=self.device, dtype=torch.long)
-                        if self.agent.primitive_integration == 'separate_networks':
-                            n_pred = torch.zeros_like(eval_naction)
-                            for k in range(self.agent.K):
-                                dim_k = self.agent.diffusion_dims[k]
-                                if dim_k == 0: continue
-                                mask_k = (gt_prim_ids == k)
-                                if mask_k.sum() > 0:
-                                    n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
-                                        dummy_sample[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k]
-                                    )
-                            eval_naction = n_pred
-                        else:
-                            n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
-                            eval_naction = n_pred
-
-                    elif loss_type == 'ot_flow_match':
-                        num_steps = self.config.num_diffusion_iters
-                        dt = 1.0 / num_steps
-                        for i in range(num_steps):
-                            t_val = i / num_steps
-                            timestep_tensor = torch.full((B,), t_val * self.config.num_diffusion_iters, device=self.device, dtype=torch.float32)
-                            if self.agent.primitive_integration == 'separate_networks':
-                                v_pred = torch.zeros_like(eval_naction)
-                                for k in range(self.agent.K):
-                                    dim_k = self.agent.diffusion_dims[k]
-                                    if dim_k == 0: continue
-                                    mask_k = (gt_prim_ids == k)
-                                    if mask_k.sum() > 0:
-                                        v_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
-                                eval_naction = eval_naction + v_pred * dt
-                            else:
-                                v_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                                eval_naction = eval_naction + v_pred * dt
-                    else:
-                        self.agent.noise_scheduler.set_timesteps(self.config.num_diffusion_iters)
-                        for step_k in self.agent.noise_scheduler.timesteps:
-                            timestep_tensor = torch.full((B,), step_k.item(), device=self.device, dtype=torch.long)
-                            if self.agent.primitive_integration == 'separate_networks':
-                                n_pred = torch.zeros_like(eval_naction)
-                                for net_idx in range(self.agent.K):
-                                    dim_k = self.agent.diffusion_dims[net_idx]
-                                    if dim_k == 0: continue
-                                    mask_k = (gt_prim_ids == net_idx)
-                                    if mask_k.sum() > 0:
-                                        n_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{net_idx}'](eval_naction[mask_k][..., :dim_k], timestep_tensor[mask_k], global_cond=obs_cond[mask_k])
-                            else:
-                                n_pred = self.agent.nets['noise_pred_net'](sample=eval_naction, timestep=timestep_tensor, global_cond=obs_cond)
-                            eval_naction = self.agent.noise_scheduler.step(model_output=n_pred, timestep=step_k, sample=eval_naction).prev_sample
-
-                    act_dim = self.agent.network_action_dim
-                    state_dim = self.config.state_dim
-                    num_kpts = state_dim // 2
-                    pred_curr_state = eval_naction[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
-                    gt_curr_state = diffusion_target[..., act_dim : act_dim + state_dim].view(B, -1, num_kpts, 2)
-                    
-                    curr_l2_dist = torch.norm(pred_curr_state - gt_curr_state, dim=-1).mean()
-                    if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/curr_semkey_l2': curr_l2_dist.item()}, step=self.agent.update_step)
-                    
-                    if getattr(self.agent, 'predict_goal_state', False):
-                        goal_dim = getattr(self.agent, 'goal_state_dim', 30)
-                        num_goal_kpts = goal_dim // 2
-                        pred_goal_state = eval_naction[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
-                        gt_goal_state = diffusion_target[..., act_dim + state_dim : act_dim + state_dim + goal_dim].view(B, -1, num_goal_kpts, 2)
-                        goal_l2_dist = torch.norm(pred_goal_state - gt_goal_state, dim=-1).mean()
-                        if hasattr(self.agent, 'logger'): self.agent.logger.log({'train/goal_semkey_l2': goal_l2_dist.item()}, step=self.agent.update_step)
-
-                    self.agent.nets.train()
-
-            if self.agent.validate_training and self.agent.update_step > 0 and self.agent.update_step % self.agent.val_interval == 0:
-                self.validate()
-
-            self.agent.update_step += 1
-
-
-==================================================
-FILE: test_hindsight_dataset.py
-==================================================
-
-import unittest
-import numpy as np
-import os
-import shutil
-import tempfile
-from torch.utils.data import DataLoader
-
-# --- Mocking the class import for the purpose of this script ---
-# Replace this with your actual import path
-from actoris_harena import TrajectoryDataset
-from hindsight_dataset import HindsightDataset 
-
-class TestHindsightDataset(unittest.TestCase):
-
-    def setUp(self):
-        self.test_dir = tempfile.mkdtemp()
-        self.data_path = "test_hindsight_dataset.zarr"
-        self.full_path = os.path.join(self.test_dir, self.data_path)
-
-        # Standard Configs matching your YAML
-        self.obs_config = {
-            'rgb': {'shape': (3, 128, 128), 'output_key': 'rgb'},
-            'depth': {'shape': (1, 128, 128), 'output_key': 'depth'},
-            'semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'semkey_norm_pixel'},
-            # The static goals that should be OVERWRITTEN by the hindsight logic
-            'goal_rgb': {'shape': (3, 128, 128), 'output_key': 'goal_rgb'},
-            'flattened_goal_semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'flattened_goal_semkey_norm_pixel'}
-        }
-        
-        self.act_config = {
-            'default': {'shape': (9,), 'output_key': 'default'}
-        }
-        
-        self.future_goal_mapping = {
-            'rgb': 'goal_rgb',
-            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
-        }
-
-    def tearDown(self):
-        shutil.rmtree(self.test_dir)
-
-    def generate_temporally_predictable_data(self, num_steps=10):
-        """
-        CRITICAL: Instead of random noise, we fill the tensors with their timestep index 't'.
-        This allows the tests to inspect the sampled goal and know exactly which future 
-        frame the stochastic sampler selected.
-        """
-        obs = {
-            'rgb': np.zeros((num_steps + 1, 3, 128, 128), dtype=np.float32),
-            'depth': np.zeros((num_steps + 1, 1, 128, 128), dtype=np.float32),
-            'semkey_norm_pixel': np.zeros((num_steps + 1, 17, 2), dtype=np.float32),
-            
-            # Fill original static goals with -1.0 so we can prove they get overwritten
-            'goal_rgb': np.full((num_steps + 1, 3, 128, 128), -1.0, dtype=np.float32),
-            'flattened_goal_semkey_norm_pixel': np.full((num_steps + 1, 17, 2), -1.0, dtype=np.float32)
-        }
-        
-        for t in range(num_steps + 1):
-            obs['rgb'][t] += t
-            obs['semkey_norm_pixel'][t] += (t * 10) # Distinct scalar for keypoints
-            
-        act = {
-            'default': np.zeros((num_steps, 9), dtype=np.float32)
-        }
-        
-        return obs, act
-
-    # =========================================================================
-    # TEST 1: HER Mapping and Shape Consistency
-    # =========================================================================
-    def test_hindsight_mapping_and_shapes(self):
-        print("\n--- Test 1: HER Mapping and Shape Consistency ---")
-        
-        dataset_w = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
-            obs_config=self.obs_config, act_config=self.act_config,
-            future_goal_mapping=self.future_goal_mapping
-        )
-        
-        # Add trajectory of 10 actions (11 observations stored due to pad)
-        obs, act = self.generate_temporally_predictable_data(10)
-        dataset_w.add_trajectory(obs, act)
-
-        seq_len = 2
-        dataset_r = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
-            obs_config=self.obs_config, act_config=self.act_config,
-            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
-            future_goal_mapping=self.future_goal_mapping
-        )
-
-        item = dataset_r[0] # Sampling start_idx = 0, end_idx = 2
-        
-        # 1. Verify shapes. Observation sequences should be (seq_len + 1, ...)
-        expected_obs_seq_len = seq_len + 1
-        self.assertEqual(item['observation']['goal_rgb'].shape, (expected_obs_seq_len, 3, 128, 128))
-        self.assertEqual(item['observation']['flattened_goal_semkey_norm_pixel'].shape, (expected_obs_seq_len, 17, 2))
-
-        # 2. Verify static goals were overwritten (no -1.0 values remain)
-        self.assertTrue(np.all(item['observation']['goal_rgb'] >= 0))
-        
-        # 3. Verify temporal tiling. The goal should be identical across the sequence dimension.
-        # Check if the first frame of the goal equals the last frame of the goal sequence
-        np.testing.assert_array_equal(item['observation']['goal_rgb'][0], item['observation']['goal_rgb'][-1])
-        
-        print("Mapping and shape constraints verified.")
-
-    # =========================================================================
-    # TEST 2: Rigorous Stochastic Future Boundaries & Synchronization
-    # =========================================================================
-    def test_future_sampling_bounds_rigorous(self):
-        print("\n--- Test 2: Rigorous Stochastic Future Boundaries ---")
-        
-        dataset_w = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
-            obs_config=self.obs_config, act_config=self.act_config,
-            future_goal_mapping=self.future_goal_mapping
-        )
-        
-        # Use a slightly longer trajectory to give the sampler a wider variance
-        traj_len = 15
-        obs, act = self.generate_temporally_predictable_data(traj_len)
-        dataset_w.add_trajectory(obs, act)
-
-        seq_len = 4
-        dataset_r = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
-            obs_config=self.obs_config, act_config=self.act_config,
-            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
-            future_goal_mapping=self.future_goal_mapping
-        )
-
-        # effective_traj_end avoids the dummy pad (traj_len - 1 = 14)
-        effective_traj_end = traj_len - 1 
-
-        # We will test EVERY valid starting index in the trajectory
-        num_valid_starts = len(dataset_r)
-        
-        for start_idx in range(num_valid_starts):
-            end_idx = start_idx + seq_len
-            expected_min = min(end_idx, effective_traj_end)
-            expected_max = effective_traj_end
-            
-            valid_future_range = list(range(expected_min, expected_max + 1))
-            sampled_t_rgb_counts = {t: 0 for t in valid_future_range}
-            
-            # Sample enough times to guarantee hitting every uniform choice.
-            # Using 200 samples makes the probability of missing a valid bin astronomically small.
-            num_samples = 200 
-            
-            for _ in range(num_samples):
-                item = dataset_r[start_idx]
-                
-                # Check RGB temporal mark
-                sampled_t_rgb = int(np.mean(item['observation']['goal_rgb']))
-                
-                # Check Semkey temporal mark. 
-                # Recall we multiplied semkey by 10 in generate_temporally_predictable_data
-                sampled_t_semkey = int(np.mean(item['observation']['flattened_goal_semkey_norm_pixel'])) / 10.0
-                
-                # --- RIGOR CHECK 1: Cross-Modality Synchronization ---
-                self.assertEqual(
-                    sampled_t_rgb, int(sampled_t_semkey), 
-                    f"Temporal mismatch! RGB goal is from t={sampled_t_rgb} but Semkey goal is from t={sampled_t_semkey}"
-                )
-                
-                # --- RIGOR CHECK 2: Absolute Boundaries ---
-                self.assertGreaterEqual(
-                    sampled_t_rgb, expected_min, 
-                    f"Time Travel Bug: Sampled past index {sampled_t_rgb} for start {start_idx} (min allowed: {expected_min})"
-                )
-                self.assertLessEqual(
-                    sampled_t_rgb, expected_max, 
-                    f"Out of Bounds Bug: Sampled index {sampled_t_rgb} for start {start_idx} (max allowed: {expected_max})"
-                )
-                
-                sampled_t_rgb_counts[sampled_t_rgb] += 1
-
-            # --- RIGOR CHECK 3: Uniform Coverage ---
-            # Ensure every single valid future index was sampled at least once
-            if expected_min < expected_max: # If there's an actual range to sample from
-                for t, count in sampled_t_rgb_counts.items():
-                    self.assertGreater(
-                        count, 0, 
-                        f"Coverage Failure: At start_idx={start_idx}, valid future index {t} was NEVER sampled after {num_samples} tries. Sampler is biased."
-                    )
-                    
-        print(f"Rigorous future boundary, synchronization, and coverage checks passed across all {num_valid_starts} sliding windows.")
-
-    # =========================================================================
-    # TEST 3: Edge Case - Sampling at the absolute end of the trajectory
-    # =========================================================================
-    def test_trajectory_end_edge_case(self):
-        print("\n--- Test 3: Trajectory End Edge Case ---")
-        
-        dataset_w = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
-            obs_config=self.obs_config, act_config=self.act_config,
-            future_goal_mapping=self.future_goal_mapping
-        )
-        
-        traj_len = 5
-        obs, act = self.generate_temporally_predictable_data(traj_len)
-        dataset_w.add_trajectory(obs, act)
-
-        seq_len = 1
-        dataset_r = HindsightDataset(
-            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
-            obs_config=self.obs_config, act_config=self.act_config,
-            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
-            future_goal_mapping=self.future_goal_mapping
-        )
-
-        # Max valid start_idx = (traj_len) - seq_len = 5 - 1 = 4
-        # At start_idx = 4, end_idx = 5.
-        # effective_traj_end is 4 (indices 0,1,2,3,4 are valid obs, 5 is pad).
-        # In this edge case, end_idx > effective_traj_end, so the sampler MUST 
-        # clamp to effective_traj_end (4) without throwing a ValueError.
-        max_idx = len(dataset_r) - 1
-        
-        try:
-            item = dataset_r[max_idx]
-            sampled_t = int(np.mean(item['observation']['goal_rgb']))
-            
-            # The only valid fallback is clamping to the final valid observation
-            self.assertEqual(sampled_t, 4, "Edge case clamping failed to select the final valid frame.")
-            print("Edge case clamping successful.")
-        except ValueError as e:
-            self.fail(f"Sampler crashed at the end of the trajectory: {e}")
-
-if __name__ == '__main__':
-    unittest.main()
-
-
-==================================================
-FILE: dataset.py
-==================================================
-
-import numpy as np
-import torch
-import zarr
-import os
-
-def create_sample_indices(
-        episode_ends:np.ndarray, sequence_length:int,
-        pad_before: int=0, pad_after: int=0):
-    indices = list()
-    for i in range(len(episode_ends)):
-        start_idx = 0
-        if i > 0:
-            start_idx = episode_ends[i-1]
-        end_idx = episode_ends[i]
-        episode_length = end_idx - start_idx
-
-        min_start = -pad_before
-        max_start = episode_length - sequence_length + pad_after
-
-        # range stops one idx before end
-        for idx in range(min_start, max_start+1):
-            buffer_start_idx = max(idx, 0) + start_idx
-            buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
-            start_offset = buffer_start_idx - (idx+start_idx)
-            end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
-            sample_start_idx = 0 + start_offset
-            sample_end_idx = sequence_length - end_offset
-            indices.append([
-                buffer_start_idx, buffer_end_idx,
-                sample_start_idx, sample_end_idx])
-    indices = np.array(indices)
-    return indices
-
-
-def sample_sequence(train_data, sequence_length,
-                    buffer_start_idx, buffer_end_idx,
-                    sample_start_idx, sample_end_idx):
-    result = dict()
-    for key, input_arr in train_data.items():
-        sample = input_arr[buffer_start_idx:buffer_end_idx]
-        data = sample
-        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
-            data = np.zeros(
-                shape=(sequence_length,) + input_arr.shape[1:],
-                dtype=input_arr.dtype)
-            if sample_start_idx > 0:
-                data[:sample_start_idx] = sample[0]
-            if sample_end_idx < sequence_length:
-                data[sample_end_idx:] = sample[-1]
-            data[sample_start_idx:sample_end_idx] = sample
-        result[key] = data
-    return result
-
-# normalize data
-def get_data_stats(data):
-    data = data.reshape(-1,data.shape[-1])
-    stats = {
-        'min': np.min(data, axis=0),
-        'max': np.max(data, axis=0)
-    }
-    return stats
-
-def normalize_data(data, stats):
-    # nomalize to [0,1]
-    ndata = (data - stats['min']) / (stats['max'] - stats['min'])
-    # normalize to [-1, 1]
-    ndata = ndata * 2 - 1
-    return ndata
-
-def unnormalize_data(ndata, stats):
-    ndata = (ndata + 1) / 2
-    data = ndata * (stats['max'] - stats['min']) + stats['min']
-    return data
-
-# dataset
-class DiffusionDataset(torch.utils.data.Dataset):
-    def __init__(self,
-                 dataset_path: str,
-                 pred_horizon: int,
-                 obs_horizon: int,
-                 action_horizon: int):
-
-        # read from zarr dataset
-        dataset_path = os.path.join(
-            os.environ['actoris_harena_PATH'],
-            '..',
-            'data',
-            dataset_path)
-        print('dataset_path:', dataset_path)
-        #self.store = zarr.DirectoryStore(dataset_path)
-        dataset_root = zarr.open(dataset_path, mode='r')
-        # the above gives errro zarr.errors.PathNotFoundError: nothing found at path '
-
-        # float32, [0,1], (N,96,96,3)
-        train_image_data = dataset_root['data']['img'][:]
-        train_image_data = np.moveaxis(train_image_data, -1,1)
-        # (N,3,96,96)
-
-        # (N, D)
-        train_data = {
-            # first two dims of state vector are agent (i.e. gripper) locations
-            'agent_pos': dataset_root['data']['state'][:,:2],
-            'action': dataset_root['data']['action'][:]
-        }
-        episode_ends = dataset_root['meta']['episode_ends'][:]
-
-        # compute start and end of each state-action sequence
-        # also handles padding
-        indices = create_sample_indices(
-            episode_ends=episode_ends,
-            sequence_length=pred_horizon,
-            pad_before=obs_horizon-1,
-            pad_after=action_horizon-1)
-
-        # compute statistics and normalized data to [-1,1]
-        stats = dict()
-        normalized_train_data = dict()
-        for key, data in train_data.items():
-            stats[key] = get_data_stats(data)
-            normalized_train_data[key] = normalize_data(data, stats[key])
-
-        # images are already normalized
-        normalized_train_data['image'] = train_image_data
-
-        self.indices = indices
-        self.stats = stats
-        self.normalized_train_data = normalized_train_data
-        self.pred_horizon = pred_horizon
-        self.action_horizon = action_horizon
-        self.obs_horizon = obs_horizon
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        # get the start/end indices for this datapoint
-        buffer_start_idx, buffer_end_idx, \
-            sample_start_idx, sample_end_idx = self.indices[idx]
-
-        # get nomralized data using these indices
-        nsample = sample_sequence(
-            train_data=self.normalized_train_data,
-            sequence_length=self.pred_horizon,
-            buffer_start_idx=buffer_start_idx,
-            buffer_end_idx=buffer_end_idx,
-            sample_start_idx=sample_start_idx,
-            sample_end_idx=sample_end_idx
-        )
-
-        # discard unused observations
-        nsample['image'] = nsample['image']
-        nsample['agent_pos'] = nsample['agent_pos']
-        return nsample
-
 
 
 ==================================================
@@ -3634,6 +2923,847 @@ def save_denoising_gif(image, masks, noise_actions_history, step_idx, save_dir='
     filename = os.path.join(save_dir, f'step_{step_idx}_evolution.gif')
     imageio.mimsave(filename, frames, fps=10)
     plt.close(fig)
+
+
+==================================================
+FILE: magpie_transform.py
+==================================================
+
+import numpy as np
+from actoris_harena.utilities.networks.utils import np_to_ts, ts_to_np
+from .dataset import normalize_data, unnormalize_data
+
+class DiffusionTransform:
+    def __init__(self, config, stats):
+        self.config = config
+        self.device = self.config.get('device', 'cpu')
+        self.stats = stats
+
+    def __call__(self, data, train=True):
+        ret_data = {}
+        
+        if not train:
+            ret_data[self.config.input_obs] = data[self.config.input_obs].astype(np.float32) / 255.0
+            
+            if len(ret_data[self.config.input_obs].shape) == 3:
+                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
+                ret_data[self.config.input_obs] = np.expand_dims(ret_data[self.config.input_obs], axis=0)
+
+            ret_data[self.config.input_obs] = ret_data[self.config.input_obs].transpose(0, 1, 4, 2, 3)
+            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs], self.device)
+            
+            ret_data['vector_state'] = normalize_data(
+                data['vector_state'], 
+                self.stats[self.config.data_state]
+            )
+            ret_data['vector_state'] = np_to_ts(ret_data['vector_state'], self.device)
+            
+            if len(ret_data['vector_state'].shape) == 1:
+                ret_data['vector_state'] = ret_data['vector_state'].unsqueeze(0)
+
+        else:
+            ret_data[self.config.input_obs] = data[self.config.data_obs]
+            ret_data[self.config.input_obs] = np_to_ts(ret_data[self.config.input_obs][:, :self.config.obs_horizon], self.device)
+            ret_data['vector_state'] = np_to_ts(data[self.config.data_state][:, :self.config.obs_horizon], self.device)
+            ret_data['action'] = np_to_ts(data['action'], self.device)
+
+        return ret_data
+
+    def postprocess(self, data):
+        ret_data = {}
+        if 'action' in data.keys():
+            data['action'] = unnormalize_data(data['action'], self.stats[self.config.data_action])
+            ret_data['action'] = data['action']
+            
+        if self.config.input_obs in data.keys():
+            ret_data[self.config.input_obs] = (ts_to_np(data[self.config.input_obs]) * 255.0).clip(0, 255).astype(np.uint8)
+            
+        return ret_data
+
+
+==================================================
+FILE: networks.py
+==================================================
+
+"""
+Magpie Core Networks Module.
+
+This module contains the foundational neural network architectures for the diffusion 
+policy. It includes the 1D U-Net and MLP backbones for the reverse diffusion process, 
+positional embeddings for timestep conditioning, FiLM-modulated residual blocks for 
+state conditioning, and auxiliary networks for representation learning and classification.
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+from typing import Union
+
+class ResNetDecoder(nn.Module):
+    """
+    Decodes a 1D latent representation back into a 2D spatial image mask or observation.
+
+    Typically used as an auxiliary task (Auto-Encoder) during representation learning 
+    to force the vision encoder to capture geometrically meaningful features.
+    """
+    def __init__(self, input_dim=512, output_channel=3):
+        super().__init__()
+        # Map the flat 512-dim vector into a low-resolution spatial feature map (6x6)
+        self.fc = nn.Linear(input_dim, 256 * 6 * 6)
+        
+        # Sequentially upsample: 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            
+            nn.ConvTranspose2d(32, output_channel, kernel_size=4, stride=2, padding=1),
+            # Squash output to [0, 1] range to match normalized image inputs
+            nn.Sigmoid() 
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Latent vector of shape (Batch, 512).
+        Returns:
+            torch.Tensor: Reconstructed spatial tensor of shape (Batch, C, 96, 96).
+        """
+        x = self.fc(x)
+        x = x.view(-1, 256, 6, 6)
+        x = self.decoder(x)
+        return x
+    
+class SinusoidalPosEmb(nn.Module):
+    """
+    Standard sinusoidal positional embedding.
+    
+    Used to encode the scalar diffusion timestep `k` into a high-dimensional 
+    vector so the neural network can condition its denoising logic on the current 
+    noise level.
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): 1D tensor of timesteps (Batch,).
+        Returns:
+            torch.Tensor: Embedded timesteps of shape (Batch, dim).
+        """
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
+
+
+class Downsample1d(nn.Module):
+    """Halves the temporal resolution of the action sequence."""
+    def __init__(self, dim, disable=False):
+        super().__init__()
+        self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
+        self.disable = disable
+
+    def forward(self, x):
+        if self.disable:
+            return x
+        return self.conv(x)
+
+class Upsample1d(nn.Module):
+    """Doubles the temporal resolution of the action sequence."""
+    def __init__(self, dim, disable=False):
+        super().__init__()
+        self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
+        self.disable = disable
+
+    def forward(self, x):
+        if self.disable:
+            return x
+        return self.conv(x)
+
+
+class Conv1dBlock(nn.Module):
+    """
+    Standard 1D Convolutional Block using GroupNorm and Mish activation.
+
+    GroupNorm is preferred over BatchNorm in sequence modeling and RL because 
+    batch sizes are often small or highly correlated, which destabilizes BatchNorm.
+    Mish provides a smooth, non-monotonic gradient flow.
+    """
+    def __init__(self, inp_channels, out_channels, kernel_size, n_groups=8):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv1d(inp_channels, out_channels, kernel_size, padding=kernel_size // 2),
+            nn.GroupNorm(n_groups, out_channels),
+            nn.Mish(),
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class ConditionalResidualBlock1D(nn.Module):
+    """
+    A 1D Residual Block modulated by global conditioning features via FiLM.
+
+    Feature-wise Linear Modulation (FiLM) is the standard mechanism to inject 
+    the environmental observation (image features) and the diffusion timestep 
+    into the action denoiser. It predicts a per-channel scale and bias to shift 
+    the convolutional activations.
+    """
+    def __init__(self,
+            in_channels,
+            out_channels,
+            cond_dim,
+            kernel_size=3,
+            n_groups=8):
+        super().__init__()
+
+        self.blocks = nn.ModuleList([
+            Conv1dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups),
+            Conv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
+        ])
+
+        # FiLM Modulator: maps the global condition to scale and bias vectors
+        cond_channels = out_channels * 2
+        self.out_channels = out_channels
+        self.cond_encoder = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(cond_dim, cond_channels),
+            nn.Unflatten(-1, (-1, 1)) # Prepare for broadcasting over the time dimension
+        )
+
+        # 1x1 conv to match channel dimensions for the residual connection
+        self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
+            if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x, cond):
+        """
+        Args:
+            x (torch.Tensor): Action sequence of shape (Batch, in_channels, Horizon).
+            cond (torch.Tensor): Global condition (vision + timestep) of shape (Batch, cond_dim).
+
+        Returns:
+            torch.Tensor: Modulated action sequence of shape (Batch, out_channels, Horizon).
+        """
+        out = self.blocks[0](x)
+        
+        # Generate FiLM scale and bias
+        embed = self.cond_encoder(cond)
+        embed = embed.reshape(embed.shape[0], 2, self.out_channels, 1)
+        scale = embed[:, 0, ...]
+        bias = embed[:, 1, ...]
+        
+        # Apply affine modulation
+        out = scale * out + bias
+
+        out = self.blocks[1](out)
+        out = out + self.residual_conv(x)
+        return out
+
+
+class ConditionalUnet1D(nn.Module):
+    """
+    The core Diffusion Backbone: A 1D U-Net.
+
+    Unlike standard 2D U-Nets used for images, this operates over the temporal 
+    horizon of the action trajectory. The spatial dimension is `T` (prediction horizon), 
+    and the "channels" are the action dimensions.
+    """
+    def __init__(self,
+        input_dim,
+        global_cond_dim,
+        diffusion_step_embed_dim=256,
+        down_dims=[256,512,1024],
+        kernel_size=5,
+        n_groups=8,
+        diable_updown=False,
+        use_delta_t=False): # Note: retained original typo 'diable_updown' for compatibility
+        """
+        Args:
+            input_dim: Action dimension (e.g., 7 DoF).
+            global_cond_dim: Dimension of the flattened vision/state features.
+            diffusion_step_embed_dim: Dimension of the sinusoidal time embedding.
+            down_dims: List of channel dimensions for the UNet hierarchy.
+            kernel_size: Convolutional kernel size along the time axis.
+            n_groups: Group count for GroupNorm.
+            diable_updown: If True, skips spatial downsampling/upsampling.
+        """
+        print('disable_updown', diable_updown)
+        super().__init__()
+        all_dims = [input_dim] + list(down_dims)
+        start_dim = down_dims[0]
+
+        # Process diffusion timestep `k` into an embedding
+        dsed = diffusion_step_embed_dim
+        diffusion_step_encoder = nn.Sequential(
+            SinusoidalPosEmb(dsed),
+            nn.Linear(dsed, dsed * 4),
+            nn.Mish(),
+            nn.Linear(dsed * 4, dsed),
+        )
+        
+        # The total conditioning dimension injected into every FiLM block
+        cond_dim = dsed + global_cond_dim
+
+        in_out = list(zip(all_dims[:-1], all_dims[1:]))
+        mid_dim = all_dims[-1]
+        
+        # Bottleneck blocks
+        self.mid_modules = nn.ModuleList([
+            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+            ConditionalResidualBlock1D(mid_dim, mid_dim, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+        ])
+
+        # Contracting Path
+        down_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (len(in_out) - 1)
+            down_modules.append(nn.ModuleList([
+                ConditionalResidualBlock1D(dim_in, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(dim_out, dim_out, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                Downsample1d(dim_out, diable_updown) if not is_last else nn.Identity()
+            ]))
+
+        # Expanding Path
+        up_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (len(in_out) - 1)
+            up_modules.append(nn.ModuleList([
+                # dim_out * 2 because of skip connections concatenated from down_modules
+                ConditionalResidualBlock1D(dim_out*2, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(dim_in, dim_in, cond_dim=cond_dim, kernel_size=kernel_size, n_groups=n_groups),
+                Upsample1d(dim_in, diable_updown) if not is_last else nn.Identity()
+            ]))
+
+        # Final projection back to action dimensions
+        final_conv = nn.Sequential(
+            Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
+            nn.Conv1d(start_dim, input_dim, 1),
+        )
+
+        self.diffusion_step_encoder = diffusion_step_encoder
+        
+        if use_delta_t:
+            self.delta_t_encoder = nn.Sequential(
+                nn.Linear(1, dsed),
+                nn.Mish(),
+                nn.Linear(dsed, dsed)
+            )
+        else:
+            self.delta_t_encoder = None
+
+        self.up_modules = up_modules
+        self.down_modules = down_modules
+        self.final_conv = final_conv
+
+        print("number of parameters: {:e}".format(sum(p.numel() for p in self.parameters())))
+
+    def forward(self,
+            sample: torch.Tensor,
+            timestep: Union[torch.Tensor, float, int],
+            global_cond=None,
+            delta_t=None):
+        """
+        Args:
+            sample (torch.Tensor): Noisy action sequence (Batch, Horizon, ActionDim).
+            timestep (Tensor/int): Current diffusion step.
+            global_cond (torch.Tensor): Visual/State conditioning (Batch, CondDim).
+
+        Returns:
+            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim).
+        """
+        # PyTorch 1D Convs expect (Batch, Channels, Length). We swap ActionDim and Horizon.
+        # (B, T, C) -> (B, C, T)
+        sample = sample.moveaxis(-1,-2)
+
+        # 1. Process Timesteps
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample.device)
+            
+        timesteps = timesteps.expand(sample.shape[0])
+        global_feature = self.diffusion_step_encoder(timesteps)
+
+        # NEW: 1.5 Process Delta T (Consistency Training)
+        if self.delta_t_encoder is not None:
+            if delta_t is not None:
+                dt_tensor = delta_t.clone().detach().to(dtype=torch.float32, device=sample.device)
+            else:
+                dt_tensor = torch.zeros((sample.shape[0],), dtype=torch.float32, device=sample.device)
+            
+            dt_tensor = dt_tensor.expand(sample.shape[0]).view(-1, 1)
+            global_feature = global_feature + self.delta_t_encoder(dt_tensor)
+
+        # 2. Fuse Timestep and Vision features
+        if global_cond is not None:
+            global_feature = torch.cat([global_feature, global_cond], axis=-1)
+
+        x = sample
+        h = []
+        
+        # 3. Contracting Path
+        for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            h.append(x) # Save for skip connection
+            x = downsample(x)
+
+        # 4. Bottleneck
+        for mid_module in self.mid_modules:
+            x = mid_module(x, global_feature)
+
+        # 5. Expanding Path
+        for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
+            # Concatenate skip connection
+            x = torch.cat((x, h.pop()), dim=1)
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            x = upsample(x)
+
+        x = self.final_conv(x)
+
+        # Revert back to (Batch, Horizon, ActionDim)
+        x = x.moveaxis(-1,-2)
+        return x
+
+
+def get_activation(name: str):
+    """Utility to map string names to PyTorch activation modules."""
+    name = name.lower()
+    if name == "relu":
+        return nn.ReLU()
+    elif name == "gelu":
+        return nn.GELU()
+    elif name == "silu" or name == "swish":
+        return nn.SiLU()
+    elif name == "tanh":
+        return nn.Tanh()
+    elif name == "leaky_relu":
+        return nn.LeakyReLU(0.01)
+    else:
+        raise ValueError(f"Unsupported activation: {name}")
+
+
+class MLPNetwork(nn.Module):
+    """
+    Standard Multi-Layer Perceptron.
+
+    Used primarily as the classification head for primitive skill selection 
+    (e.g., determining whether to execute a pick, place, or dual-arm operation).
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims,
+        activation="relu",
+        dropout=0.0,
+        use_layernorm=False,
+    ):
+        super().__init__()
+
+        layers = []
+        dims = [input_dim] + list(hidden_dims)
+        act = get_activation(activation)
+
+        for i in range(len(hidden_dims)):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+
+            if use_layernorm:
+                layers.append(nn.LayerNorm(dims[i + 1]))
+
+            layers.append(act)
+
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+        layers.append(nn.Linear(dims[-1], output_dim))
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+class ConditionalMLP1D(nn.Module):
+    """
+    An alternative Diffusion Backbone: A Dense MLP.
+
+    While the U-Net leverages temporal convolutions to maintain structural awareness 
+    across the trajectory horizon, the MLP flattens the entire horizon into a single 
+    vector. This is faster and uses fewer parameters, but generally performs worse 
+    on highly complex continuous control tasks compared to the U-Net.
+    """
+    def __init__(
+        self,
+        input_dim,
+        global_cond_dim,
+        pred_horizon,
+        diffusion_step_embed_dim=256,
+        hidden_dims=[512, 512, 512],
+        activation="relu",
+        dropout=0.1,
+        use_delta_t=False):
+        """
+        Args:
+            input_dim: Dim of a single action step.
+            global_cond_dim: Dim of global conditioning.
+            pred_horizon: The length of the action sequence (needed to flatten/unflatten).
+            diffusion_step_embed_dim: Size of positional encoding for diffusion iteration.
+            hidden_dims: List of hidden layer dimensions.
+        """
+        super().__init__()
+        self.input_dim = input_dim
+        self.pred_horizon = pred_horizon
+
+        # Time step embedding (identical to ConditionalUnet1D for consistent scaling)
+        dsed = diffusion_step_embed_dim
+        self.diffusion_step_encoder = nn.Sequential(
+            SinusoidalPosEmb(dsed),
+            nn.Linear(dsed, dsed * 4),
+            nn.Mish(),
+            nn.Linear(dsed * 4, dsed),
+        )
+
+        if use_delta_t:
+            self.delta_t_encoder = nn.Sequential(
+                nn.Linear(1, dsed),
+                nn.Mish(),
+                nn.Linear(dsed, dsed)
+            )
+        else:
+            self.delta_t_encoder = None
+
+        # The MLP takes the flattened action + time embedding + global conditioning
+        cond_dim = dsed + global_cond_dim
+        mlp_input_dim = (pred_horizon * input_dim) + cond_dim
+        output_dim = pred_horizon * input_dim
+
+        # Build the dense layers
+        layers = []
+        dims = [mlp_input_dim] + list(hidden_dims)
+        act = get_activation(activation)
+
+        for i in range(len(hidden_dims)):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            layers.append(act)
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+        # Final projection to the flattened action shape
+        layers.append(nn.Linear(dims[-1], output_dim))
+        self.net = nn.Sequential(*layers)
+
+        print("number of parameters (MLP backbone): {:e}".format(
+            sum(p.numel() for p in self.parameters()))
+        )
+
+    def forward(
+        self,
+        sample: torch.Tensor,
+        timestep: Union[torch.Tensor, float, int],
+        global_cond=None,
+        delta_t=None
+    ):
+        """
+        Args:
+            sample: (Batch, Horizon, ActionDim)
+            timestep: (Batch,) or int
+            global_cond: (Batch, CondDim)
+            
+        Returns:
+            torch.Tensor: Predicted noise vector (Batch, Horizon, ActionDim)
+        """
+        B, T, C = sample.shape
+
+        # 1. Process time steps
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample.device)
+        timesteps = timesteps.expand(B)
+
+        global_feature = self.diffusion_step_encoder(timesteps)
+
+        # NEW: Only apply Delta T if the encoder exists
+        if self.delta_t_encoder is not None:
+            if delta_t is not None:
+                dt_tensor = delta_t.clone().detach().to(dtype=torch.float32, device=sample.device)
+            else:
+                dt_tensor = torch.zeros((sample.shape[0],), dtype=torch.float32, device=sample.device)
+            
+            dt_tensor = dt_tensor.expand(sample.shape[0]).view(-1, 1)
+            global_feature = global_feature + self.delta_t_encoder(dt_tensor)
+
+        # 2. Concatenate conditioning features
+        if global_cond is not None:
+            global_feature = torch.cat([global_feature, global_cond], dim=-1)
+
+        # 3. Flatten the action sample (B, T*C) and concat with conditioning
+        sample_flat = sample.reshape(B, -1) 
+        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) 
+
+        # 4. Forward pass
+        out_flat = self.net(mlp_in) 
+
+        # 5. Unflatten back to original temporal shape
+        out = out_flat.reshape(B, T, C)
+        return out
+
+
+==================================================
+FILE: test_hindsight_dataset.py
+==================================================
+
+import unittest
+import numpy as np
+import os
+import shutil
+import tempfile
+from torch.utils.data import DataLoader
+
+# --- Mocking the class import for the purpose of this script ---
+# Replace this with your actual import path
+from actoris_harena import TrajectoryDataset
+from hindsight_dataset import HindsightDataset 
+
+class TestHindsightDataset(unittest.TestCase):
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.data_path = "test_hindsight_dataset.zarr"
+        self.full_path = os.path.join(self.test_dir, self.data_path)
+
+        # Standard Configs matching your YAML
+        self.obs_config = {
+            'rgb': {'shape': (3, 128, 128), 'output_key': 'rgb'},
+            'depth': {'shape': (1, 128, 128), 'output_key': 'depth'},
+            'semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'semkey_norm_pixel'},
+            # The static goals that should be OVERWRITTEN by the hindsight logic
+            'goal_rgb': {'shape': (3, 128, 128), 'output_key': 'goal_rgb'},
+            'flattened_goal_semkey_norm_pixel': {'shape': (17, 2), 'output_key': 'flattened_goal_semkey_norm_pixel'}
+        }
+        
+        self.act_config = {
+            'default': {'shape': (9,), 'output_key': 'default'}
+        }
+        
+        self.future_goal_mapping = {
+            'rgb': 'goal_rgb',
+            'semkey_norm_pixel': 'flattened_goal_semkey_norm_pixel'
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def generate_temporally_predictable_data(self, num_steps=10):
+        """
+        CRITICAL: Instead of random noise, we fill the tensors with their timestep index 't'.
+        This allows the tests to inspect the sampled goal and know exactly which future 
+        frame the stochastic sampler selected.
+        """
+        obs = {
+            'rgb': np.zeros((num_steps + 1, 3, 128, 128), dtype=np.float32),
+            'depth': np.zeros((num_steps + 1, 1, 128, 128), dtype=np.float32),
+            'semkey_norm_pixel': np.zeros((num_steps + 1, 17, 2), dtype=np.float32),
+            
+            # Fill original static goals with -1.0 so we can prove they get overwritten
+            'goal_rgb': np.full((num_steps + 1, 3, 128, 128), -1.0, dtype=np.float32),
+            'flattened_goal_semkey_norm_pixel': np.full((num_steps + 1, 17, 2), -1.0, dtype=np.float32)
+        }
+        
+        for t in range(num_steps + 1):
+            obs['rgb'][t] += t
+            obs['semkey_norm_pixel'][t] += (t * 10) # Distinct scalar for keypoints
+            
+        act = {
+            'default': np.zeros((num_steps, 9), dtype=np.float32)
+        }
+        
+        return obs, act
+
+    # =========================================================================
+    # TEST 1: HER Mapping and Shape Consistency
+    # =========================================================================
+    def test_hindsight_mapping_and_shapes(self):
+        print("\n--- Test 1: HER Mapping and Shape Consistency ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        # Add trajectory of 10 actions (11 observations stored due to pad)
+        obs, act = self.generate_temporally_predictable_data(10)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 2
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        item = dataset_r[0] # Sampling start_idx = 0, end_idx = 2
+        
+        # 1. Verify shapes. Observation sequences should be (seq_len + 1, ...)
+        expected_obs_seq_len = seq_len + 1
+        self.assertEqual(item['observation']['goal_rgb'].shape, (expected_obs_seq_len, 3, 128, 128))
+        self.assertEqual(item['observation']['flattened_goal_semkey_norm_pixel'].shape, (expected_obs_seq_len, 17, 2))
+
+        # 2. Verify static goals were overwritten (no -1.0 values remain)
+        self.assertTrue(np.all(item['observation']['goal_rgb'] >= 0))
+        
+        # 3. Verify temporal tiling. The goal should be identical across the sequence dimension.
+        # Check if the first frame of the goal equals the last frame of the goal sequence
+        np.testing.assert_array_equal(item['observation']['goal_rgb'][0], item['observation']['goal_rgb'][-1])
+        
+        print("Mapping and shape constraints verified.")
+
+    # =========================================================================
+    # TEST 2: Rigorous Stochastic Future Boundaries & Synchronization
+    # =========================================================================
+    def test_future_sampling_bounds_rigorous(self):
+        print("\n--- Test 2: Rigorous Stochastic Future Boundaries ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        # Use a slightly longer trajectory to give the sampler a wider variance
+        traj_len = 15
+        obs, act = self.generate_temporally_predictable_data(traj_len)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 4
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        # effective_traj_end avoids the dummy pad (traj_len - 1 = 14)
+        effective_traj_end = traj_len - 1 
+
+        # We will test EVERY valid starting index in the trajectory
+        num_valid_starts = len(dataset_r)
+        
+        for start_idx in range(num_valid_starts):
+            end_idx = start_idx + seq_len
+            expected_min = min(end_idx, effective_traj_end)
+            expected_max = effective_traj_end
+            
+            valid_future_range = list(range(expected_min, expected_max + 1))
+            sampled_t_rgb_counts = {t: 0 for t in valid_future_range}
+            
+            # Sample enough times to guarantee hitting every uniform choice.
+            # Using 200 samples makes the probability of missing a valid bin astronomically small.
+            num_samples = 200 
+            
+            for _ in range(num_samples):
+                item = dataset_r[start_idx]
+                
+                # Check RGB temporal mark
+                sampled_t_rgb = int(np.mean(item['observation']['goal_rgb']))
+                
+                # Check Semkey temporal mark. 
+                # Recall we multiplied semkey by 10 in generate_temporally_predictable_data
+                sampled_t_semkey = int(np.mean(item['observation']['flattened_goal_semkey_norm_pixel'])) / 10.0
+                
+                # --- RIGOR CHECK 1: Cross-Modality Synchronization ---
+                self.assertEqual(
+                    sampled_t_rgb, int(sampled_t_semkey), 
+                    f"Temporal mismatch! RGB goal is from t={sampled_t_rgb} but Semkey goal is from t={sampled_t_semkey}"
+                )
+                
+                # --- RIGOR CHECK 2: Absolute Boundaries ---
+                self.assertGreaterEqual(
+                    sampled_t_rgb, expected_min, 
+                    f"Time Travel Bug: Sampled past index {sampled_t_rgb} for start {start_idx} (min allowed: {expected_min})"
+                )
+                self.assertLessEqual(
+                    sampled_t_rgb, expected_max, 
+                    f"Out of Bounds Bug: Sampled index {sampled_t_rgb} for start {start_idx} (max allowed: {expected_max})"
+                )
+                
+                sampled_t_rgb_counts[sampled_t_rgb] += 1
+
+            # --- RIGOR CHECK 3: Uniform Coverage ---
+            # Ensure every single valid future index was sampled at least once
+            if expected_min < expected_max: # If there's an actual range to sample from
+                for t, count in sampled_t_rgb_counts.items():
+                    self.assertGreater(
+                        count, 0, 
+                        f"Coverage Failure: At start_idx={start_idx}, valid future index {t} was NEVER sampled after {num_samples} tries. Sampler is biased."
+                    )
+                    
+        print(f"Rigorous future boundary, synchronization, and coverage checks passed across all {num_valid_starts} sliding windows.")
+
+    # =========================================================================
+    # TEST 3: Edge Case - Sampling at the absolute end of the trajectory
+    # =========================================================================
+    def test_trajectory_end_edge_case(self):
+        print("\n--- Test 3: Trajectory End Edge Case ---")
+        
+        dataset_w = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='w',
+            obs_config=self.obs_config, act_config=self.act_config,
+            future_goal_mapping=self.future_goal_mapping
+        )
+        
+        traj_len = 5
+        obs, act = self.generate_temporally_predictable_data(traj_len)
+        dataset_w.add_trajectory(obs, act)
+
+        seq_len = 1
+        dataset_r = HindsightDataset(
+            data_path=self.data_path, data_dir=self.test_dir, io_mode='r',
+            obs_config=self.obs_config, act_config=self.act_config,
+            seq_length=seq_len, cross_trajectory=False, return_trj_last=False,
+            future_goal_mapping=self.future_goal_mapping
+        )
+
+        # Max valid start_idx = (traj_len) - seq_len = 5 - 1 = 4
+        # At start_idx = 4, end_idx = 5.
+        # effective_traj_end is 4 (indices 0,1,2,3,4 are valid obs, 5 is pad).
+        # In this edge case, end_idx > effective_traj_end, so the sampler MUST 
+        # clamp to effective_traj_end (4) without throwing a ValueError.
+        max_idx = len(dataset_r) - 1
+        
+        try:
+            item = dataset_r[max_idx]
+            sampled_t = int(np.mean(item['observation']['goal_rgb']))
+            
+            # The only valid fallback is clamping to the final valid observation
+            self.assertEqual(sampled_t, 4, "Edge case clamping failed to select the final valid frame.")
+            print("Edge case clamping successful.")
+        except ValueError as e:
+            self.fail(f"Sampler crashed at the end of the trajectory: {e}")
+
+if __name__ == '__main__':
+    unittest.main()
 
 
 ==================================================

@@ -425,7 +425,7 @@ class MagpieAgent(TrainableAgent):
             return naction, noise_actions
         
         # Forward Pass: Optimal Transport Flow Matching
-        elif self.config.get('loss_type', 'diffusion') == 'ot_flow_match':
+        elif self.config.get('loss_type', 'diffusion') in ['ot_flow_match', 'ot_flow_match+consistency']:
             num_steps = self.config.num_diffusion_iters
             dt = 1.0 / num_steps
             for i in range(num_steps):

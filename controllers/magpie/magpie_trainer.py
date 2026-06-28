@@ -412,7 +412,7 @@ class MagpieTrainer:
                     eval_naction = n_pred
 
                 # Branch: Optimal Transport Flow Matching
-                elif loss_type == 'ot_flow_match':
+                elif loss_type in ['ot_flow_match', 'ot_flow_match+consistency']:
                     num_steps = self.config.num_diffusion_iters
                     dt = 1.0 / num_steps
                     for i in range(num_steps):
@@ -666,14 +666,79 @@ class MagpieTrainer:
                 loss_type = self.config.get('loss_type', 'diffusion')
 
                 # 6. Forward Forward Diffusion (Adding Noise)
-                if loss_type == 'ot_flow_match':
+                delta_t_inputs = None
+                if loss_type in ['ot_flow_match', 'ot_flow_match+consistency']:
                     noise = torch.randn_like(diffusion_target)
                     t = torch.rand((B,), device=self.device, dtype=diffusion_target.dtype)
                     t_expand = t.view(B, 1, 1)
-                    # Interpolate linearly between pure noise (t=0) and data (t=1)
                     noisy_actions = (1 - t_expand) * noise + t_expand * diffusion_target
-                    target = diffusion_target - noise
+                    
+                    target = diffusion_target - noise # Default FM target
                     timesteps = t * self.config.num_diffusion_iters
+                    
+                    # --- NEW: Consistency Training Logic ---
+                    if loss_type == 'ot_flow_match+consistency':
+                        consistency_ratio = self.config.get('consistency_ratio', 0.25)
+                        ct_mask = torch.rand((B,), device=self.device) < consistency_ratio
+                        
+                        delta_t_inputs = torch.zeros((B,), device=self.device, dtype=diffusion_target.dtype)
+                        delta_t_inputs[ct_mask] = torch.rand((ct_mask.sum(),), device=self.device, dtype=diffusion_target.dtype)
+                        
+                        if ct_mask.any():
+                            # Sync EMA shadow network
+                            if not hasattr(self, 'ema_nets'):
+                                import copy
+                                self.ema_nets = copy.deepcopy(self.agent.nets)
+                                self.ema_nets.eval()
+                                for p in self.ema_nets.parameters(): p.requires_grad = False
+                            
+                            self.agent.ema.copy_to(self.ema_nets.parameters())
+                            
+                            # Gather masked variables
+                            t_ct = t[ct_mask]
+                            dt_ct = delta_t_inputs[ct_mask]
+                            t1_ct = torch.clamp(t_ct + dt_ct, 0.0, 1.0)
+                            t1_expand = t1_ct.view(-1, 1, 1)
+                            
+                            x0_ct = noise[ct_mask]
+                            x1_ct = diffusion_target[ct_mask]
+                            xt_ct = noisy_actions[ct_mask]
+                            
+                            # Compute x_{t1}
+                            x_t1 = (1 - t1_expand) * x0_ct + t1_expand * x1_ct
+                            
+                            # Predict v_{t1} using EMA network
+                            dt_prime = torch.rand_like(t_ct)
+                            
+                            with torch.no_grad():
+                                if self.agent.primitive_integration == 'separate_networks':
+                                    v_t1 = torch.zeros_like(x_t1)
+                                    gt_prim_ids_ct = gt_prim_ids[ct_mask]
+                                    for k in range(self.agent.K):
+                                        dim_k = self.agent.diffusion_dims[k]
+                                        if dim_k == 0: continue
+                                        mask_k = (gt_prim_ids_ct == k)
+                                        if mask_k.sum() > 0:
+                                            v_t1[mask_k, :, :dim_k] = self.ema_nets[f'noise_pred_net_{k}'](
+                                                sample=x_t1[mask_k][..., :dim_k], 
+                                                timestep=t1_ct[mask_k] * self.config.num_diffusion_iters, 
+                                                global_cond=obs_cond[ct_mask][mask_k],
+                                                delta_t=dt_prime[mask_k]
+                                            )
+                                else:
+                                    v_t1 = self.ema_nets['noise_pred_net'](
+                                        sample=x_t1, 
+                                        timestep=t1_ct * self.config.num_diffusion_iters, 
+                                        global_cond=obs_cond[ct_mask],
+                                        delta_t=dt_prime
+                                    )
+                            
+                            # Calculate \tilde{x}_1 and target velocity
+                            x1_tilde = x_t1 + (1 - t1_expand) * v_t1
+                            eps = 1e-5
+                            v_target_ct = (x1_tilde - xt_ct) / (1 - t_ct.view(-1, 1, 1) + eps)
+                            
+                            target[ct_mask] = v_target_ct
                 elif loss_type == 'mse':
                     # For direct regression, we feed dummy zeros to the network and target the raw action.
                     noisy_actions = torch.zeros_like(diffusion_target)
@@ -693,11 +758,21 @@ class MagpieTrainer:
                         if dim_k == 0: continue
                         mask_k = (gt_prim_ids == k)
                         if mask_k.sum() > 0:
+                            # Pass delta_t_inputs to the network if available
+                            dt_in = delta_t_inputs[mask_k] if delta_t_inputs is not None else None
                             noise_pred[mask_k, :, :dim_k] = self.agent.nets[f'noise_pred_net_{k}'](
-                                noisy_actions[mask_k][..., :dim_k], timesteps[mask_k], global_cond=obs_cond[mask_k]
+                                noisy_actions[mask_k][..., :dim_k], 
+                                timesteps[mask_k], 
+                                global_cond=obs_cond[mask_k],
+                                delta_t=dt_in
                             )
                 else:
-                    noise_pred = self.agent.nets['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
+                    noise_pred = self.agent.nets['noise_pred_net'](
+                        noisy_actions, 
+                        timesteps, 
+                        global_cond=obs_cond,
+                        delta_t=delta_t_inputs
+                    )
 
                 # 8. Loss Calculations
                 if self.agent.primitive_integration != 'none' and getattr(self.agent, 'mask_out_irrelavent_action_dim', False):
@@ -777,8 +852,9 @@ class MagpieTrainer:
                             n_pred = self.agent.nets['noise_pred_net'](sample=dummy_sample, timestep=timestep_tensor, global_cond=obs_cond)
                             eval_naction = n_pred
 
-                    elif loss_type == 'ot_flow_match':
+                    elif loss_type in ['ot_flow_match', 'ot_flow_match+consistency']:
                         num_steps = self.config.num_diffusion_iters
+                        
                         dt = 1.0 / num_steps
                         for i in range(num_steps):
                             t_val = i / num_steps

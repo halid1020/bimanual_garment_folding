@@ -75,6 +75,7 @@ class GarmentFoldingTask(GarmentTask):
 
     def reset(self, arena):
         """Reset environment and generate goals if necessary."""
+        # arena._save_debug_state("task_reset_start")
         self.goal_dir = os.path.join(self.asset_dir, 'goals', arena.get_name(), \
                                      self.name, arena.get_mode(), f"eid_{arena.get_episode_id()}")
         
@@ -93,6 +94,8 @@ class GarmentFoldingTask(GarmentTask):
         if self.through_canon:
             arena.flattened_obs = None
             arena.get_caon_flattened_obs()
+        
+        # arena._save_debug_state("task_reset_complete")
 
         return {"goals": self.goals, "keypoints": self.semkey2pid}
 
@@ -187,6 +190,8 @@ class GarmentFoldingTask(GarmentTask):
 
     def evaluate(self, arena):
         """Evaluate folding quality using particle alignment and semantic keypoints."""
+        # arena._save_debug_state(f"task_eval_step_{arena.action_step}")
+
         if len(self.goals) == 0:
             return {}
         cur_particles = arena.get_mesh_particles_positions()

@@ -226,15 +226,20 @@ class GarmentEnv(Arena):
         self.num_mesh_particles = int(len(init_state_params['mesh_verts'])/3)
         self.init_state_params = init_state_params
 
+        # --- PROBE: Right after set_scene loads the HDF5 parameters ---
+        # self._save_debug_state("env_reset_1_post_set_scene")
+
         self.pickers.reset(self.picker_initial_pos)
         self.info = {}
         self.last_info = None
         self.action_tool.reset(self)
         self._step_sim()
-           
+            
         self.last_flattened_step = -100
         self.flattened_obs = None
-        self.get_flattened_obs()
+        
+        # This will trigger the flattened state probes we added previously
+        self.get_flattened_obs() 
         
         self.task.reset(self)
         self.action_step = 0
@@ -247,6 +252,9 @@ class GarmentEnv(Arena):
         self.clear_frames()
         self.picker_poses = []
         self.all_infos = [self.info]
+        
+        # --- PROBE: Final state before returning to the RL loop ---
+        # self._save_debug_state("env_reset_2_final_ready")
         
         return self.info
 
@@ -339,6 +347,10 @@ class GarmentEnv(Arena):
             self.set_mesh_particles_positions(goal_particles)
             self.wait_until_stable()
             self.last_flattened_step = 0
+        elif self.init_mode == 'crumpled':
+            print('[GarmentEnv], crumpled init state')#
+        else:
+            raise NotImplementedError
 
     def get_episode_config(self):
         return self.episode_config
@@ -479,11 +491,29 @@ class GarmentEnv(Arena):
     def _compute_flattened_state(self, setup_method):
         """Helper to reduce duplication between flattened observation generators"""
         if self.flattened_obs is None:
+            
+            # --- PROBE 1: The Pristine Crumpled State ---
+            # self._save_debug_state("1_initial_crumpled") 
+            
             current_particle_pos = pyflex.get_positions()
             self.flattened_obs = setup_method()
             self.flatten_coverage = self._get_coverage()
+            
+            # --- PROBE 2: The Flattened State (for observation) ---
+            # self._save_debug_state("2_after_flattening") 
+            
             pyflex.set_positions(current_particle_pos)
+            
+            # --- PROBE 3: Immediately after Teleportation (Pre-Physics Step) ---
+            # You will likely see the crumpled shape here, but with massive internal stress.
+            # self._save_debug_state("3_after_set_positions") 
+            
             self.wait_until_stable()
+            
+            # --- PROBE 4: After Physics Stabilization ---
+            # This is where the PBD solver likely explodes the cloth back to flat.
+            # self._save_debug_state("4_after_wait_stable") 
+            
         return self.flattened_obs
 
     def get_flattened_obs(self):
@@ -493,6 +523,7 @@ class GarmentEnv(Arena):
         return self._compute_flattened_state(self.set_to_random_flatten)
 
     def get_caon_flattened_obs(self):
+        print('[GarmentEnv] get canon flattened')
         return self._compute_flattened_state(self.set_to_canon_flatten)
 
     def get_no_op(self):
@@ -585,11 +616,15 @@ class GarmentEnv(Arena):
         pos = pyflex.get_positions().reshape(-1, 4).copy()
         pos[:, :3] = particle_positions.copy()
         pyflex.set_positions(pos.flatten())
+        self._step_sim()
+        self.wait_until_stable()
     
     def set_mesh_particles_positions(self, mesh_particle_positions):
         particle_positions = self.get_particle_positions()
         particle_positions[:self.num_mesh_particles] = mesh_particle_positions
         self.set_particle_positions(particle_positions)
+        self._step_sim()
+        self.wait_until_stable()
     
     def _get_picker_pos(self):
         return self.pickers.get_picker_pos()
@@ -843,3 +878,34 @@ class GarmentEnv(Arena):
         Shuts down the PyFlex simulation, freeing up GPU/CPU memory.
         """
         pyflex.clean()
+    
+    def _save_debug_state(self, stage_name):
+        """Saves a diagnostic frame projecting 3D particles to 2D pixels."""
+        import os
+        import cv2
+        import numpy as np
+        
+        os.makedirs("tmp/debug_reset", exist_ok=True)
+        
+        # 1. Render current visual state
+        img = self._render('rgb')
+        # Ensure we have a contiguous writable array for OpenCV (BGR format)
+        debug_img = cv2.cvtColor(img.copy(), cv2.COLOR_RGB2BGR) 
+        
+        # 2. Get particle positions and map to pixel space
+        particles = self.get_mesh_particles_positions()
+        pixels, visible = self.get_visibility(particles)
+        
+        # 3. Draw particles (Green = visible, Red = occluded)
+        for pix, vis in zip(pixels, visible):
+            y, x = int(pix[0]), int(pix[1]) # pixels array is [v, u] -> [y, x]
+            color = (0, 255, 0) if vis else (0, 0, 255) 
+            cv2.circle(debug_img, (x, y), 2, color, -1)
+            
+        # 4. Add stage text for easy timeline identification
+        cv2.putText(debug_img, stage_name, (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                    
+        # 5. Save the frame
+        filepath = f"tmp/debug_reset/debug_ep{self.eid}_{stage_name}.png"
+        cv2.imwrite(filepath, debug_img)

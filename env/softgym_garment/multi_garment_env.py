@@ -67,6 +67,8 @@ class MultiGarmentEnv(GarmentEnv):
 
             set_scene(config=init_state_params, state=init_state_params)
             
+            # self._save_debug_state(f"multi_reset_attempt_{attempt}_set_scene")
+
             self.pickers.reset(self.picker_initial_pos)
             self.low_level_mesh_particles = []
             self.low_level_visible_pcs = []
@@ -74,6 +76,9 @@ class MultiGarmentEnv(GarmentEnv):
             self.action_tool.reset(self) # Get out of camera view and open the gripper
             self._step_sim()
             
+            # --- PROBE: Check what it looks like before the visibility test ---
+            # self._save_debug_state(f"multi_reset_attempt_{attempt}_pre_visibility")
+
             # --- Quick Visibility Check ---
             # We call _get_obs with flatten_obs=False so it safely crops the mask 
             # without triggering downstream flattened keypoint logic yet.

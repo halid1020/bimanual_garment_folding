@@ -9,7 +9,7 @@ input_obs: 'rgb+goal_rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 200
+num_demos: 800
 demo_horizon: 10
 
 disable_updown: True
@@ -32,31 +32,38 @@ grad_clip_norm: 1.0
 eval_checkpoint: -1
 debug: False
 add_all_demos: True
+use_random_oversampling: False
 
-dataset_mode: "general"
+dataset_mode: "hindsight"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_alignment_human_demo"
+  data_path: "all_garments_multi_primitive_alignment"
   data_dir: "./data/datasets"
   split_ratios: [0.0, 0.05, 0.95]
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True
 
+  future_goal_mapping:
+    rgb: 'goal_rgb'
+    depth: 'goal_depth'
+    mask: 'goal_mask'
+    semkey_norm_pixel: 'flattened_goal_semkey_norm_pixel'
+
   obs_config:
     mask: { shape: [128, 128, 1], output_key: 'mask' }
     depth: { shape: [128, 128, 1], output_key: 'depth' }
     rgb: { shape: [128, 128, 3], output_key: 'rgb' }
-    semkey_norm_pixel: { shape: [15, 2], output_key: 'semkey_norm_pixel' }
+    semkey_norm_pixel: { shape: [17, 2], output_key: 'semkey_norm_pixel' }
     goal_rgb: { shape: [128, 128, 3], output_key: 'goal_rgb' }
     goal_depth: { shape: [128, 128, 1], output_key: 'goal_depth' }
     goal_mask: { shape: [128, 128, 1], output_key: 'goal_mask' }
-    flattened_semkey_norm_pixel: { shape: [15, 2], output_key: 'flattened_goal_semkey_norm_pixel' }
+    flattened_semkey_norm_pixel: { shape: [17, 2], output_key: 'flattened_goal_semkey_norm_pixel' }
 
   act_config:
     default: { shape: [9], output_key: 'default' }
 
 loss_type: 'ot_flow_match'
-num_diffusion_iters: 4
+num_diffusion_iters: 10
 
 noise_pred_net: 'mlp'
 mlp_backbone_config:
@@ -68,16 +75,16 @@ primitive_integration: 'separate_networks'
 primitive_classifier:
   hidden_dims: [128]
   activation: relu        
-  dropout: 0.5          
+  dropout: 0.6          # NEW: Extreme classifier dropout
   use_layernorm: true
 prim_class_weights: [1.0, 1.0, 1.0, 1.0]
-prim_weight: 0.01
+prim_weight: 0.005      # NEW: Lowered slightly so gradients don't push as aggressively once accuracy is high
 
 batch_size: 1024
 optimiser_class: 'adamw'
 optimiser_params: 
   lr: 3e-4
-  weight_decay: 5e-3
+  weight_decay: 1e-2
 num_warmup_steps: 3000
 ema_power: 0.995
 
@@ -99,10 +106,10 @@ use_projector: True
 projector_hidden_dims: [512, 512]
 projector_out_dim: 512
 projector_activation: 'gelu'
-projector_dropout: 0.0
+projector_dropout: 0.2      # NEW: Aggressive projector dropout
 projector_use_layernorm: False
-feature_noise_factor: 0.02
+feature_noise_factor: 0.03
 
 predict_goal_state: False
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_with_rotate_swap_index_random_scale
+data_augmenter: magpie_garment

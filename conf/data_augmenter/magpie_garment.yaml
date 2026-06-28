@@ -1,0 +1,32 @@
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: true
+rotation_degree: 0.1
+vertical_flip: true
+debug: false
+
+# --- UPDATED: Enhanced Color Jitter ---
+color_jitter: true
+brightness: 0.4   # Increased from default 0.2
+contrast: 0.4     # Increased from default 0.2
+saturation: 0.4   # Increased from default 0.2
+hue: 0.15         # Increased from default 0.05
+
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: true
+use_goal: True
+goal_aug: "same_as_obs"
+use_workspace: False
+K: 4
+not_rotate_primitives: [0]
+augment_sem_key: True
+
+# --- UPDATED: Smaller Scale Range ---
+random_scale: true
+scale_range: [0.5, 1.0]  # Adjusted from [0.7, 1.0] to force smaller scaling
+
+random_swap_actions: true
+swap_action_prob: 0.5  
+swap_action_mapping:
+  0: [[0, 1], [2, 3]]           
+  1: [[0, 1, 4, 5], [2, 3, 6, 7]]

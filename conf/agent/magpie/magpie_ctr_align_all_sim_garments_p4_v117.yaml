@@ -9,7 +9,7 @@ input_obs: 'rgb+goal_rgb'
 use_mask: True
 eval_action_sampler: 'normal'
 include_state: False
-num_demos: 200
+num_demos: 800
 demo_horizon: 10
 
 disable_updown: True
@@ -32,10 +32,11 @@ grad_clip_norm: 1.0
 eval_checkpoint: -1
 debug: False
 add_all_demos: True
+use_random_oversampling: True 
 
 dataset_mode: "general"
 dataset_config:
-  data_path: "multi_longsleeve_multi_primitive_alignment_human_demo"
+  data_path: "all_garments_multi_primitive_alignment"
   data_dir: "./data/datasets"
   split_ratios: [0.0, 0.05, 0.95]
   seq_length: 1
@@ -46,11 +47,11 @@ dataset_config:
     mask: { shape: [128, 128, 1], output_key: 'mask' }
     depth: { shape: [128, 128, 1], output_key: 'depth' }
     rgb: { shape: [128, 128, 3], output_key: 'rgb' }
-    semkey_norm_pixel: { shape: [15, 2], output_key: 'semkey_norm_pixel' }
+    semkey_norm_pixel: { shape: [17, 2], output_key: 'semkey_norm_pixel' }
     goal_rgb: { shape: [128, 128, 3], output_key: 'goal_rgb' }
     goal_depth: { shape: [128, 128, 1], output_key: 'goal_depth' }
     goal_mask: { shape: [128, 128, 1], output_key: 'goal_mask' }
-    flattened_semkey_norm_pixel: { shape: [15, 2], output_key: 'flattened_goal_semkey_norm_pixel' }
+    flattened_semkey_norm_pixel: { shape: [17, 2], output_key: 'flattened_goal_semkey_norm_pixel' }
 
   act_config:
     default: { shape: [9], output_key: 'default' }
@@ -66,7 +67,7 @@ mlp_backbone_config:
 
 primitive_integration: 'separate_networks'
 primitive_classifier:
-  hidden_dims: [128]
+  hidden_dims: [256, 128]
   activation: relu        
   dropout: 0.5          
   use_layernorm: true
@@ -77,7 +78,7 @@ batch_size: 1024
 optimiser_class: 'adamw'
 optimiser_params: 
   lr: 3e-4
-  weight_decay: 5e-3
+  weight_decay: 5e-2        # NEW: High weight decay acts as strong L2 regularization to stop classifier overfitting
 num_warmup_steps: 3000
 ema_power: 0.995
 
@@ -101,8 +102,8 @@ projector_out_dim: 512
 projector_activation: 'gelu'
 projector_dropout: 0.0
 projector_use_layernorm: False
-feature_noise_factor: 0.02
+feature_noise_factor: 0.03
 
 predict_goal_state: False
 
-data_augmenter: pixel_based_multi_primitive_augmenter_for_diffusion_colour_jittering_channel_permuation_K_4_goal_sem_key_with_rotate_swap_index_random_scale
+data_augmenter: magpie_garment

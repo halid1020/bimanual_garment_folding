@@ -210,7 +210,7 @@ class MagpieTrainer:
                 
                 # Handle primitive action mapping
                 add_action = action
-                if self.config.primitive_integration in ['bin_as_output', 'one-hot-encoding', 'separate_networks', 'ordinary_encoding']: 
+                if self.config.primitive_integration in ['bin_as_output', 'one_hot_encoding', 'separate_networks', 'ordinary_encoding']: 
                     action_name = list(action.keys())[0]
                     action_param = action[action_name]
                     prim_id = self.agent.prim_name2id[action_name]
@@ -360,7 +360,7 @@ class MagpieTrainer:
 
                 # 4. Validate Primitive Classification Head
                 gt_prim_ids = None
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     preds = torch.argmax(prim_logits, dim=-1)
                     
@@ -373,7 +373,7 @@ class MagpieTrainer:
                     all_preds.extend(preds.cpu().numpy())
                     all_gts.extend(gt_prim_ids.cpu().numpy())
                     
-                    if self.agent.primitive_integration == 'one-hot-encoding':
+                    if self.agent.primitive_integration == 'one_hot_encoding':
                         prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
@@ -608,7 +608,7 @@ class MagpieTrainer:
                 gt_prim_ids = None
                 prim_loss = torch.tensor(0.0, device=self.device)
                 
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
                     prim_logits = self.agent.nets['prim_class_head'](obs_cond)
                     prim_bin = nbatch['action'][:, 0, 0]
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
@@ -637,7 +637,7 @@ class MagpieTrainer:
                     # Remove primitive bin from action target
                     nbatch['action'] = nbatch['action'][:, :, 1:] 
 
-                    if self.agent.primitive_integration == 'one-hot-encoding':
+                    if self.agent.primitive_integration == 'one_hot_encoding':
                         prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
                         obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
 
@@ -746,7 +746,7 @@ class MagpieTrainer:
                 if self.agent.rep_learn in ['auto-encoder', 'predict-state']:
                     metrics_to_log['train/state_pred_loss'] = rep_loss.item()
                 
-                if self.agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+                if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
                     metrics_to_log['train/prim_loss_raw'] = prim_loss.item()
                     metrics_to_log['train/prim_loss_weighted'] = (prim_loss * prim_weight).item()
                     

@@ -1,11 +1,11 @@
 """
-Actoris-Harena DataLoader Augmentation Visualizer (Multi-Batch 5x5 Master Grid).
+Actoris-Harena DataLoader Augmentation Visualizer (Dynamic Multi-Batch Grid).
 
 This script fetches multiple training batches, applies augmentations, and outputs a 
-single master grid. It processes 5 batches of size 5, arranging 25 samples into 5 rows. 
-Each sample is a 2x2 block showing:
-  [ Orig RGB ] [ Orig Goal ]
-  [ Aug RGB  ] [ Aug Goal  ]
+single master grid. It processes 'N' batches of size 'M', arranging samples into 
+a visual grid. Each sample is a 2x2 block showing:
+  [ Original RGB ] [ Original Target ]
+  [ Augmented RGB] [ Augmented Target]
 """
 
 import os
@@ -20,18 +20,18 @@ from dotmap import DotMap
 # Import your dataset and augmentor
 from actoris_harena.utilities.trajectory_dataset import TrajectoryDataset
 from data_augmentation.pixel_based_multi_primitive_data_augmenter_for_diffusion import PixelBasedMultiPrimitiveDataAugmenterForDiffusion
+from controllers.magpie.hindsight_dataset import HindsightDataset
 
 # Import your existing drawing utilities
 from tool.magpie.visualise_data import (
-    format_image, draw_keypoints, decode_action_vector, 
-    draw_action, draw_text_with_bg, TEXT_Y_STEP
+    format_image, draw_keypoints, decode_action_vector, draw_action
 )
 
 # ==========================================
-# Hardcoded Dataset Configuration
+# Base Dataset Configuration
 # ==========================================
 DATASET_CONFIG = {
-    "data_path": "multi_longsleeve_multi_primitive_alignment_human_demo",
+    "data_path": "PLACEHOLDER_UPDATED_IN_MAIN",
     "data_dir": "./data/datasets",
     "split_ratios": [0.0, 0.05, 0.95],
     "seq_length": 1,
@@ -52,6 +52,74 @@ DATASET_CONFIG = {
     }
 }
 
+# ==========================================
+# Custom Datasets for Distance Tracking
+# ==========================================
+class DistanceAwareTrajectoryDataset(TrajectoryDataset):
+    """
+    Standard dataset wrapper that calculates how many steps away 
+    the end of the trajectory (default target) is.
+    """
+    def __getitem__(self, idx: int):
+        ret = super().__getitem__(idx)
+        
+        idx_offset = idx + self.start_sample
+        if self.whole_trajectory:
+            traj_idx = idx_offset
+            start_idx = self.traj_starts[traj_idx]
+        elif self.cross_trajectory:
+            start_idx = idx_offset if self.return_trj_last else self.valid_indices[idx_offset]
+            traj_idx = np.searchsorted(self.traj_starts, start_idx, side='right') - 1
+        else:
+            traj_idx, start_idx = self.flat_ranges[idx_offset]
+            
+        effective_traj_end = self.traj_starts[traj_idx] + self.traj_lengths[traj_idx] - 2
+        dist = max(0, effective_traj_end - start_idx)
+        
+        ret['goal_distance'] = np.array(dist, dtype=np.int32)
+        return ret
+
+# ==========================================
+# Helpers
+# ==========================================
+def map_primitive_name(raw_name):
+    """
+    Maps raw primitive strings from the decoder to the requested formatted names.
+    """
+    name_lower = str(raw_name).lower()
+    if 'fling' in name_lower:
+        return "Pick and Fling"
+    elif 'bimanual' in name_lower or 'dual' in name_lower:
+        return "Dual-Arm Pick and Place"
+    elif 'pick' in name_lower or 'place' in name_lower:
+        return "Single-Arm Pick and Place"
+    else:
+        return "No Operation"
+
+def draw_bold_text(img, text, position=(15, 35), text_color=(255, 255, 255), align='top-left'):
+    """
+    Draws custom bigger, bolder text with NO background, using a subtle stroke 
+    so it remains readable against both dark and light image content.
+    """
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 1.0       # Bigger text
+    thickness = 2     # Bolder line
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    
+    if align == 'bottom-right':
+        x = img.shape[1] - tw - 15
+        y = img.shape[0] - 15
+    elif align == 'bottom-left':
+        x = 15
+        y = img.shape[0] - 15
+    else:
+        x, y = position
+        
+    # Draw dark outline/stroke for readability without a background box
+    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+    # Draw actual text
+    cv2.putText(img, text, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
+
 def unformat_tensor_image(img_tensor: torch.Tensor, is_normalized: bool = False) -> np.ndarray:
     """
     Converts a PyTorch image tensor (C, H, W) back to a numpy array (H, W, C).
@@ -65,8 +133,14 @@ def unformat_tensor_image(img_tensor: torch.Tensor, is_normalized: bool = False)
         
     return img_np.clip(0, 255).astype(np.uint8)
 
+# ==========================================
+# Main Execution
+# ==========================================
 def main(args):
-    # 1. Load Augmentor Configuration via DotMap
+    # 1. Update Global Config with CLI Arguments
+    DATASET_CONFIG['data_path'] = args.data_path
+
+    # 2. Load Augmentor Configuration via DotMap
     print(f"Loading Augmentor Config from: {args.aug_config_path}")
     with open(args.aug_config_path, 'r') as f:
         raw_aug_config = yaml.safe_load(f)
@@ -74,9 +148,14 @@ def main(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # 2. Initialize Dataset and DataLoader
-    print("Initializing TrajectoryDataset...")
-    dataset = TrajectoryDataset(**DATASET_CONFIG, sample_mode='train')
+    # 3. Initialize Dataset and DataLoader
+    print(f"Targeting dataset path: {args.data_path}")
+    if args.use_hindsight:
+        print("Initializing HindsightDataset...")
+        dataset = HindsightDataset(**DATASET_CONFIG, sample_mode='train')
+    else:
+        print("Initializing DistanceAwareTrajectoryDataset...")
+        dataset = DistanceAwareTrajectoryDataset(**DATASET_CONFIG, sample_mode='train')
     
     dataloader = torch.utils.data.DataLoader(
         dataset, 
@@ -88,7 +167,7 @@ def main(args):
     print("Initializing Augmentor...")
     augmentor = PixelBasedMultiPrimitiveDataAugmenterForDiffusion(config=aug_config)
 
-    # 3. Process Multiple Batches
+    # 4. Process Multiple Batches
     img_size = 512
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     
@@ -104,7 +183,7 @@ def main(args):
             print("DataLoader ran out of data!")
             break
         
-        # 4. Replicate MagpieTrainer Batch Restructuring
+        # 5. Replicate MagpieTrainer Batch Restructuring
         obs = raw_batch['observation']
         action = raw_batch['action']['default']
         
@@ -113,11 +192,11 @@ def main(args):
 
         orig_batch = copy.deepcopy(formatted_batch)
 
-        # 5. Apply Augmentations
+        # 6. Apply Augmentations
         print("Applying Augmentations...")
         aug_batch = augmentor(formatted_batch, train=True, device=device)
 
-        # 6. Visualization Generation Loop for Current Batch
+        # 7. Visualization Generation Loop for Current Batch
         B = orig_batch['rgb'].shape[0]
         
         for b in range(B):
@@ -125,6 +204,7 @@ def main(args):
             print(f"Processing Sample {total_samples} (Batch {batch_idx + 1}, Item {b+1}/{B})...")
             
             t = 0 # Since seq_length=1, there is only 1 action transition per sample
+            step_distance = raw_batch['goal_distance'][b].item()
             
             # --- Extract Original ---
             orig_rgb_raw = unformat_tensor_image(orig_batch['rgb'][b, t], is_normalized=False)
@@ -138,14 +218,13 @@ def main(args):
             orig_goal_semkey = orig_batch[goal_key][b, t].numpy()
             orig_act = orig_batch['action'][b, t].numpy()
 
-            draw_keypoints(img_cur_orig, orig_semkey)
-            draw_keypoints(img_goal_orig, orig_goal_semkey)
-            prim_name_orig, params_orig = decode_action_vector(orig_act)
-            draw_action(img_cur_orig, prim_name_orig, params_orig)
-            
-            draw_text_with_bg(img_cur_orig, "Orig RGB", (10, TEXT_Y_STEP), (255, 255, 255))
-            draw_text_with_bg(img_goal_orig, "Orig Goal", (10, TEXT_Y_STEP), (200, 200, 200))
+            if args.draw_keypoints:
+                draw_keypoints(img_cur_orig, orig_semkey)
+                draw_keypoints(img_goal_orig, orig_goal_semkey)
 
+            prim_name_orig, params_orig = decode_action_vector(orig_act)
+            draw_action(img_cur_orig, prim_name_orig, params_orig) 
+            
             # --- Extract Augmented ---
             aug_rgb_raw = unformat_tensor_image(aug_batch['rgb'][b, t], is_normalized=True)
             aug_goal_raw = unformat_tensor_image(aug_batch['goal_rgb'][b, t], is_normalized=True)
@@ -157,47 +236,45 @@ def main(args):
             aug_goal_semkey = aug_batch[goal_key][b, t].detach().cpu().numpy()
             aug_act = aug_batch['action'][b, t].detach().cpu().numpy()
 
-            draw_keypoints(img_cur_aug, aug_semkey)
-            draw_keypoints(img_goal_aug, aug_goal_semkey)
+            if args.draw_keypoints:
+                draw_keypoints(img_cur_aug, aug_semkey)
+                draw_keypoints(img_goal_aug, aug_goal_semkey)
+                
             prim_name_aug, params_aug = decode_action_vector(aug_act)
             draw_action(img_cur_aug, prim_name_aug, params_aug)
             
-            draw_text_with_bg(img_cur_aug, "Aug RGB", (10, TEXT_Y_STEP), (50, 255, 50))
-            draw_text_with_bg(img_goal_aug, "Aug Goal", (10, TEXT_Y_STEP), (50, 255, 50))
+            # --- Apply Custom Bold Text Labels to ALL Samples ---
+            # Use "Actual Target" if distance is 0, otherwise show the distance
+            dist_str = f"Dist: {step_distance}" if step_distance > 0 else "Actual Target"
+
+            draw_bold_text(img_cur_orig, "Original RGB", text_color=(255, 255, 255))
+            draw_bold_text(img_goal_orig, f"Original Target ({dist_str})", text_color=(255, 255, 255))
+            
+            draw_bold_text(img_cur_aug, "Augmented RGB", text_color=(100, 255, 100))
+            draw_bold_text(img_goal_aug, f"Augmented Target ({dist_str})", text_color=(100, 255, 100))
+            
+            # Place requested primitive text on the bottom-left corner of Augmented RGB
+            mapped_prim_name = map_primitive_name(prim_name_aug)
+            draw_bold_text(img_cur_aug, mapped_prim_name, text_color=(200, 200, 255), align='bottom-left')
 
             # --- Assemble 2x2 Block ---
             top_row = cv2.hconcat([img_cur_orig, img_goal_orig])
             bottom_row = cv2.hconcat([img_cur_aug, img_goal_aug])
             comp_block = cv2.vconcat([top_row, bottom_row])
             
-            # Add Sample Banner
-            banner_height = 50
-            banner = np.zeros((banner_height, comp_block.shape[1], 3), dtype=np.uint8)
-            cv2.putText(
-                banner, 
-                f"Sample {total_samples}", 
-                (20, 35), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                1.2, 
-                (255, 255, 0), 
-                3, 
-                cv2.LINE_AA
-            )
-            sample_with_banner = cv2.vconcat([banner, comp_block])
-            
             # Add a visual border to separate samples clearly
             border_size = 10
             sample_bordered = cv2.copyMakeBorder(
-                sample_with_banner, border_size, border_size, border_size, border_size, 
+                comp_block, border_size, border_size, border_size, border_size, 
                 cv2.BORDER_CONSTANT, value=[100, 100, 100]
             )
             
             all_comp_blocks.append(sample_bordered)
 
-    # 7. Final Master Concatenation (Stitching the accumulated batches)
+    # 8. Final Master Concatenation (Stitching the accumulated batches)
     if all_comp_blocks:
-        print("\nStitching final multi-batch master grid...")
-        cols_per_row = 5 # Force a 5-column layout
+        cols_per_row = args.grid_cols if args.grid_cols > 0 else args.batch_size
+        print(f"\nStitching final master grid using {cols_per_row} columns...")
         master_rows = []
         
         for i in range(0, len(all_comp_blocks), cols_per_row):
@@ -222,9 +299,13 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize DataLoader Output and Augmentations across multiple batches.")
     parser.add_argument('--aug_config_path', type=str, required=True, help="Path to the augmentor YAML config file")
+    parser.add_argument('--data_path', type=str, default="multi_longsleeve_multi_primitive_alignment_human_demo", help="Path or name of the dataset")
     parser.add_argument('--batch_size', type=int, default=5, help="Batch size to request from DataLoader")
     parser.add_argument('--num_batches', type=int, default=5, help="Number of batches to sample and stack")
+    parser.add_argument('--grid_cols', type=int, default=0, help="Force number of columns in the final grid. Defaults to batch_size if 0.")
     parser.add_argument('--output_path', type=str, default='./tmp/dataloader_augment.png')
+    parser.add_argument('--use_hindsight', action='store_true', help="Use HindsightDataset instead of TrajectoryDataset")
+    parser.add_argument('--draw_keypoints', action='store_true', help="Draw semantic keypoints on the images")
     args = parser.parse_args()
     
     main(args)

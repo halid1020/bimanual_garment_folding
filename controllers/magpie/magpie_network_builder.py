@@ -120,14 +120,14 @@ def build_networks_and_optimizers(agent):
     prim_class_head = None
     global_cond_dim = agent.effective_obs_dim * config.obs_horizon
     
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+    if agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
         cls_cfg = config.get("primitive_classifier", {}) 
         prim_class_head = MLPNetwork(
             input_dim=agent.effective_obs_dim, output_dim=agent.K,
             hidden_dims=cls_cfg.get("hidden_dims", []), activation=cls_cfg.get("activation", "relu"),
             dropout=cls_cfg.get("dropout", 0.0), use_layernorm=cls_cfg.get("use_layernorm", False),
         )
-        if agent.primitive_integration == 'one-hot-encoding':
+        if agent.primitive_integration == 'one_hot_encoding':
             # Expand the global conditioning dimension to accommodate the concatenated one-hot vector
             global_cond_dim = (agent.effective_obs_dim + agent.K) * config.obs_horizon
         
@@ -286,7 +286,7 @@ def build_primitive_action_masks(agent):
     
     start = None
     # Determine the offset index based on whether we reserve dimension 0 for the primitive bin
-    if agent.primitive_integration in ['one-hot-encoding', 'separate_networks', 'ordinary_encoding']:
+    if agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
         start = 0
     elif agent.primitive_integration == 'bin_as_output':
         start = 1

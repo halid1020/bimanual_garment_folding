@@ -73,6 +73,10 @@ pip install OpenEXR
 
 ### Step 4: Setup Assets (Simulation Only)
 Download and unzip the [`assets.zip`](https://drive.google.com/file/d/1Pwqvu1bGxKbL7Qpt_ots3vQJbzCEBsIa/view?usp=sharing) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes, goal states, and semantic keypoint configurations required for garment folding. 
+```bash
+gdown 1Pwqvu1bGxKbL7Qpt_ots3vQJbzCEBsIa
+unzip assets.zip
+```
 >
 
 ## 3. Testing the Installation (Simulation)

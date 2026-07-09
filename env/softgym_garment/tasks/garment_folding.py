@@ -65,7 +65,9 @@ class GarmentFoldingTask(GarmentTask):
         self.config = config
         self.demonstrator = config.demonstrator ## TODO: This needs to be initialised before the class.
 
-        self.iou_thresholds = config.get('iou_thresholds', [0.80] * self.config.goal_steps)
+        # One threshold per subgoal: the initial flattened/canonical state plus each
+        # fold step, i.e. goal_steps + 1 subgoals in total.
+        self.iou_thresholds = config.get('iou_thresholds', [0.80] * (self.config.goal_steps + 1))
         self.use_strict_alignment = config.get('alignment', False) is True
         self.goals = [] # This needs to be loaded  or generated
         self.has_succeeded = False
@@ -145,14 +147,20 @@ class GarmentFoldingTask(GarmentTask):
             if not os.path.exists(goal_path):
                 print(f'[GarmentFoldingTask, _load_or_generate_goals] Generating goal {i} for episode id {arena.eid}')
                 goal = self._generate_a_goal(arena)
+
+                # Keep exactly the goal_steps + 1 subgoals the task uses (initial
+                # flattened/canonical state + each fold); drop the demonstrator's
+                # redundant terminal frame so that the number of images saved matches
+                # the number later loaded (range(goal_steps + 1)).
+                subgoals = goal[:-1]
+
                 os.makedirs(goal_path, exist_ok=True)
 
-                # --- FIXED: Changed loop variable to 'j' to avoid shadowing 'i' ---
-                for j, subgoal in enumerate(goal):
+                for j, subgoal in enumerate(subgoals):
                     # Save RGB
                     plt.imsave(os.path.join(goal_path, f"rgb_step_{j}.png"), subgoal['observation']['rgb']/255.0)
 
-                    # --- NEW: Save Depth as a numpy array ---
+                    # Save Depth as a numpy array
                     if 'depth' in subgoal['observation']:
                         np.save(os.path.join(goal_path, f"depth_step_{j}.npy"), subgoal['observation']['depth'])
 
@@ -160,7 +168,7 @@ class GarmentFoldingTask(GarmentTask):
                     save_point_cloud_ply(os.path.join(goal_path, f"particles_step_{j}.ply"),
                                         subgoal['observation']["particle_positions"])
 
-                goals.append(goal[:-1])
+                goals.append(subgoals)
             else:
                 goal = []
                 for j in range(self.config.goal_steps + 1):
@@ -213,10 +221,14 @@ class GarmentFoldingTask(GarmentTask):
         N = len(trj_infos)
         K = self.config.goal_steps + 1
         
-        # 1. If we have already succeeded, lock the UI to the final goal
-        if self.has_succeeded:
+        # 1. Lock to the final goal only if the CURRENT state still matches it.
+        #    Relying on self.has_succeeded here lags by one step, because success()
+        #    (which updates has_succeeded) runs after evaluate() in _process_info;
+        #    a disturbed fold would otherwise keep showing the final target for one
+        #    extra step before reverting to an earlier subgoal.
+        if self._iou_for_goal_step(arena, trj_infos[-1], K - 1) >= self.iou_thresholds[K - 1]:
             active_idx = K - 1
-            
+
         # 2. Otherwise, scan the recent sliding window for the sequence
         else:
             K_window = min(K, N)

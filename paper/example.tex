@@ -329,7 +329,7 @@ In simulation, we evaluate folding using fine-grained, particle-based geometric 
     \item \textbf{Mean Particle Distance (MPD):} We apply rigid Procrustes alignment between the current ($\{\mathbf{p}_t^i\}_{i=1}^N$) and goal ($\{\mathbf{p}_g^i\}_{i=1}^N$) particle sets via Singular Value Decomposition (SVD) on centred point clouds to ensure translational and rotational invariance \cite{canberk2022cloth}.
     \item \textbf{Mean Keypoint Distance (MKD):} Procrustes alignment applied strictly to designated semantic keypoints.
     \item \textbf{Alignment Intersection-over-Union (A-IoU):} The IoU overlap between the current garment segmentation mask and the target goal mask.
-    \item \textbf{Sequential IoU-Based Success Rate (Sq-IoU-SR):} A trial is deemed successful only if a sliding-window IoU matching mechanism strictly follows the demonstrated sequence of intermediate folding subgoals.
+    \item \textbf{Sequential IoU-Based Success Rate (Sq-IoU-SR):} The demonstrated fold defines an ordered sequence of subgoals (the initial flattened, canonically aligned state plus each fold step). At each step the current mask is matched against this sequence with a sliding window over the most recent trajectory frames; the matched progress is thus re-estimated from the current observation, so a disturbed fold reverts to the appropriate earlier subgoal. A trial succeeds only if the trajectory reproduces the full subgoal sequence in order.
 \end{enumerate}
 
 \begin{table*}[t!]

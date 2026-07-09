@@ -263,7 +263,7 @@ Our dataset comprises 200 simulation episodes for each garment category, and 40 
     \includegraphics[width=0.49\linewidth]{plots/human-interface-initial.png}
     \hfill
     \includegraphics[width=0.49\linewidth]{plots/human-interface-success.png}
-    \caption{Interface that is used to collect human demonstration data and human baseline evaluation}
+    \caption{\textbf{This image should occupy two columns and it should be combined with Figure 1.} Interface that is used to collect human demonstration data and human baseline evaluation}
     \label{fig:qualitative_sota_canon}
 \end{figure}
 
@@ -271,7 +271,7 @@ Our dataset comprises 200 simulation episodes for each garment category, and 40 
 \begin{figure}[!t]
     \centering
     % \includegraphics[width=0.5\linewidth]{plots/your_figure.png}
-    \caption{Data Augmentation and Sampling}
+    \caption{\textbf{This image should occupy two columns and it should be compbined with Figure 1.} Data Augmentation and Sampling
     \label{fig:placeholder}
 \end{figure}
 
@@ -295,7 +295,7 @@ In this set of experiments, we benchmark MAGPIE against leading domain-specific 
 We evaluate MAGPIE across both simulation and physical domains. We build our simulation environment upon the ClothFunnels variant of the SoftGym benchmark \cite{lin2020softgym}, powered by the PyFlex physics engine \cite{li2018learning}. We source realistic garment meshes from the Cloth3D dataset \cite{bertiche2020cloth3d}, specifically selecting long-sleeve T-shirts, trousers, skirts, and dresses. For each category, our dataset comprises 200 training episodes, 30 validation episodes, and 30 evaluation episodes. To ensure robust policy learning, we utilise a diverse split of ``hard'' (highly crumpled with severe self-occlusion) and ``easy'' (semi-flattened) initial states, directly following the ClothFunnels methodology. Specifically, the 200 training trials use a mixture of ``hard'' and ``easy'' configurations, whereas the validation and evaluation trials strictly use ``hard'' initialisations.  We preserve most parameter distributions from the original ClothFunnels environment, where a top-down camera observes the centre of the world frame. However, for our novel central-alignment and folding tasks, we explicitly align simulation properties with our real-world setup. This includes matching workspace radii, dual-arm base placements, and camera configurations to mirror our physical hardware cell. Furthermore, we adjust fabric stiffness values and cloth particle radii to emulate realistic garment dynamics. A side-by-side comparison of these environmental parameters is detailed in Table \ref{tab:sim-real-params}. Detailed mechanics of the simulation physics, mesh rendering, and primitive trajectory parameters are deferred to Appendix \ref{app:simulation_details}. We set all the evaluation step strictly as 20---there is no early stopping at the success states.
 
 \begin{table*}[!t]
-\caption{Comparison of physical and simulated environmental parameters, highlighting the reduced sim-to-real gap in our experimental framework.}
+\caption{\textbf{TODO: this table should only occupy one column} Comparison of physical and simulated environmental parameters, highlighting the reduced sim-to-real gap in our experimental framework.}
 \label{tab:sim-real-params}
 \centering
 \small
@@ -371,21 +371,21 @@ LS-SR $\uparrow$ & 0/30 & 1/30 & \cellcolor{red!25}7/30 & \cellcolor{yellow!25}1
 \begin{figure}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/traj_canon_alignment.png}
-    \caption{Qualitative comparison of MAGPIE against SoTA bimanual flattening methods on the Canonicalisation-Alignment Task. The grid tracks the spatial execution sequence across consecutive steps, starting from a highly crumpled out-of-distribution initial state, moving through sequential execution of high-momentum Pick-and-Fling actions, and terminating at the target aligned and folded state.}
+    \caption{\textbf{This image should occupy two columns}} Qualitative comparison of MAGPIE against SoTA bimanual flattening methods on the Canonicalisation-Alignment Task. The grid tracks the spatial execution sequence across consecutive steps, starting from a highly crumpled out-of-distribution initial state, moving through sequential execution of high-momentum Pick-and-Fling actions, and terminating at the target aligned and folded state.}
     \label{fig:qualitative_sota_canon}
 \end{figure}
 
 \begin{figure}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/traj_central_alignment.png}
-    \caption{Qualitative comparison of MAGPIE on the Central-Alignment Task across different garment categories.}
+    \caption{\textbf{This image should occupy two columns}} Qualitative comparison of MAGPIE on the Central-Alignment Task across different garment categories.}
     \label{fig:qualitative_central_garment}
 \end{figure}
 
 \begin{figure}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/magpie_garment_radar_plot.png}
-    \caption{Quantitative evaluation of MAGPIE on the Central-Alignment Task across different garment categories.}
+    \caption{\textbf{This image should occupy two columns}} Quantitative evaluation of MAGPIE on the Central-Alignment Task across different garment categories.}
     \label{fig:quantative_central_garment}
 \end{figure}
 

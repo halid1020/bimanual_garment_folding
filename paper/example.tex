@@ -192,11 +192,10 @@ We build MAGPIE upon the Parameterised Action Partially Observable Markov Decisi
 To improve learning efficiency, we train MAGPIE using a strategy inspired by Hindsight Experience Replay (HER) \cite{andrychowicz2017hindsight}. Instead of strictly conditioning the policy on the final human-designated goal state—which may be structurally distant from a highly crumpled starting position—we treat intermediate future states within the same trajectory as virtual goals. This transforms partial or incomplete sequences into successful demonstrations of local spatial transformations, providing a dense, reachable learning signal for the policy. Finally, we sequence the flattening and folding behaviours using a vision-based heuristic relying on normalised coverage and alignment Intersection over Union (IoU). The method is developed in simulation and successfully transferred to the real world in a zero-shot manner. Please see Figure \ref{fig:architecture} for an illustration of our method.
 
 % > **Diagram Blueprint for Figure \ref{fig:architecture} (System Architecture)**
-% > * **Input Block:** Show a crumpled garment RGB image and a goal folded RGB image ($96 \times 96$) passing through a Shared Vision Encoder (ResNet-18 + GroupNorm).
-% > * **Latent Space:** Represent the output passing through an MLP Projector to form the 256-dimensional latent visual embedding $z$.
+% > * **Input Block:** Show a crumpled garment RGB image and a goal folded RGB image ($128 \times 128$) passing through a Shared Vision Encoder (ResNet-18 + GroupNorm).
+% > * **Latent Space:** Represent the output passing through an MLP Projector to form the 512-dimensional latent visual embedding $z$.
 % > * **Branch 1 (Classification):** Route $z$ to the MLP Classifier. Show a softmax output generating a categorical distribution over 4 primitives (Pick-and-Fling, Dual-arm Place, Single-arm Place, No-Op). Highlight the selected primitive $\omega^*$.
-% > * **Branch 2 (Action Parameter Inference):** Create a routing switch controlled by $\omega^*$. The embedding $z$ is routed *only* to the specific 1D U-Net COT-FM network (e.g., $v_\phi^{\omega^*}$). Show a noise vector $a_0$ iteratively transported over $k=10$ integration steps into the final continuous action parameters $a_1$.
-% > * **Branch 3 (Representation):** Show $z$ passing into an auxiliary MLP Regression head to predict the $17 \times 2$ dimensional Semantic Keypoints (include a mask icon indicating gradients are only applied during simulation data batches).
+% > * **Branch 2 (Action Parameter Inference):** Create a routing switch controlled by $\omega^*$. The embedding $z$ is routed *only* to the specific MLP-based COT-FM network (e.g., $v_\phi^{\omega^*}$). Show a noise vector $a_0$ iteratively transported over $k=4$ integration steps into the final continuous action parameters $a_1$.
 
 \subsection{Multi-Primitive Learning as Classification}
 \label{sec:classification}
@@ -213,7 +212,7 @@ Once the optimal primitive $\omega^*$ is identified, the system must determine t
 We utilise Conditioned Optimal Transport Flow Matching (COT-FM) \cite{black2024pi0, lipman2022flow, liu2022rectified} (detailed in Section \ref{sec:ot_cfm}) to model the generative mapping from an initial noise distribution to the target action parameter distribution. Rather than employing a single one-size-fits-all network conditioned on a one-hot encoding, we instantiate independent vector field networks $v_{\phi}^{\omega}$ for each primitive type $\omega \in \Omega$. This architectural split effectively prevents mode collapse and parameter interference across distinctly different robotic behaviours. We demonstrate the empirical superiority of this decoupled approach via ablation studies in our experiments section.
 
 Building upon the optimal transport formulation defined in Section \ref{sec:ot_cfm}, the specific vector field network $v_{\phi}^{\omega}(a_k^\omega, k \mid z)$ for the selected primitive $\omega$ is trained to regress the constant target velocity $u_k = a_1 - a_0$. We optimise this via the following conditional flow matching objective:
-$$\mathcal{L}_{para}^{\omega}(\phi) = \mathbb{E}_{\substack{k \sim \mathcal{U}[0,1] \\ a_0 \sim \mathcal{N}(\bm{0}, \bm{I}) \\ a_1 \sim \mathcal{D}^\omega}} \left[ \| v_{\phi}^{\omega}(a_k^\omega, k \mid z) - (a_1 - a_0) \|^2 \right]$$ \textbf{TODO: fix the action parameter}
+$$\mathcal{L}_{para}^{\omega}(\phi) = \mathbb{E}_{\substack{k \sim \mathcal{U}[0,1] \\ a_0 \sim \mathcal{N}(\bm{0}, \bm{I}) \\ a_1 \sim \mathcal{D}^\omega}} \left[ \| v_{\phi}^{\omega}(a_k^\omega, k \mid z) - (a_1 - a_0) \|^2 \right]$$
 where $\mathcal{D}$ represents the expert demonstration dataset where primitive $\omega$ was executed. The exact implementation details of these policy networks are given in Appendix \ref{app:architecture}.
 
 % \subsection{Representation Learning via Semantic Keypoints}
@@ -248,14 +247,14 @@ where $\mathcal{D}$ represents the expert demonstration dataset where primitive 
     \caption{Data Sampling and Augmentation. The data augmentation includes rotation, flipping, scaling and colour jittering, RGB channel permutation as well as gripper-swapping. The hindsight sampling randomly select the target states as well as the actual target of the trajecotory.}
     \label{fig:placeholder}
 \end{figure}
-To improve data efficiency and provide a dense, reachable learning signal, we actively sample future states for goal conditioning during training. Rather than conditioning the policy strictly on the terminal goal state of an episode, we dynamically sample a future observation $x_{goal}$ from a randomly selected future time step $t + \Delta t$ within the same trajectory sequence. This acts as a proximal sub-goal, effectively bridging the severe visual distribution shift between highly crumpled initial states and perfectly folded final states. By anchoring the generative policy to near-term geometric changes, the network learns local spatial transformations much faster.  \textbf{TODO: talk about this is inspired by Hignd Signt Replay Buffer.}
+To improve data efficiency and provide a dense, reachable learning signal, we actively sample future states for goal conditioning during training. Rather than conditioning the policy strictly on the terminal goal state of an episode, we dynamically sample a future observation $x_{goal}$ from a randomly selected future time step $t + \Delta t$ within the same trajectory sequence. This acts as a proximal sub-goal, effectively bridging the severe visual distribution shift between highly crumpled initial states and perfectly folded final states. By anchoring the generative policy to near-term geometric changes, the network learns local spatial transformations much faster. This future-state relabelling is directly inspired by Hindsight Experience Replay (HER)~\cite{andrychowicz2017hindsight}, which similarly converts partial rollouts into successful goal-reaching demonstrations.
 
 Furthermore, to ensure robustness to visual perturbations and bridge the simulation-to-reality gap, we apply an aggressive suite of spatial and visual data augmentations to the RGB observations prior to latent encoding. These include color jittering (modifying brightness, contrast, saturation, and hue), random channel permutation, random vertical flipping (with corresponding inversions of spatial action coordinates), random scaling within a $[0.7, 1.0]$ range, and random rotations in $1^\circ$ increments. To handle the symmetrical nature of dual-arm manipulation, we also employ an action-swapping augmentation with a $50\%$ probability, which geometrically mirrors the observation and remaps the corresponding left/right arm action parameters.
 
 \subsection{Training Details}
-All network components—including the shared visual encoder, the representation regressor, the primitive classification network, and the suite of flow-matching action generative models—are optimised jointly in an end-to-end manner. The overall training objective is formulated as a weighted sum of the primitive classification loss $\mathcal{L}_{prim}$, the representation learning loss $\mathcal{L}_{rep}$, and the sum of the optimal transport flow-matching losses across all active primitive networks $\sum_{\omega \in \Omega} \mathcal{L}_{para}^{\omega}$:
+All network components—including the shared visual encoder, the primitive classification network, and the suite of flow-matching action generative models—are optimised jointly in an end-to-end manner. The overall training objective is formulated as a weighted sum of the primitive classification loss $\mathcal{L}_{prim}$ and the sum of the optimal transport flow-matching losses across all active primitive networks $\sum_{\omega \in \Omega} \mathcal{L}_{para}^{\omega}$:
 $$\mathcal{L}_{total} = \beta_{prim} \mathcal{L}_{prim} + \beta_{para} \sum_{\omega \in \Omega} \mathcal{L}_{para}^{\omega}$$
-where the scaling coefficients are empirically set to $\beta_{prim} = 0.001$ and $\beta_{para} = 1.0$ to balance the auxiliary objectives. We employ the AdamW optimiser and apply weighted cross-entropy to handle the highly imbalanced distribution of primitives within the demonstration dataset. 
+where the scaling coefficients are empirically set to $\beta_{prim} = 0.01$ and $\beta_{para} = 1.0$ to balance the objectives. We employ the AdamW optimiser and apply weighted cross-entropy to handle the highly imbalanced distribution of primitives within the demonstration dataset. 
 
 Our dataset comprises 200 simulation episodes for each garment category, and 40 real-world episodes for each physical garment instance. Each episode is rolled out to a maximum of 20 steps. A complete and detailed breakdown of all hyperparameters, network architectures (including hidden dimensions and normalisation layers), and environment configurations can be found in Appendix \ref{app:architecture}.
 
@@ -525,15 +524,15 @@ We would like to thank the Institute of Safe Autonomy at the University of York 
 \section{Network Architecture and Implementation Details}
 \label{app:architecture}
 
-\textbf{TODO: explain brief how MAGPIE works briefly and refer the reader to read the main body seciton first.} Our implementation relies on a highly decoupled architecture to manage the multi-primitive nature of garment shaping. 
+This appendix details the exact network architecture and training configuration of MAGPIE; we refer the reader to Section~\ref{sec:method} for the conceptual overview. Our implementation relies on a highly decoupled architecture to manage the multi-primitive nature of garment shaping: a shared vision encoder feeds an MLP primitive classifier and a suite of primitive-specific MLP-based flow-matching networks.
 
 \subsection{Shared Vision Encoder}
-To process visual inputs, we utilise a ResNet-18 backbone. \textbf{TODO: ciation} Because standard Batch Normalisation performs poorly with the small batch sizes typical of continuous robotic control algorithms, we replace all 2D Batch Normalisation layers with Group Normalisation (\texttt{num\_groups}=16). The final fully connected layer is removed, and an Adaptive Average Pooling layer compresses the spatial features into a 512-dimensional vector. 
+To process visual inputs, we utilise a ResNet-18 backbone~\cite{he2016deep}. Because standard Batch Normalisation performs poorly with the small batch sizes typical of continuous robotic control algorithms, we replace all 2D Batch Normalisation layers with Group Normalisation (\texttt{num\_groups}=16). The final fully connected layer is removed, and an Adaptive Average Pooling layer compresses the spatial features into a 512-dimensional vector.
 
-To refine these features for downstream tasks, this vector is subsequently passed through an MLP projector consisting of two hidden layers with dimensions $[256, 256]$ and ReLU activations, outputting a final 256-dimensional visual embedding. During training, a feature noise factor of $0.01$ is applied to the observation features to improve robustness. For state-inclusive experiments, physical vector states are concatenated with this projected visual embedding. 
+To refine these features for downstream tasks, this vector is subsequently passed through an MLP projector consisting of two hidden layers with dimensions $[512, 512]$ and GELU activations, outputting a final 512-dimensional visual embedding. During training, a feature noise factor of $0.05$ is applied to the observation features to improve robustness. For state-inclusive experiments, physical vector states are concatenated with this projected visual embedding.
 
 \subsection{Primitive Classification Head}
-The high-level primitive selection is handled by an MLP classifier. The network takes the 256-dimensional projected visual embedding and passes it through a single hidden layer with a dimension of 128. We apply a ReLU activation function, followed by Layer Normalisation and a Dropout layer with a probability of $p = 0.5$. The final output maps to the $K=4$ available action primitives. To ensure balanced decision-making during training, the classes are equally weighted ($\lambda_\omega = 1.0$ for all classes).
+The high-level primitive selection is handled by an MLP classifier. The network takes the 512-dimensional projected visual embedding and passes it through two hidden layers with dimensions $[256, 128]$. We apply a ReLU activation function, followed by Layer Normalisation and a Dropout layer with a probability of $p = 0.5$. The final output maps to the $K=4$ available action primitives. To ensure balanced decision-making during training, the classes are equally weighted ($\lambda_\omega = 1.0$ for all classes).
 
 
 \begin{table}[!t]
@@ -547,21 +546,24 @@ The high-level primitive selection is handled by an MLP classifier. The network 
 \multicolumn{2}{c}{\textit{Optimisation}} \\
 \midrule
 Optimiser & AdamW \\
-Learning Rate & $1 \times 10^{-4}$ \\
+Learning Rate & $3 \times 10^{-4}$ \\
 Weight Decay & $1 \times 10^{-2}$ \\
-Batch Size & 256 \\
-Total Update Steps & 100,000 \\
-Trial Validation Interval & 100 \\
+Batch Size & 1024 \\
+Total Update Steps & 120,000 \\
+Trial Validation Interval & 5,000 \\
 EMA Decay Rate & 0.9999 \\
-Warmup Steps & 1,500 \\
+Warmup Steps & 3,000 \\
 \midrule
 \multicolumn{2}{c}{\textit{Flow Matching \& Architecture}} \\
 \midrule
-Inference Iterations & 10 \\
+Inference Iterations & 4 \\
+Flow-Matching Backbone & MLP (\texttt{ConditionalMLP1D}) \\
+Backbone Hidden Dims & $[1024, 1024, 1024, 512]$ \\
+Backbone Activation & GELU \\
 Vision Encoder & ResNet-18 (\texttt{original}) \\
-Observation Embedding Dim & 256 (Projected) \\
+Observation Embedding Dim & 512 (Projected) \\
 Input Modalities & \texttt{rgb} + \texttt{goal\_rgb} \\
-Input Image Resolution & $96 \times 96$ \\
+Input Image Resolution & $128 \times 128$ \\
 Observation Horizon & 1 \\
 Prediction / Action Horizon & 1 \\
 Action Dimension & 4, 8, 4, 0 \\
@@ -569,19 +571,12 @@ Action Dimension & 4, 8, 4, 0 \\
 \multicolumn{2}{c}{\textit{Primitive Classification Network}} \\
 \midrule
 Primitive Integration & Separate Networks \\
-Hidden Dimensions & $[128]$ \\
+Hidden Dimensions & $[256, 128]$ \\
 Activation & ReLU \\
 Dropout & 0.5 \\
 Normalisation & LayerNorm \\
 Class Weights & $[1.0, 1.0, 1.0, 1.0]$ \\
-Primitive Loss Weight ($\beta_{prim}$) & 0.001 \\
-\midrule
-\multicolumn{2}{c}{\textit{Representation Learning}} \\
-\midrule
-Representation Mode & Predict State (\texttt{predict-state}) \\
-Representation Loss Weight ($\beta_{rep}$) & 0.5 \\
-State Dimension (Keypoints) & 34 ($17 \times 2$) \\
-Goal State Prediction & Disabled \\
+Primitive Loss Weight ($\beta_{prim}$) & 0.01 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -589,19 +584,16 @@ Goal State Prediction & Disabled \\
 
 
 \subsection{Conditioned Flow-Matching Networks (COT-FM)}
-For each of the $K$ primitives, we instantiate an independent 1D Conditional U-Net backbone to regress the optimal transport vector field. This separate-network integration ensures that distinct robotic behaviours do not suffer from parameter interference.
+For each of the $K$ primitives, we instantiate an independent MLP backbone (\texttt{ConditionalMLP1D}) to regress the optimal transport vector field. This separate-network integration ensures that distinct robotic behaviours do not suffer from parameter interference. The no-operation primitive carries no continuous parameters (dimension $0$) and therefore has no associated network.
 \begin{itemize}
-    \item \textbf{Architecture Backbone:} The U-Net employs a sequence of `ConditionalResidualBlock1D` modules. We set \texttt{disable\_updown=True}, effectively turning the architecture into a deep sequence of 1D convolutional residual blocks without spatial downsampling, which preserves the strict dimensionality of the continuous action spaces ($4, 8, 4$, or $0$). Each convolutional block consists of a 1D Convolution, Group Normalisation, and a Mish activation function.
-    \item \textbf{Timestep Embedding:} The continuous flow timestep $k$ is encoded using Sinusoidal Positional Embeddings, which are then passed through a two-layer MLP sequence (Linear $\rightarrow$ Mish $\rightarrow$ Linear) to generate the temporal feature.
-    \item \textbf{Conditioning:} The global visual context $z$ is concatenated with the temporal feature. This combined embedding is injected into the residual blocks using Feature-wise Linear Modulation (FiLM). Specifically, a conditioning encoder (Mish $\rightarrow$ Linear) predicts a per-channel scale and bias to dynamically modulate the network's activations after the first convolutional block.
-    \item \textbf{Integration:} During training, the flow matches the constant velocity field $a_1 - a_0$. During inference, we utilise an ODE solver with 10 integration steps to reliably transport the initial Gaussian noise into the predicted spatial parameters.
+    \item \textbf{Architecture Backbone:} Each network flattens the (single-step) action into a vector and passes it through a stack of dense layers with hidden dimensions $[1024, 1024, 1024, 512]$, GELU activations, and dropout $0.1$, regressing the vector field over the primitive's continuous action dimension ($4$, $8$, or $4$). Unlike a temporal U-Net, this backbone contains no convolutions or spatial down-/up-sampling.
+    \item \textbf{Timestep Embedding:} The continuous flow timestep $k$ is encoded using Sinusoidal Positional Embeddings (dimension $256$), which are then passed through a two-layer MLP sequence (Linear $\rightarrow$ Mish $\rightarrow$ Linear) to generate the temporal feature.
+    \item \textbf{Conditioning:} Conditioning is applied by concatenation: the global visual context $z$ and the timestep feature are concatenated with the flattened noisy action and fed jointly to the dense network, which directly regresses the velocity field.
+    \item \textbf{Integration:} During training, the flow matches the constant velocity field $a_1 - a_0$. During inference, we integrate the learned field with a $4$-step Euler ODE solver to transport the initial Gaussian noise into the predicted spatial parameters.
 \end{itemize}
 
-\subsection{Representation Regressor Head}
-The auxiliary semantic keypoint predictor is an MLP regression head consisting of two hidden layers with dimensions $[256, 256]$, featuring ReLU activations, Layer Normalisation, and a dropout probability of $0.5$. It takes the 256-dimensional projected visual embedding and maps it directly to a 34-dimensional vector, representing the maximum 17 2D semantic keypoints defined in our framework. Goal state prediction via this network is explicitly disabled in this configuration.
-
 \subsection{Optimization Hyperparameters}
-We optimise all networks end-to-end using the AdamW optimiser with a base learning rate of $1 \times 10^{-4}$ and a weight decay of $1 \times 10^{-2}$. We employ a cosine annealing learning rate scheduler with a warmup period of 1,500 steps. To stabilise training, we apply gradient clipping and maintain an Exponential Moving Average (EMA) of the model weights with a high decay rate of 0.9999.
+We optimise all networks end-to-end using the AdamW optimiser with a base learning rate of $3 \times 10^{-4}$ and a weight decay of $1 \times 10^{-2}$. We employ a cosine annealing learning rate scheduler with a warmup period of 3,000 steps. To stabilise training, we apply gradient clipping and maintain an Exponential Moving Average (EMA) of the model weights with a high decay rate of 0.9999.
 
 
 \section{Integration of Other Methods}

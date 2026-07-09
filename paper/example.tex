@@ -146,15 +146,15 @@ In robotics, policies are often developed over a discrete set of action primitiv
 
 \subsection{Action Primitives} \label{sec:action_primitives}
 
-MAGPIE adopts four types of primitives essential for effective and robust performance: \textbf{TODO: put number of parameters for each.}
+MAGPIE adopts four types of primitives essential for effective and robust performance. Each primitive is parameterised by a set of normalised 2-D pixel coordinates in $[-1, 1]$ (a total of $4$, $8$, $4$, and $0$ parameters, respectively), which are de-normalised and projected onto the table plane before execution.
 
-\paragraph{Pick-and-Fling:} Primarily utilised for highly crumpled states or garment reorientation, pick-and-fling has proven substantially important for effective flattening. The action easily flips the garment's orientation, reveals hidden key-points, and helps untangle the cloth when needed.
+\paragraph{Pick-and-Fling:} Primarily utilised for highly crumpled states or garment reorientation, pick-and-fling has proven substantially important for effective flattening. The action easily flips the garment's orientation, reveals hidden key-points, and helps untangle the cloth when needed. It is parameterised by $4$ values---one 2-D grasp point per arm.
 
-\paragraph{Dual-arm pick-and-place:} Resembling \textit{pick-and-stretch} in ClothMate \cite{luo2025clothmate} and the \textit{fold} primitive in prior literature \cite{xue2023unifolding}, dual-arm pick-and-place adjusts the garment after initial flattening. The primitive is essential for precise folding. To prevent self-collisions, intersecting arm trajectories are executed sequentially.
+\paragraph{Dual-arm pick-and-place:} Resembling \textit{pick-and-stretch} in ClothMate \cite{luo2025clothmate} and the \textit{fold} primitive in prior literature \cite{xue2023unifolding}, dual-arm pick-and-place adjusts the garment after initial flattening. The primitive is essential for precise folding. To prevent self-collisions, intersecting arm trajectories are executed sequentially. It is parameterised by $8$ values---a 2-D pick and a 2-D place point for each of the two arms.
 
-\paragraph{Single-arm pick-and-place:} Also known as the \textit{drag} primitive, single-arm pick-and-place employs one robot arm to bring the garment toward the intersection of the dual-arm workspace, enabling subsequent flattening and folding. The operation is also vital for fine-grained adjustments, such as aligning trouser legs that fall outside the shared reachable area.
+\paragraph{Single-arm pick-and-place:} Also known as the \textit{drag} primitive, single-arm pick-and-place employs one robot arm to bring the garment toward the intersection of the dual-arm workspace, enabling subsequent flattening and folding. The operation is also vital for fine-grained adjustments, such as aligning trouser legs that fall outside the shared reachable area. It is parameterised by $4$ values---a single 2-D pick and 2-D place point.
 
-\paragraph{No Operation:} Under this primitive, the robot arms remain stationary, allowing the system to stabilise upon successfully completing the task.
+\paragraph{No Operation:} Under this primitive, the robot arms remain stationary, allowing the system to stabilise upon successfully completing the task. It carries no continuous parameters ($0$-dimensional).
 
 \subsection{Optimal Transport Conditional Flow Matching for Policy Learning} \label{sec:ot_cfm}
 
@@ -180,9 +180,18 @@ Substituting this derivation into the formulation yields a highly tractable lear
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.98\linewidth]{plots/Magpie-architecture.jpg}
-    \caption{The Architecture of MAGPIE. We just snap the resulted action to the corresponding workspace, then snap the pick action on the cloth masks before environment execution.}
-        \label{fig:reward-function}
+\subfloat[The architecture of MAGPIE. We snap the resulting action to the corresponding workspace, then snap the pick action onto the cloth masks before environment execution.]{%
+    \includegraphics[width=0.98\linewidth]{plots/Magpie-architecture.jpg}%
+    \label{fig:architecture}}\\[4pt]
+\subfloat[Data sampling and augmentation. The augmentation includes rotation, flipping, scaling and colour jittering, RGB channel permutation as well as gripper-swapping. The hindsight sampling randomly selects the target states as well as the actual target of the trajectory.]{%
+    \includegraphics[width=1.0\linewidth]{plots/dataloader_augment_master_multi_batch.png}%
+    \label{fig:data_augmentation}}\\[4pt]
+\subfloat[Interface used to collect human demonstration data and for human baseline evaluation (initial state, left; a successful fold, right).]{%
+    \includegraphics[width=0.49\linewidth]{plots/human-interface-initial.png}\hfill
+    \includegraphics[width=0.49\linewidth]{plots/human-interface-success.png}%
+    \label{fig:human_interface}}
+\caption{Overview of MAGPIE: (a) the multi-primitive network architecture, (b) the data sampling and augmentation pipeline, and (c) the interface used to collect human demonstrations and to run the human baseline.}
+\label{fig:overview}
 \end{figure*}
 
 \section{Method} \label{sec:method}
@@ -241,15 +250,9 @@ where $\mathcal{D}$ represents the expert demonstration dataset where primitive 
 
 
 \subsection{Data Augmentation and Future-State Goal Sampling}
-\begin{figure}
-    \centering
-    \includegraphics[width=1.0\linewidth]{plots/dataloader_augment_master_multi_batch.png}
-    \caption{Data Sampling and Augmentation. The data augmentation includes rotation, flipping, scaling and colour jittering, RGB channel permutation as well as gripper-swapping. The hindsight sampling randomly select the target states as well as the actual target of the trajecotory.}
-    \label{fig:placeholder}
-\end{figure}
 To improve data efficiency and provide a dense, reachable learning signal, we actively sample future states for goal conditioning during training. Rather than conditioning the policy strictly on the terminal goal state of an episode, we dynamically sample a future observation $x_{goal}$ from a randomly selected future time step $t + \Delta t$ within the same trajectory sequence. This acts as a proximal sub-goal, effectively bridging the severe visual distribution shift between highly crumpled initial states and perfectly folded final states. By anchoring the generative policy to near-term geometric changes, the network learns local spatial transformations much faster. This future-state relabelling is directly inspired by Hindsight Experience Replay (HER)~\cite{andrychowicz2017hindsight}, which similarly converts partial rollouts into successful goal-reaching demonstrations.
 
-Furthermore, to ensure robustness to visual perturbations and bridge the simulation-to-reality gap, we apply an aggressive suite of spatial and visual data augmentations to the RGB observations prior to latent encoding. These include color jittering (modifying brightness, contrast, saturation, and hue), random channel permutation, random vertical flipping (with corresponding inversions of spatial action coordinates), random scaling within a $[0.7, 1.0]$ range, and random rotations in $1^\circ$ increments. To handle the symmetrical nature of dual-arm manipulation, we also employ an action-swapping augmentation with a $50\%$ probability, which geometrically mirrors the observation and remaps the corresponding left/right arm action parameters.
+Furthermore, to ensure robustness to visual perturbations and bridge the simulation-to-reality gap, we apply an aggressive suite of spatial and visual data augmentations to the RGB observations prior to latent encoding (Figure~\ref{fig:data_augmentation}). These include color jittering (modifying brightness, contrast, saturation, and hue), random channel permutation, random vertical flipping (with corresponding inversions of spatial action coordinates), random scaling within a $[0.7, 1.0]$ range, and random rotations in $1^\circ$ increments. To handle the symmetrical nature of dual-arm manipulation, we also employ an action-swapping augmentation with a $50\%$ probability, which geometrically mirrors the observation and remaps the corresponding left/right arm action parameters.
 
 \subsection{Training Details}
 All network components—including the shared visual encoder, the primitive classification network, and the suite of flow-matching action generative models—are optimised jointly in an end-to-end manner. The overall training objective is formulated as a weighted sum of the primitive classification loss $\mathcal{L}_{prim}$ and the sum of the optimal transport flow-matching losses across all active primitive networks $\sum_{\omega \in \Omega} \mathcal{L}_{para}^{\omega}$:
@@ -258,22 +261,7 @@ where the scaling coefficients are empirically set to $\beta_{prim} = 0.01$ and 
 
 Our dataset comprises 200 simulation episodes for each garment category, and 40 real-world episodes for each physical garment instance. Each episode is rolled out to a maximum of 20 steps. A complete and detailed breakdown of all hyperparameters, network architectures (including hidden dimensions and normalisation layers), and environment configurations can be found in Appendix \ref{app:architecture}.
 
-\begin{figure}[!t]
-    \centering
-    \includegraphics[width=0.49\linewidth]{plots/human-interface-initial.png}
-    \hfill
-    \includegraphics[width=0.49\linewidth]{plots/human-interface-success.png}
-    \caption{\textbf{This image should occupy two columns and it should be combined with Figure 1.} Interface that is used to collect human demonstration data and human baseline evaluation}
-    \label{fig:qualitative_sota_canon}
-\end{figure}
 
-
-\begin{figure}[!t]
-    \centering
-    % \includegraphics[width=0.5\linewidth]{plots/your_figure.png}
-    \caption{\textbf{This image should occupy two columns and it should be compbined with Figure 1.} Data Augmentation and Sampling
-    \label{fig:placeholder}
-\end{figure}
 
 \section{Experiments}
 \label{sec:experiments}
@@ -292,27 +280,31 @@ We develop our proposed method MAGPIE based on the decoupled multi-primitive arc
 In this set of experiments, we benchmark MAGPIE against leading domain-specific garment-manipulation multi-primitive approaches in simulation. For non-unified baselines, we evaluate ClothFunnels \cite{canberk2022cloth} and ClothMate \cite{luo2025clothmate}. For unified framework baselines, we compare against UniFolding \cite{xue2023unifolding}. To ensure a fair comparison, we exclude methods that rely on step-wise language instructions.
 
 \paragraph{Simulation Experimental Setup}
-We evaluate MAGPIE across both simulation and physical domains. We build our simulation environment upon the ClothFunnels variant of the SoftGym benchmark \cite{lin2020softgym}, powered by the PyFlex physics engine \cite{li2018learning}. We source realistic garment meshes from the Cloth3D dataset \cite{bertiche2020cloth3d}, specifically selecting long-sleeve T-shirts, trousers, skirts, and dresses. For each category, our dataset comprises 200 training episodes, 30 validation episodes, and 30 evaluation episodes. To ensure robust policy learning, we utilise a diverse split of ``hard'' (highly crumpled with severe self-occlusion) and ``easy'' (semi-flattened) initial states, directly following the ClothFunnels methodology. Specifically, the 200 training trials use a mixture of ``hard'' and ``easy'' configurations, whereas the validation and evaluation trials strictly use ``hard'' initialisations.  We preserve most parameter distributions from the original ClothFunnels environment, where a top-down camera observes the centre of the world frame. However, for our novel central-alignment and folding tasks, we explicitly align simulation properties with our real-world setup. This includes matching workspace radii, dual-arm base placements, and camera configurations to mirror our physical hardware cell. Furthermore, we adjust fabric stiffness values and cloth particle radii to emulate realistic garment dynamics. A side-by-side comparison of these environmental parameters is detailed in Table \ref{tab:sim-real-params}. Detailed mechanics of the simulation physics, mesh rendering, and primitive trajectory parameters are deferred to Appendix \ref{app:simulation_details}. We set all the evaluation step strictly as 20---there is no early stopping at the success states.
+We evaluate MAGPIE across both simulation and physical domains. We build our simulation environment upon the ClothFunnels variant of the SoftGym benchmark \cite{lin2020softgym}, powered by the PyFlex physics engine \cite{li2018learning}. We source realistic garment meshes from the Cloth3D dataset \cite{bertiche2020cloth3d}, specifically selecting long-sleeve T-shirts, trousers, skirts, and dresses. For each category, our dataset comprises 200 training episodes, 30 validation episodes, and 30 evaluation episodes. To ensure robust policy learning, we utilise a diverse split of ``hard'' (highly crumpled with severe self-occlusion) and ``easy'' (semi-flattened) initial states, directly following the ClothFunnels methodology. Specifically, the 200 training trials use a mixture of ``hard'' and ``easy'' configurations, whereas the validation and evaluation trials strictly use ``hard'' initialisations.  We preserve most parameter distributions from the original ClothFunnels environment, where a top-down camera observes the centre of the world frame. However, for our novel central-alignment and folding tasks, we explicitly align simulation properties with our real-world setup. This includes matching workspace radii, dual-arm base placements, and camera configurations to mirror our physical hardware cell. Furthermore, we adjust fabric stiffness values and cloth particle radii to emulate realistic garment dynamics. A side-by-side comparison of these environmental parameters is detailed in Table \ref{tab:sim-real-params}. Detailed mechanics of the simulation physics, mesh rendering, and primitive trajectory parameters are deferred to Appendix \ref{app:architecture}. We set all the evaluation step strictly as 20---there is no early stopping at the success states.
 
-\begin{table*}[!t]
-\caption{\textbf{TODO: this table should only occupy one column} Comparison of physical and simulated environmental parameters, highlighting the reduced sim-to-real gap in our experimental framework.}
+\begin{table}[!t]
+\caption{Comparison of physical and simulated environmental parameters, highlighting the reduced sim-to-real gap in our experimental framework.}
 \label{tab:sim-real-params}
 \centering
-\small
+\footnotesize
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{l|cc}
 \toprule
 \textbf{Parameter} & \textbf{ClothFunnels} & \textbf{Ours} \\
 \midrule
 Camera Height & $2.0\,\mathrm{m}$ & $1.65\,\mathrm{m}$ \\
-Camera FoV  & 45x45 & 69x42 \\
-Camera Resolution  & 480x480& 1280x720 \\
+Camera FoV  & $45{\times}45$ & $69{\times}42$ \\
+Camera Resolution  & $480{\times}480$ & $1280{\times}720$ \\
 Particle Radius & $0.0140\,\mathrm{m}$ & $0.0175\,\mathrm{m}$ \\
-Cloth Stiffness & (0.75, 0.02, 0.02) & (0.8, 0.6, 0.8) \\
+Cloth Stiffness & $(0.75, 0.02, 0.02)$ & $(0.8, 0.6, 0.8)$ \\
 Arm Base Distance & $1.765\,\mathrm{m}$ & $1.2\,\mathrm{m}$ \\
-Arm Workspace Radius & $(0\,\mathrm{m}, 1.5\,\mathrm{m}), (0\,\mathrm{m}, 1.5\,\mathrm{m})$ & $(0.1\,\mathrm{m}, 0.85\,\mathrm{m}), (0.25\,\mathrm{m}, 0.9\,\mathrm{m})$ \\
+Workspace Radius, arm~1$^{\dagger}$ & $(0, 1.5)$ & $(0.10, 0.85)$ \\
+Workspace Radius, arm~2$^{\dagger}$ & $(0, 1.5)$ & $(0.25, 0.90)$ \\
 \bottomrule
 \end{tabular}
-\end{table*}
+
+{\footnotesize $^{\dagger}$\,(near, far) reach radius in metres.}
+\end{table}
 
 \paragraph{Metrics for Canonicalisation and Central Alignment Tasks in Simulation}
 For all continuous flattening metrics, we report the final value achieved at the end of the trajectory (capped at 20 steps):
@@ -368,26 +360,26 @@ LS-SR $\uparrow$ & 0/30 & 1/30 & \cellcolor{red!25}7/30 & \cellcolor{yellow!25}1
 }
 \end{table*}
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/traj_canon_alignment.png}
-    \caption{\textbf{This image should occupy two columns}} Qualitative comparison of MAGPIE against SoTA bimanual flattening methods on the Canonicalisation-Alignment Task. The grid tracks the spatial execution sequence across consecutive steps, starting from a highly crumpled out-of-distribution initial state, moving through sequential execution of high-momentum Pick-and-Fling actions, and terminating at the target aligned and folded state.}
+    \caption{Qualitative comparison of MAGPIE against SoTA bimanual flattening methods on the Canonicalisation-Alignment Task. The grid tracks the spatial execution sequence across consecutive steps, starting from a highly crumpled out-of-distribution initial state, moving through sequential execution of high-momentum Pick-and-Fling actions, and terminating at the target aligned and folded state.}
     \label{fig:qualitative_sota_canon}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/traj_central_alignment.png}
-    \caption{\textbf{This image should occupy two columns}} Qualitative comparison of MAGPIE on the Central-Alignment Task across different garment categories.}
+    \caption{Qualitative comparison of MAGPIE on the Central-Alignment Task across different garment categories.}
     \label{fig:qualitative_central_garment}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[!t]
+\begin{figure*}[!t]
     \centering
     \includegraphics[width=1.0\linewidth]{plots/magpie_garment_radar_plot.png}
-    \caption{\textbf{This image should occupy two columns}} Quantitative evaluation of MAGPIE on the Central-Alignment Task across different garment categories.}
+    \caption{Quantitative evaluation of MAGPIE on the Central-Alignment Task across different garment categories.}
     \label{fig:quantative_central_garment}
-\end{figure}
+\end{figure*}
 
 % --- EXPERIMENT ANALYSIS PLACEHOLDER ---
 \paragraph{Exepriemtn Design} Based on the above setup and evaluation, we first analyse the comparative performance of these methods on canonicalisation alignment tasks, demonstrating MAGPIE's efficiency in resolving severe occlusions relative to baselines (Table \ref{tab:longsleeve-flattening} and Figure \ref{fig:qualitative_sota_canon}). Following this, we showcase MAGPIE's robust alignment generalisation capabilities across all tested garment categories, supported by the qualitative transitions in Figure \ref{fig:qualitative_central_garment} and the radar plot distributions in Figure \ref{fig:quantative_central_garment}. Finally, we evaluate MAGPIE's downstream folding proficiency, explicitly focusing on the challenging dynamics of long-sleeve garment manipulation.
@@ -403,7 +395,7 @@ To isolate the sources of MAGPIE's folding performance, we compare the following
     \item \textbf{MAGPIE (All-Garment):} Our full unified policy, trained jointly across all garment categories with future-state goal conditioning and hindsight sub-goal sampling. A single network performs flattening, alignment, and folding end-to-end.
     \item \textbf{MAGPIE (Long-sleeve, Folding-only):} An ablated variant trained exclusively on long-sleeve folding demonstrations \emph{without} goal conditioning and \emph{without} hindsight future-state sampling. This isolates the contribution of multi-garment training and goal-directed hindsight supervision to folding robustness.
     \item \textbf{MAGPIE + Heuristic Folding:} A hybrid ``flatten-then-fold'' pipeline in which the All-Garment MAGPIE policy first flattens and canonicalises the garment, after which a deterministic keypoint-based heuristic folder---following the fold templates used by prior work \cite{canberk2022cloth, xue2023unifolding}---takes over to execute the final folds. This tests whether a single unified learned folder outperforms a strong scripted hand-off from the same alignment policy.
-    \item \textbf{Human:} A human operator folds each garment through the same primitive interface used for demonstration collection, providing an upper-bound reference on achievable folding quality under identical observation and action constraints.
+    \item \textbf{Human:} A human operator folds each garment through the same primitive interface used for demonstration collection (Figure~\ref{fig:human_interface}), providing an upper-bound reference on achievable folding quality under identical observation and action constraints.
 \end{itemize}
 
 \begin{table}[!t]
@@ -656,13 +648,13 @@ This formulation ensures that the resultant point cloud provided to the percepti
 
 \section{Real Robot Setup} \label{sec:real-world-setup}
 
-In cloth manipulation literature, robot arms are often fixed on a table \cite{lin2022learning,lee2024learning,canberk2023cloth}, leading to a ring-shaped workspace for Pick-and-Place (PnP) primitives. Following previous works \cite{luo2025clothmate, canberk2022cloth}, we configure our dual-arm system face-to-face. However, unlike setups that elevate the robots on cylindrical stands above the workspace surface, we install the robot bases directly onto the table surface, which is covered with a dark foam material. While this restricts the downward vertical clearance and makes dynamic actions like the pick-and-fling primitive more challenging, our optimized trajectories ensure the tasks are still completed robustly.
+In cloth manipulation literature, robot arms are often fixed on a table \cite{lin2022learning,canberk2022cloth}, leading to a ring-shaped workspace for Pick-and-Place (PnP) primitives. Following previous works \cite{luo2025clothmate, canberk2022cloth}, we configure our dual-arm system face-to-face. However, unlike setups that elevate the robots on cylindrical stands above the workspace surface, we install the robot bases directly onto the table surface, which is covered with a dark foam material. While this restricts the downward vertical clearance and makes dynamic actions like the pick-and-fling primitive more challenging, our optimized trajectories ensure the tasks are still completed robustly.
 
 \textbf{TODO: put an picture of real world setup.}
 
 
 
-The workspace of each robot is defined by a specific near radius $r_{n}$ and far radius $r_{f}$ to prevent singular configurations and unreachable goal states. Specifically, the UR5e operates within $r_n = 0.10$~m and $r_f = 0.85$~m, while the larger UR16e operates within $r_n = 0.25$~m and $r_f = 0.90$~m. Given the top-down camera perspective, we compute the spatial position $p_w$ in the world frame for each pixel $p_x$ in the camera view by projecting the rays through the camera intrinsics onto the table plane. Consequently, we determine whether $p_x$ lies within the valid workspace by checking if $r_n \leq ||p_w - b_w||_2 \leq r_f$, where $b_w$ represents the corresponding robot base position. Please refer to Table \ref{tab:seg-para} for the exact parameters of our real-robot setup. 
+The workspace of each robot is defined by a specific near radius $r_{n}$ and far radius $r_{f}$ to prevent singular configurations and unreachable goal states. Specifically, the UR5e operates within $r_n = 0.10$~m and $r_f = 0.85$~m, while the larger UR16e operates within $r_n = 0.25$~m and $r_f = 0.90$~m. Given the top-down camera perspective, we compute the spatial position $p_w$ in the world frame for each pixel $p_x$ in the camera view by projecting the rays through the camera intrinsics onto the table plane. Consequently, we determine whether $p_x$ lies within the valid workspace by checking if $r_n \leq ||p_w - b_w||_2 \leq r_f$, where $b_w$ represents the corresponding robot base position. Please refer to Table \ref{tab:sim-real-params} for the exact parameters of our real-robot setup.
 
 This section first introduces the implementation details of behaviour primitives in the real world (Section ?). Next, we discuss how we conduct our hand-eye calibration (Section \ref{sec:calibration}) for the transformation between the camera pixel space and robot base space. Then, we explain our approach to segmenting the physical garments from the camera observations (Section \ref{sec:real-world-cloth-seg}). Finally, we detail our grasping implementation, designed to ensure the precise and robust picking of garments (Section \ref{sec:grasping}).
 
@@ -691,7 +683,7 @@ To guarantee precise physical manipulation based on visual input, we conducted a
 
 
 \subsection{Real-World Garment Segmentation} \label{sec:real-world-cloth-seg}
-Following standard practices in the domain \cite{canberk2023cloth, lin2022learning, kadi2025draper}, we utilise the Segment Anything Model (SAM) \cite{kirillov2023segment} to isolate the target garment. This segmentation is crucial for stripping the background from policy inputs and enabling accurate real-world evaluation. Given an RGB observation, SAM generates a set of $K$ binary candidate masks. To efficiently isolate the true garment, we convert the image to the HSV color space and apply a multi-stage heuristic filtering pipeline. First, we apply spatial pruning: masks are retained only if their total pixel area $A \in [A_{\text{min}}, A_{\text{max}}]$. To eliminate broad background surfaces, we reject any candidate whose active border pixels exceed 30\% of the image perimeter, formalised as $P_{\text{mask}} > \alpha_{border} \times 2(h + w)$. Next, we apply chromatic and variance filters to distinguish the garment from its environment. For each mask, we compute the mean saturation $\bar{S}$ and RGB intensity variance $V$. We discard grey areas if $\bar{S} < S_{\text{min}}$ as low saturation. We further reject grey backgrounds by ensuring $ V \geq V_{min}$. Finally, the optimal mask is selected by maximising a utility score that prioritises large, distinctly coloured objects $\text{Score}_i = A_i \cdot \bar{V}_i$. This pipeline reliably yields high-fidelity garment segmentations for downstream manipulation tasks. The specific parameters used in our real-world experiments are detailed in Table \ref{tab:seg-para}.
+Following standard practices in the domain \cite{canberk2022cloth, lin2022learning, kadi2025draper}, we utilise the Segment Anything Model (SAM) \cite{kirillov2023segment} to isolate the target garment. This segmentation is crucial for stripping the background from policy inputs and enabling accurate real-world evaluation. Given an RGB observation, SAM generates a set of $K$ binary candidate masks. To efficiently isolate the true garment, we convert the image to the HSV color space and apply a multi-stage heuristic filtering pipeline. First, we apply spatial pruning: masks are retained only if their total pixel area $A \in [A_{\text{min}}, A_{\text{max}}]$. To eliminate broad background surfaces, we reject any candidate whose active border pixels exceed 30\% of the image perimeter, formalised as $P_{\text{mask}} > \alpha_{border} \times 2(h + w)$. Next, we apply chromatic and variance filters to distinguish the garment from its environment. For each mask, we compute the mean saturation $\bar{S}$ and RGB intensity variance $V$. We discard grey areas if $\bar{S} < S_{\text{min}}$ as low saturation. We further reject grey backgrounds by ensuring $ V \geq V_{min}$. Finally, the optimal mask is selected by maximising a utility score that prioritises large, distinctly coloured objects $\text{Score}_i = A_i \cdot \bar{V}_i$. This pipeline reliably yields high-fidelity garment segmentations for downstream manipulation tasks.
 \subsection{Force-guarded Grasping} \label{sec:grasping}
 
 Accurately grasping garments without failure remains a significant challenge for parallel grippers. We build upon the grasping protocol proposed by DRAPER \cite{kadi2025draper} which adjust the pick position on an eroded mask of the garment and ensures the axis connecting the two gripper fingers is perpendicular to the target mask cutline. However, while DRAPER utilises a custom pincher extension, our approach employs a standard OnRobot RG2 parallel gripper. To mitigate misgrasping errors, we initialised the gripper to a 3~cm opening width before the approach towards garments. The end-effector then executes a guarded descent, lowering gradually until the robot's force-torque sensor detects an upward reaction force of approximately 5~N. This force-based threshold ensures the garment is firmly contacted while preventing gripper faults or misgrasps caused by excessive collision resistance from the underlying workspace table.

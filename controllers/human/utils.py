@@ -103,18 +103,29 @@ def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
             current_mask = state['observation']['mask']
             
             _draw_contour(rgb, goal_mask)
-            
-            current_iou = calculate_strict_iou(current_mask, goal_mask)
+
+            # Use the environment's own subgoal IoU (exposed in the evaluation dict)
+            # so the displayed value and the green/target signal match how the
+            # environment actually judges subgoal success; fall back to a direct
+            # computation if it is unavailable.
+            current_iou = evaluation.get('active_subgoal_iou',
+                                         calculate_strict_iou(current_mask, goal_mask))
             target_iou = TARGET_THRESHOLDS[active_idx] if active_idx < len(TARGET_THRESHOLDS) else 0.80
-            
+
             progress_color = (0, 255, 0) if current_iou >= target_iou else (0, 255, 255)
-            
+
+            # Target IoU for every subgoal, with the active one bracketed.
+            targets_str = "Targets: " + "  ".join(
+                (f"[S{g + 1}:{t:.2f}]" if g == active_idx else f"S{g + 1}:{t:.2f}")
+                for g, t in enumerate(TARGET_THRESHOLDS))
+
             h, w = rgb.shape[:2]
-            # --- ADJUSTED: Increased spacing between the two lines (h - 35 and h - 10) ---
-            cv2.putText(rgb, f"Target: Subgoal {active_idx + 1}/{len(state['goals'])}", 
-                        (10, h - 35), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), FONT_THICKNESS)
-            cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}", 
-                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, FONT_THICKNESS)
+            cv2.putText(rgb, f"Target: Subgoal {active_idx + 1}/{len(state['goals'])}",
+                        (10, h - 60), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, (0, 255, 255), FONT_THICKNESS)
+            cv2.putText(rgb, f"IoU: {current_iou:.3f} / Target: {target_iou:.3f}",
+                        (10, h - 35), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE, progress_color, FONT_THICKNESS)
+            cv2.putText(rgb, targets_str,
+                        (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, FONT_SCALE * 0.75, (0, 255, 255), max(1, FONT_THICKNESS - 1))
                         
     elif 'goal' in state and 'mask' in state['goal']:
         goal_mask = state['goal']['mask']

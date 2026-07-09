@@ -216,60 +216,47 @@ class GarmentFoldingTask(GarmentTask):
         mean_particle_distance = median(particle_distances)
         key_particle_distance = median(key_distances)
 
-        # --- NEW: Calculate Active Subgoal Index mirroring Multi-Stage Reward ---
+        # --- Active subgoal from the CURRENT state ------------------------------
+        # The active target is the subgoal following the furthest one the current
+        # mask already satisfies. If the current state matches no subgoal (e.g. a
+        # failed fold), it reverts to the first subgoal (the flattened / canonical
+        # state), signalling the user/agent to restart (re-flatten). This is computed
+        # purely from the present observation, so the interface never lags nor sticks
+        # on a target the garment no longer matches.
         trj_infos = arena.get_trajectory_infos()
-        N = len(trj_infos)
         K = self.config.goal_steps + 1
-        
-        # 1. Lock to the final goal only if the CURRENT state still matches it.
-        #    Relying on self.has_succeeded here lags by one step, because success()
-        #    (which updates has_succeeded) runs after evaluate() in _process_info;
-        #    a disturbed fold would otherwise keep showing the final target for one
-        #    extra step before reverting to an earlier subgoal.
-        if self._iou_for_goal_step(arena, trj_infos[-1], K - 1) >= self.iou_thresholds[K - 1]:
-            active_idx = K - 1
+        current_info = trj_infos[-1]
 
-        # 2. Otherwise, scan the recent sliding window for the sequence
-        else:
-            K_window = min(K, N)
-            traj_window = trj_infos[N - K_window : N]
-            
-            best_matched_steps = 0
+        # IoU of the current state against every subgoal, using the environment's own
+        # subgoal-matching function (the same one that drives success).
+        subgoal_ious = [self._iou_for_goal_step(arena, current_info, g) for g in range(K)]
 
-            # Try all possible start positions in the recent trajectory window
-            for start in range(K_window):
-                matched_steps = 0
-                
-                for g in range(K):
-                    t = start + g
-                    if t >= K_window:
-                        break
-                    
-                    # Check the trajectory frame against the specific goal step
-                    iou = self._iou_for_goal_step(arena, traj_window[t], g)
-                    
-                    # If it matches, increment. If not, the contiguous sequence is broken.
-                    if iou >= self.iou_thresholds[g]:
-                        matched_steps += 1
-                    else:
-                        break
-                        
-                best_matched_steps = max(best_matched_steps, matched_steps)
+        achieved = -1
+        for g in range(K):
+            if subgoal_ious[g] >= self.iou_thresholds[g]:
+                achieved = g
+        active_idx = min(achieved + 1, K - 1)
 
-            # The active index is the number of successfully matched steps in a row,
-            # clamped to the final goal index so it doesn't go out of bounds.
-            active_idx = min(best_matched_steps, K - 1)
+        # IoU of the current state against the active target subgoal, exposed so the
+        # human interface can display the exact value the environment uses to judge
+        # subgoal success (keeping the overlay consistent with the metrics).
+        active_subgoal_iou = subgoal_ious[active_idx]
         # ------------------------------------------------------------------------
 
         return {
             "mean_particle_distance": mean_particle_distance,
             "semantic_keypoint_distance": key_particle_distance,
             'max_IoU': self._get_max_IoU(arena),
-            'algn_IoU': self._get_algn_IoU(arena),
+            # Strict IoU to the final fold subgoal, computed exactly as the success
+            # criterion and the interface overlay do (max over all goal variations,
+            # observation mask), so 'Align IoU(fold)' stays consistent with Success
+            # and the displayed subgoal IoU.
+            'algn_IoU': subgoal_ious[K - 1],
             'max_IoU_to_flattened':  self._get_max_IoU_to_flattened(arena),
             'algn_IoU_to_flattened': self._get_algn_IoU_to_flattened(arena),
             'normalised_coverage': self._get_normalised_coverage(arena),
             'active_subgoal_idx': active_idx,
+            'active_subgoal_iou': active_subgoal_iou,
             'iou_thresholds': self.iou_thresholds
         }
 
@@ -295,10 +282,17 @@ class GarmentFoldingTask(GarmentTask):
         return aligned_curr, aligned_goal
     
     def _get_algn_IoU_to_flattened(self, arena):
+        # Strict IoU to the flattened / canonical subgoal (subgoal 0), taken as the best
+        # match over all goal variations (the 3 demo saved goals). This mirrors
+        # _iou_for_goal_step(..., 0) so the reported 'Align IoU(flat)' stays consistent
+        # with the interface overlay shown while the garment is being flattened.
         cur_mask = arena.cloth_mask
-        goal_mask = arena.get_flattened_obs()['observation']['mask']
-        IoU = calculate_iou(cur_mask, goal_mask)
-        return IoU
+        algn_IoU = 0.0
+        for goal in self.goals:
+            goal_mask = goal[0]['observation']['rgb'].sum(axis=2) > 0
+            IoU = calculate_iou(cur_mask, goal_mask)
+            algn_IoU = max(algn_IoU, IoU)
+        return algn_IoU
     
     def _compute_particle_distance(self, cur, goal, arena):
         """Align particles and compute mean distance."""
@@ -531,14 +525,16 @@ class GarmentFoldingTask(GarmentTask):
     def _get_max_IoU(self, arena):
         cur_mask = arena.cloth_mask
         max_IoU = 0
-        for goal in self.goals[:1]:
+        # Take the best match over all goal variations, consistent with how success
+        # and the subgoal IoU are computed.
+        for goal in self.goals:
             goal_mask = goal[-1]['observation']["rgb"].sum(axis=2) > 0 ## only useful for background is black
-            
+
             IoU, matched_IoU = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
             if IoU > max_IoU:
                 max_IoU = IoU
-        
-        return IoU
+
+        return max_IoU
     
     def _get_algn_IoU(self, arena):
         cur_mask = arena.cloth_mask
@@ -553,10 +549,16 @@ class GarmentFoldingTask(GarmentTask):
         return algn_IoU
     
     def _get_max_IoU_to_flattened(self, arena):
+        # Best-alignment IoU to the flattened / canonical subgoal (subgoal 0), taken as
+        # the best match over all goal variations (the 3 demo saved goals), consistent
+        # with the rest of the reported metrics and the interface overlay.
         cur_mask = arena.cloth_mask
-        IoU, matched_IoU = get_max_IoU(cur_mask, arena.get_flattened_obs()['observation']['mask'], debug=self.config.debug)
-        
-        return IoU
+        max_IoU = 0.0
+        for goal in self.goals:
+            goal_mask = goal[0]['observation']['rgb'].sum(axis=2) > 0
+            IoU, _ = get_max_IoU(cur_mask, goal_mask, debug=self.config.debug)
+            max_IoU = max(max_IoU, IoU)
+        return max_IoU
     
     def _get_normalised_coverage(self, arena):
         res = arena._get_coverage() / arena.flatten_coverage

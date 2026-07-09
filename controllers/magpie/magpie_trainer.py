@@ -361,7 +361,8 @@ class MagpieTrainer:
                 # 4. Validate Primitive Classification Head
                 gt_prim_ids = None
                 if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    # Pass only the current (last) frame's features to match inference
+                    prim_logits = self.agent.nets['prim_class_head'](obs_features[:, -1, :])
                     preds = torch.argmax(prim_logits, dim=-1)
                     
                     prim_bin = nbatch['action'][:, 0, 0].to(self.device)
@@ -375,12 +376,14 @@ class MagpieTrainer:
                     
                     if self.agent.primitive_integration == 'one_hot_encoding':
                         prim_one_hot = nn.functional.one_hot(preds, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                        # Expand across the observation horizon before concatenating
+                        prim_one_hot_exp = prim_one_hot.unsqueeze(1).expand(-1, self.config.obs_horizon, -1)
+                        obs_cond = torch.cat([obs_features, prim_one_hot_exp], dim=-1).flatten(start_dim=1)
 
                     elif self.agent.primitive_integration == 'ordinary_encoding':
-                        # Append the continuous [-1, 1] bin prediction to the observation
                         prim_enc = (1.0 * (preds.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
-                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+                        prim_enc_exp = prim_enc.unsqueeze(1).expand(-1, self.config.obs_horizon, -1)
+                        obs_cond = torch.cat([obs_features, prim_enc_exp], dim=-1).flatten(start_dim=1)
 
                     gt_action = nbatch['action'][:, :, 1:].to(self.device)
                 else:
@@ -604,12 +607,16 @@ class MagpieTrainer:
                     
                 obs_cond = obs_features.flatten(start_dim=1)
 
+                # Remove obs_cond = obs_features.flatten(start_dim=1) from higher up, let the base be default
+                obs_cond = obs_features.flatten(start_dim=1)
+
                 # 4. Primitive Classification Loss
                 gt_prim_ids = None
                 prim_loss = torch.tensor(0.0, device=self.device)
                 
                 if self.agent.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
-                    prim_logits = self.agent.nets['prim_class_head'](obs_cond)
+                    # Pass only the last frame
+                    prim_logits = self.agent.nets['prim_class_head'](obs_features[:, -1, :])
                     prim_bin = nbatch['action'][:, 0, 0]
                     gt_prim_ids = (((prim_bin + 1) / 2) * self.agent.K).long()
                     gt_prim_ids = torch.clamp(gt_prim_ids, 0, self.agent.K - 1).to(self.device)
@@ -639,12 +646,13 @@ class MagpieTrainer:
 
                     if self.agent.primitive_integration == 'one_hot_encoding':
                         prim_one_hot = nn.functional.one_hot(gt_prim_ids, num_classes=self.agent.K).float()
-                        obs_cond = torch.cat([obs_cond, prim_one_hot], dim=-1)
+                        prim_one_hot_exp = prim_one_hot.unsqueeze(1).expand(-1, self.config.obs_horizon, -1)
+                        obs_cond = torch.cat([obs_features, prim_one_hot_exp], dim=-1).flatten(start_dim=1)
 
                     elif self.agent.primitive_integration == 'ordinary_encoding':
-                        # Condition the target using the Ground Truth scalar bin
                         prim_enc = (1.0 * (gt_prim_ids.float() + 0.5) / self.agent.K * 2.0 - 1.0).unsqueeze(-1)
-                        obs_cond = torch.cat([obs_cond, prim_enc], dim=-1)
+                        prim_enc_exp = prim_enc.unsqueeze(1).expand(-1, self.config.obs_horizon, -1)
+                        obs_cond = torch.cat([obs_features, prim_enc_exp], dim=-1).flatten(start_dim=1)
 
                 # 5. Build Diffusion Target
                 if self.agent.rep_learn == 'predict-state-with-action':

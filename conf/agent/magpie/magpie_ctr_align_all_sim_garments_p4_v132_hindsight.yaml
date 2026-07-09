@@ -2,7 +2,7 @@ name: magpie
 device: 'cuda'
 oracle: False
 action_dim: 8
-obs_horizon: 2
+obs_horizon: 1
 pred_horizon: 1
 action_horizon: 1
 input_obs: 'rgb+goal_rgb'
@@ -41,7 +41,6 @@ dataset_config:
   seq_length: 1
   io_mode: "w"
   cache_in_memory: True
-  hindsight_prob: 0.3
 
   future_goal_mapping:
     rgb: 'goal_rgb'
@@ -62,9 +61,8 @@ dataset_config:
   act_config:
     default: { shape: [9], output_key: 'default' }
 
-loss_type: 'ot_flow_match+consistency'
-consistency_ratio: 0.50
-num_diffusion_iters: 2
+loss_type: 'ot_flow_match'
+num_diffusion_iters: 4
 
 noise_pred_net: 'mlp'
 mlp_backbone_config:
@@ -79,7 +77,7 @@ primitive_classifier:
   dropout: 0.5          
   use_layernorm: true
 prim_class_weights: [1.0, 1.0, 1.0, 1.0]
-prim_weight: 0.01
+prim_weight: 0.001
 
 batch_size: 1024
 optimiser_class: 'adamw'
@@ -87,7 +85,7 @@ optimiser_params:
   lr: 3e-4
   weight_decay: 1e-2
 num_warmup_steps: 3000
-ema_power: 0.9999 # Highly stable moving average
+ema_power: 0.9999
 
 primitives:
   - name: norm-pixel-pick-and-fling
@@ -109,7 +107,7 @@ projector_out_dim: 512
 projector_activation: 'gelu'
 projector_dropout: 0.0
 projector_use_layernorm: False
-feature_noise_factor: 0.03
+feature_noise_factor: 0.05
 
 predict_goal_state: False
 

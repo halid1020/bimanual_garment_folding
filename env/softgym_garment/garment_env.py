@@ -415,6 +415,11 @@ class GarmentEnv(Arena):
         
         if task_related:
             info['evaluation'] = self.evaluate()
+            # iou_thresholds is config metadata (a list), not a scalar metric.
+            # Surface it at the top level for consumers like the human controller,
+            # while keeping info['evaluation'] scalar-only for downstream rounding.
+            if 'iou_thresholds' in info['evaluation']:
+                info['iou_thresholds'] = list(info['evaluation'].pop('iou_thresholds'))
             if info['evaluation'].get('normalised_coverage', 0) > 0.9:
                 self.last_flattened_step = self.action_step
 

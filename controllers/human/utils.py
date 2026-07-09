@@ -94,7 +94,8 @@ def overlay_active_goal_contour(rgb: np.ndarray, state: dict) -> np.ndarray:
         evaluation = state.get('evaluation', {})
         active_idx = evaluation.get('active_subgoal_idx', 0)
         
-        TARGET_THRESHOLDS = evaluation.get('iou_thresholds', [0.80] * len(state['goals']))
+        TARGET_THRESHOLDS = state.get('iou_thresholds',
+            evaluation.get('iou_thresholds', [0.80] * len(state['goals'])))
         active_goal_state = state['goals'][active_idx]
         
         if 'observation' in active_goal_state and 'mask' in active_goal_state['observation']:

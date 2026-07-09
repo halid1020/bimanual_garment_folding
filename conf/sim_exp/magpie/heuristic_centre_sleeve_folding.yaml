@@ -1,0 +1,14 @@
+# @package _global_
+# Heuristic (keypoint-based) centre-sleeve folding policy.
+# Only the `agent` block is consumed when this config is composed by the
+# iou-based stitching policy; the arena/task are provided for completeness so
+# the config can also be run stand-alone.
+defaults:
+  - /agent/magpie@agent: heuristic_centre_sleeve_folding
+  - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace_horizon_25
+  - /task/magpie@task: canonicalisation_alignment_centre_sleeve_folding
+
+exp_name: heuristic_centre_sleeve_folding
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

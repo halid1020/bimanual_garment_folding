@@ -1,0 +1,13 @@
+# "MAGPIE + Heuristic Folding" baseline agent.
+# The IoU-based stitching policy runs the MAGPIE all-garment policy to flatten /
+# canonicalise-align the garment, then hands off to a deterministic keypoint-based
+# centre-sleeve folder once the alignment stage of the task reward is complete.
+name: iou-based-stitching-policy
+
+# Flattening / canonicalisation-alignment stage: MAGPIE all-garment (v126, hindsight).
+flattening_policy: sim_exp/magpie/magpie_ctr_align_all_sim_garments_p4_v126_hindsight
+flattening_checkpoint: best
+
+# Folding stage: deterministic keypoint-based heuristic folder.
+folding_policy: sim_exp/magpie/heuristic_centre_sleeve_folding
+folding_checkpoint: best

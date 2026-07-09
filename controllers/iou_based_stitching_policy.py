@@ -21,19 +21,19 @@ class IoUBasedStitchingPolicy(Agent):
         import actoris_harena.api as ag_ar
         print(f'[iou_based_stitching_policy] Building flattening agent from {config.flattening_policy}')
         self.flattening_policy = ag_ar.build_agent(
-            flattening_policy_config.agent.name, 
+            flattening_policy_config.agent.name,
             flattening_policy_config.agent,
             project_name=flattening_policy_config.project_name,
             exp_name=config.flattening_policy,
-            save_dir= os.path.join(flattening_policy_config.save_root, config.flattening_policy))
+            save_dir= os.path.join(flattening_policy_config.save_root, flattening_policy_config.exp_name))
         
         print(f'[iou_based_stitching_policy] Building folding agent from {config.folding_policy}')
         self.folding_policy = ag_ar.build_agent(
-            folding_policy_config.agent.name, 
+            folding_policy_config.agent.name,
             folding_policy_config.agent,
             project_name=folding_policy_config.project_name,
             exp_name=config.folding_policy,
-            save_dir= os.path.join(folding_policy_config.save_root, config.folding_policy))
+            save_dir= os.path.join(folding_policy_config.save_root, folding_policy_config.exp_name))
         
         
         if config.get('flattening_checkpoint', 'best') == 'best':

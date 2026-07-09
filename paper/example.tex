@@ -394,7 +394,51 @@ LS-SR $\uparrow$ & 0/30 & 1/30 & \cellcolor{red!25}7/30 & \cellcolor{yellow!25}1
 \paragraph{Exepriemtn Design} Based on the above setup and evaluation, we first analyse the comparative performance of these methods on canonicalisation alignment tasks, demonstrating MAGPIE's efficiency in resolving severe occlusions relative to baselines (Table \ref{tab:longsleeve-flattening} and Figure \ref{fig:qualitative_sota_canon}). Following this, we showcase MAGPIE's robust alignment generalisation capabilities across all tested garment categories, supported by the qualitative transitions in Figure \ref{fig:qualitative_central_garment} and the radar plot distributions in Figure \ref{fig:quantative_central_garment}. Finally, we evaluate MAGPIE's downstream folding proficiency, explicitly focusing on the challenging dynamics of long-sleeve garment manipulation.
 
 
-\subsection{Ablation Studies} 
+\subsection{Goal-Directed Folding in Simulation}
+\label{sec:exp_folding}
+
+Having established MAGPIE's flattening and alignment capabilities, we now evaluate its core competency: producing neat, structured folds directly from crumpled states. We conduct this evaluation in the \textit{goal-directed folding} environment, in which a long-sleeve garment must be manipulated from a highly crumpled initial configuration, through an intermediate canonicalisation-alignment state, and into a demonstrated sequence of target folded sub-goals (a two-step fold). Unlike the alignment tasks, success here is conditioned on reproducing the ordered sequence of intermediate folded geometries, making it substantially more sensitive to compounding errors and self-occlusion. We evaluate every method over 30 held-out ``hard'' crumpled initialisations of long-sleeve garments and report the folding metrics defined above---Mean Particle Distance (MPD), Mean Keypoint Distance (MKD), Alignment IoU (A-IoU), and the Sequential IoU-Based Success Rate (Sq-IoU-SR).
+
+To isolate the sources of MAGPIE's folding performance, we compare the following approaches:
+\begin{itemize}
+    \item \textbf{MAGPIE (All-Garment):} Our full unified policy, trained jointly across all garment categories with future-state goal conditioning and hindsight sub-goal sampling. A single network performs flattening, alignment, and folding end-to-end.
+    \item \textbf{MAGPIE (Long-sleeve, Folding-only):} An ablated variant trained exclusively on long-sleeve folding demonstrations \emph{without} goal conditioning and \emph{without} hindsight future-state sampling. This isolates the contribution of multi-garment training and goal-directed hindsight supervision to folding robustness.
+    \item \textbf{MAGPIE + Heuristic Folding:} A hybrid ``flatten-then-fold'' pipeline in which the All-Garment MAGPIE policy first flattens and canonicalises the garment, after which a deterministic keypoint-based heuristic folder---following the fold templates used by prior work \cite{canberk2022cloth, xue2023unifolding}---takes over to execute the final folds. This tests whether a single unified learned folder outperforms a strong scripted hand-off from the same alignment policy.
+    \item \textbf{Human:} A human operator folds each garment through the same primitive interface used for demonstration collection, providing an upper-bound reference on achievable folding quality under identical observation and action constraints.
+\end{itemize}
+
+\begin{table}[!t]
+\caption{Goal-directed folding in simulation on long-sleeve garments (30 hard crumpled initialisations, two-step fold through canonicalisation-alignment). Distances are reported in normalised units; higher is better for A-IoU and Sq-IoU-SR, lower is better for MPD and MKD. \textbf{TODO: populate with final numbers.}}
+\label{tab:sim-folding}
+\centering
+\small
+\begin{tabular}{l|ccc||c}
+\toprule
+ & \multicolumn{3}{c||}{\textbf{MAGPIE}} & \\
+\cmidrule(lr){2-4}
+\textbf{Metric} & \textbf{All-Garment} & \textbf{LS-only} & \textbf{+\,Heuristic} & \textbf{Human} \\
+\midrule
+MPD $\downarrow$        & -- & -- & -- & -- \\
+MKD $\downarrow$        & -- & -- & -- & -- \\
+A-IoU $\uparrow$        & -- & -- & -- & -- \\
+Sq-IoU-SR $\uparrow$    & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!t]
+    \centering
+    % \includegraphics[width=1.0\linewidth]{plots/traj_folding_cmp.png}
+    \caption{Qualitative comparison of goal-directed folding in simulation. Each row tracks the execution sequence from a crumpled long-sleeve initial state, through the canonicalisation-alignment sub-goal, to the final two-step fold, for the All-Garment MAGPIE policy, the long-sleeve folding-only variant, the MAGPIE~+~heuristic hand-off, and the human operator. \textbf{TODO: add rendered trajectory grid.}}
+    \label{fig:qualitative_folding}
+\end{figure}
+
+Table~\ref{tab:sim-folding} reports the quantitative folding comparison, and Figure~\ref{fig:qualitative_folding} illustrates the corresponding trajectories. We expect the All-Garment MAGPIE policy to benefit from goal conditioning and hindsight sub-goal sampling, which supply a dense, reachable learning signal that the long-sleeve folding-only variant lacks; and to remain competitive with, or exceed, the flatten-then-fold heuristic hand-off by seamlessly interleaving flattening and folding primitives rather than committing to a rigid phase switch. The human baseline bounds the attainable folding quality under the same interface.
+% --- FOLDING RESULTS ANALYSIS PLACEHOLDER ---
+[Placeholder: Detailed quantitative analysis of the goal-directed folding results, including per-metric comparison, failure modes of the heuristic hand-off, and the gap to human performance.]
+
+
+\subsection{Ablation Studies}
 \label{sec:exp_abl}
 
 To understand the driving factors behind MAGPIE's robust performance, we systematically ablate its core algorithmic and architectural components. We conduct these ablations in simulation focusing on the central-alignment task for long-sleeve garments, employing the same experimental setup and evaluation metrics introduced in Section \ref{sec:exp_sota}.

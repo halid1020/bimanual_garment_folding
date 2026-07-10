@@ -228,13 +228,41 @@ class GarmentFoldingTask(GarmentTask):
         current_info = trj_infos[-1]
 
         # IoU of the current state against every subgoal, using the environment's own
-        # subgoal-matching function (the same one that drives success).
+        # subgoal-matching function (the same one that drives success). Kept for the
+        # displayed overlay numbers below (active_subgoal_iou / algn_IoU).
         subgoal_ious = [self._iou_for_goal_step(arena, current_info, g) for g in range(K)]
 
+        # Furthest subgoal reached as a CONTIGUOUS temporal sequence ending at the current
+        # step: the last (g+1) trajectory steps must match subgoals 0..g in order. This
+        # mirrors success()'s last-K window (see success(), the range(K) sub-goal check),
+        # so the overlay stays in lock-step with the success criterion. A per-frame max
+        # over subgoal IoUs (the previous approach) could not tell forward progress from a
+        # regression: a crumpled state mid re-flatten incidentally matches a later fold
+        # subgoal and made the overlay jump ahead to the final target. Requiring a clean
+        # flat->fold1(->fold2) suffix ending *now* fixes that, since a re-flattening
+        # garment has no such suffix and correctly falls back to the flattened subgoal.
+        N = len(trj_infos)
         achieved = -1
-        for g in range(K):
-            if subgoal_ious[g] >= self.iou_thresholds[g]:
+        for g in range(min(K, N)):
+            if all(
+                self._iou_for_goal_step(arena, trj_infos[N - 1 - g + j], j)
+                >= self.iou_thresholds[j]
+                for j in range(g + 1)
+            ):
                 achieved = g
+
+        # Hold the final subgoal whenever the current frame still matches it, mirroring
+        # success()'s latched branch (the `has_succeeded` check compares only the current
+        # mask to the final goal). With stop_on_success=False the episode continues past a
+        # first success, and a corrective step can break the clean flat->fold1->fold2
+        # suffix above while the fold itself is still held; without this guard the overlay
+        # would tell the user to re-flatten a garment the environment already counts as a
+        # completed fold. This uses the current frame only, so (unlike gating on the
+        # lagging `has_succeeded`) it also fires on the very step success first triggers,
+        # and it does not re-open the re-flatten bug: a spread/crumpled garment does not
+        # match the compact final fold, so the guard stays inactive during re-flattening.
+        if subgoal_ious[K - 1] >= self.iou_thresholds[K - 1]:
+            achieved = K - 1
         active_idx = min(achieved + 1, K - 1)
 
         # IoU of the current state against the active target subgoal, exposed so the

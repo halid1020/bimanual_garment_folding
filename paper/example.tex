@@ -280,7 +280,9 @@ We develop our proposed method MAGPIE based on the decoupled multi-primitive arc
 In this set of experiments, we benchmark MAGPIE against leading domain-specific garment-manipulation multi-primitive approaches in simulation. For non-unified baselines, we evaluate ClothFunnels \cite{canberk2022cloth} and ClothMate \cite{luo2025clothmate}. For unified framework baselines, we compare against UniFolding \cite{xue2023unifolding}. To ensure a fair comparison, we exclude methods that rely on step-wise language instructions.
 
 \paragraph{Simulation Experimental Setup}
-We evaluate MAGPIE across both simulation and physical domains. We build our simulation environment upon the ClothFunnels variant of the SoftGym benchmark \cite{lin2020softgym}, powered by the PyFlex physics engine \cite{li2018learning}. We source realistic garment meshes from the Cloth3D dataset \cite{bertiche2020cloth3d}, specifically selecting long-sleeve T-shirts, trousers, skirts, and dresses. For each category, our dataset comprises 200 training episodes, 30 validation episodes, and 30 evaluation episodes. To ensure robust policy learning, we utilise a diverse split of ``hard'' (highly crumpled with severe self-occlusion) and ``easy'' (semi-flattened) initial states, directly following the ClothFunnels methodology. Specifically, the 200 training trials use a mixture of ``hard'' and ``easy'' configurations, whereas the validation and evaluation trials strictly use ``hard'' initialisations.  We preserve most parameter distributions from the original ClothFunnels environment, where a top-down camera observes the centre of the world frame. However, for our novel central-alignment and folding tasks, we explicitly align simulation properties with our real-world setup. This includes matching workspace radii, dual-arm base placements, and camera configurations to mirror our physical hardware cell. Furthermore, we adjust fabric stiffness values and cloth particle radii to emulate realistic garment dynamics. A side-by-side comparison of these environmental parameters is detailed in Table \ref{tab:sim-real-params}. Detailed mechanics of the simulation physics, mesh rendering, and primitive trajectory parameters are deferred to Appendix \ref{app:architecture}. We set all the evaluation step strictly as 20---there is no early stopping at the success states.
+We evaluate MAGPIE across both simulation and physical domains. We build our simulation environment upon the ClothFunnels variant of the SoftGym benchmark \cite{lin2020softgym}, powered by the PyFlex physics engine \cite{li2018learning}. We source realistic garment meshes from the Cloth3D dataset \cite{bertiche2020cloth3d}, specifically selecting long-sleeve T-shirts, trousers, skirts, and dresses. For each category, our dataset comprises 200 training episodes, 30 validation episodes, and 30 evaluation episodes. To ensure robust policy learning, we utilise a diverse split of ``hard'' (highly crumpled with severe self-occlusion) and ``easy'' (semi-flattened) initial states, directly following the ClothFunnels methodology. Specifically, the 200 training trials use a mixture of ``hard'' and ``easy'' configurations, whereas the validation and evaluation trials strictly use ``hard'' initialisations.  We preserve most parameter distributions from the original ClothFunnels environment, where a top-down camera observes the centre of the world frame. However, for our novel central-alignment and folding tasks, we explicitly align simulation properties with our real-world setup. This includes matching workspace radii, dual-arm base placements, and camera configurations to mirror our physical hardware cell. Furthermore, we adjust fabric stiffness values and cloth particle radii to emulate realistic garment dynamics. A side-by-side comparison of these environmental parameters is detailed in Table \ref{tab:sim-real-params}. Detailed mechanics of the simulation physics, mesh rendering, and primitive trajectory parameters are deferred to Appendix \ref{app:architecture}. Evaluation trajectories are rolled out for a fixed step budget with no early stopping at the success states (per-task horizons are given below).
+
+\paragraph{Task Setups} We evaluate three simulated tasks that share the environment, garment source, and hard/easy initial-state split described above. For each episode the target geometry is produced once by rolling out a scripted keypoint demonstrator and cached (RGB, mask, depth, and particle positions per subgoal), so every method is scored against identical goals. In \emph{Canonicalisation-Alignment}, a crumpled garment must be flattened into a fixed canonical pose. \emph{Central-Alignment} shares this objective with a workspace-centred target pose and is evaluated across all garment categories. \emph{Goal-Directed Folding} requires a two-step fold executed \emph{through} the canonicalisation-alignment state, i.e. an ordered set of $K=3$ subgoals: the flattened/canonical state $S_0$, fold-1 $S_1$, and fold-2 $S_2$. The alignment tasks use a $20$-step horizon and folding a $25$-step horizon, both without early stopping. Full metric definitions and success criteria are provided in Appendix~\ref{app:eval_protocol}.
 
 \begin{table}[!t]
 \caption{Comparison of physical and simulated environmental parameters, highlighting the reduced sim-to-real gap in our experimental framework.}
@@ -306,22 +308,20 @@ Workspace Radius, arm~2$^{\dagger}$ & $(0, 1.5)$ & $(0.25, 0.90)$ \\
 {\footnotesize $^{\dagger}$\,(near, far) reach radius in metres.}
 \end{table}
 
-\paragraph{Metrics for Canonicalisation and Central Alignment Tasks in Simulation}
-For all continuous flattening metrics, we report the final value achieved at the end of the trajectory (capped at 20 steps):
+\paragraph{Metrics for Canonicalisation and Central Alignment} Reported at the final trajectory step (full definitions in Appendix~\ref{app:eval_protocol}):
 \begin{enumerate}
-    \item \textbf{Normalised Coverage (NC):} The ratio of the garment's current 2D projected area to its maximally flattened area, bounded in $[0, 1]$.
-    \item \textbf{Normalised Improvement (NI):} The relative coverage increase from the initial state, defined as $\text{clip}(\frac{c_t - c_0}{c_{\text{max}} - c_0}, 0, 1)$.
-    \item \textbf{Alignment Intersection-over-Union (A-IoU):} The IoU overlap between the current garment segmentation mask and the target goal mask.
-    \item \textbf{Success Rate (SR):} The percentage of trials simultaneously achieving $\text{NC} > 80\%$ and $\text{A-IoU} > 70\%$; we report both cross-trajectory success rate (C-SR) and last step success rate (LS-SR).
+    \item \textbf{Normalised Coverage (NC):} current projected garment area as a fraction of its fully flattened area.
+    \item \textbf{Normalised Improvement (NI):} coverage gain over the initial state, normalised to $[0,1]$.
+    \item \textbf{Alignment IoU (A-IoU):} direct mask overlap with the target goal (no re-alignment), rewarding the correct canonical pose.
+    \item \textbf{Success Rate (SR):} fraction of trials reaching $\text{NC}>80\%$ and $\text{A-IoU}>70\%$, reported cross-trajectory (C-SR) and at the last step (LS-SR).
 \end{enumerate}
 
-\paragraph{Metrics for Folding in Simulation}
-In simulation, we evaluate folding using fine-grained, particle-based geometric distances alongside vision-based metrics:
+\paragraph{Metrics for Folding} Reported at the final trajectory step (full definitions in Appendix~\ref{app:eval_protocol}):
 \begin{enumerate}
-    \item \textbf{Mean Particle Distance (MPD):} We apply rigid Procrustes alignment between the current ($\{\mathbf{p}_t^i\}_{i=1}^N$) and goal ($\{\mathbf{p}_g^i\}_{i=1}^N$) particle sets via Singular Value Decomposition (SVD) on centred point clouds to ensure translational and rotational invariance \cite{canberk2022cloth}.
-    \item \textbf{Mean Keypoint Distance (MKD):} Procrustes alignment applied strictly to designated semantic keypoints.
-    \item \textbf{Alignment Intersection-over-Union (A-IoU):} The IoU overlap between the current garment segmentation mask and the target goal mask.
-    \item \textbf{Sequential IoU-Based Success Rate (Sq-IoU-SR):} The demonstrated fold defines an ordered sequence of subgoals (the initial flattened, canonically aligned state plus each fold step). At each step the current mask is matched against this sequence with a sliding window over the most recent trajectory frames; the matched progress is thus re-estimated from the current observation, so a disturbed fold reverts to the appropriate earlier subgoal. A trial succeeds only if the trajectory reproduces the full subgoal sequence in order.
+    \item \textbf{Mean Particle Distance (MPD):} mean per-particle distance to the goal after rigid Procrustes alignment \cite{canberk2022cloth}.
+    \item \textbf{Alignment IoU (A-IoU):} direct mask overlap with the target fold (no re-alignment), as for flattening.
+    \item \textbf{Max IoU:} mask overlap with the target fold maximised over a rigid 2D rotation and translation, crediting a correct fold up to global pose.
+    \item \textbf{Sequential IoU-Based Success Rate (Sq-IoU-SR):} fraction of trials that reproduce the ordered fold subgoals $S_0,\dots,S_{K-1}$ within a consecutive window ending at the current step; the same criterion sets the target shown on the human interface.
 \end{enumerate}
 
 \begin{table*}[t!]
@@ -388,7 +388,7 @@ LS-SR $\uparrow$ & 0/30 & 1/30 & \cellcolor{red!25}7/30 & \cellcolor{yellow!25}1
 \subsection{Goal-Directed Folding in Simulation}
 \label{sec:exp_folding}
 
-Having established MAGPIE's flattening and alignment capabilities, we now evaluate its core competency: producing neat, structured folds directly from crumpled states. We conduct this evaluation in the \textit{goal-directed folding} environment, in which a long-sleeve garment must be manipulated from a highly crumpled initial configuration, through an intermediate canonicalisation-alignment state, and into a demonstrated sequence of target folded sub-goals (a two-step fold). Unlike the alignment tasks, success here is conditioned on reproducing the ordered sequence of intermediate folded geometries, making it substantially more sensitive to compounding errors and self-occlusion. We evaluate every method over 30 held-out ``hard'' crumpled initialisations of long-sleeve garments and report the folding metrics defined above---Mean Particle Distance (MPD), Mean Keypoint Distance (MKD), Alignment IoU (A-IoU), and the Sequential IoU-Based Success Rate (Sq-IoU-SR).
+Having established MAGPIE's flattening and alignment capabilities, we now evaluate its core competency: producing neat, structured folds directly from crumpled states. We conduct this evaluation in the \textit{goal-directed folding} environment, in which a long-sleeve garment must be manipulated from a highly crumpled initial configuration, through an intermediate canonicalisation-alignment state, and into a demonstrated sequence of target folded sub-goals (a two-step fold). Unlike the alignment tasks, success here is conditioned on reproducing the ordered sequence of intermediate folded geometries, making it substantially more sensitive to compounding errors and self-occlusion. We evaluate every method over 30 held-out ``hard'' crumpled initialisations of long-sleeve garments (a $25$-step horizon, no early stopping) and report the folding metrics defined above---Mean Particle Distance (MPD), Alignment IoU (A-IoU), Max IoU, and the Sequential IoU-Based Success Rate (Sq-IoU-SR).
 
 To isolate the sources of MAGPIE's folding performance, we compare the following approaches:
 \begin{itemize}
@@ -399,7 +399,7 @@ To isolate the sources of MAGPIE's folding performance, we compare the following
 \end{itemize}
 
 \begin{table}[!t]
-\caption{Goal-directed folding in simulation on long-sleeve garments (30 hard crumpled initialisations, two-step fold through canonicalisation-alignment). Distances are reported in normalised units; higher is better for A-IoU and Sq-IoU-SR, lower is better for MPD and MKD. \textbf{TODO: populate with final numbers.}}
+\caption{Goal-directed folding in simulation on long-sleeve garments (30 hard crumpled initialisations, two-step fold through canonicalisation-alignment). Distances are reported in normalised units; higher is better for A-IoU, Max IoU, and Sq-IoU-SR, lower is better for MPD. \textbf{TODO: populate with final numbers.}}
 \label{tab:sim-folding}
 \centering
 \small
@@ -410,8 +410,8 @@ To isolate the sources of MAGPIE's folding performance, we compare the following
 \textbf{Metric} & \textbf{All-Garment} & \textbf{LS-only} & \textbf{+\,Heuristic} & \textbf{Human} \\
 \midrule
 MPD $\downarrow$        & -- & -- & -- & -- \\
-MKD $\downarrow$        & -- & -- & -- & -- \\
 A-IoU $\uparrow$        & -- & -- & -- & -- \\
+Max IoU $\uparrow$      & -- & -- & -- & -- \\
 Sq-IoU-SR $\uparrow$    & -- & -- & -- & -- \\
 \bottomrule
 \end{tabular}
@@ -497,6 +497,7 @@ Despite achieving high alignment scores, a core limitation of our framework is i
 \paragraph{Future Work}
 Future directions will focus on broadening the validation envelope to encompass out-of-distribution, complex multi-layered garments and unseen fabric blends. We intend to integrate real-time tactile and force-torque feedback into the COT-FM integration steps, allowing the policy to dynamically sense fabric tension and friction coefficients during high-speed flinging actions, further reducing the sim-to-real gap.
 
+\textbf{TODO: also mention we use traditional neural network structure (such ask, MLP and CNNs) for accomplishing this work. In the future, we will investigate the usage of transformers.}
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -589,34 +590,43 @@ We optimise all networks end-to-end using the AdamW optimiser with a base learni
 
 
 \section{Integration of Other Methods}
-\subsection{ClothFunnels Integration}
-We transition the discretisation of actions from the environment directly into the policy, enabling the framework to output continuous coordinate vectors within a normalised pixel space. Consequently, the original dynamic unfolding and static placement operations are mapped seamlessly to continuous bimanual and single-arm spatial manoeuvres, respectively. Whereas the original implementation relied on a three-dimensional inverse-kinematic heuristic for the final folding sequence, our adaptation translates this process entirely into a planar, two-dimensional coordinate framework. Specifically, the original unified folding action is decomposed into a deterministic sequence comprising two individual single-arm placements followed by a simultaneous dual-arm manipulation. Furthermore, to guarantee physical plausibility, we dynamically integrate precise robotic reachability masks provided directly by the environment, eschewing the naive approximations previously generated within the policy. 
+We do not re-implement the baselines. Instead, we take each author's released code and adapt it to our framework. This keeps the comparison focused on the manipulation policy rather than the surrounding system. Every baseline reads the same top-down observation. Every baseline emits actions in our normalised pixel primitive space (\texttt{pick-and-fling}, single/dual \texttt{pick-and-place}, and \texttt{no-op}), with coordinates in $[-1,1]$. We grant each baseline the same environment-provided per-arm reachability masks. We also evaluate each one on the same tasks, initial states, and cached goals. For every baseline we first summarise the original method, then describe how we adapt its code.
 
-This adapted policy is calibrated to operate upon a $480 \times 480$ observation space, captured from a downward-facing camera elevated at two metres, which is subsequently downsampled and cropped to a $128 \times 128$ resolution for network inference. To accommodate this dimensionality reduction and necessary rotational augmentations, the system maintains three distinct coordinate representations: a tightly cropped transformed space, a rotated pre-transformed space, and an absolute original space. The inclusion of the absolute original space is critical for reorienting the directional vectors of the dynamic actions, ensuring the fabric is propelled vertically towards the top of the observation frame rather than horizontally from left to right as originally configured. Procedurally, the algorithm selects its initial unfolding primitives by identifying the maximal peaks across spatial action-value maps. Once a predefined horizon of $10$ flattening steps is completed, a convolutional keypoint detection network evaluates six primary semantic landmarks on the garment (specifically the shoulders, sleeves, and hem) to mathematically calculate and execute the final geometric fold.
+\subsection{ClothFunnels: Method, Architecture, Training and Inference}
+Cloth Funnels~\cite{canberk2022cloth} learns a \emph{canonicalised-alignment} objective. The objective funnels crumpled configurations into a narrow set of structured, fully-visible canonical poses, such as a T-shape for shirts, at a fixed 2D position and orientation. Simple heuristics can then fold the garment. The method parameterises manipulation as spatial action maps. It augments the $128{\times}128$ top-down RGB observation with a two-channel scale-invariant positional encoding. It then transforms this input across $16$ rotations and $6$ scales ($\{0.75,1.0,1.5,2.0,2.5,3.0\}$), giving $96$ inputs. A fully-convolutional value network predicts a dense per-pixel value map for every transform and each of two primitives: a dynamic dual-arm \texttt{pick-and-fling} and a quasi-static \texttt{pick-and-place}. The method factorises the reward as $R_{CA}=(1-\alpha)R_{C}+\alpha R_{A}$ ($\alpha=0.6$). The canonicalisation term $R_{C}$ measures per-vertex distance to the best-aligned goal, and the alignment term $R_{A}$ measures the residual rigid-transform error. The network uses one encoder per reward term, each with a decoder head per primitive. It trains self-supervised in simulation over roughly $12.5$k episodes, regressing each action's delta-reward $\Delta R_{CA}$ with an MSE loss under $\epsilon$-greedy exploration. At inference it scores every (rotation, scale, pixel) triple, masks out infeasible actions, and executes the arg-max. It recovers the pick and place pixels by inverting the chosen rotation-and-scale transform. A separate convolutional keypoint detector then supplies the landmarks for the final heuristic fold.
 
-\subsection{ClothMate Integration}
-As an architectural extension of the aforementioned methodology, the adaptation of ClothMate shares an identical foundation for environmental masking and spatial coordinate reconciliation. However, to refine the terminal flattening phase, it introduces a bimanual stretching manoeuvre in place of the independent single-arm placements utilised by ClothFunnels. Under this paradigm, the core spatial policy network is strictly responsible for parameterising the high-velocity dynamic unfolding actions. 
+\subsection{ClothFunnels: Integration into Our Framework}
+We move the action discretisation out of the environment and into the policy. The released code then outputs continuous coordinates in our normalised pixel space. This maps its dynamic unfolding and static placement onto our continuous bimanual and single-arm manoeuvres. The original code folds with a 3D inverse-kinematic heuristic. We replace this heuristic with a purely planar 2D formulation. We split the original unified fold into a fixed sequence: two single-arm placements, then one simultaneous dual-arm manipulation. We also feed the environment's exact per-arm reachability masks into the policy, which replaces its own coarse approximations.
 
-To govern the transition from dynamic unfolding to precise bimanual stretching, the framework employs a binary state classifier. This classifier evaluates the spatial arrangement of the fabric, triggering the stretching module exclusively when an empirical structural threshold is successfully surpassed—specifically, when the relative coverage area (RCA) score falls below $0.15$, indicating the garment is sufficiently spread. To prevent erroneous physical manipulation, a rigorous secondary validation mechanism is enforced: the associated U-Net classifier branch must also yield a predictive confidence exceeding $0.45$ in recognising the garment's topological state before the bimanual stretching manoeuvre is actively authorised and executed.
+The policy runs on a $480 \times 480$ observation from a downward-facing camera at two metres. We downsample and crop this observation to $128 \times 128$ for the network. The code keeps three coordinate frames to handle this crop and the rotational augmentations: a tightly cropped transformed space, a rotated pre-transformed space, and the absolute original space. We use the absolute original space to reorient the dynamic actions. This makes the fling drive the fabric upward in the frame rather than sideways as in the original setup. The policy selects its unfolding actions from the peaks of the spatial action-value maps. After $10$ flattening steps, a convolutional keypoint detector locates six semantic landmarks (the shoulders, sleeves, and hem) and computes the final fold.
 
-\subsection{Keypoint Localisation and Semantic Utilisation}
-A defining distinction between the two adapted methodologies lies in their respective strategies for semantic keypoint extraction—specifically, the quantity of landmarks predicted, their spatial locations, and their functional purpose within the manipulation pipeline. 
+The detector isolates six landmarks: the left and right shoulders, the top-left and top-right collar vertices, and the bottom-left and bottom-right hem vertices. The pipeline uses these landmarks only in the terminal phase. Once unfolding and flattening finish, the six keypoints anchor a deterministic fold. The shoulders and top corners set the inward sleeve fold, and the bottom hem keypoints set the final upward fold towards the collar. The six keypoints therefore act as absolute waypoints for the terminal fold.
 
-Within the ClothFunnels adaptation, the convolutional detection module isolates six distinct semantic landmarks: the left and right shoulders, the top-left and top-right collar vertices, and the bottom-left and bottom-right hem vertices. These six keypoints are utilised exclusively during the terminal phase of the manipulation episode. Once the dynamic unfolding and flattening phases are complete, these structural landmarks provide the geometric foundation for a deterministic, multi-step folding sequence. Specifically, the spatial relationship between the shoulders and the top corners parameterises the initial inward folding of the sleeves, whilst the bottom hem keypoints define the trajectory for the final upward fold towards the collar. Consequently, the six keypoints act as absolute waypoints for terminal geometric state transitions.
+\subsection{ClothMate: Method, Architecture, Training and Inference}
+ClothMate~\cite{luo2025clothmate} flattens garments from arbitrary configurations in a generalisable, data-efficient way. Its key insight is grasp--fling consistency: grasping the same point pair produces a consistent fling response regardless of the current crumpled state. It exploits this insight with a two-stage design. First it learns point-wise fling responses under a canonicalised, aligned configuration. Then it generalises to arbitrary states through a point-to-point projection. This design decouples state estimation from action prediction. The decoupling tames the infinite-DOF dynamics and self-occlusion of garments and improves data efficiency across categories. A spatial-action-map value network, as in Cloth Funnels, scores dynamic \texttt{fling} and \texttt{place} candidates over $16$ rotations at $128{\times}128$ resolution. It blends rigid and deformable value predictions, and we set the deformable weight to $0.4$. A U-Net predicts four garment-corner keypoints through a heatmap head and a garment-state score through a classification head. A low relative-coverage-area (RCA) reading switches the policy from flinging to a keypoint-driven bimanual \texttt{pick-and-stretch} that tensions the most contracted edge. It trains the value network self-supervised and supervises the U-Net on annotated corners and states. At inference it flings until the garment is spread, then parameterises an open-loop stretch from the four corners.
 
-Conversely, the ClothMate adaptation predicts a sparser configuration comprising exactly four primary corner keypoints: the top-left, top-right, bottom-left, and bottom-right vertices. Rather than facilitating a terminal folding sequence, these four landmarks function dynamically as a geometric validation and parameterisation mechanism during the active flattening phase. When the state classifier identifies that the garment is sufficiently spread, the relative horizontal distances between these keypoint pairs are assessed. This assessment serves a critical dual purpose: it first classifies the gross morphology of the garment (distinguishing trousers from upper-body garments to prevent excessive lateral tension on constrained features like waistbands), and subsequently identifies the most structurally contracted, wrinkled edge. Ultimately, these four keypoints dictate the spatial anchor constraints and directional vectors required to execute a safe, open-loop bimanual stretching manoeuvre.
+\subsection{ClothMate: Integration into Our Framework}
+Our ClothMate adaptation reuses the masking and coordinate handling of our Cloth Funnels adaptation. To refine the terminal flattening, it swaps the two single-arm placements for one bimanual stretch. The spatial policy network then handles only the high-velocity dynamic unfolding.
 
-\subsection{3D-to-2D Visibility and Occlusion Modelling to Generate Pointclouds for Unifolding}
+A binary state classifier governs the switch from flinging to stretching. It reads the fabric's spatial arrangement and triggers the stretch only when the relative coverage area (RCA) score drops below $0.15$, which marks a sufficiently spread garment. A second check guards against bad grasps. The U-Net classifier branch must also report a confidence above $0.45$ before the stretch runs.
 
-To robustly map the simulated 3D garment state to the 2D visual observation space, it is necessary to determine the exact subset of topological nodes (particles) that are unoccluded from the perspective of the camera sensor. This process constitutes a rigorous geometric projection pipeline followed by a depth-buffer occlusion test.
+The four U-Net corners drive validation and parameterisation during flattening, not a terminal fold. When the classifier flags a spread garment, the code measures the horizontal distances between the keypoint pairs. This measurement serves two purposes. It first classifies the garment's gross morphology, separating trousers from upper-body garments so the stretch avoids over-tensioning constrained parts like waistbands. It then finds the most contracted, wrinkled edge. Finally, the four corners set the anchor constraints and directions for a safe, open-loop bimanual stretch.
 
-Let the garment be discretised into $N$ particles, with their coordinates defined in the global world frame as $\mathbf{X}_w \in \mathbb{R}^{N \times 3}$. To compute the visibility mask, we first apply a rigid body transformation to map these points into the local coordinate frame of the camera. Using homogeneous coordinates $\tilde{\mathbf{X}}_w \in \mathbb{R}^{N \times 4}$, the camera-space coordinates $\mathbf{X}_c$ are obtained via the inverse extrinsic matrix $\mathbf{T}_{cw} \in \text{SE}(3)$:
+\subsection{UniFolding: Method, Architecture, Training and Inference}
+UniFolding~\cite{xue2023unifolding} unifies unfolding and folding in one policy, UFONet, that acts directly on a partial garment point cloud masked from RGB-D. The point-cloud input improves generalisation and reduces sensitivity to texture and shape. A sparse-convolution ResUNet3D encoder produces a $128$-d global feature and per-point $128$-d features, and a self-attention module refines them. Three heads consume these features. An action-classification head decides the unfolding-to-folding transition from the global feature. A fling head regresses $K$ grasp-keypoint candidates by attention-based offset voting in the canonical NOCS frame, which exploits garment bilateral symmetry, and a pairwise MLP then ranks the keypoint pairs. A pick-and-place head predicts the dual-arm pick and place points for fold-1 and fold-2, and a drag primitive covers unreachable grasps. Training is sample-efficient and human-centric. It uses offline Virtual-Reality demonstrations ($\sim$16\,h across long- and short-sleeve shirts), a self-supervised simulation stage that trains the pairwise scoring head, and an online real-world human-in-the-loop stage with pairwise-preference annotations. The losses combine a variety (minimum-over-$N$) loss and a smooth-$L_1$ loss for the keypoints and pick/place, plus a cross-entropy loss on the preferences. At inference it classifies the stage, scores fling keypoint pairs for unfolding or pick/place points for folding, and runs them as dual-arm $\mathrm{SE}(3)$ actions.
+
+\subsection{UniFolding: Integration into Our Framework}
+UniFolding acts on 3D point clouds, but our environment exposes a top-down RGB-D observation. Bridging the two takes three steps. We synthesise the partial point cloud the network expects, express it in the network's canonical virtual frame, and project the predicted 3D poses back to our normalised pixel actions. We build the visible point cloud by testing every mesh particle for camera visibility, as we derive below. We then map it into the virtual frame with the world-to-virtual rigid transform and zero its minimum height. We pass this point cloud to the network. We project the returned left and right pick and place poses onto the image plane using SoftGym's exact camera intrinsics and extrinsics, then crop and normalise them to $[-1,1]$. We map each predicted action type onto our primitives: \texttt{fling} to \texttt{pick-and-fling}; \texttt{fold}, \texttt{pick-and-place}, and \texttt{drag} to \texttt{dual pick-and-place}; and single placements to \texttt{single pick-and-place}. We enforce reachability with the same per-arm ring workspace as our method, so infeasible grasps trigger UniFolding's native drag fallbacks. The rest of this subsection details the visibility computation.
+
+To map the simulated 3D garment state to the 2D observation, we first find which particles the camera can see. We run a geometric projection followed by a depth-buffer occlusion test.
+
+We discretise the garment into $N$ particles with world-frame coordinates $\mathbf{X}_w \in \mathbb{R}^{N \times 3}$. We first map these points into the camera frame with a rigid transformation. In homogeneous coordinates $\tilde{\mathbf{X}}_w \in \mathbb{R}^{N \times 4}$, we apply the inverse extrinsic matrix $\mathbf{T}_{cw} \in \text{SE}(3)$ to obtain the camera-space coordinates $\mathbf{X}_c$:
 
 \begin{equation}
     \mathbf{X}_c = (\mathbf{T}_{cw} \tilde{\mathbf{X}}_w^T)^T
 \end{equation}
 
-For a given particle $i$, its camera-frame coordinates are denoted as $\mathbf{x}_{c,i} = [x_i, y_i, z_i]^T$, where $z_i$ represents the planar depth from the camera sensor. We subsequently model the perspective projection using the pinhole camera intrinsic matrix $\mathbf{K} \in \mathbb{R}^{3 \times 3}$. The continuous 2D pixel coordinates $[u_i, v_i]^T$ on the image plane are derived via the perspective divide:
+We write particle $i$'s camera-frame coordinates as $\mathbf{x}_{c,i} = [x_i, y_i, z_i]^T$, where $z_i$ is the depth from the camera. We then model the perspective projection with the pinhole intrinsic matrix $\mathbf{K} \in \mathbb{R}^{3 \times 3}$. The perspective divide gives the 2D pixel coordinates $[u_i, v_i]^T$:
 
 \begin{equation}
     \lambda_i \begin{bmatrix} u_i \\ v_i \\ 1 \end{bmatrix} = \mathbf{K} \mathbf{x}_{c,i}
@@ -624,27 +634,108 @@ For a given particle $i$, its camera-frame coordinates are denoted as $\mathbf{x
 
 where the scaling factor $\lambda_i$ equates to the planar depth $z_i$. 
 
-A particle is deemed theoretically visible if it resides within the camera's viewing frustum. We define the frustum visibility indicator $\mathcal{V}_{\text{frustum}}(i)$ for an image of dimensions $W \times H$ as:
+A particle is visible only if it lies within the camera's viewing frustum. We define the frustum visibility indicator $\mathcal{V}_{\text{frustum}}(i)$ for an image of dimensions $W \times H$ as:
 
 \begin{equation}
     \mathcal{V}_{\text{frustum}}(i) = \mathbb{I}(z_i > 0 \land 0 \le u_i < W \land 0 \le v_i < H)
 \end{equation}
 
-However, self-occlusion is highly prevalent in highly deformable objects such as crumpled garments. To resolve this, we sample the environment's rendered Z-buffer, denoted as $\mathcal{D} \in \mathbb{R}^{H \times W}$, which encodes the depth of the closest rendered surface at each discrete pixel coordinate. We evaluate the continuous pixel coordinates $(u_i, v_i)$ by rounding them to their nearest discrete indices and comparing the particle's analytical depth $z_i$ against the empirical depth buffer.
+Crumpled garments self-occlude heavily, so the frustum test alone is not enough. To resolve this, we sample the environment's rendered Z-buffer $\mathcal{D} \in \mathbb{R}^{H \times W}$, which holds the depth of the closest rendered surface at each pixel. We round each pixel coordinate $(u_i, v_i)$ to the nearest index and compare the particle's depth $z_i$ against this buffer.
 
-To account for the volumetric thickness of the simulated nodes and to mitigate floating-point inaccuracies (frequently observed as Z-fighting in OpenGL rendering pipelines), we introduce the particle radius $r$ and a regularisation margin $\epsilon$. The occlusion indicator $\mathcal{V}_{\text{occlusion}}(i)$ is thus formulated as:
+We also account for the volumetric thickness of the particles and for floating-point noise (Z-fighting in OpenGL pipelines). We therefore add the particle radius $r$ and a margin $\epsilon$. This gives the occlusion indicator $\mathcal{V}_{\text{occlusion}}(i)$:
 
 \begin{equation}
     \mathcal{V}_{\text{occlusion}}(i) = \mathbb{I}(z_i - r \le \mathcal{D}(\lfloor v_i \rceil, \lfloor u_i \rceil) + \epsilon)
 \end{equation}
 
-Ultimately, the global visibility mask $\mathcal{V} \in \{0, 1\}^N$ for the entire point cloud is yielded by the logical conjunction of the frustum and occlusion constraints:
+We finally combine the two constraints. The logical conjunction of the frustum and occlusion tests yields the global visibility mask $\mathcal{V} \in \{0, 1\}^N$:
 
 \begin{equation}
     \mathcal{V}(i) = \mathcal{V}_{\text{frustum}}(i) \land \mathcal{V}_{\text{occlusion}}(i)
 \end{equation}
 
-This formulation ensures that the resultant point cloud provided to the perception network accurately reflects only the exposed surfaces of the garment, discarding hidden topological layers whilst preserving spatial fidelity.
+This mask keeps only the exposed surfaces of the garment. It discards the hidden layers, so the point cloud we feed to the network reflects what the camera actually sees.
+
+\section{Evaluation Metrics} \label{app:eval_protocol}
+
+This appendix details the exact implementation of the evaluation metrics reported in the Experiments
+(Section~\ref{sec:experiments}), so that the numbers in
+Tables~\ref{tab:longsleeve-flattening}~and~\ref{tab:sim-folding} are reproducible. All quantities are
+computed per step from the top-down garment segmentation mask; the alignment tasks use a $20$-step
+horizon and the folding task a $25$-step horizon, with \emph{no} early stopping at success states, so
+every metric is well defined throughout the trajectory.
+
+\subsection{Coverage-based metrics}
+Let $c_t$ be the garment's 2D projected area (mask pixel count) at step $t$, $c_0$ the initial area,
+and $c_{\text{max}}$ its fully flattened reference area (measured once from the flattened canonical
+mesh).
+\begin{itemize}
+    \item \textbf{Normalised Coverage (NC)}: $\mathrm{NC}_t = c_t / c_{\text{max}} \in [0,1]$.
+    \item \textbf{Normalised Improvement (NI)}: the relative coverage gain over the initial state,
+    $\mathrm{NI}_t = \mathrm{clip}\!\left(\frac{c_t - c_0}{\max(c_{\text{max}} - c_0,\,0) + \varepsilon},\, 0,\, 1\right)$,
+    with a small guard $\varepsilon = 10^{-3}$ to avoid division by zero on near-flat initialisations.
+\end{itemize}
+
+\subsection{Alignment IoU versus Max IoU}
+\label{app:iou_variants}
+We use two mask-IoU operators, and the distinction is important because they measure different things.
+Both first resize the compared masks to a common $128{\times}128$ grid.
+\begin{itemize}
+    \item \textbf{Alignment IoU (A-IoU)}: the direct overlap $\mathrm{IoU}(A,B)=|A\cap B|/|A\cup B|$
+    between the current mask $A$ and the target mask $B$, with \emph{no} re-alignment. It is therefore
+    sensitive to the garment's global position and orientation, which is desirable because reaching a
+    specific canonical / folded pose is part of the task. This single definition is used for the
+    reported A-IoU in \emph{both} the flattening and folding experiments, for the alignment success
+    criterion, and for the folding subgoal matching that drives Sq-IoU-SR.
+    \item \textbf{Max IoU}: the \emph{maximum} overlap achievable under a rigid 2D alignment of the
+    current mask onto the target, $\max_{\theta,\mathbf{t}} \mathrm{IoU}(R_{\theta}A + \mathbf{t},\,B)$,
+    implemented as a coarse $5^{\circ}$ rotation sweep (refined to $1^{\circ}$) combined with an FFT
+    cross-correlation best-translation search. It is rotation- and translation-invariant, so a
+    correctly shaped but globally rotated or shifted garment is still credited. We report it
+    \emph{additionally} for the folding experiments, as a pose-invariant complement to the A-IoU that
+    isolates fold shape quality from residual global pose error; it does not enter any success
+    criterion.
+\end{itemize}
+For every target the IoU is taken as the maximum over all cached goal variations of the demonstrated
+sequence.
+
+\subsection{Particle-based folding metric}
+Given the current particle set $\{\mathbf{p}_t^i\}_{i=1}^{N}$ and the goal set
+$\{\mathbf{p}_g^i\}_{i=1}^{N}$, the \textbf{Mean Particle Distance (MPD)} first applies a rigid
+Procrustes alignment (SVD of the centred point clouds) to remove global translation and rotation, then
+reports the mean Euclidean residual over all $N$ particles in normalised units (lower is better).
+
+\subsection{Success-rate definitions}
+\paragraph{Flattening / alignment (C-SR, LS-SR).} A step is counted as successful when it
+simultaneously satisfies $\mathrm{NC} > 0.8$ and $\text{A-IoU} > 0.7$. We report the
+cross-trajectory success rate \textbf{C-SR} (the trial succeeds if \emph{any} step meets the
+criterion) and the last-step success rate \textbf{LS-SR} (only the final step is checked). These
+reporting thresholds ($0.8/0.7$) are applied in the evaluation pipeline and are intentionally distinct
+from the tighter constants used inside the environment for reward shaping and control; the latter never
+enter the reported numbers.
+
+\paragraph{Folding (Sq-IoU-SR).}
+\label{app:sq_iou_sr}
+The demonstrated fold defines an ordered set of $K = \texttt{goal\_steps}+1$ subgoals: the flattened /
+canonical state $S_0$ followed by each fold step (for the two-step fold, $K=3$: $S_0$, fold-1 $S_1$,
+fold-2 $S_2$). Each subgoal $g$ has an Alignment-IoU matching threshold $\tau_g$ (we use
+$\tau=[0.7,0.7,0.7]$). A trial is scored successful the first time the \textbf{last $K$ trajectory
+steps, in order and ending at the current step}, match $S_0, S_1, \dots, S_{K-1}$ respectively: step
+$t{-}(K{-}1)$ matches $S_0$, \dots, step $t$ matches $S_{K-1}$, each with Alignment IoU above its
+threshold. Once achieved, success
+latches and is held for as long as the current mask still matches the final subgoal $S_{K-1}$; a
+subsequently disturbed fold un-latches it.
+
+The same in-order suffix criterion drives the target subgoal displayed on the human interface
+(Fig.~\ref{fig:human_interface}): the shown target is $S_{a}$, where $a$ is one past the furthest
+subgoal reached by such an in-order suffix ending at the current step. Consequently a garment that is
+being re-flattened after a failed fold correctly reverts to the flattened subgoal $S_0$ rather than
+jumping ahead to a later fold, because a spread garment matches no later fold mask. As an exception,
+whenever the current mask already matches the final subgoal $S_{K-1}$ above its threshold, the
+interface holds $S_{K-1}$ as the target---mirroring the latched success check above---so a garment the
+environment already counts as a completed fold is never shown as needing re-flattening even if an
+intervening corrective step has broken the strict $S_0\!\to\!\dots\!\to\!S_{K-1}$ window. This keeps
+the displayed target consistent with the reported success flag.
 
 \section{Real Robot Setup} \label{sec:real-world-setup}
 

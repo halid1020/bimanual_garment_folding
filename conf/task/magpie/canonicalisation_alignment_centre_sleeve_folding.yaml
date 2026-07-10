@@ -6,7 +6,7 @@ debug: false
 alignment: True
 goal_steps: 2
 through_canon: True
-iou_thresholds: [0.80, 0.80, 0.80]  # <--- NEW: Dynamic Thresholds
+iou_thresholds: [0.7, 0.7, 0.7]
 overstretch_penalty_scale: 0
 overstretch_penalty_threshold: 0
 affordance_penalty_scale: 0

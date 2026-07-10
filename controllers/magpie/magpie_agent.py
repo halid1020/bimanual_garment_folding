@@ -63,6 +63,7 @@ class MagpieAgent(TrainableAgent):
         self.buffer_actions = {}
         self.last_actions = {}
         self.obs_deque = {}
+        self.active_primitive_ids = {}
         
         # Operational flags
         self.collect_on_success = self.config.get('collect_on_success', True)
@@ -207,13 +208,6 @@ class MagpieAgent(TrainableAgent):
 
         This is the core evaluation loop: it aggregates visual history, encodes 
         features, processes primitives, and runs the reverse diffusion process.
-
-        Args:
-            info (dict): Current environment state and observations.
-            update (bool): Whether to update internal observation history.
-
-        Returns:
-            dict or np.ndarray: The predicted action, formatted for the environment.
         """
         start_time = time.time()
         arena_id = info['arena_id']
@@ -225,6 +219,14 @@ class MagpieAgent(TrainableAgent):
             else:
                 self.init([info])
 
+        # Ensure observation queue is fully populated for step 0 lag
+        if arena_id not in self.obs_deque or len(self.obs_deque[arena_id]) < self.config.obs_horizon:
+            if arena_id not in self.obs_deque:
+                self.obs_deque[arena_id] = deque(maxlen=self.config.obs_horizon)
+            current_obs = self._process_info(info)
+            while len(self.obs_deque[arena_id]) < self.config.obs_horizon:
+                self.obs_deque[arena_id].append(current_obs)
+
         # Execute full planning if the action buffer is depleted
         if len(self.buffer_actions[arena_id]) == 0:
             sample_state = self._prepare_eval_state(info)
@@ -232,7 +234,6 @@ class MagpieAgent(TrainableAgent):
             
             if self.config.include_state:
                 vector_state = torch.stack([x['vector_state'] for x in self.obs_deque[arena_id]])
-                # CRITICAL: Must cast to device before concatenation to avoid host-to-device bottlenecks
                 vector_state = vector_state.to(self.device) 
                 obs_features = torch.cat([obs_features, vector_state], dim=-1)
 
@@ -240,6 +241,11 @@ class MagpieAgent(TrainableAgent):
                 obs_features = self.nets['obs_projector'](obs_features)
 
             obs_cond, cur_prim_id, prim_probs_log = self._process_primitives(obs_features, info)
+            
+            # Initialize tracker safely if it doesn't exist, and cache the active primitive ID
+            if not hasattr(self, 'active_primitive_ids'):
+                self.active_primitive_ids = {}
+            self.active_primitive_ids[arena_id] = cur_prim_id
             
             # Sample initial noise for the reverse diffusion process
             naction = self.eval_action_sampler.sample(
@@ -253,18 +259,46 @@ class MagpieAgent(TrainableAgent):
             self._store_predicted_actions(naction, arena_id)
             self._log_internal_states(naction, noise_actions, prim_probs_log, obs_features, info)
 
+        # Failsafe: If buffer is STILL empty (e.g., severe slicing mismatch), pad with a zero action
+        if len(self.buffer_actions[arena_id]) == 0:
+            print(f"[WARNING] Action buffer empty for arena {arena_id}. Returning safe fallback action.")
+            fallback_action = np.zeros(self.network_action_dim, dtype=np.float32)
+            self.buffer_actions[arena_id].append(fallback_action)
+
+        # Retrieve cached ID (defaults to 0 if something bypasses the cache)
+        active_id = getattr(self, 'active_primitive_ids', {}).get(arena_id, 0)
+
         # Pop the next immediate action from the planned trajectory buffer
         action = self.buffer_actions[arena_id].popleft()
         action = action[:self.network_action_dim].flatten()
-        out_action = self._format_output_action(action, cur_prim_id if 'cur_prim_id' in locals() else None)
+        
+        out_action = self._format_output_action(action, active_id)
         
         self.last_actions[arena_id] = action
 
-        if self.measure_time:
+        if getattr(self, 'measure_time', False):
             self.internal_states[arena_id].setdefault('inference_time', []).append(time.time() - start_time)
             print(f"Arena {arena_id}: Action planned in {time.time() - start_time:.4f} seconds.")
             
         return out_action
+
+    def _store_predicted_actions(self, naction, arena_id):
+        """Un-normalizes the raw tensor actions and pushes them to the execution queue."""
+        # Safe slicing logic: Adjust start index if pred_horizon does not encompass the full obs_horizon
+        if self.config.pred_horizon <= self.config.obs_horizon:
+            start = 0
+        else:
+            start = self.config.obs_horizon - 1
+            
+        end = start + self.config.action_horizon
+        
+        # Ensure the slice never exceeds the actual generated trajectory length
+        end = min(end, self.config.pred_horizon)
+        
+        final_naction = naction[..., :self.network_action_dim]
+        action_pred = self.data_augmenter.postprocess({'action': ts_to_np(final_naction)})['action'][0]
+        
+        self.buffer_actions[arena_id] = deque(action_pred[start:end, :], maxlen=self.config.action_horizon)
 
     def act(self, infos, updates):
         """Batched action inference across multiple environments."""
@@ -279,6 +313,7 @@ class MagpieAgent(TrainableAgent):
             self.internal_states[arena_id] = {}
             self.buffer_actions[arena_id] = deque(maxlen=self.config.action_horizon)
             self.last_actions[arena_id] = None
+            self.active_primitive_ids[arena_id] = 0
 
     def get_state(self):
         """Retrieves diagnostic internal states for logging/visualization."""
@@ -469,13 +504,6 @@ class MagpieAgent(TrainableAgent):
         act_part = self.constrain_action(act_part, info, t=timestep, debug=self.debug)
         return torch.cat([act_part, state_part], dim=-1)
 
-    def _store_predicted_actions(self, naction, arena_id):
-        """Un-normalizes the raw tensor actions and pushes them to the execution queue."""
-        start = self.config.obs_horizon - 1
-        end = start + self.config.action_horizon
-        final_naction = naction[..., :self.network_action_dim]
-        action_pred = self.data_augmenter.postprocess({'action': ts_to_np(final_naction)})['action'][0]
-        self.buffer_actions[arena_id] = deque(action_pred[start:end, :], maxlen=self.config.action_horizon)
 
     def _format_output_action(self, action, cur_prim_id):
         """Formats the numerical vector back into a structured dictionary expected by the environment."""

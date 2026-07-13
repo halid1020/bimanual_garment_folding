@@ -17,6 +17,7 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
         self.place_orien = config.get('place_orien', False)
         self.pick_prien = config.get('pick_orien', False)
         self.apply_workspace = config.get('apply_workspace', False)
+        self.constrain_actions = config.get('constrain_actions', True)
         
         if self.obj_mask == 'from_model':
             self.obj_mask_threshold = config.obj_mask_threshold
@@ -90,35 +91,37 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
         for i in range(self.iterations):
             popsize = self.candidates
             samples = np.stack([np.random.normal(mean, std) for _ in range(popsize)]).reshape(popsize, plan_hor, -1)
-            H, W = obj_mask.shape[:2] 
-            assert H == W, "Obj mask should be square"
 
-            # Mask constraints apply to the first planned action only; the cloth
-            # state after step 1 is unknown, so later actions are left unconstrained.
-            first_pick_actions = ((samples[:, 0, :2] + 1) * (H / 2)).astype(int)
-            first_pick_actions = first_pick_actions.clip(0, H-1).reshape(popsize, -1)
-            place_actions = ((samples[:, 0, 2:4] + 1) * (H / 2)).astype(int)
-            place_actions = place_actions.clip(0, H-1).reshape(popsize, -1)
+            if self.constrain_actions:
+                H, W = obj_mask.shape[:2]
+                assert H == W, "Obj mask should be square"
 
-            if self.config.swap_action:
-                valid_indices_for_pick = obj_mask[first_pick_actions[:, 1], first_pick_actions[:, 0]] == 1
+                # Mask constraints apply to the first planned action only; the cloth
+                # state after step 1 is unknown, so later actions are left unconstrained.
+                first_pick_actions = ((samples[:, 0, :2] + 1) * (H / 2)).astype(int)
+                first_pick_actions = first_pick_actions.clip(0, H-1).reshape(popsize, -1)
+                place_actions = ((samples[:, 0, 2:4] + 1) * (H / 2)).astype(int)
+                place_actions = place_actions.clip(0, H-1).reshape(popsize, -1)
+
+                if self.config.swap_action:
+                    valid_indices_for_pick = obj_mask[first_pick_actions[:, 1], first_pick_actions[:, 0]] == 1
+                    if self.apply_workspace:
+                        valid_indices_for_place = workspace_mask[place_actions[:, 1], place_actions[:, 0]] == 1
+                else:
+                    valid_indices_for_pick = obj_mask[first_pick_actions[:, 0], first_pick_actions[:, 1]] == 1
+                    if self.apply_workspace:
+                        valid_indices_for_place = workspace_mask[place_actions[:, 0], place_actions[:, 1]] == 1
+
+                valid_indices = valid_indices_for_pick
+
                 if self.apply_workspace:
-                    valid_indices_for_place = workspace_mask[place_actions[:, 1], place_actions[:, 0]] == 1
-            else:
-                valid_indices_for_pick = obj_mask[first_pick_actions[:, 0], first_pick_actions[:, 1]] == 1
-                if self.apply_workspace:
-                    valid_indices_for_place = workspace_mask[place_actions[:, 0], place_actions[:, 1]] == 1
+                    valid_indices &= valid_indices_for_place
 
-            valid_indices = valid_indices_for_pick
-            
-            if self.apply_workspace:
-                valid_indices &= valid_indices_for_place
+                samples = samples[valid_indices]
+                popsize = samples.shape[0]
 
-            samples = samples[valid_indices]
-            popsize = samples.shape[0]
-
-            if popsize == 0:
-                break
+                if popsize == 0:
+                    break
 
             if self.clip:
                 samples = np.clip(samples, action_space.low[:1], action_space.high[:1])

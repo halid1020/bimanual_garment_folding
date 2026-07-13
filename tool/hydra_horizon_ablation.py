@@ -4,10 +4,11 @@
 Standalone MPC-horizon ablation for LaGarNet.
 
 Loads the best checkpoint of a trained LaGarNet experiment and evaluates it on
-the configured arenas with planning horizons H = 1, 2, 3, 5, reporting both
-task performance (via the standard arena logger -> performance.csv) and
-per-step planning runtime (runtime.csv). Results land in
-<save_root>/<eval_name>_H{H}/<arena>/eval_checkpoint_-2/ so the analysis
+the configured arenas across the planning variants below (horizons H = 1, 2,
+3, 5 plus an unconstrained-CEM variant at H = 1), reporting both task
+performance (via the standard arena logger -> performance.csv) and per-step
+planning runtime (runtime.csv). Results land in
+<save_root>/<eval_name>_<tag>/<arena>/eval_checkpoint_-2/ so the analysis
 notebook can read them with the same layout as other transfer evaluations.
 """
 
@@ -27,8 +28,15 @@ from registration.sim_arena import register_arenas
 from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 
-# The ablation this script exists for; edit here, not in the config.
-HORIZONS = [1, 2, 3, 5]
+# The ablations this script exists for; edit here, not in the config.
+# (tag, planning_horizon, constrain_actions)
+VARIANTS = [
+    ('H1', 1, True),
+    ('H2', 2, True),
+    ('H3', 3, True),
+    ('H5', 5, True),
+    ('H1_unconstrained', 1, False),  # CEM without cloth/workspace mask rejection
+]
 
 
 def _unwrap(cfg: DictConfig, marker_keys) -> DictConfig:
@@ -42,11 +50,12 @@ def _unwrap(cfg: DictConfig, marker_keys) -> DictConfig:
     return cfg
 
 
-def _append_runtime_row(runtime_csv, episode_config, horizon, durations):
+def _append_runtime_row(runtime_csv, episode_config, horizon, constrained, durations):
     row = pd.DataFrame([{
         'tier': episode_config['tier'],
         'episode_id': episode_config['eid'],
         'planning_horizon': horizon,
+        'constrain_actions': constrained,
         'num_steps': len(durations),
         'planning_time_mean_s': float(np.mean(durations)),
         'planning_time_std_s': float(np.std(durations)),
@@ -76,17 +85,19 @@ def main(cfg: DictConfig) -> None:
     source_save_dir = os.path.join(save_root, train_cfg.exp_name)
     print(f"[horizon_ablation] Checkpoint dir: {source_save_dir}")
 
-    for horizon in HORIZONS:
-        print(f"\n{'='*60}\n[horizon_ablation] Planning horizon H = {horizon}\n{'='*60}")
+    for tag, horizon, constrained in VARIANTS:
+        print(f"\n{'='*60}\n[horizon_ablation] Variant {tag}: H = {horizon}, "
+              f"constrain_actions = {constrained}\n{'='*60}")
 
         agent_cfg = copy.deepcopy(train_cfg.agent)
         agent_cfg.policy.params.planning_horizon = horizon
+        agent_cfg.policy.params.constrain_actions = constrained
 
         agent = ag_ar.build_agent(
             agent_cfg.name,
             agent_cfg,
             project_name=train_cfg.project_name,
-            exp_name=f"{train_cfg.exp_name}_H{horizon}",
+            exp_name=f"{train_cfg.exp_name}_{tag}",
             save_dir=source_save_dir,
             disable_wandb=True
         )
@@ -103,19 +114,19 @@ def main(cfg: DictConfig) -> None:
                                ['task_name'])
 
             clean_arena_name = eval_setup.arena.split('/')[-1]
-            out_dir = os.path.join(save_root, f"{cfg.eval_name}_H{horizon}",
+            out_dir = os.path.join(save_root, f"{cfg.eval_name}_{tag}",
                                    clean_arena_name)
             os.makedirs(out_dir, exist_ok=True)
             runtime_csv = os.path.join(out_dir, 'eval_checkpoint_-2', 'runtime.csv')
 
-            print(f"\n>>> H={horizon} | Arena: {arena_cfg.name} | "
+            print(f"\n>>> {tag} | Arena: {arena_cfg.name} | "
                   f"Task: {task_cfg.task_name}\n>>> Output: {out_dir}")
 
             arena = ag_ar.build_arena(
                 arena_cfg.name,
                 arena_cfg,
                 project_name=train_cfg.project_name,
-                exp_name=f"{cfg.eval_name}_H{horizon}_arena_{i}",
+                exp_name=f"{cfg.eval_name}_{tag}_arena_{i}",
                 save_dir=out_dir
             )
             task = build_sim_task(task_cfg)
@@ -135,11 +146,11 @@ def main(cfg: DictConfig) -> None:
                     continue
                 os.makedirs(os.path.dirname(runtime_csv), exist_ok=True)
                 _append_runtime_row(runtime_csv, episode_config, horizon,
-                                    res['action_durations'])
+                                    constrained, res['action_durations'])
 
             arena.close()  # release the PyFlex/OpenGL context between runs
 
-    print("\n[horizon_ablation] All horizons completed.")
+    print("\n[horizon_ablation] All variants completed.")
 
 
 if __name__ == "__main__":

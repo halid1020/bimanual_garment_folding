@@ -1,0 +1,12 @@
+# conf/transfer_eval/lagarnet/final_lagarnet_horizon_ablation.yaml
+# Consumed by tool/hydra_horizon_ablation.py, which fixes the planning
+# horizons (H = 1, 2, 3, 5) in code; this file only selects the trained
+# experiment and the evaluation arena.
+
+eval_name: transfer_eval_final_lagarnet_horizon
+
+train_exp_config: sim_exp/lagarnet/final_lagarnet
+
+eval_arenas:
+  - arena: lagarnet/multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus

@@ -22,6 +22,7 @@ usage() {
     echo "  -e  Run hydra_eval.py instead of hydra_train.py"
     echo "  -r  Run hydra_transfer_eval.py (uses transfer_eval/ configs)"
     echo "  -a  Run hydra_train_and_transfer.py (uses transfer_eval/ configs)"
+    echo "  -z  Run hydra_horizon_ablation.py (uses transfer_eval/ configs)"
     exit 1
 }
 
@@ -37,7 +38,7 @@ EXP_NAME=${EXP_NAME#transfer_eval/}
 shift
 
 # Added 'a' to getopts
-while getopts "t:m:c:p:g:era" opt; do
+while getopts "t:m:c:p:g:eraz" opt; do
   case $opt in
     t) 
       # Smart time parsing
@@ -63,11 +64,16 @@ while getopts "t:m:c:p:g:era" opt; do
       PY_SCRIPT="hydra_transfer_eval.py" 
       CONFIG_DIR="transfer_eval"
       ;; 
-    a) 
+    a)
       # Switch to unified train and transfer eval script
-      PY_SCRIPT="hydra_train_and_transfer.py" 
+      PY_SCRIPT="hydra_train_and_transfer.py"
       CONFIG_DIR="transfer_eval"
-      ;; 
+      ;;
+    z)
+      # Standalone MPC-horizon ablation (H fixed in the script)
+      PY_SCRIPT="hydra_horizon_ablation.py"
+      CONFIG_DIR="transfer_eval"
+      ;;
     *) usage ;;
   esac
 done

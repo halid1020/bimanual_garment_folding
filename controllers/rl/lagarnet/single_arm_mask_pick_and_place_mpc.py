@@ -39,7 +39,6 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
         action_space = Box(low=-1, high=1, shape=(1, self.A), dtype=np.float32)
         num_elites = int(0.1 * self.candidates)
         plan_hor = self.planning_horizon
-        assert plan_hor == 1, "plan_hor should be 1"
 
         mean = np.tile(np.zeros([1, self.A]).flatten(), [plan_hor]).reshape(plan_hor, -1)
         std = np.tile(np.ones([1, self.A]).flatten(), [plan_hor]).reshape(plan_hor, -1)
@@ -94,10 +93,12 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
             H, W = obj_mask.shape[:2] 
             assert H == W, "Obj mask should be square"
 
+            # Mask constraints apply to the first planned action only; the cloth
+            # state after step 1 is unknown, so later actions are left unconstrained.
             first_pick_actions = ((samples[:, 0, :2] + 1) * (H / 2)).astype(int)
-            first_pick_actions = first_pick_actions.astype(int).clip(0, H-1).reshape(self.candidates, -1)
-            place_actions = ((samples[:, :, 2:4] + 1) * (H / 2)).astype(int)
-            place_actions = place_actions.astype(int).clip(0, H-1).reshape(self.candidates, -1)
+            first_pick_actions = first_pick_actions.clip(0, H-1).reshape(popsize, -1)
+            place_actions = ((samples[:, 0, 2:4] + 1) * (H / 2)).astype(int)
+            place_actions = place_actions.clip(0, H-1).reshape(popsize, -1)
 
             if self.config.swap_action:
                 valid_indices_for_pick = obj_mask[first_pick_actions[:, 1], first_pick_actions[:, 0]] == 1
@@ -143,7 +144,8 @@ class SingleArmMaskPickAndPlaceMPC(MPC_CEM):
                 
             cv2.imwrite(filename, act_image)
 
-        cost = self._predict_and_eval(np.array([ret_act]), info, goal=(info['goals'] if self.goal_condition else None))[0][0]
+        final_plan = np.clip(mean.reshape(1, plan_hor, self.A), action_space.low[:1], action_space.high[:1])
+        cost = self._predict_and_eval(final_plan, info, goal=(info['goals'] if self.goal_condition else None))[0][0]
         
         self.internal_states[info['arena_id']] = {
             'action_cost': cost,

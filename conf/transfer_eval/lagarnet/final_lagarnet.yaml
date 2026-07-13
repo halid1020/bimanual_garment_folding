@@ -1,0 +1,19 @@
+# @package transfer_eval
+
+# Pass the training config as a string so Hydra doesn't auto-merge it and break the namespace
+train_exp_config: sim_exp/lagarnet/final_lagarnet
+
+# Define evaluation arenas & tasks as a standard list of strings
+eval_arenas:
+
+  - arena: lagarnet/multi_trousers_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: lagarnet/multi_skirt_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: lagarnet/multi_dress_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus
+  
+  - arena: lagarnet/multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+    task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus

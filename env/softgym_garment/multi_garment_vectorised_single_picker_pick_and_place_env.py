@@ -25,7 +25,7 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         self.evaluate_result = None
         self.overstretch = 0
         dict_action = {
-            'norm-pixel-pick-and-place': {
+            'norm-pixel-single-pick-and-place': {
                 'pick_0': action[:2],
                 'place_0': action[2:4]
             }
@@ -36,7 +36,7 @@ class MultiGarmentVectorisedSinglePickerPickAndPlaceEnv(MultiGarmentEnv):
         self.all_infos.append(self.info)
         self.info = self._process_info(self.info)
         
-        applied_action = self.info['applied_action']['norm-pixel-pick-and-place']
+        applied_action = self.info['applied_action']['norm-pixel-single-pick-and-place']
 
         self.info['applied_action'] = np.stack([applied_action[:2], applied_action[4:6]]).flatten()
         self.info['observation']['is_first'] = False

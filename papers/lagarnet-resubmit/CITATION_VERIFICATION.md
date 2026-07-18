@@ -25,15 +25,20 @@ doumanoglou2016folding, sun2015accurate, park1994robot, garrido2014automatic, co
 nayak2018introduction, goodfellow2016deep, paoletti2012pink, hoque2021lazydagger, deng2023facing,
 urrtde2025 (has DOI 10.1109/SII59315.2025.10871000), kadi2023data/2024planet/2024mjtn/2025draper (authors' own).
 
-## PENDING web cross-check (WebSearch/WebFetch rate-limited until 16:40 Europe/London)
-- lee2024learning — "Learning fabric manipulation in the real world with human videos": verify venue/year (ICRA 2024 vs earlier arXiv 2022).
-- gusseme2025insights — IJARS 2025: verify venue/year/author list.
-- tian2025diffusion — verify CoRL 2025 venue string.
-- duan2024learning — NeurIPS 2024: verify.
-- ma2021learning — verify title ("...for Visual Manipulation of Deformable Objects"?) and whether it should cite the ICRA 2022 version instead of CoRR 2021.
-- teng2022multidimensional — IEEE T-ITS 2022: verify.
-- huang2025sis — RA-L 2025: verify vol/no/pages.
-- gu2023learning — RA-L 2023: verify vol/no/pages.
-- he2024fabricfolding — Robotica 2024: verify.
-- ma2024interpretable — Applied Sciences 2024: verify.
-- huang2022accelerating — arXiv 2201.07016: confirm still unpublished (else update venue).
+## Web cross-check COMPLETED (2026-07-13, after rate-limit reset)
+Verified correct as-is:
+- lee2024learning — ICRA 2024, pp. 3124–3130 ✓
+- gusseme2025insights — IJARS 2025, DOI 10.1177/17298806251322582 ✓
+- tian2025diffusion — CoRL 2025 (PMLR v305) ✓
+- duan2024learning — NeurIPS 2024 ✓
+- he2024fabricfolding — Robotica 42(4):1281–1296, 2024 ✓ (year correct)
+- ma2024interpretable — Applied Sciences 14(9):3772, 2024 ✓
+- huang2022accelerating — arXiv 2201.07016, no published venue found ✓
+- huang2025sis — RA-L 10(7):7342–7349, 2025 ✓ (year/venue correct)
+- mo2022foldsformer — RA-L 8(2):760–767, 2023 ✓ (confirms the earlier year fix)
+
+Fixed after verification:
+- ma2021learning: CoRR 2021 preprint → @inproceedings ICRA 2022, published title
+  "Learning Latent Graph Dynamics for Visual Manipulation of Deformable Objects".
+- teng2022multidimensional: year 2022 → 2023; added vol 24, no 4, pp 4532–4540 (T-ITS).
+- gu2023learning: year 2023 → 2024; added vol 9, no 2, pp 1051–1058 (RA-L).

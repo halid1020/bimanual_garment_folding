@@ -78,11 +78,10 @@ H.~A. Kadi and K.~Terzi{\'c}, ``Data-driven robotic manipulation of cloth-like
   \emph{Sensors}, vol.~23, no.~5, p. 2389, 2023.
 
 \bibitem{ma2021learning}
-\BIBentryALTinterwordspacing
-X.~Ma, D.~Hsu, and W.~S. Lee, ``Learning latent graph dynamics for deformable
-  object manipulation,'' \emph{CoRR}, vol. abs/2104.12149, 2021. [Online].
-  Available: \url{https://arxiv.org/abs/2104.12149}
-\BIBentrySTDinterwordspacing
+X.~Ma, D.~Hsu, and W.~S. Lee, ``Learning latent graph dynamics for visual
+  manipulation of deformable objects,'' in \emph{2022 International Conference
+  on Robotics and Automation (ICRA)}.\hskip 1em plus 0.5em minus 0.4em\relax
+  IEEE, 2022.
 
 \bibitem{yan2021learning}
 W.~Yan, A.~Vangipuram, P.~Abbeel, and L.~Pinto, ``Learning predictive
@@ -186,7 +185,8 @@ C.~He, L.~Meng, Z.~Sun, J.~Wang, and M.~Q.-H. Meng, ``Fabricfolding: learning
 
 \bibitem{gu2023learning}
 N.-Q. Gu, R.~He, and L.~Yu, ``Learning to unfold garment effectively into
-  oriented direction,'' \emph{IEEE Robotics and Automation Letters}, 2023.
+  oriented direction,'' \emph{IEEE Robotics and Automation Letters}, vol.~9,
+  no.~2, pp. 1051--1058, 2024.
 
 \bibitem{arnold2023cloth}
 S.~Arnold, D.~Tanaka, and K.~Yamazaki, ``Cloth manipulation planning on basis
@@ -208,7 +208,7 @@ T.~Lips, V.-L. De~Gusseme, and F.~wyffels, ``Learning keypoints for robotic
 Y.~Teng, H.~Lu, Y.~Li, T.~Kamiya, Y.~Nakatoh, S.~Serikawa, and P.~Gao,
   ``Multidimensional deformable object manipulation based on dn-transporter
   networks,'' \emph{IEEE Transactions on Intelligent Transportation Systems},
-  2022.
+  vol.~24, no.~4, pp. 4532--4540, 2023.
 
 \bibitem{mo2022foldsformer}
 K.~Mo, C.~Xia, X.~Wang, Y.~Deng, X.~Gao, and B.~Liang, ``Foldsformer: Learning

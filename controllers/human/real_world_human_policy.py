@@ -72,7 +72,22 @@ class RealWordHumanPolicy(Agent):
             contours, _ = cv2.findContours(goal_mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             display_rgb = cv2.drawContours(display_rgb, contours, -1, (0, 255, 255), 1)
-            
+
+            # --- Active subgoal readout (for goal-directed multi-subgoal tasks) ---
+            evaluation = info.get('evaluation', {}) or {}
+            if 'active_subgoal_idx' in evaluation:
+                i = evaluation['active_subgoal_idx']
+                thresholds = evaluation.get('iou_thresholds', [])
+                K = len(info.get('goals', [])) or len(thresholds)
+                cur_iou = evaluation.get('active_subgoal_iou', 0.0)
+                tgt = thresholds[i] if i < len(thresholds) else 0.8
+
+                print(colored(f"[RealWordHumanPolicy] Target: Subgoal {i + 1}/{K} | IoU {cur_iou:.3f} / Target {tgt:.3f}", "cyan"))
+
+                colour = (0, 255, 0) if cur_iou >= tgt else (0, 255, 255)
+                cv2.putText(display_rgb, f"Subgoal {i + 1}/{K}  IoU {cur_iou:.3f}/{tgt:.3f}",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
+
         h, w = rgb.shape[:2]
 
         # Shared normalisation function

@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - /agent/magpie@agent: magpie_ctr_align_all_sim_garments_p4_v144_hindsight
+  - /arena/magpie@arena: multi_longsleeve_provide_semkey_pixel_no_success_stop_resol_128_workspace
+  - /task/magpie@task: central_alignment
+
+exp_name: magpie_ctr_align_all_sim_garments_p4_v144_hindsight
+project_name: bimanual_garment_folding
+save_root: /mnt/ssd/garment_folding_data
+train_and_eval: train_and_evaluate_single

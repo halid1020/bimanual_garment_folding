@@ -1,0 +1,6 @@
+task_name: "real-world-canonicalisation-alignment-folding"
+debug: False
+goal_steps: 2
+num_goals: 1
+fold_name: 'canonicalisation_alignment_centre_sleeve_folding'
+iou_thresholds: [0.8, 0.8, 0.82]

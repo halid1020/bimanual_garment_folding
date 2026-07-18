@@ -32,9 +32,17 @@ class PickAndPlaceSkill:
         # FIX 1: Lower the max height (15cm is usually plenty for cloth)
         self.target_arc_height = config.get('target_arc_height', 0.2) 
         
-        # FIX 2: Reduce resolution. 
+        # FIX 2: Reduce resolution.
         # Fewer points = fewer stops. 6 is enough for a simple arc.
-        self.arc_resolution = config.get('arc_resolution', 6) 
+        self.arc_resolution = config.get('arc_resolution', 6)
+
+        # Dual-arm tension release parameters (configurable via the config dict)
+        self.release_force = config.get('release_force', 4.0)                       # N, inward push magnitude
+        self.release_max_time = config.get('release_max_time', 3.0)                 # s, force-mode duration cap
+        self.release_speed_threshold = config.get('release_speed_threshold', 0.005) # m/s, settle detection
+        self.release_max_dist = config.get('release_max_dist', 0.15)               # m, max inward closure
+        self.slack_force_threshold = config.get('slack_force_threshold', 1.5)       # N, horizontal tension = slack
+        self.deposit_height = config.get('deposit_height', 0.005)                   # m, lay-down height above place z
 
     def reset(self):
         self.scene.both_open_gripper()
@@ -285,6 +293,20 @@ class PickAndPlaceSkill:
         # 4. Release & Retract
         # -------------------------------------------------------------------------
         self.dual_arm_release_tension()
+
+        # Deposit: gently lower each arm to lay the fabric flat on the table before
+        # releasing. Keep the CURRENT XY/orientation (the TCPs may have shifted inward
+        # during the tension release) and only drop z. The place z here is
+        # p_place[2] + 0.02; p_place[2] already includes the gripper offset, so this
+        # lowers ~1.5 cm down to (p_place[2] + deposit_height).
+        cur_0 = self.scene.ur5e.get_tcp_pose()
+        cur_1 = self.scene.ur16e.get_tcp_pose()
+        deposit_0 = cur_0.copy()
+        deposit_0[2] = p0_place[2] + self.deposit_height
+        deposit_1 = cur_1.copy()
+        deposit_1[2] = p1_place[2] + self.deposit_height
+        self.scene.both_movel(deposit_0, deposit_1, speed=0.25, acc=0.25, blocking=True)
+
         self.scene.both_open_gripper()
         time.sleep(0.3)
 
@@ -295,39 +317,110 @@ class PickAndPlaceSkill:
         if self.home_after:
             self.scene.both_home(speed=MOVE_SPEED, acc=MOVE_ACC, blocking=True)
     
-    def dual_arm_release_tension(self, release_force=-2.0, max_time=1.5, speed_threshold=0.005, max_release_dist=0.15): 
-        """Uses force control to let the arms comply with the fabric's tension until slack."""
-        
+    def _dual_arm_inward_units(self, pose5, pose16):
+        """Horizontal unit vectors pointing from each arm's TCP toward the OTHER arm's
+        TCP, each expressed in that arm's OWN base frame (z zeroed).
+
+        Returns (d5, d16): d5 in the UR5e base frame, d16 in the UR16e base frame.
+        """
+        from real_robot.utils.transform_utils import transform_point
+
+        # UR5e frame: bring the UR16e TCP into the UR5e base frame.
+        other_in_5 = transform_point(self.scene.T_ur5e_ur16e, pose16[:3])
+        d5 = np.asarray(other_in_5, dtype=float) - np.asarray(pose5[:3], dtype=float)
+        d5[2] = 0.0
+        n5 = np.linalg.norm(d5)
+        d5 = d5 / n5 if n5 > 1e-6 else np.zeros(3)
+
+        # UR16e frame: bring the UR5e TCP into the UR16e base frame.
+        T_ur16e_ur5e = np.linalg.inv(self.scene.T_ur5e_ur16e)
+        other_in_16 = transform_point(T_ur16e_ur5e, pose5[:3])
+        d16 = np.asarray(other_in_16, dtype=float) - np.asarray(pose16[:3], dtype=float)
+        d16[2] = 0.0
+        n16 = np.linalg.norm(d16)
+        d16 = d16 / n16 if n16 > 1e-6 else np.zeros(3)
+
+        return d5, d16
+
+    def _position_based_converge(self):
+        """Fallback tension release using position control (no force mode).
+
+        Used when either arm sits inside the singularity zone, and as the fallback
+        when force mode raises an exception. Nudges each TCP a small step toward the
+        other arm along the true inward direction, keeping the current z and
+        orientation. Slow and blocking so it stays gentle on the fabric.
+        """
+        pose5 = self.scene.ur5e.get_tcp_pose()
+        pose16 = self.scene.ur16e.get_tcp_pose()
+        d5, d16 = self._dual_arm_inward_units(pose5, pose16)
+
+        step = min(0.04, 0.15 * self.scene.get_tcp_distance())
+        print(f"[PickAndPlace Release] Position-based converge: stepping {step:.3f}m inward per arm.")
+
+        # d5/d16 have z zeroed, so adding them keeps the current z; orientation is
+        # preserved by copying the full 6-vector pose.
+        target5 = np.asarray(pose5, dtype=float).copy()
+        target5[:3] = np.asarray(pose5[:3], dtype=float) + d5 * step
+        target16 = np.asarray(pose16, dtype=float).copy()
+        target16[:3] = np.asarray(pose16[:3], dtype=float) + d16 * step
+
+        self.scene.both_movel(target5, target16, speed=0.25, acc=0.25, blocking=True)
+        return True
+
+    def dual_arm_release_tension(self, release_force=None, max_time=None,
+                                 speed_threshold=None, max_release_dist=None,
+                                 slack_force_threshold=None):
+        """Uses force control to let the arms comply with the fabric's tension until slack.
+
+        Each arm is made compliant in its own base X/Y plane and pushed gently toward
+        the other arm along the TRUE inward direction, so the stretched garment relaxes
+        instead of snapping back when the grippers open. Terminates on force feedback
+        (tension gone), on closure distance, on settle speed, or on a max-time cap.
+        Kwargs (all default to None) override the config-driven defaults from __init__.
+        """
+        # Resolve parameters (explicit kwargs override the config-driven defaults).
+        release_force = self.release_force if release_force is None else release_force
+        max_time = self.release_max_time if max_time is None else max_time
+        speed_threshold = self.release_speed_threshold if speed_threshold is None else speed_threshold
+        max_release_dist = self.release_max_dist if max_release_dist is None else max_release_dist
+        slack_force_threshold = self.slack_force_threshold if slack_force_threshold is None else slack_force_threshold
+
         # --- FIX 1: Proactive Singularity Avoidance ---
         # Get TCP positions (assuming they return [x, y, z, rx, ry, rz] in the robot's base frame)
         pose5 = self.scene.ur5e.get_tcp_pose()
         pose16 = self.scene.ur16e.get_tcp_pose()
-        
+
         # Calculate radial distance from base Z-axis (Shoulder singularity zone)
         dist5 = np.linalg.norm(pose5[:2])
         dist16 = np.linalg.norm(pose16[:2])
-        
-        # 15cm is a standard safe zone to avoid UR shoulder singularities
-        SINGULARITY_THRESHOLD = 0.35
 
-        #print(f"[PickAndPlace Release WARNING: Arm(s) to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
+        # 15cm is a standard safe zone to avoid UR shoulder singularities
+        SINGULARITY_THRESHOLD = 0.15
 
         if dist5 < SINGULARITY_THRESHOLD or dist16 < SINGULARITY_THRESHOLD:
             print(f"[PickAndPlace Release] WARNING: Arm(s) too close to base (UR5e: {dist5:.2f}m, UR16e: {dist16:.2f}m).")
-            print("[PickAndPlace Release] Skipping force-mode to avoid singularity error.")
-            # Simply skip force mode. The script will proceed to open the grippers naturally.
-            return False
+            print("[PickAndPlace Release] Inside singularity zone: using position-based converge instead of force mode.")
+            return self._position_based_converge()
         # ----------------------------------------------
 
-        #print(f"[PickAndPlace] Relaxing tension with {release_force}N...")
-        task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] 
-        selection_vector = [0, 1, 0, 0, 0, 0] # Compliant along Y-axis
+        # --- True inward directions (each in its OWN base frame, z zeroed) ---
+        d5, d16 = self._dual_arm_inward_units(pose5, pose16)
+
+        # Per-arm inward wrench along the base X/Y plane; compliant in base X and Y only.
+        right_wrench = [release_force * d5[0], release_force * d5[1], 0, 0, 0, 0]
+        left_wrench = [release_force * d16[0], release_force * d16[1], 0, 0, 0, 0]
+        task_frame = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        selection_vector = [1, 1, 0, 0, 0, 0]  # Compliant along base X and Y
         force_type = 2
-        limits = [0.15, 2, 2, 1, 1, 1]
-        dt = 0.1 
+        limits = [0.15, 0.15, 0.1, 1, 1, 1]    # 0.15 m/s speed caps on compliant X/Y
+        dt = 0.1
 
         start_width = self.scene.get_tcp_distance()
-        target_width_min = start_width - max_release_dist 
+        target_width_min = start_width - max_release_dist
+
+        # Record each arm's initial horizontal tension (base-frame Fx, Fy magnitude).
+        f_init_5 = np.linalg.norm(self.scene.ur5e.get_tcp_force()[:2])
+        f_init_16 = np.linalg.norm(self.scene.ur16e.get_tcp_force()[:2])
 
         # --- FIX 2: Try/Except Guardrail ---
         try:
@@ -335,34 +428,43 @@ class PickAndPlaceSkill:
                 with self.scene.ur16e.start_force_mode() as left_force_guard:
                     start_time = time.time()
                     prev_time = start_time
-                    
+
                     while True:
                         elapsed = time.time() - start_time
-                        
+
                         if elapsed >= max_time:
                             #print(f'[PickAndPlace Release] Max time {max_time}s reached, tension relaxed.')
                             break
-                        
-                        # Apply gentle inward wrench
-                        right_wrench = [0, release_force, 0, 0, 0, 0]
-                        left_wrench = [0, release_force, 0, 0, 0, 0]
 
                         r = right_force_guard.apply_force(task_frame, selection_vector, right_wrench, force_type, limits)
                         if not r: return False
                         r = left_force_guard.apply_force(task_frame, selection_vector, left_wrench, force_type, limits)
                         if not r: return False
-                        
+
                         # Stop if they move too close together
                         tcp_distance = self.scene.get_tcp_distance()
                         if tcp_distance <= target_width_min:
                             #print(f"[PickAndPlace Release] Reached safety limit for inward movement: {tcp_distance:.3f}m")
                             break
 
+                        # Force-feedback termination: stop once BOTH arms are slack, i.e.
+                        # horizontal tension is below the slack threshold OR has dropped
+                        # by >=60% from its initial value. Only checked after 0.3s so the
+                        # arms have actually started complying.
+                        if elapsed > 0.3:
+                            f_cur_5 = np.linalg.norm(self.scene.ur5e.get_tcp_force()[:2])
+                            f_cur_16 = np.linalg.norm(self.scene.ur16e.get_tcp_force()[:2])
+                            slack_5 = (f_cur_5 < slack_force_threshold) or (f_cur_5 < 0.4 * f_init_5)
+                            slack_16 = (f_cur_16 < slack_force_threshold) or (f_cur_16 < 0.4 * f_init_16)
+                            if slack_5 and slack_16:
+                                print(f"[PickAndPlace Release] Tension released (UR5e: {f_cur_5:.2f}N, UR16e: {f_cur_16:.2f}N). Fabric is slack.")
+                                break
+
                         # Monitor speed to see if the arms have settled
                         l_speed = np.linalg.norm(self.scene.ur5e.get_tcp_speed()[:3])
                         r_speed = np.linalg.norm(self.scene.ur16e.get_tcp_speed()[:3])
                         actual_speed = max(l_speed, r_speed)
-                        
+
                         if elapsed > 0.5:
                             if actual_speed < speed_threshold:
                                 #print(f"[PickAndPlace Release] Settled (Speed: {actual_speed:.4f}). Fabric is slack.")
@@ -373,10 +475,11 @@ class PickAndPlaceSkill:
                         if duration < dt:
                             time.sleep(dt - duration)
                         prev_time = curr_time
-                        
+
             return True
 
         except Exception as e:
             # If the UR controller throws a protective stop or RTDE exception, catch it here
             print(f"[PickAndPlace Release] ABORTED: Force mode triggered an error: {e}")
-            return False
+            print("[PickAndPlace Release] Falling back to position-based converge.")
+            return self._position_based_converge()

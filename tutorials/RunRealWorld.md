@@ -138,7 +138,27 @@ python tool/eval_real_world.py --config-name real_world_exp/real_world_human_fol
 *Instructions:* The program will prompt you to provide the garment ID (e.g., `teen-brown-top`). Next, it it will ask you to flatten the garment for collecting initial demonstration as a ground truth for evaluatoin. Afterwards, it will ask you to crumple the garment into its initial state. The script will then guide you through providing primitive actions. All instructions from the program that require user input will be highlighted in <span style="color: green;">green</span>.
 
 
-## 8. Control with Neural Controllers
+## 8. Goal-Directed Folding from a Crumpled State (Canonicalisation-Alignment → Folding)
+
+This environment is the real-world counterpart of the simulation task `canonicalisation_alignment_centre_sleeve_folding`: starting from a random crumpled state, the garment must first be brought to a canonical/aligned flattened position (subgoal 0), and then folded through the demonstrated fold steps (subgoals 1..2). Evaluation and success mirror the simulation: each subgoal is checked with a strict mask IoU, and the environment feeds the *active* subgoal to the policy/human overlay at every step.
+
+From the root directory of this repository, run:
+```bash
+. ./setup.sh
+python tool/eval_real_world.py --config-name real_world_exp/real_world_human_folding_from_random_crumpled
+```
+
+*Instructions:* The program proceeds through the following stages. All prompts that require user input are highlighted in <span style="color: green;">green</span>.
+
+1. **Garment ID**: provide the garment ID (e.g., `teen-brown-top`). If a flattened reference for this garment was captured previously, it is loaded; otherwise you will be asked to manually flatten the garment so the system can capture it.
+2. **Canonical target adjustment** (first run per garment only): an interactive window shows the red/blue robot workspace regions, a horizontal mid-line, and the garment mask in green. Drag the mask with the mouse and rotate it with `A`/`D` so that **the bottom (hem) of the garment faces the top of the image and the shoulders lie on the horizontal mid-line**, then press `ENTER` to confirm. This warped mask becomes subgoal 0 (the canonical flattened target).
+3. **Physical placement**: physically arrange the flattened garment to match the displayed yellow target contour. The window and terminal show the current IoU to the target; press `Enter` to re-capture, and type `c` to confirm once the placement matches.
+4. **Fold demonstration** (first run per garment only): demonstrate the 2 fold steps using the primitive-click interface, exactly as in the folding tutorial above. The resulting subgoals are cached under `assets/real-world-dual-arm-multi-primitive/canonicalisation_alignment_centre_sleeve_folding/<garment_id>/goals/` and reloaded automatically on later runs.
+5. **Episode**: crumple the garment into a random initial state and press `Enter`. During the episode, the interface overlays the contour of the **active subgoal** (canonical target first; fold subgoals once alignment is achieved) together with `Target: Subgoal i/3` and the current IoU against its threshold (`[0.8, 0.8, 0.82]`). An episode succeeds when the trajectory passes through all subgoals in order, exactly as in simulation.
+
+Results are saved to `~/project/garment_folding_data/real_world_human_folding_from_random_crumpled`. Each episode folder contains one `step_i/` folder per action (RGB, depth, masks, action, evaluation info) plus a `final_state/` folder holding the state after the last action.
+
+## 9. Control with Neural Controllers
 
 Once the system is verified with a human-controlled episode, you are ready to run our neural controller, Magpie.
 
@@ -180,6 +200,6 @@ python tool/eval_real_world.py --config-name real_world_exp/magpie_ctr_align_lon
 
 Ensure you securely save the evaluation results once the process is complete.
 
-## 9. Shutting Down the Robots
+## 10. Shutting Down the Robots
 
 When you finish your work, shutting down the robots is straightforward. Simply press the hard on/off button on the pendant, then press the `Discard Changes` virtual button on the interface. Ensure the robots are completely shut down whenever left unattended.

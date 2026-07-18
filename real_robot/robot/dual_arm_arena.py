@@ -234,11 +234,21 @@ class DualArmArena(Arena):
             goals = self.task.get_goals()
             if len(goals) > 0:
                 goal = goals[0]
+                # Expose all subgoals of the first goal variation for the UI overlay.
+                info['goals'] = [sg['observation'] for sg in goal]
+
+                # Feed the active subgoal (if the task exposes one) as the goal;
+                # otherwise fall back to the final subgoal (preserves behaviour for
+                # tasks without subgoal logic).
+                evaluation = info.get('evaluation', {})
+                active = evaluation.get('active_subgoal_idx', None) if isinstance(evaluation, dict) else None
+                target = goal[active] if active is not None else goal[-1]
+
                 info['goal'] = {}
-                for k, v in goal[-1]['observation'].items():
-                    if k == 'rgb' and self.maskout_background and ('mask' in  goal[-1]['observation']):
+                for k, v in target['observation'].items():
+                    if k == 'rgb' and self.maskout_background and ('mask' in target['observation']):
                         # apply resized_mask on resized_rgb and resized_depeth.
-                        is_background = goal[-1]['observation']['mask'] == 0
+                        is_background = target['observation']['mask'] == 0
                         v[is_background] = 0
 
                     info['goal'][k] = v

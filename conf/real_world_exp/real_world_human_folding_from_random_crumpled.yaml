@@ -1,10 +1,10 @@
 # @package _global_
 defaults:
-  - /agent@agent: real_world_human  # Points to conf/agent/human_agent.yaml
-  - /real_world_arena@arena: dual_arm_multi_primitives     # Points to conf/arena/dual_arm.yaml
-  - /task@task: real_world_folding      # Points to conf/task/folding.yaml
+  - /agent@agent: real_world_human_canon_align  # Points to conf/agent/real_world_human_canon_align.yaml
+  - /real_world_arena@arena: dual_arm_multi_primitives     # Points to conf/real_world_arena/dual_arm_multi_primitives.yaml
+  - /task@task: real_world_canon_align_folding      # Points to conf/task/real_world_canon_align_folding.yaml
 
 
 project_name: 'bimanual_garment_folding'
-exp_name: real_world_human_folding
+exp_name: real_world_human_folding_from_random_crumpled
 measure_time: True

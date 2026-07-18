@@ -212,6 +212,57 @@ class PixelBasedPrimitiveImpEnvLogger(VideoLogger):
 
             images.append(img)
 
+        # ---------------------------------------------------------
+        # Save Final State Explicitly (state after the last action;
+        # result["information"] has N+1 entries vs N actions, so the
+        # loop above never writes this one to disk)
+        # ---------------------------------------------------------
+        if result["information"]:
+            last_info = result["information"][-1]
+            final_state_dir = os.path.join(episode_data_dir, 'final_state')
+            os.makedirs(final_state_dir, exist_ok=True)
+
+            last_obs = last_info.get("observation", {})
+
+            # A. Save Images (RGB, Depth, Masks)
+            if "rgb" in last_obs:
+                save_colour(last_obs["rgb"], filename='rgb', directory=final_state_dir, rgb2bgr=True)
+
+            if "depth" in last_obs:
+                save_depth(last_obs["depth"], filename='depth', directory=final_state_dir)
+
+            if "mask" in last_obs:
+                save_mask(last_obs["mask"], filename='mask', directory=final_state_dir)
+
+            if "robot0_mask" in last_obs:
+                save_mask(last_obs["robot0_mask"], filename='robot0_mask', directory=final_state_dir)
+            if "robot1_mask" in last_obs:
+                save_mask(last_obs["robot1_mask"], filename='robot1_mask', directory=final_state_dir)
+
+            # C. Save Evaluation & Success Info
+            final_info = {
+                "evaluation": last_info.get("evaluation", {}),
+                "success": last_info.get("success", False),
+                "reward": last_info.get("reward", 0.0),
+                "done": last_info.get("done", True),
+                "eid": eid
+            }
+
+            with open(os.path.join(final_state_dir, 'info.json'), 'w') as f:
+                json.dump(final_info, f, indent=4, cls=NumpyEncoder)
+
+            # D. Save Garment Name
+            garment_name = "unknown"
+            # Try getting from Arena object first
+            if "arena" in last_info and hasattr(last_info["arena"], "garment_id"):
+                garment_name = getattr(last_info["arena"], "garment_id", "unknown")
+            # Fallback to episode config
+            elif "garment_id" in episode_config:
+                garment_name = episode_config["garment_id"]
+
+            with open(os.path.join(final_state_dir, 'garment_name.txt'), 'w') as f:
+                f.write(str(garment_name))
+
         if len(frames) > len(images):
              images.append(frames[-1])
 

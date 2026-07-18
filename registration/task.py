@@ -54,7 +54,7 @@ def build_sim_task(task_cfg):
 
 def build_real_task(task_cfg):
     from real_robot.tasks.garment_flattening_task import RealWorldGarmentFlatteningTask
-    from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
+    from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask, RealWorldGarmentCanonAlignFoldingTask
     from real_robot.tasks.garment_alignment_task import RealWorldGarmentAlignmentTask
 
     if task_cfg.task_name == 'real-world-garment-flattening':
@@ -62,6 +62,8 @@ def build_real_task(task_cfg):
     elif task_cfg.task_name == 'real-world-garment-folding':
         demonstrator = RealWordHumanPolicy(DotMap())
         task = RealWorldGarmentFoldingTask(DotMap({**task_cfg, "demonstrator": demonstrator}))
+    elif task_cfg.task_name == 'real-world-canonicalisation-alignment-folding':
+        task = RealWorldGarmentCanonAlignFoldingTask(DotMap({**task_cfg, "demonstrator": RealWordHumanPolicy(DotMap())}))
     elif task_cfg.task_name == 'real-world-garment-canonicalisation-alignment':
         task = RealWorldGarmentAlignmentTask(task_cfg)
     else:

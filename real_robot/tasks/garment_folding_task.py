@@ -354,7 +354,7 @@ class RealWorldGarmentCanonAlignFoldingTask(RealWorldGarmentFoldingTask):
     def __init__(self, config):
         super().__init__(config)
         # Per-subgoal IoU thresholds (length K = goal_steps + 1).
-        self.iou_thresholds = list(config.get('iou_thresholds', [0.8, 0.8, 0.82]))
+        self.iou_thresholds = list(config.get('iou_thresholds', [0.7, 0.7, 0.7]))
         # NB: self.name = config.fold_name (set by super) must contain 'alignment'
         # so the arena enables the flatten-contour drawing; the config supplies
         # fold_name: 'canonicalisation_alignment_centre_sleeve_folding'.

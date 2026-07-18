@@ -3,4 +3,4 @@ debug: False
 goal_steps: 2
 num_goals: 1
 fold_name: 'canonicalisation_alignment_centre_sleeve_folding'
-iou_thresholds: [0.8, 0.8, 0.82]
+iou_thresholds: [0.7, 0.7, 0.7]

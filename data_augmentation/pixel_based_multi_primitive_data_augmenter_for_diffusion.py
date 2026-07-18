@@ -567,6 +567,38 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                 orient_actions = -orient_actions
 
         # =========================
+        #   RANDOM ACTION SWAP
+        # =========================
+        # Label-symmetry augmentation for bimanual primitives: swapping the two
+        # grippers' parameter slots describes the SAME physical action, so with
+        # probability `swap_action_prob` (per sample) exchange group-A / group-B
+        # indices of `pixel_actions`. Placed AFTER all geometric action transforms
+        # (crop, rotation/scale, flip) and before write-back, so it only permutes
+        # already-transformed parameter slots. Images/masks/semantic keypoints are
+        # untouched, and the primitive scalar (act[:, 0]) is never modified.
+        if self.random_swap_actions and train and len(self.swap_action_mapping) > 0:
+            prim_bin_swap = act[:, 0]
+            prim_ids_swap = torch.clamp(
+                (((prim_bin_swap + 1) / 2) * self.K).long(), 0, self.K - 1
+            )
+            for p, groups in self.swap_action_mapping.items():
+                group_A, group_B = groups[0], groups[1]
+                p_mask = (prim_ids_swap == p)
+                if not torch.any(p_mask):
+                    continue
+                rand = torch.rand(pixel_actions.shape[0], device=pixel_actions.device)
+                swap_mask = p_mask & (rand < self.swap_action_prob)
+                if not torch.any(swap_mask):
+                    continue
+                rows = swap_mask.nonzero(as_tuple=True)[0]
+                idx_A = torch.as_tensor(group_A, device=pixel_actions.device, dtype=torch.long)
+                idx_B = torch.as_tensor(group_B, device=pixel_actions.device, dtype=torch.long)
+                a_vals = pixel_actions[rows][:, idx_A].clone()
+                b_vals = pixel_actions[rows][:, idx_B].clone()
+                pixel_actions[rows.unsqueeze(1), idx_A.unsqueeze(0)] = b_vals
+                pixel_actions[rows.unsqueeze(1), idx_B.unsqueeze(0)] = a_vals
+
+        # =========================
         #     COLOR JITTER & NOISE
         # =========================
         if self.color_jitter and train:

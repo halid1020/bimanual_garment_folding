@@ -20,6 +20,23 @@ from actoris_harena.utilities.save_utils import save_mask
 from .dataset import DiffusionDataset
 from .utils import compute_classification_metrics
 
+
+def get_goal_channel_range(input_obs_type):
+    """
+    Returns the (start, end) channel indices of the GOAL channels for a given
+    `input_obs` type, on the channel dim of the flattened [B*T, C, H, W] tensor.
+
+    Used for goal classifier-free guidance (CFG): zeroing these channels yields the
+    "null goal" (unconditional) network input. Returns None for input types that do
+    not carry goal channels (goal-CFG is not applicable there).
+    """
+    return {
+        'rgb+goal_rgb': (3, 6),
+        'rgb-workspace-mask-goal': (5, 8),
+        'rgb+goal_mask': (3, 4),
+    }.get(input_obs_type, None)
+
+
 class MagpieTrainer:
     """
     Coordinates the training and validation pipelines for the MagpieAgent.
@@ -561,6 +578,22 @@ class MagpieTrainer:
 
             B = nbatch[self.config.input_obs].shape[0]
             input_obs = nbatch[self.config.input_obs][:, :self.config.obs_horizon].flatten(end_dim=1).float()
+
+            # Goal Classifier-Free Guidance (CFG): with probability cfg_goal_drop_prob,
+            # zero the GOAL channels of a sample so the model also learns an unconditional
+            # (goal-free) vector field. Default 0.0 => no-op, bit-identical to before.
+            cfg_goal_drop_prob = self.config.get('cfg_goal_drop_prob', 0.0)
+            if cfg_goal_drop_prob > 0.0:
+                goal_range = get_goal_channel_range(self.config.input_obs)
+                if goal_range is not None:
+                    g0, g1 = goal_range
+                    drop_mask = torch.rand(input_obs.shape[0]) < cfg_goal_drop_prob
+                    if drop_mask.any():
+                        input_obs[drop_mask, g0:g1] = 0.0
+                elif not getattr(self, '_warned_cfg_no_goal', False):
+                    print(f"[MagpieTrainer] cfg_goal_drop_prob > 0 but input_obs='{self.config.input_obs}' "
+                          f"has no goal channels; skipping goal drop.")
+                    self._warned_cfg_no_goal = True
 
             device_type = 'cuda' if 'cuda' in str(self.device) else 'cpu'
             use_amp = self.config.get('use_amp', False)

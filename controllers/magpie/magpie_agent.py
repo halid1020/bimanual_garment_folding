@@ -27,7 +27,7 @@ from actoris_harena.utilities.networks.utils import ts_to_np
 # --- NEW EXTRACTED MODULES ---
 from .magpie_transform import DiffusionTransform
 from .magpie_network_builder import build_networks_and_optimizers, build_primitive_action_masks
-from .magpie_trainer import MagpieTrainer
+from .magpie_trainer import MagpieTrainer, get_goal_channel_range
 from .action_sampler import ActionSampler
 from .constrain_action_functions import name2func
 
@@ -241,21 +241,40 @@ class MagpieAgent(TrainableAgent):
                 obs_features = self.nets['obs_projector'](obs_features)
 
             obs_cond, cur_prim_id, prim_probs_log = self._process_primitives(obs_features, info)
-            
+
+            # --- Goal Classifier-Free Guidance (CFG) ---
+            # When cfg_guidance_scale != 1.0, build a SECOND conditioning vector from the
+            # same observation with the GOAL channels zeroed (null goal). It reuses the
+            # primitive chosen by the conditional classifier (no re-selection). Default
+            # cfg_guidance_scale = 1.0 => obs_cond_uncond stays None => bit-identical.
+            obs_cond_uncond = self._build_uncond_obs_cond(sample_state, info, arena_id, cur_prim_id)
+
             # Initialize tracker safely if it doesn't exist, and cache the active primitive ID
             if not hasattr(self, 'active_primitive_ids'):
                 self.active_primitive_ids = {}
             self.active_primitive_ids[arena_id] = cur_prim_id
-            
-            # Sample initial noise for the reverse diffusion process
-            naction = self.eval_action_sampler.sample(
-                state=sample_state, 
-                horizon=self.config.pred_horizon, 
-                action_dim=getattr(self, 'diffusion_dim', self.network_action_dim)
-            ).to(self.device)
-            
-            # Denoise the trajectory conditioned on visual observations
-            naction, noise_actions = self._run_diffusion_loop(naction, obs_cond, cur_prim_id, info)
+
+            # Sample initial noise for the reverse diffusion process.
+            #
+            # OPTIONAL test-time best-of-N action sampling (config-gated; DEFAULT OFF).
+            # When `eval_best_of_n` > 1 we draw N seeds, integrate them as ONE batched
+            # (CFG-aware) Euler rollout, score the N candidate actions and keep the best.
+            # With the key absent (== 1) this branch is bit-identical to the original
+            # single-draw path below.
+            best_of_n = int(self.config.get('eval_best_of_n', 1))
+            if best_of_n > 1:
+                naction, noise_actions = self._run_best_of_n(
+                    sample_state, obs_cond, cur_prim_id, info, obs_cond_uncond, best_of_n)
+            else:
+                naction = self.eval_action_sampler.sample(
+                    state=sample_state,
+                    horizon=self.config.pred_horizon,
+                    action_dim=getattr(self, 'diffusion_dim', self.network_action_dim)
+                ).to(self.device)
+
+                # Denoise the trajectory conditioned on visual observations
+                naction, noise_actions = self._run_diffusion_loop(naction, obs_cond, cur_prim_id, info, obs_cond_uncond)
+
             self._store_predicted_actions(naction, arena_id)
             self._log_internal_states(naction, noise_actions, prim_probs_log, obs_features, info)
 
@@ -394,22 +413,32 @@ class MagpieAgent(TrainableAgent):
             )
             return torch.cat([hidden[0], hidden[4]], dim=-1).transpose(0, 1).squeeze(0)
         
-    def _process_primitives(self, obs_features, info):
+    def _process_primitives(self, obs_features, info, prim_id_override=None):
         """
         Determines the appropriate high-level primitive action using the classifier head.
         Appends a one-hot encoding of the selected primitive to the conditioning vector.
+
+        If `prim_id_override` is provided, the classifier is NOT run and the given primitive
+        id is used to build the conditioning instead (used by the goal-CFG unconditional
+        branch so both branches share the same primitive). With the default (None) this is
+        bit-identical to the original behavior.
         """
         cur_prim_id = 0
         prim_probs_log = None
-        
+
         if self.primitive_integration in ['one_hot_encoding', 'separate_networks', 'ordinary_encoding']:
-            prim_logits = self.nets['prim_class_head'](obs_features)
-            prim_probs_log = torch.softmax(prim_logits, dim=-1).cpu().detach().numpy()
-            prim_id = torch.argmax(prim_logits, dim=-1)
-            cur_prim_id = prim_id[-1].cpu().detach().item()
-            
-            p_obj = self.primitives[cur_prim_id]
-            info['prim_name'] = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
+            if prim_id_override is None:
+                prim_logits = self.nets['prim_class_head'](obs_features)
+                prim_probs_log = torch.softmax(prim_logits, dim=-1).cpu().detach().numpy()
+                prim_id = torch.argmax(prim_logits, dim=-1)
+                cur_prim_id = prim_id[-1].cpu().detach().item()
+
+                p_obj = self.primitives[cur_prim_id]
+                info['prim_name'] = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
+            else:
+                cur_prim_id = prim_id_override
+                prim_id = torch.full((obs_features.shape[0],), cur_prim_id,
+                                     device=obs_features.device, dtype=torch.long)
 
             if self.primitive_integration == 'one_hot_encoding':
                 prim_enc = torch.nn.functional.one_hot(prim_id, num_classes=self.K).float()
@@ -425,10 +454,57 @@ class MagpieAgent(TrainableAgent):
                 
         return obs_features.unsqueeze(0).flatten(start_dim=1), cur_prim_id, prim_probs_log
     
-    def _run_diffusion_loop(self, naction, obs_cond, cur_prim_id, info):
+    def _build_uncond_obs_cond(self, sample_state, info, arena_id, cur_prim_id):
+        """
+        Builds the unconditional ("null goal") conditioning vector for goal-CFG.
+
+        Returns None (guidance disabled) unless cfg_guidance_scale != 1.0, the loss type is
+        an ot_flow_match variant, and the current input_obs carries goal channels. When
+        active, it zeros the goal channels of the stacked observation image, re-encodes it
+        through the same vision-encoder/projector path, and builds the conditioning with the
+        SAME primitive chosen by the conditional branch (no classifier re-selection).
+        """
+        cfg_scale = self.config.get('cfg_guidance_scale', 1.0)
+        if cfg_scale == 1.0:
+            return None
+
+        loss_type = self.config.get('loss_type', 'diffusion')
+        if loss_type not in ['ot_flow_match', 'ot_flow_match+consistency']:
+            print(f"[MagpieAgent] cfg_guidance_scale != 1.0 is only supported for ot_flow_match "
+                  f"loss types (got '{loss_type}'); proceeding unguided.")
+            return None
+
+        goal_range = get_goal_channel_range(self.config.input_obs)
+        if goal_range is None:
+            print(f"[MagpieAgent] cfg_guidance_scale != 1.0 but input_obs='{self.config.input_obs}' "
+                  f"has no goal channels; proceeding unguided.")
+            return None
+
+        g0, g1 = goal_range
+        uncond_image = sample_state['image'].clone()
+        uncond_image[:, g0:g1] = 0.0
+
+        uncond_features = self._extract_vision_features(uncond_image, info)
+
+        if self.config.include_state:
+            vector_state = torch.stack([x['vector_state'] for x in self.obs_deque[arena_id]])
+            vector_state = vector_state.to(self.device)
+            uncond_features = torch.cat([uncond_features, vector_state], dim=-1)
+
+        if getattr(self, 'use_projector', False):
+            uncond_features = self.nets['obs_projector'](uncond_features)
+
+        obs_cond_uncond, _, _ = self._process_primitives(uncond_features, info, prim_id_override=cur_prim_id)
+        return obs_cond_uncond
+
+    def _run_diffusion_loop(self, naction, obs_cond, cur_prim_id, info, obs_cond_uncond=None):
         """
         Executes the reverse process to refine pure noise into a usable action trajectory.
         Supports both Standard DDPM and Optimal Transport (OT) Flow Matching.
+
+        If `obs_cond_uncond` is provided (goal-CFG active, ot_flow_match only), each Euler
+        step evaluates the vector field twice and integrates the guided field
+        v = v_uncond + cfg_guidance_scale * (v_cond - v_uncond).
         """
         start = self.config.obs_horizon - 1
         end = start + self.config.action_horizon
@@ -469,14 +545,27 @@ class MagpieAgent(TrainableAgent):
                 
                 # Predict vector field v(x_t)
                 v_pred = active_net(sample=naction[..., :dim_k], timestep=t_tensor, global_cond=obs_cond)
-                
+
+                # Goal classifier-free guidance: extrapolate between the conditional and
+                # unconditional (null-goal) vector fields using the same network.
+                if obs_cond_uncond is not None:
+                    v_uncond = active_net(sample=naction[..., :dim_k], timestep=t_tensor, global_cond=obs_cond_uncond)
+                    cfg_scale = self.config.get('cfg_guidance_scale', 1.0)
+                    v_pred = v_uncond + cfg_scale * (v_pred - v_uncond)
+
                 # Euler Integration Step
                 naction[..., :dim_k] += v_pred * dt
-                
+
+                # Record the (per-batch) L2 norm of the current step's predicted vector
+                # field. Overwritten each iteration => ends holding the FINAL Euler step,
+                # used by best-of-N ('field_norm' scorer and pick_on_mask tie-break).
+                # Setting this attribute does not alter the single-draw trajectory.
+                self._last_field_norm = v_pred[..., :dim_k].reshape(v_pred.shape[0], -1).norm(dim=-1).detach()
+
                 # Enforce physical constraints on the evolving trajectory (OT Flow Match)
                 if self.primitive_integration in ['one_hot_encoding', 'ordinary_encoding']:
                     naction = self._apply_action_constraints(naction, info, t_val)
-                    
+
                 noise_actions.append(ts_to_np(naction[:, start:end, :self.network_action_dim]))
                 
         # Forward Pass: Standard Denoising Diffusion (DDPM)
@@ -497,6 +586,191 @@ class MagpieAgent(TrainableAgent):
                 
         return naction, noise_actions
     
+    # --------------------------------------------------------------------------------
+    # --- OPTIONAL TEST-TIME BEST-OF-N ACTION SAMPLING (config-gated; DEFAULT OFF) ----
+    # --------------------------------------------------------------------------------
+    # COORDINATE CONVENTION (verified from code, not assumed):
+    #   Normalized action pick coords are [y_norm, x_norm] == [row_norm, col_norm]:
+    #       action[0] -> ROW (image axis 0, height H)
+    #       action[1] -> COL (image axis 1, width  W)
+    #   The env maps a pick to a pixel when EXECUTING it as
+    #       row = (y_norm + 1)/2 * H ,  col = (x_norm + 1)/2 * W ,  then indexes mask[row, col]
+    #   (see env/softgym_garment/action_primitives/utils.py::readjust_norm_pixel_pick and
+    #    pixel_pick_and_place.py; the training augmenter's postprocess uses the same axis
+    #    order, mapping action[...,0]->H and action[...,1]->W, and only clips to [-1,1]).
+    #   NB: constrain_action_functions.py's debug snap/force path uses the OPPOSITE order
+    #   (IS_YX_ACTION_SPACE=False => [x,y]); we score against the authoritative EXECUTION
+    #   convention above.
+
+    def _run_best_of_n(self, sample_state, obs_cond, cur_prim_id, info, obs_cond_uncond, best_of_n):
+        """
+        Draws `best_of_n` initial-noise seeds via the SAME `eval_action_sampler` used by
+        the single-draw path, integrates all of them as ONE batched Euler rollout through
+        `_run_diffusion_loop` (so classifier-free guidance, when active, guides every draw),
+        scores the N candidate actions and returns the single best trajectory (shape
+        (1, H, D)) plus its (sliced) noise history so the rest of `single_act` sees exactly
+        one action, identically to today.
+
+        Falls back to a plain single draw (with a one-time warning) for the no-operation
+        primitive and for non-ot_flow_match loss types, which best-of-N does not support.
+        """
+        dim_k = self.diffusion_dims[cur_prim_id] if self.primitive_integration == 'separate_networks' else self.diffusion_dim
+        loss_type = self.config.get('loss_type', 'diffusion')
+        supported = loss_type in ['ot_flow_match', 'ot_flow_match+consistency']
+
+        def _single_draw():
+            naction = self.eval_action_sampler.sample(
+                state=sample_state,
+                horizon=self.config.pred_horizon,
+                action_dim=getattr(self, 'diffusion_dim', self.network_action_dim)
+            ).to(self.device)
+            return self._run_diffusion_loop(naction, obs_cond, cur_prim_id, info, obs_cond_uncond)
+
+        # No-operation primitive has no continuous parameters to sample -> single draw.
+        if dim_k == 0:
+            return _single_draw()
+
+        # mse / DDPM inference is not covered by best-of-N (no per-step Euler field to
+        # score/guide the way the ot_flow_match branch is); warn once and single-draw.
+        if not supported:
+            if not getattr(self, '_warned_best_of_n_loss', False):
+                print(f"[MagpieAgent] eval_best_of_n>1 is only supported for ot_flow_match "
+                      f"loss types (got '{loss_type}'); using a single draw.")
+                self._warned_best_of_n_loss = True
+            return _single_draw()
+
+        # 1. Draw N seeds by batching the existing sampler's per-call output.
+        seeds = [
+            self.eval_action_sampler.sample(
+                state=sample_state,
+                horizon=self.config.pred_horizon,
+                action_dim=getattr(self, 'diffusion_dim', self.network_action_dim)
+            )
+            for _ in range(best_of_n)
+        ]
+        naction = torch.cat(seeds, dim=0).to(self.device)  # (N, H, D)
+
+        # 2. Expand conditioning along the batch dim (CFG-aware).
+        obs_cond_n = obs_cond.expand(best_of_n, *obs_cond.shape[1:])
+        obs_cond_uncond_n = None
+        if obs_cond_uncond is not None:
+            obs_cond_uncond_n = obs_cond_uncond.expand(best_of_n, *obs_cond_uncond.shape[1:])
+
+        # 3. ONE batched Euler rollout for all N candidates (guides every draw under CFG).
+        naction, noise_actions = self._run_diffusion_loop(
+            naction, obs_cond_n, cur_prim_id, info, obs_cond_uncond_n)
+
+        # 4. Score candidates and select the best.
+        field_norms = getattr(self, '_last_field_norm', None)
+        best_idx = self._select_best_candidate(naction, info, cur_prim_id, field_norms)
+
+        best_naction = naction[best_idx:best_idx + 1]
+        best_noise = [na[best_idx:best_idx + 1] for na in noise_actions]
+        return best_naction, best_noise
+
+    def _select_best_candidate(self, naction, info, cur_prim_id, field_norms):
+        """
+        Returns the index of the best of the N candidate trajectories.
+
+        Scorers (config `best_of_n_scorer`, default 'pick_on_mask'):
+          - 'pick_on_mask': number of PICK points landing on the garment mask AND inside
+            the robot workspace (union of robot0/robot1 masks). Ties broken by lower final
+            Euler-step field norm. Falls back to 'field_norm' (one-time warning) if the
+            required masks are absent.
+          - 'field_norm': lowest L2 norm of the final Euler step's predicted vector field.
+        """
+        N = naction.shape[0]
+
+        # Executed action step: mirror the slice start used by _store_predicted_actions.
+        if self.config.pred_horizon <= self.config.obs_horizon:
+            start = 0
+        else:
+            start = self.config.obs_horizon - 1
+        cand = naction[:, start, :self.network_action_dim].clamp(-1.0, 1.0)  # (N, Adim)
+
+        if field_norms is None:
+            field_np = np.zeros(N, dtype=np.float64)
+        else:
+            field_np = ts_to_np(field_norms).reshape(-1).astype(np.float64)
+
+        scorer = self.config.get('best_of_n_scorer', 'pick_on_mask')
+
+        pick_scores = None
+        if scorer == 'pick_on_mask':
+            pick_scores = self._score_pick_on_mask(cand, info, cur_prim_id)
+            if pick_scores is None and not getattr(self, '_warned_pick_on_mask_fallback', False):
+                print("[MagpieAgent] best_of_n_scorer='pick_on_mask' requires "
+                      "info['observation']['mask'|'robot0_mask'|'robot1_mask']; "
+                      "falling back to 'field_norm'.")
+                self._warned_pick_on_mask_fallback = True
+        elif scorer != 'field_norm':
+            if not getattr(self, '_warned_scorer_unknown', False):
+                print(f"[MagpieAgent] unknown best_of_n_scorer '{scorer}'; using 'field_norm'.")
+                self._warned_scorer_unknown = True
+
+        if pick_scores is None:
+            # 'field_norm' scorer (or fallback): lowest final-step field norm wins.
+            return int(np.argmin(field_np))
+
+        # Lexicographic: max pick score, ties broken by min field norm.
+        pick_scores = np.asarray(pick_scores, dtype=np.float64).reshape(-1)
+        best = np.lexsort((field_np, -pick_scores))[0]
+        return int(best)
+
+    def _score_pick_on_mask(self, cand, info, cur_prim_id):
+        """
+        Scores each candidate by how many of its PICK points land on the garment mask AND
+        inside the robot workspace (union of robot0/robot1 masks). Returns a length-N numpy
+        array, or None (signalling a field_norm fallback) if the required masks are missing
+        or the primitive has no pick points.
+
+        Coordinate convention: see the block comment above `_run_best_of_n`
+        (action = [y_norm, x_norm] = [row_norm, col_norm]).
+        """
+        obs = info.get('observation', {})
+        if any(k not in obs for k in ('mask', 'robot0_mask', 'robot1_mask')):
+            return None
+
+        def _to_2d_bool(m):
+            if torch.is_tensor(m):
+                m = m.detach().cpu().numpy()
+            m = np.asarray(m)
+            if m.ndim == 3:
+                m = m[..., 0]
+            return m > 0
+
+        garment = _to_2d_bool(obs['mask'])
+        workspace = _to_2d_bool(obs['robot0_mask']) | _to_2d_bool(obs['robot1_mask'])
+
+        # Pick-dim (y_index, x_index) pairs per primitive action layout.
+        p_obj = self.primitives[cur_prim_id]
+        prim_name = p_obj['name'] if isinstance(p_obj, dict) else p_obj.name
+        if 'pick-and-fling' in prim_name:
+            pick_slices = [(0, 1), (2, 3)]
+        elif 'dual-pick-and-place' in prim_name:
+            pick_slices = [(0, 1), (2, 3)]   # places [4:6],[6:8] are NOT scored
+        elif 'single-pick-and-place' in prim_name:
+            pick_slices = [(0, 1)]
+        else:  # no-operation / unknown -> nothing to score
+            return None
+
+        def _on(mask2d, y_norm, x_norm):
+            H, W = mask2d.shape[:2]
+            row = int(np.clip((y_norm + 1.0) * 0.5 * H, 0, H - 1))
+            col = int(np.clip((x_norm + 1.0) * 0.5 * W, 0, W - 1))
+            return bool(mask2d[row, col])
+
+        cand_np = ts_to_np(cand)  # (N, Adim)
+        scores = np.zeros(cand_np.shape[0], dtype=np.float64)
+        for n in range(cand_np.shape[0]):
+            count = 0
+            for (yi, xi) in pick_slices:
+                y_norm, x_norm = cand_np[n, yi], cand_np[n, xi]
+                if _on(garment, y_norm, x_norm) and _on(workspace, y_norm, x_norm):
+                    count += 1
+            scores[n] = count
+        return scores
+
     def _apply_action_constraints(self, naction, info, timestep):
         """Applies mathematical or environmental boundaries (e.g., table boundaries) to the trajectory."""
         act_part = naction[..., :self.network_action_dim]

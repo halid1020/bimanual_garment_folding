@@ -432,7 +432,9 @@ class ConditionalMLP1D(nn.Module):
         hidden_dims=[512, 512, 512],
         activation="relu",
         dropout=0.1,
-        use_delta_t=False):
+        use_delta_t=False,
+        use_film=False,
+        film_hidden_dim=256):
         """
         Args:
             input_dim: Dim of a single action step.
@@ -440,10 +442,16 @@ class ConditionalMLP1D(nn.Module):
             pred_horizon: The length of the action sequence (needed to flatten/unflatten).
             diffusion_step_embed_dim: Size of positional encoding for diffusion iteration.
             hidden_dims: List of hidden layer dimensions.
+            use_film: If True, inject the conditioning (time [+ delta_t] + global_cond)
+                at every hidden layer via per-layer FiLM (scale/shift) instead of a single
+                input-layer concatenation. Default False -> architecture identical to before.
+            film_hidden_dim: Width of the shared conditioning embedding used by the FiLM
+                generators (only used when use_film=True).
         """
         super().__init__()
         self.input_dim = input_dim
         self.pred_horizon = pred_horizon
+        self.use_film = use_film
 
         # Time step embedding (identical to ConditionalUnet1D for consistent scaling)
         dsed = diffusion_step_embed_dim
@@ -463,25 +471,73 @@ class ConditionalMLP1D(nn.Module):
         else:
             self.delta_t_encoder = None
 
-        # The MLP takes the flattened action + time embedding + global conditioning
+        # The conditioning vector (time embedding [+ delta_t] fused, then global cond
+        # concatenated) has this dimensionality in both modes. Note: delta_t is *added*
+        # to the time embedding, so it does not change cond_dim.
         cond_dim = dsed + global_cond_dim
-        mlp_input_dim = (pred_horizon * input_dim) + cond_dim
         output_dim = pred_horizon * input_dim
 
-        # Build the dense layers
-        layers = []
-        dims = [mlp_input_dim] + list(hidden_dims)
-        act = get_activation(activation)
+        if not self.use_film:
+            # -----------------------------------------------------------------
+            # Concatenation conditioning (original behaviour, unchanged).
+            # The MLP takes the flattened action + time embedding + global conditioning.
+            # -----------------------------------------------------------------
+            mlp_input_dim = (pred_horizon * input_dim) + cond_dim
 
-        for i in range(len(hidden_dims)):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(act)
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
+            # Build the dense layers
+            layers = []
+            dims = [mlp_input_dim] + list(hidden_dims)
+            act = get_activation(activation)
 
-        # Final projection to the flattened action shape
-        layers.append(nn.Linear(dims[-1], output_dim))
-        self.net = nn.Sequential(*layers)
+            for i in range(len(hidden_dims)):
+                layers.append(nn.Linear(dims[i], dims[i + 1]))
+                layers.append(act)
+                if dropout > 0:
+                    layers.append(nn.Dropout(dropout))
+
+            # Final projection to the flattened action shape
+            layers.append(nn.Linear(dims[-1], output_dim))
+            self.net = nn.Sequential(*layers)
+        else:
+            # -----------------------------------------------------------------
+            # FiLM conditioning: the trunk sees the flattened action ONLY, and the
+            # conditioning is injected at every hidden layer via per-layer scale/shift.
+            # -----------------------------------------------------------------
+            self.dropout_p = dropout
+            trunk_input_dim = pred_horizon * input_dim
+
+            # Shared conditioning embedding consumed by every FiLM generator.
+            self.film_cond_encoder = nn.Sequential(
+                nn.Linear(cond_dim, film_hidden_dim),
+                nn.Mish(),
+            )
+
+            self.film_hidden_layers = nn.ModuleList()
+            self.film_activations = nn.ModuleList()
+            self.film_dropouts = nn.ModuleList()
+            self.film_generators = nn.ModuleList()
+
+            dims = [trunk_input_dim] + list(hidden_dims)
+            for i in range(len(hidden_dims)):
+                self.film_hidden_layers.append(nn.Linear(dims[i], dims[i + 1]))
+                self.film_activations.append(get_activation(activation))
+                self.film_dropouts.append(
+                    nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+                )
+
+                # Each generator maps the conditioning embedding -> (gamma, beta).
+                gen = nn.Linear(film_hidden_dim, 2 * hidden_dims[i])
+                # Zero-init the weights and set the bias so that at init gamma=1, beta=0
+                # (identity modulation). This keeps training starting near-identity,
+                # standard practice for FiLM.
+                nn.init.zeros_(gen.weight)
+                with torch.no_grad():
+                    gen.bias[:hidden_dims[i]].fill_(1.0)   # gamma -> 1
+                    gen.bias[hidden_dims[i]:].fill_(0.0)   # beta  -> 0
+                self.film_generators.append(gen)
+
+            # Final projection to the flattened action shape
+            self.film_out = nn.Linear(dims[-1], output_dim)
 
         print("number of parameters (MLP backbone): {:e}".format(
             sum(p.numel() for p in self.parameters()))
@@ -529,12 +585,28 @@ class ConditionalMLP1D(nn.Module):
         if global_cond is not None:
             global_feature = torch.cat([global_feature, global_cond], dim=-1)
 
-        # 3. Flatten the action sample (B, T*C) and concat with conditioning
-        sample_flat = sample.reshape(B, -1) 
-        mlp_in = torch.cat([sample_flat, global_feature], dim=-1) 
+        # 3. Flatten the action sample (B, T*C)
+        sample_flat = sample.reshape(B, -1)
 
-        # 4. Forward pass
-        out_flat = self.net(mlp_in) 
+        if not self.use_film:
+            # Concat conditioning at the input layer, then forward through the dense stack.
+            mlp_in = torch.cat([sample_flat, global_feature], dim=-1)
+            out_flat = self.net(mlp_in)
+        else:
+            # FiLM: trunk sees the action only; conditioning modulates every hidden layer.
+            cond_emb = self.film_cond_encoder(global_feature)
+            h = sample_flat
+            for lin, act, drop, gen in zip(
+                self.film_hidden_layers,
+                self.film_activations,
+                self.film_dropouts,
+                self.film_generators,
+            ):
+                h = act(lin(h))
+                gamma, beta = gen(cond_emb).chunk(2, dim=-1)
+                h = gamma * h + beta
+                h = drop(h)
+            out_flat = self.film_out(h)
 
         # 5. Unflatten back to original temporal shape
         out = out_flat.reshape(B, T, C)

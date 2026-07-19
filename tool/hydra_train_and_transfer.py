@@ -24,6 +24,26 @@ from tool.utils import resolve_save_root
 from env.parallel import Parallel
 
 
+def _unwrap_to_field(cfg: Any, key: str) -> Any:
+    """Descend a directly-composed config to the first node containing `key`.
+
+    Configs composed via `compose(config_name="arena/lagarnet/...")` get nested
+    under their group package (arena.lagarnet.*) when the file has no
+    `# @package _global_`; magpie files place fields at the root. This returns
+    whichever node actually holds `key`, leaving already-flat configs untouched.
+    """
+    if not isinstance(cfg, DictConfig):
+        return cfg
+    if key in cfg:
+        return cfg
+    for value in cfg.values():
+        if isinstance(value, DictConfig):
+            found = _unwrap_to_field(value, key)
+            if key in found:
+                return found
+    return cfg
+
+
 def execute_training_phase(train_cfg: DictConfig, agent: Any, save_dir: str) -> None:
     print("[INFO] Initializing Training Phase...", flush=True)
     
@@ -128,14 +148,12 @@ def execute_transfer_evaluation_phase(transfer_cfg: DictConfig, train_cfg: DictC
         arena_cfg = compose(config_name=f"arena/{eval_setup.arena}")
         task_cfg = compose(config_name=f"task/{eval_setup.task}")
         
-        # Mirroring the exact extraction logic from your standalone script
-        if hasattr(arena_cfg, 'arena'):
-            arena_cfg = arena_cfg.arena
-            
-        if hasattr(task_cfg, 'task') and hasattr(task_cfg.task, 'magpie'):
-            task_cfg = task_cfg.task.magpie
-        elif hasattr(task_cfg, 'magpie'):
-            task_cfg = task_cfg.magpie
+        # A directly-composed group config may be nested under its group package
+        # (e.g. arena.lagarnet.*, task.lagarnet.*, task.magpie.*) when the file
+        # lacks `# @package _global_`. Descend to the node that actually holds the
+        # arena/task fields so this works regardless of the group layout.
+        arena_cfg = _unwrap_to_field(arena_cfg, 'name')
+        task_cfg = _unwrap_to_field(task_cfg, 'task_name')
 
         print(f"\n>>> Starting Evaluation {i+1}/{len(eval_arenas)}")
         print(f">>> Arena: {arena_cfg.get('name', 'Unknown')} | Task: {task_cfg.get('task_name', 'Unknown')}")

@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1783959585.75372 "main.aux" "main.bbl" "main" 1783959593.00018 0
+["bibtex main"] 1784465637.82635 "main.aux" "main.bbl" "main" 1784465646.26981 0
   "./ref.bib" 1783959568.96227 342348 3fb444b57294dbf6538b3315d4ea0d06 ""
   "/usr/share/texlive/texmf-dist/bibtex/bib/ieeetran/IEEEabrv.bib" 1440712899 20898 a5d2167c380db7dfff810b085c77ed63 ""
   "/usr/share/texlive/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1783959592.82331 55992 cfa0be9f5c4d602bd08d1bc7e8210a02 "pdflatex"
+  "main.aux" 1784465646.08726 55430 3753e5140e4e5658c7d598a0784e1238 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1783959585.85229 "main.tex" "main.pdf" "main" 1783959593.00043 0
+["pdflatex"] 1784465637.85432 "main.tex" "main.pdf" "main" 1784465646.27005 0
   "/etc/texmf/web2c/texmf.cnf" 1719051094.59597 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -79,6 +79,7 @@
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb" 1248133631 32734 69e00a6b65cedb993666e42eedb3d48f ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb" 1248133631 32762 224316ccc9ad3ca0423a14971cfa7fc1 ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb" 1248133631 32726 0a1aea6fcd6468ee2cf64d891f5c43c8 ""
+  "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb" 1248133631 33993 9b89b85fd2d9df0482bd47194d1d3bf3 ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1248133631 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb" 1248133631 32915 7bf7720c61a5b3a7ff25b0964421c9b6 ""
   "/usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb" 1248133631 32587 1788b0c1c5b39540c96f5e42ccd6dae8 ""
@@ -275,10 +276,10 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1720295055.80154 165012 f177baa1c39a3ebd62c3096a43521a0d ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1720295072 6830986 950dc122fe7c536ea59a7ac9f6133315 ""
   "IEEEtran.cls" 1783947314.16548 281957 5b2e4fa15b0f7eabb840ebf67df4c0f7 ""
-  "main.aux" 1783959592.82331 55992 cfa0be9f5c4d602bd08d1bc7e8210a02 "pdflatex"
-  "main.bbl" 1783959585.79371 20827 9785d2fc61e3c17b23a2d7410b2dea13 "bibtex main"
-  "main.out" 1783959592.82831 6896 9a8239b306b939e92c196ed6b7154cf3 "pdflatex"
-  "main.tex" 1783949969.94272 151167 61e78ea927324157a63b39d59b3a16bd ""
+  "main.aux" 1784465646.08726 55430 3753e5140e4e5658c7d598a0784e1238 "pdflatex"
+  "main.bbl" 1784465637.84988 20827 9785d2fc61e3c17b23a2d7410b2dea13 "bibtex main"
+  "main.out" 1784465646.09224 6896 9a8239b306b939e92c196ed6b7154cf3 "pdflatex"
+  "main.tex" 1784465615.83198 147320 9345993429c2b3090617798ddd6576a6 ""
   "plots/ablation_data_ratio_bar.png" 1783947314.16895 128447 3f93822fcc173c7e09840ec19efa8395 ""
   "plots/ablation_data_size_line.png" 1783947314.17048 184860 a465e37452b3a062981f8dc4cdd79669 ""
   "plots/ablation_latent_bar.png" 1783947314.17148 137063 27e3bad65b47ee0efbfad709afe238e2 ""
@@ -291,6 +292,7 @@
   "plots/lagarnet-failure.jpg" 1783947314.22748 401332 4842ae6ce659fe1b14824a50f8ef3662 ""
   "plots/lagarnet-real-garments.jpg" 1783947314.19148 3103337 b5e897999dd47572e488297f3be7e1af ""
   "plots/lagarnet-real-setup.jpg" 1783947314.20648 195544 f9e383d1dd345ae3f9b4d77a69717e03 ""
+  "plots/lagarnet_flattening_heatmap.png" 1784465506.16275 1312573 546fc8b2e9df2c66f3772f4516bf8052 ""
   "plots/max_iou_distribution.png" 1783947314.20148 312763 e8f14df1a492de2dff714282394df0a7 ""
   "plots/metrics_radar.png" 1783947314.21548 517683 1747e56f0c36d1a8221e4b999d70a44b ""
   "plots/multi_arena_radar.png" 1783947314.17848 1246846 22926c8af732af0a097032cbe0202667 ""

@@ -271,12 +271,10 @@
 \citation{canberk2023cloth}
 \citation{kadi2025draper}
 \citation{chi2023diffusionpolicy}
-\citation{lin2022learning}
 \citation{huang2022mesh}
 \citation{canberk2023cloth}
 \citation{kadi2025draper}
 \citation{chi2023diffusionpolicy}
-\citation{lin2022learning}
 \citation{huang2022mesh}
 \citation{canberk2023cloth}
 \citation{lin2020softgym}
@@ -316,90 +314,97 @@
 \@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces The initial state distribution of simulation garments.}}{10}{figure.caption.7}\protected@file@percent }
 \newlabel{fig:garment-distribution}{{4}{10}{The initial state distribution of simulation garments}{figure.caption.7}{}}
 \newlabel{fig:garment-distribution@cref}{{[figure][4][]4}{[1][9][]10}}
-\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Numerical comparison of different learning-based pick-and-place (\text  {PnP}) controllers on longsleeved T-shirts in simulation. We only enable the single-arm PnP primitive of the off-the-shelf \text  {ClothFunnels} \cite  {canberk2023cloth} to ensure that all models operate in a consistent environment. We train both \text  {PlaNet-ClothPick} and \text  {LaGarNet} with the RGB-to-Mask setup on the same task-focused and all-garments datasets, yet with their own reward functions and network architectures. We train the behaviour cloning methods \text  {Diffusion Policy} \cite  {kadi2025draper, chi2023diffusionpolicy} with 200 human demonstrations. Each horizontal block reports cumulative metrics within the first 5, 10, 20, and 30 action steps, respectively. Mesh-based planning method, $\dagger $ VCD \cite  {lin2022learning}, reports to reach 83.8 $\pm $ 45 \% NI and 96 $\pm $ 21.8 \% NC for T-shirt flattening in simulation within 20 steps; however, its improved successor, MEDOR \cite  {huang2022mesh}, stably outperforms it in all scenarios. We test the off-the-shelf MEDOR in our evaluation trials but with their simulation setup. We highlight the top three values for each metric and action step with green, yellow, and red backgrounds, respectively. The proposed All-Garments \text  {LaGarNet} outperforms all compared algorithms; it reaches a similar performance to the SoTA mesh-based method MEDOR, and even slightly outperforms human experts from 10-20 steps.}}{10}{table.caption.8}\protected@file@percent }
-\newlabel{tab:longsleeve-flattening}{{III}{10}{Numerical comparison of different learning-based pick-and-place (\text {PnP}) controllers on longsleeved T-shirts in simulation. We only enable the single-arm PnP primitive of the off-the-shelf \text {ClothFunnels} \cite {canberk2023cloth} to ensure that all models operate in a consistent environment. We train both \text {PlaNet-ClothPick} and \text {LaGarNet} with the RGB-to-Mask setup on the same task-focused and all-garments datasets, yet with their own reward functions and network architectures. We train the behaviour cloning methods \text {Diffusion Policy} \cite {kadi2025draper, chi2023diffusionpolicy} with 200 human demonstrations. Each horizontal block reports cumulative metrics within the first 5, 10, 20, and 30 action steps, respectively. Mesh-based planning method, $\dagger $ VCD \cite {lin2022learning}, reports to reach 83.8 $\pm $ 45 \% NI and 96 $\pm $ 21.8 \% NC for T-shirt flattening in simulation within 20 steps; however, its improved successor, MEDOR \cite {huang2022mesh}, stably outperforms it in all scenarios. We test the off-the-shelf MEDOR in our evaluation trials but with their simulation setup. We highlight the top three values for each metric and action step with green, yellow, and red backgrounds, respectively. The proposed All-Garments \text {LaGarNet} outperforms all compared algorithms; it reaches a similar performance to the SoTA mesh-based method MEDOR, and even slightly outperforms human experts from 10-20 steps}{table.caption.8}{}}
-\newlabel{tab:longsleeve-flattening@cref}{{[table][3][]III}{[1][9][]10}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Longsleeved T-shirt flattening in simulation: per-horizon performance of learning-based single-arm pick-and-place (\text  {PnP}) controllers. For each metric (Normalised Coverage, Normalised Improvement, Max IoU, and Success Rate), the columns report the cumulative \emph  {Max} (best value reached within the horizon) and the \emph  {Last} (final-step) value at 5, 10, 20, and 30 action steps; cell colour encodes the score in $[0,1]$. We enable only the single-arm PnP primitive of the off-the-shelf \text  {ClothFunnels}~\cite  {canberk2023cloth} to keep a consistent environment; \text  {PlaNet-ClothPick} and \text  {LaGarNet} use the RGB-to-Mask setup on the same task-focused and all-garment datasets with their own reward functions, while \text  {Diffusion Policy}~\cite  {kadi2025draper, chi2023diffusionpolicy} is trained on 200 human demonstrations. The state-of-the-art mesh-based planner \text  {MEDOR}~\cite  {huang2022mesh} is evaluated with its own simulation setup. Our All-Garments \text  {LaGarNet} reaches performance comparable to MEDOR and closely matches human experts (and slightly exceeds them at 10--20 steps); the small Max$\to $Last gap indicates that final configurations remain stable.}}{10}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:longsleeve-flattening}{{5}{10}{Longsleeved T-shirt flattening in simulation: per-horizon performance of learning-based single-arm pick-and-place (\text {PnP}) controllers. For each metric (Normalised Coverage, Normalised Improvement, Max IoU, and Success Rate), the columns report the cumulative \emph {Max} (best value reached within the horizon) and the \emph {Last} (final-step) value at 5, 10, 20, and 30 action steps; cell colour encodes the score in $[0,1]$. We enable only the single-arm PnP primitive of the off-the-shelf \text {ClothFunnels}~\cite {canberk2023cloth} to keep a consistent environment; \text {PlaNet-ClothPick} and \text {LaGarNet} use the RGB-to-Mask setup on the same task-focused and all-garment datasets with their own reward functions, while \text {Diffusion Policy}~\cite {kadi2025draper, chi2023diffusionpolicy} is trained on 200 human demonstrations. The state-of-the-art mesh-based planner \text {MEDOR}~\cite {huang2022mesh} is evaluated with its own simulation setup. Our All-Garments \text {LaGarNet} reaches performance comparable to MEDOR and closely matches human experts (and slightly exceeds them at 10--20 steps); the small Max$\to $Last gap indicates that final configurations remain stable}{figure.caption.8}{}}
+\newlabel{fig:longsleeve-flattening@cref}{{[figure][5][]5}{[1][9][]10}}
 \newlabel{sec:baseline}{{\mbox  {IV-A}2}{10}{Baseline Methods}{subsubsection.4.1.2}{}}
 \newlabel{sec:baseline@cref}{{[subsubsection][2][4,1]\mbox  {IV-A}2}{[1][10][]10}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-A}2}Baseline Methods}{10}{subsubsection.4.1.2}\protected@file@percent }
-\newlabel{sec:sota-result}{{\mbox  {IV-A}3}{10}{Results}{subsubsection.4.1.3}{}}
-\newlabel{sec:sota-result@cref}{{[subsubsection][3][4,1]\mbox  {IV-A}3}{[1][10][]10}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-A}3}Results}{10}{subsubsection.4.1.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Simulation performance of different policies on all four garment types by action step 20. Our method \text  {LaGarNet} consistently outperforms the baseline all-garment \text  {PlaNet-ClothPick} and task-specific \text  {Diffusion Policy} on each garment type.}}{11}{figure.caption.9}\protected@file@percent }
-\newlabel{fig:sim-lagarnet-results}{{5}{11}{Simulation performance of different policies on all four garment types by action step 20. Our method \text {LaGarNet} consistently outperforms the baseline all-garment \text {PlaNet-ClothPick} and task-specific \text {Diffusion Policy} on each garment type}{figure.caption.9}{}}
-\newlabel{fig:sim-lagarnet-results@cref}{{[figure][5][]5}{[1][10][]11}}
-\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Secondary comparison of computational requirements and data efficiency across garment flattening baselines. $\dagger $ represents the reported values in the original paper. \text  {ClothFunnels} uses a machine with 4 NVIDIA RTX3090s. Our hardware setup for all timing and parameter evaluations is: Ubuntu 24.04.4 LTS, NVIDIA GeForce RTX 3090 Ti GPU, AMD Ryzen 9 5900X 12-Core Processor (2 threads per core), and 64GB RAM. Whist mesh-based method requires substantially shorter data collection time, our LaGarNet method demands much less network parameters and faster training and per-step inference time.}}{11}{table.caption.10}\protected@file@percent }
-\newlabel{tab:efficiency-comparison}{{IV}{11}{Secondary comparison of computational requirements and data efficiency across garment flattening baselines. $\dagger $ represents the reported values in the original paper. \text {ClothFunnels} uses a machine with 4 NVIDIA RTX3090s. Our hardware setup for all timing and parameter evaluations is: Ubuntu 24.04.4 LTS, NVIDIA GeForce RTX 3090 Ti GPU, AMD Ryzen 9 5900X 12-Core Processor (2 threads per core), and 64GB RAM. Whist mesh-based method requires substantially shorter data collection time, our LaGarNet method demands much less network parameters and faster training and per-step inference time}{table.caption.10}{}}
-\newlabel{tab:efficiency-comparison@cref}{{[table][4][]IV}{[1][10][]11}}
+\newlabel{sec:sota-result}{{\mbox  {IV-A}3}{11}{Results}{subsubsection.4.1.3}{}}
+\newlabel{sec:sota-result@cref}{{[subsubsection][3][4,1]\mbox  {IV-A}3}{[1][11][]11}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-A}3}Results}{11}{subsubsection.4.1.3}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Diffusion Policy vs. LaGarNet}{11}{subsection.4.2}\protected@file@percent }
 \newlabel{sec:comp-diff}{{\mbox  {IV-B}}{11}{Diffusion Policy vs. LaGarNet}{subsection.4.2}{}}
 \newlabel{sec:comp-diff@cref}{{[subsection][2][4]\mbox  {IV-B}}{[1][11][]11}}
 \newlabel{sec:diff-baselines}{{\mbox  {IV-B}1}{11}{Baselines}{subsubsection.4.2.1}{}}
 \newlabel{sec:diff-baselines@cref}{{[subsubsection][1][4,2]\mbox  {IV-B}1}{[1][11][]11}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}1}Baselines}{11}{subsubsection.4.2.1}\protected@file@percent }
-\citation{wang2004image}
-\citation{wang2004image}
-\newlabel{fig:diffusion-human-val}{{6a}{12}{\centering Validation Trials \caption@thelabel }{figure.caption.11}{}}
-\newlabel{fig:diffusion-human-val@cref}{{[subfigure][1][6]6a}{[1][10][]12}}
+\newlabel{sec:diff-result}{{\mbox  {IV-B}2}{11}{Results}{subsubsection.4.2.2}{}}
+\newlabel{sec:diff-result@cref}{{[subsubsection][2][4,2]\mbox  {IV-B}2}{[1][11][]11}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}2}Results}{11}{subsubsection.4.2.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Simulation performance of different policies on all four garment types by action step 20. Our method \text  {LaGarNet} consistently outperforms the baseline all-garment \text  {PlaNet-ClothPick} and task-specific \text  {Diffusion Policy} on each garment type.}}{12}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:sim-lagarnet-results}{{6}{12}{Simulation performance of different policies on all four garment types by action step 20. Our method \text {LaGarNet} consistently outperforms the baseline all-garment \text {PlaNet-ClothPick} and task-specific \text {Diffusion Policy} on each garment type}{figure.caption.9}{}}
+\newlabel{fig:sim-lagarnet-results@cref}{{[figure][6][]6}{[1][11][]12}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Secondary comparison of computational requirements and data efficiency across garment flattening baselines. $\dagger $ represents the reported values in the original paper. \text  {ClothFunnels} uses a machine with 4 NVIDIA RTX3090s. Our hardware setup for all timing and parameter evaluations is: Ubuntu 24.04.4 LTS, NVIDIA GeForce RTX 3090 Ti GPU, AMD Ryzen 9 5900X 12-Core Processor (2 threads per core), and 64GB RAM. Whist mesh-based method requires substantially shorter data collection time, our LaGarNet method demands much less network parameters and faster training and per-step inference time.}}{12}{table.caption.10}\protected@file@percent }
+\newlabel{tab:efficiency-comparison}{{III}{12}{Secondary comparison of computational requirements and data efficiency across garment flattening baselines. $\dagger $ represents the reported values in the original paper. \text {ClothFunnels} uses a machine with 4 NVIDIA RTX3090s. Our hardware setup for all timing and parameter evaluations is: Ubuntu 24.04.4 LTS, NVIDIA GeForce RTX 3090 Ti GPU, AMD Ryzen 9 5900X 12-Core Processor (2 threads per core), and 64GB RAM. Whist mesh-based method requires substantially shorter data collection time, our LaGarNet method demands much less network parameters and faster training and per-step inference time}{table.caption.10}{}}
+\newlabel{tab:efficiency-comparison@cref}{{[table][3][]III}{[1][11][]12}}
+\newlabel{fig:diffusion-human-val}{{7a}{12}{\centering Validation Trials \caption@thelabel }{figure.caption.11}{}}
+\newlabel{fig:diffusion-human-val@cref}{{[subfigure][1][7]7a}{[1][11][]12}}
 \newlabel{sub@fig:diffusion-human-val}{{a}{12}{\centering Validation Trials \caption@thelabel }{figure.caption.11}{}}
-\newlabel{sub@fig:diffusion-human-val@cref}{{[subfigure][1][6]6a}{[1][10][]12}}
-\newlabel{fig:diffusion-human-eval}{{6b}{12}{\centering Evaluation Trials \caption@thelabel }{figure.caption.11}{}}
-\newlabel{fig:diffusion-human-eval@cref}{{[subfigure][2][6]6b}{[1][10][]12}}
+\newlabel{sub@fig:diffusion-human-val@cref}{{[subfigure][1][7]7a}{[1][11][]12}}
+\newlabel{fig:diffusion-human-eval}{{7b}{12}{\centering Evaluation Trials \caption@thelabel }{figure.caption.11}{}}
+\newlabel{fig:diffusion-human-eval@cref}{{[subfigure][2][7]7b}{[1][11][]12}}
 \newlabel{sub@fig:diffusion-human-eval}{{b}{12}{\centering Evaluation Trials \caption@thelabel }{figure.caption.11}{}}
-\newlabel{sub@fig:diffusion-human-eval@cref}{{[subfigure][2][6]6b}{[1][10][]12}}
-\newlabel{tab:comp-diff-lagarnet}{{6c}{12}{\centering Architectural Ablations \caption@thelabel }{figure.caption.11}{}}
-\newlabel{tab:comp-diff-lagarnet@cref}{{[subfigure][3][6]6c}{[1][10][]12}}
+\newlabel{sub@fig:diffusion-human-eval@cref}{{[subfigure][2][7]7b}{[1][11][]12}}
+\newlabel{tab:comp-diff-lagarnet}{{7c}{12}{\centering Architectural Ablations \caption@thelabel }{figure.caption.11}{}}
+\newlabel{tab:comp-diff-lagarnet@cref}{{[subfigure][3][7]7c}{[1][11][]12}}
 \newlabel{sub@tab:comp-diff-lagarnet}{{c}{12}{\centering Architectural Ablations \caption@thelabel }{figure.caption.11}{}}
-\newlabel{sub@tab:comp-diff-lagarnet@cref}{{[subfigure][3][6]6c}{[1][10][]12}}
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Performance comparison between Diffusion Policy and LaGarNet on the simulated longsleeve environment. \textbf  {(a)} Validation performance over the course of 50,000 training steps for task-specific Diffusion Policies trained with varying human demonstrations. To highlight the underlying training trends amidst step-to-step variance, the bold lines represent an Exponential Moving Average (EMA, span = 15) of the success rate, while the raw, unsmoothed data is plotted faintly in the background. \textbf  {(b)} A radar chart illustrating the evaluation performance of these policies across the four primary metrics. The All-Garment LaGarNet demonstrates highly stable, sample-efficient training and achieves superior evaluation performance compared to the behaviour cloning diffusion policy baselines. \textbf  {(c)} Performance comparison of various architectural ablations by action step 20. All values are aggregated across 120 evaluation episodes (30 trials for each of the four garment types). The standard LaGarNet, trained on 5,000 episodes of mixed-quality transitional trajectories, shows substantially better performance compared to all variants of the Diffusion Policy, which are trained on an equivalent volume of success-only trajectories.}}{12}{figure.caption.11}\protected@file@percent }
-\newlabel{fig:diff-vs-lagarnet-performance-combined}{{6}{12}{Performance comparison between Diffusion Policy and LaGarNet on the simulated longsleeve environment. \textbf {(a)} Validation performance over the course of 50,000 training steps for task-specific Diffusion Policies trained with varying human demonstrations. To highlight the underlying training trends amidst step-to-step variance, the bold lines represent an Exponential Moving Average (EMA, span = 15) of the success rate, while the raw, unsmoothed data is plotted faintly in the background. \textbf {(b)} A radar chart illustrating the evaluation performance of these policies across the four primary metrics. The All-Garment LaGarNet demonstrates highly stable, sample-efficient training and achieves superior evaluation performance compared to the behaviour cloning diffusion policy baselines. \textbf {(c)} Performance comparison of various architectural ablations by action step 20. All values are aggregated across 120 evaluation episodes (30 trials for each of the four garment types). The standard LaGarNet, trained on 5,000 episodes of mixed-quality transitional trajectories, shows substantially better performance compared to all variants of the Diffusion Policy, which are trained on an equivalent volume of success-only trajectories}{figure.caption.11}{}}
-\newlabel{fig:diff-vs-lagarnet-performance-combined@cref}{{[figure][6][]6}{[1][10][]12}}
-\newlabel{sec:diff-result}{{\mbox  {IV-B}2}{12}{Results}{subsubsection.4.2.2}{}}
-\newlabel{sec:diff-result@cref}{{[subsubsection][2][4,2]\mbox  {IV-B}2}{[1][12][]12}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-B}2}Results}{12}{subsubsection.4.2.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Ablation Study on \text  {LaGarNet}}{12}{subsection.4.3}\protected@file@percent }
-\newlabel{sec:abl}{{\mbox  {IV-C}}{12}{Ablation Study on \text {LaGarNet}}{subsection.4.3}{}}
-\newlabel{sec:abl@cref}{{[subsection][3][4]\mbox  {IV-C}}{[1][12][]12}}
+\newlabel{sub@tab:comp-diff-lagarnet@cref}{{[subfigure][3][7]7c}{[1][11][]12}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Performance comparison between Diffusion Policy and LaGarNet on the simulated longsleeve environment. \textbf  {(a)} Validation performance over the course of 50,000 training steps for task-specific Diffusion Policies trained with varying human demonstrations. To highlight the underlying training trends amidst step-to-step variance, the bold lines represent an Exponential Moving Average (EMA, span = 15) of the success rate, while the raw, unsmoothed data is plotted faintly in the background. \textbf  {(b)} A radar chart illustrating the evaluation performance of these policies across the four primary metrics. The All-Garment LaGarNet demonstrates highly stable, sample-efficient training and achieves superior evaluation performance compared to the behaviour cloning diffusion policy baselines. \textbf  {(c)} Performance comparison of various architectural ablations by action step 20. All values are aggregated across 120 evaluation episodes (30 trials for each of the four garment types). The standard LaGarNet, trained on 5,000 episodes of mixed-quality transitional trajectories, shows substantially better performance compared to all variants of the Diffusion Policy, which are trained on an equivalent volume of success-only trajectories.}}{12}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:diff-vs-lagarnet-performance-combined}{{7}{12}{Performance comparison between Diffusion Policy and LaGarNet on the simulated longsleeve environment. \textbf {(a)} Validation performance over the course of 50,000 training steps for task-specific Diffusion Policies trained with varying human demonstrations. To highlight the underlying training trends amidst step-to-step variance, the bold lines represent an Exponential Moving Average (EMA, span = 15) of the success rate, while the raw, unsmoothed data is plotted faintly in the background. \textbf {(b)} A radar chart illustrating the evaluation performance of these policies across the four primary metrics. The All-Garment LaGarNet demonstrates highly stable, sample-efficient training and achieves superior evaluation performance compared to the behaviour cloning diffusion policy baselines. \textbf {(c)} Performance comparison of various architectural ablations by action step 20. All values are aggregated across 120 evaluation episodes (30 trials for each of the four garment types). The standard LaGarNet, trained on 5,000 episodes of mixed-quality transitional trajectories, shows substantially better performance compared to all variants of the Diffusion Policy, which are trained on an equivalent volume of success-only trajectories}{figure.caption.11}{}}
+\newlabel{fig:diff-vs-lagarnet-performance-combined@cref}{{[figure][7][]7}{[1][11][]12}}
+\citation{wang2004image}
+\citation{wang2004image}
 \citation{gu2023learning}
 \citation{canberk2023cloth}
 \citation{kadi2024planet}
 \citation{avigal2022speedfolding}
 \citation{hafner2019learning}
-\newlabel{fig:goal-ablation}{{7a}{13}{\centering Latent Dynamic and Goal Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{fig:goal-ablation@cref}{{[subfigure][1][7]7a}{[1][12][]13}}
-\newlabel{sub@fig:goal-ablation}{{a}{13}{\centering Latent Dynamic and Goal Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{sub@fig:goal-ablation@cref}{{[subfigure][1][7]7a}{[1][12][]13}}
-\newlabel{fig:reward-ablation}{{7b}{13}{\centering Reward Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{fig:reward-ablation@cref}{{[subfigure][2][7]7b}{[1][12][]13}}
-\newlabel{sub@fig:reward-ablation}{{b}{13}{\centering Reward Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{sub@fig:reward-ablation@cref}{{[subfigure][2][7]7b}{[1][12][]13}}
-\newlabel{fig:datasize-ablation}{{7c}{13}{\centering Data Size Ablation. \caption@thelabel }{figure.caption.12}{}}
-\newlabel{fig:datasize-ablation@cref}{{[subfigure][3][7]7c}{[1][12][]13}}
-\newlabel{sub@fig:datasize-ablation}{{c}{13}{\centering Data Size Ablation. \caption@thelabel }{figure.caption.12}{}}
-\newlabel{sub@fig:datasize-ablation@cref}{{[subfigure][3][7]7c}{[1][12][]13}}
-\newlabel{fig:dataratio-ablation}{{7d}{13}{\centering Data Composition Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{fig:dataratio-ablation@cref}{{[subfigure][4][7]7d}{[1][12][]13}}
-\newlabel{sub@fig:dataratio-ablation}{{d}{13}{\centering Data Composition Ablation \caption@thelabel }{figure.caption.12}{}}
-\newlabel{sub@fig:dataratio-ablation@cref}{{[subfigure][4][7]7d}{[1][12][]13}}
-\newlabel{fig:recon-quality}{{7e}{13}{\centering Observation reconstruction quality \caption@thelabel }{figure.caption.12}{}}
-\newlabel{fig:recon-quality@cref}{{[subfigure][5][7]7e}{[1][12][]13}}
-\newlabel{sub@fig:recon-quality}{{e}{13}{\centering Observation reconstruction quality \caption@thelabel }{figure.caption.12}{}}
-\newlabel{sub@fig:recon-quality@cref}{{[subfigure][5][7]7e}{[1][12][]13}}
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Comprehensive ablation study for LaGarNet in simulation environments. \textbf  {(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf  {(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times $64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants.}}{13}{figure.caption.12}\protected@file@percent }
-\newlabel{fig:ablation-and-recon-combined}{{7}{13}{Comprehensive ablation study for LaGarNet in simulation environments. \textbf {(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf {(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times $64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants}{figure.caption.12}{}}
-\newlabel{fig:ablation-and-recon-combined@cref}{{[figure][7][]7}{[1][12][]13}}
-\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces Quantitative results for RGB image reconstruction quality from various world models are presented. We evaluate the visual quality and similarity of generated images using Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite  {wang2004image}. SSIM is especially useful as it evaluates local structure and contrast, which are directly affected by blurring. All values are multiplied by 100 for clearer comparison. Each value represents the aggregate average over 10 trials for each of the 4 garments. All these models are based on same internal hyperparameters; the differences lie in how the models are structured and how their inputs and outputs differ. Our goal-conditioned recurrent state-space model (GC-RSSM) shows a improvement of reducing blurriness on the multi-step prior reconstructed images.}}{13}{table.caption.13}\protected@file@percent }
-\newlabel{tab:recon-quality}{{V}{13}{Quantitative results for RGB image reconstruction quality from various world models are presented. We evaluate the visual quality and similarity of generated images using Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite {wang2004image}. SSIM is especially useful as it evaluates local structure and contrast, which are directly affected by blurring. All values are multiplied by 100 for clearer comparison. Each value represents the aggregate average over 10 trials for each of the 4 garments. All these models are based on same internal hyperparameters; the differences lie in how the models are structured and how their inputs and outputs differ. Our goal-conditioned recurrent state-space model (GC-RSSM) shows a improvement of reducing blurriness on the multi-step prior reconstructed images}{table.caption.13}{}}
-\newlabel{tab:recon-quality@cref}{{[table][5][]V}{[1][12][]13}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-C}1}Ablation Baselines}{13}{subsubsection.4.3.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-C}2}Results}{13}{subsubsection.4.3.2}\protected@file@percent }
 \citation{lin2022learning}
 \citation{lin2022learning}
 \citation{kadi2024planet}
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Quantitative results for RGB image reconstruction quality from various world models are presented. We evaluate the visual quality and similarity of generated images using Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite  {wang2004image}. SSIM is especially useful as it evaluates local structure and contrast, which are directly affected by blurring. All values are multiplied by 100 for clearer comparison. Each value represents the aggregate average over 10 trials for each of the 4 garments. All these models are based on same internal hyperparameters; the differences lie in how the models are structured and how their inputs and outputs differ. Our goal-conditioned recurrent state-space model (GC-RSSM) shows a improvement of reducing blurriness on the multi-step prior reconstructed images.}}{13}{table.caption.13}\protected@file@percent }
+\newlabel{tab:recon-quality}{{IV}{13}{Quantitative results for RGB image reconstruction quality from various world models are presented. We evaluate the visual quality and similarity of generated images using Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite {wang2004image}. SSIM is especially useful as it evaluates local structure and contrast, which are directly affected by blurring. All values are multiplied by 100 for clearer comparison. Each value represents the aggregate average over 10 trials for each of the 4 garments. All these models are based on same internal hyperparameters; the differences lie in how the models are structured and how their inputs and outputs differ. Our goal-conditioned recurrent state-space model (GC-RSSM) shows a improvement of reducing blurriness on the multi-step prior reconstructed images}{table.caption.13}{}}
+\newlabel{tab:recon-quality@cref}{{[table][4][]IV}{[1][13][]13}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Ablation Study on \text  {LaGarNet}}{13}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:abl}{{\mbox  {IV-C}}{13}{Ablation Study on \text {LaGarNet}}{subsection.4.3}{}}
+\newlabel{sec:abl@cref}{{[subsection][3][4]\mbox  {IV-C}}{[1][13][]13}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-C}1}Ablation Baselines}{13}{subsubsection.4.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-C}2}Results}{13}{subsubsection.4.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Transfer Ability of LaGarNet to Real-World Settings}{13}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:real-exp}{{\mbox  {IV-D}}{13}{Transfer Ability of LaGarNet to Real-World Settings}{subsection.4.4}{}}
+\newlabel{sec:real-exp@cref}{{[subsection][4][4]\mbox  {IV-D}}{[1][13][]13}}
 \citation{lin2022learning}
 \citation{huang2022accelerating}
 \citation{huang2022mesh}
 \citation{lin2022learning}
+\newlabel{fig:goal-ablation}{{8a}{14}{\centering Latent Dynamic and Goal Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{fig:goal-ablation@cref}{{[subfigure][1][8]8a}{[1][13][]14}}
+\newlabel{sub@fig:goal-ablation}{{a}{14}{\centering Latent Dynamic and Goal Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{sub@fig:goal-ablation@cref}{{[subfigure][1][8]8a}{[1][13][]14}}
+\newlabel{fig:reward-ablation}{{8b}{14}{\centering Reward Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{fig:reward-ablation@cref}{{[subfigure][2][8]8b}{[1][13][]14}}
+\newlabel{sub@fig:reward-ablation}{{b}{14}{\centering Reward Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{sub@fig:reward-ablation@cref}{{[subfigure][2][8]8b}{[1][13][]14}}
+\newlabel{fig:datasize-ablation}{{8c}{14}{\centering Data Size Ablation. \caption@thelabel }{figure.caption.12}{}}
+\newlabel{fig:datasize-ablation@cref}{{[subfigure][3][8]8c}{[1][13][]14}}
+\newlabel{sub@fig:datasize-ablation}{{c}{14}{\centering Data Size Ablation. \caption@thelabel }{figure.caption.12}{}}
+\newlabel{sub@fig:datasize-ablation@cref}{{[subfigure][3][8]8c}{[1][13][]14}}
+\newlabel{fig:dataratio-ablation}{{8d}{14}{\centering Data Composition Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{fig:dataratio-ablation@cref}{{[subfigure][4][8]8d}{[1][13][]14}}
+\newlabel{sub@fig:dataratio-ablation}{{d}{14}{\centering Data Composition Ablation \caption@thelabel }{figure.caption.12}{}}
+\newlabel{sub@fig:dataratio-ablation@cref}{{[subfigure][4][8]8d}{[1][13][]14}}
+\newlabel{fig:recon-quality}{{8e}{14}{\centering Observation reconstruction quality \caption@thelabel }{figure.caption.12}{}}
+\newlabel{fig:recon-quality@cref}{{[subfigure][5][8]8e}{[1][13][]14}}
+\newlabel{sub@fig:recon-quality}{{e}{14}{\centering Observation reconstruction quality \caption@thelabel }{figure.caption.12}{}}
+\newlabel{sub@fig:recon-quality@cref}{{[subfigure][5][8]8e}{[1][13][]14}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Comprehensive ablation study for LaGarNet in simulation environments. \textbf  {(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf  {(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times $64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants.}}{14}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:ablation-and-recon-combined}{{8}{14}{Comprehensive ablation study for LaGarNet in simulation environments. \textbf {(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf {(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times $64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants}{figure.caption.12}{}}
+\newlabel{fig:ablation-and-recon-combined@cref}{{[figure][8][]8}{[1][13][]14}}
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces Real-world garment flattening performance of different pick-and-place controllers. Mesh-based planning method, VCD \cite  {lin2022learning}, reports to reach \colorbox {yellow!25}{79.2 $\pm $ 9.4 \% NI} and \colorbox {yellow!25}{77.3 $\pm $ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports to achieve around \colorbox {gray!25}{64\% NI} flattening for real trousers and \colorbox {gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance.}}{14}{table.caption.14}\protected@file@percent }
+\newlabel{tab:real-worldflattening}{{V}{14}{Real-world garment flattening performance of different pick-and-place controllers. Mesh-based planning method, VCD \cite {lin2022learning}, reports to reach \colorbox {yellow!25}{79.2 $\pm $ 9.4 \% NI} and \colorbox {yellow!25}{77.3 $\pm $ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports to achieve around \colorbox {gray!25}{64\% NI} flattening for real trousers and \colorbox {gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance}{table.caption.14}{}}
+\newlabel{tab:real-worldflattening@cref}{{[table][5][]V}{[1][13][]14}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-D}1}Results}{14}{subsubsection.4.4.1}\protected@file@percent }
 \citation{paoletti2012pink}
 \citation{lin2022learning}
 \citation{lee2024learning}
@@ -407,85 +412,75 @@
 \citation{kadi2025draper}
 \citation{hoque2022visuospatial}
 \citation{lee2021learning}
-\citation{urrtde2025}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Transfer Ability of LaGarNet to Real-World Settings}{14}{subsection.4.4}\protected@file@percent }
-\newlabel{sec:real-exp}{{\mbox  {IV-D}}{14}{Transfer Ability of LaGarNet to Real-World Settings}{subsection.4.4}{}}
-\newlabel{sec:real-exp@cref}{{[subsection][4][4]\mbox  {IV-D}}{[1][14][]14}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-D}1}Results}{14}{subsubsection.4.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-D}2}Limitations and Failure Cases}{14}{subsubsection.4.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {V}Real Robot Setup}{14}{section.5}\protected@file@percent }
-\newlabel{sec:real-world-setup}{{V}{14}{Real Robot Setup}{section.5}{}}
-\newlabel{sec:real-world-setup@cref}{{[section][5][]V}{[1][14][]14}}
-\@writefile{lot}{\contentsline {table}{\numberline {VI}{\ignorespaces Real-world garment flattening performance of different pick-and-place controllers. Mesh-based planning method, VCD \cite  {lin2022learning}, reports to reach \colorbox {yellow!25}{79.2 $\pm $ 9.4 \% NI} and \colorbox {yellow!25}{77.3 $\pm $ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports to achieve around \colorbox {gray!25}{64\% NI} flattening for real trousers and \colorbox {gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance.}}{15}{table.caption.14}\protected@file@percent }
-\newlabel{tab:real-worldflattening}{{VI}{15}{Real-world garment flattening performance of different pick-and-place controllers. Mesh-based planning method, VCD \cite {lin2022learning}, reports to reach \colorbox {yellow!25}{79.2 $\pm $ 9.4 \% NI} and \colorbox {yellow!25}{77.3 $\pm $ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports to achieve around \colorbox {gray!25}{64\% NI} flattening for real trousers and \colorbox {gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance}{table.caption.14}{}}
-\newlabel{tab:real-worldflattening@cref}{{[table][6][]VI}{[1][14][]15}}
-\newlabel{fig:failure-visuals}{{8a}{15}{Visual failure cases of LaGarNet}{figure.caption.15}{}}
-\newlabel{fig:failure-visuals@cref}{{[subfigure][1][8]8a}{[1][14][]15}}
+\newlabel{fig:failure-visuals}{{9a}{15}{Visual failure cases of LaGarNet}{figure.caption.15}{}}
+\newlabel{fig:failure-visuals@cref}{{[subfigure][1][9]9a}{[1][14][]15}}
 \newlabel{sub@fig:failure-visuals}{{a}{15}{Visual failure cases of LaGarNet}{figure.caption.15}{}}
-\newlabel{sub@fig:failure-visuals@cref}{{[subfigure][1][8]8a}{[1][14][]15}}
-\newlabel{tab:failure-rates}{{8b}{15}{Trajectory and step-wise failure rates}{figure.caption.15}{}}
-\newlabel{tab:failure-rates@cref}{{[subfigure][2][8]8b}{[1][14][]15}}
+\newlabel{sub@fig:failure-visuals@cref}{{[subfigure][1][9]9a}{[1][14][]15}}
+\newlabel{tab:failure-rates}{{9b}{15}{Trajectory and step-wise failure rates}{figure.caption.15}{}}
+\newlabel{tab:failure-rates@cref}{{[subfigure][2][9]9b}{[1][14][]15}}
 \newlabel{sub@tab:failure-rates}{{b}{15}{Trajectory and step-wise failure rates}{figure.caption.15}{}}
-\newlabel{sub@tab:failure-rates@cref}{{[subfigure][2][8]8b}{[1][14][]15}}
-\newlabel{tab:timing_metrics}{{8c}{15}{Average Time Consumption}{figure.caption.15}{}}
-\newlabel{tab:timing_metrics@cref}{{[subfigure][3][8]8c}{[1][14][]15}}
+\newlabel{sub@tab:failure-rates@cref}{{[subfigure][2][9]9b}{[1][14][]15}}
+\newlabel{tab:timing_metrics}{{9c}{15}{Average Time Consumption}{figure.caption.15}{}}
+\newlabel{tab:timing_metrics@cref}{{[subfigure][3][9]9c}{[1][14][]15}}
 \newlabel{sub@tab:timing_metrics}{{c}{15}{Average Time Consumption}{figure.caption.15}{}}
-\newlabel{sub@tab:timing_metrics@cref}{{[subfigure][3][8]8c}{[1][14][]15}}
-\newlabel{tab:unseen-dress}{{8d}{15}{Unseen long-sleeve dress}{figure.caption.15}{}}
-\newlabel{tab:unseen-dress@cref}{{[subfigure][4][8]8d}{[1][14][]15}}
+\newlabel{sub@tab:timing_metrics@cref}{{[subfigure][3][9]9c}{[1][14][]15}}
+\newlabel{tab:unseen-dress}{{9d}{15}{Unseen long-sleeve dress}{figure.caption.15}{}}
+\newlabel{tab:unseen-dress@cref}{{[subfigure][4][9]9d}{[1][14][]15}}
 \newlabel{sub@tab:unseen-dress}{{d}{15}{Unseen long-sleeve dress}{figure.caption.15}{}}
-\newlabel{sub@tab:unseen-dress@cref}{{[subfigure][4][8]8d}{[1][14][]15}}
-\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Comprehensive analysis of LaGarNet's real-world performance. \textbf  {(a)} Failure cases in the real world; text colours indicate the source of failure: white for mechanical limitations, blue for assumption oversights, and red for the learning process itself. \textbf  {(b)} Quantitative analysis of failure modes. Note that a step-wise failure does not necessarily cause a trajectory failure; a trajectory is successful if it reaches the success state within 20 steps. ``Messing-near-success state'' is calculated through identifying ``near-success'' steps (NC $\geq $ 0.8 and IoU $\geq $ 0.7) and calculates how often the performance drops in the very next step.\textbf  {(c)} Breakdown of system timing metrics across the perception-action cycle. \textbf  {(d)} Zero-shot generalisation metrics evaluated on an unseen longsleeved dress with soft material properties and high internal friction.}}{15}{figure.caption.15}\protected@file@percent }
-\newlabel{fig:real_world_analysis}{{8}{15}{Comprehensive analysis of LaGarNet's real-world performance. \textbf {(a)} Failure cases in the real world; text colours indicate the source of failure: white for mechanical limitations, blue for assumption oversights, and red for the learning process itself. \textbf {(b)} Quantitative analysis of failure modes. Note that a step-wise failure does not necessarily cause a trajectory failure; a trajectory is successful if it reaches the success state within 20 steps. ``Messing-near-success state'' is calculated through identifying ``near-success'' steps (NC $\geq $ 0.8 and IoU $\geq $ 0.7) and calculates how often the performance drops in the very next step.\textbf {(c)} Breakdown of system timing metrics across the perception-action cycle. \textbf {(d)} Zero-shot generalisation metrics evaluated on an unseen longsleeved dress with soft material properties and high internal friction}{figure.caption.15}{}}
-\newlabel{fig:real_world_analysis@cref}{{[figure][8][]8}{[1][14][]15}}
+\newlabel{sub@tab:unseen-dress@cref}{{[subfigure][4][9]9d}{[1][14][]15}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Comprehensive analysis of LaGarNet's real-world performance. \textbf  {(a)} Failure cases in the real world; text colours indicate the source of failure: white for mechanical limitations, blue for assumption oversights, and red for the learning process itself. \textbf  {(b)} Quantitative analysis of failure modes. Note that a step-wise failure does not necessarily cause a trajectory failure; a trajectory is successful if it reaches the success state within 20 steps. ``Messing-near-success state'' is calculated through identifying ``near-success'' steps (NC $\geq $ 0.8 and IoU $\geq $ 0.7) and calculates how often the performance drops in the very next step.\textbf  {(c)} Breakdown of system timing metrics across the perception-action cycle. \textbf  {(d)} Zero-shot generalisation metrics evaluated on an unseen longsleeved dress with soft material properties and high internal friction.}}{15}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:real_world_analysis}{{9}{15}{Comprehensive analysis of LaGarNet's real-world performance. \textbf {(a)} Failure cases in the real world; text colours indicate the source of failure: white for mechanical limitations, blue for assumption oversights, and red for the learning process itself. \textbf {(b)} Quantitative analysis of failure modes. Note that a step-wise failure does not necessarily cause a trajectory failure; a trajectory is successful if it reaches the success state within 20 steps. ``Messing-near-success state'' is calculated through identifying ``near-success'' steps (NC $\geq $ 0.8 and IoU $\geq $ 0.7) and calculates how often the performance drops in the very next step.\textbf {(c)} Breakdown of system timing metrics across the perception-action cycle. \textbf {(d)} Zero-shot generalisation metrics evaluated on an unseen longsleeved dress with soft material properties and high internal friction}{figure.caption.15}{}}
+\newlabel{fig:real_world_analysis@cref}{{[figure][9][]9}{[1][14][]15}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {IV-D}2}Limitations and Failure Cases}{15}{subsubsection.4.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Real Robot Setup}{15}{section.5}\protected@file@percent }
+\newlabel{sec:real-world-setup}{{V}{15}{Real Robot Setup}{section.5}{}}
+\newlabel{sec:real-world-setup@cref}{{[section][5][]V}{[1][15][]15}}
+\citation{urrtde2025}
 \citation{garrido2014automatic}
 \citation{park1994robot}
+\newlabel{fig:robot-camera}{{10a}{16}{Camera Setup}{figure.caption.16}{}}
+\newlabel{fig:robot-camera@cref}{{[subfigure][1][10]10a}{[1][15][]16}}
+\newlabel{sub@fig:robot-camera}{{a}{16}{Camera Setup}{figure.caption.16}{}}
+\newlabel{sub@fig:robot-camera@cref}{{[subfigure][1][10]10a}{[1][15][]16}}
+\newlabel{fig:transfer-hueristic}{{10b}{16}{Heuristic of Transferring Policy in Region-of-Interest (ROI)}{figure.caption.16}{}}
+\newlabel{fig:transfer-hueristic@cref}{{[subfigure][2][10]10b}{[1][15][]16}}
+\newlabel{sub@fig:transfer-hueristic}{{b}{16}{Heuristic of Transferring Policy in Region-of-Interest (ROI)}{figure.caption.16}{}}
+\newlabel{sub@fig:transfer-hueristic@cref}{{[subfigure][2][10]10b}{[1][15][]16}}
+\newlabel{fig:setup_c}{{\caption@xref {fig:setup_c}{ on input line 1382}}{16}{Real Robot Setup}{figure.caption.16}{}}
+\newlabel{fig:setup_c@cref}{{[section][5][]V}{[1][15][]16}}
+\newlabel{sub@fig:setup_c}{{b}{16}{Real Robot Setup}{figure.caption.16}{}}
+\newlabel{sub@fig:setup_c@cref}{{[section][5][]V}{[1][15][]16}}
+\newlabel{tab:seg-para}{{10c}{16}{Parameters}{figure.caption.16}{}}
+\newlabel{tab:seg-para@cref}{{[subfigure][3][10]10c}{[1][15][]16}}
+\newlabel{sub@tab:seg-para}{{c}{16}{Parameters}{figure.caption.16}{}}
+\newlabel{sub@tab:seg-para@cref}{{[subfigure][3][10]10c}{[1][15][]16}}
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can captures table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted as red (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any parts of the cloth, it re-select a window that centres around the cloth as shown; the most highlighted part on the rectangular images are the workspace of the \text  {UR5e} Robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline.}}{16}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:real-world-overview}{{10}{16}{Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can captures table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted as red (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any parts of the cloth, it re-select a window that centres around the cloth as shown; the most highlighted part on the rectangular images are the workspace of the \text {UR5e} Robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline}{figure.caption.16}{}}
+\newlabel{fig:real-world-overview@cref}{{[figure][10][]10}{[1][15][]16}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Transfer Heuristic for Robot's Ring-Shaped Workspace}{16}{subsection.5.1}\protected@file@percent }
+\newlabel{sec:transfer-hueristic}{{\mbox  {V-A}}{16}{Transfer Heuristic for Robot's Ring-Shaped Workspace}{subsection.5.1}{}}
+\newlabel{sec:transfer-hueristic@cref}{{[subsection][1][5]\mbox  {V-A}}{[1][16][]16}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Hand-Eye Calibration}{16}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:calibration}{{\mbox  {V-B}}{16}{Hand-Eye Calibration}{subsection.5.2}{}}
+\newlabel{sec:calibration@cref}{{[subsection][2][5]\mbox  {V-B}}{[1][16][]16}}
 \citation{canberk2023cloth}
 \citation{lin2022learning}
 \citation{kadi2025draper}
 \citation{kirillov2023segment}
 \citation{kadi2025draper}
-\newlabel{fig:robot-camera}{{9a}{16}{Camera Setup}{figure.caption.16}{}}
-\newlabel{fig:robot-camera@cref}{{[subfigure][1][9]9a}{[1][14][]16}}
-\newlabel{sub@fig:robot-camera}{{a}{16}{Camera Setup}{figure.caption.16}{}}
-\newlabel{sub@fig:robot-camera@cref}{{[subfigure][1][9]9a}{[1][14][]16}}
-\newlabel{fig:transfer-hueristic}{{9b}{16}{Heuristic of Transferring Policy in Region-of-Interest (ROI)}{figure.caption.16}{}}
-\newlabel{fig:transfer-hueristic@cref}{{[subfigure][2][9]9b}{[1][14][]16}}
-\newlabel{sub@fig:transfer-hueristic}{{b}{16}{Heuristic of Transferring Policy in Region-of-Interest (ROI)}{figure.caption.16}{}}
-\newlabel{sub@fig:transfer-hueristic@cref}{{[subfigure][2][9]9b}{[1][14][]16}}
-\newlabel{fig:setup_c}{{\caption@xref {fig:setup_c}{ on input line 1407}}{16}{Real Robot Setup}{figure.caption.16}{}}
-\newlabel{fig:setup_c@cref}{{[section][5][]V}{[1][14][]16}}
-\newlabel{sub@fig:setup_c}{{b}{16}{Real Robot Setup}{figure.caption.16}{}}
-\newlabel{sub@fig:setup_c@cref}{{[section][5][]V}{[1][14][]16}}
-\newlabel{tab:seg-para}{{9c}{16}{Parameters}{figure.caption.16}{}}
-\newlabel{tab:seg-para@cref}{{[subfigure][3][9]9c}{[1][14][]16}}
-\newlabel{sub@tab:seg-para}{{c}{16}{Parameters}{figure.caption.16}{}}
-\newlabel{sub@tab:seg-para@cref}{{[subfigure][3][9]9c}{[1][14][]16}}
-\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can captures table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted as red (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any parts of the cloth, it re-select a window that centres around the cloth as shown; the most highlighted part on the rectangular images are the workspace of the \text  {UR5e} Robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline.}}{16}{figure.caption.16}\protected@file@percent }
-\newlabel{fig:real-world-overview}{{9}{16}{Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can captures table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted as red (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any parts of the cloth, it re-select a window that centres around the cloth as shown; the most highlighted part on the rectangular images are the workspace of the \text {UR5e} Robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline}{figure.caption.16}{}}
-\newlabel{fig:real-world-overview@cref}{{[figure][9][]9}{[1][14][]16}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Transfer Heuristic for Robot's Ring-Shaped Workspace}{16}{subsection.5.1}\protected@file@percent }
-\newlabel{sec:transfer-hueristic}{{\mbox  {V-A}}{16}{Transfer Heuristic for Robot's Ring-Shaped Workspace}{subsection.5.1}{}}
-\newlabel{sec:transfer-hueristic@cref}{{[subsection][1][5]\mbox  {V-A}}{[1][15][]16}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Hand-Eye Calibration}{16}{subsection.5.2}\protected@file@percent }
-\newlabel{sec:calibration}{{\mbox  {V-B}}{16}{Hand-Eye Calibration}{subsection.5.2}{}}
-\newlabel{sec:calibration@cref}{{[subsection][2][5]\mbox  {V-B}}{[1][16][]16}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Real-World Garment Segmentation}{16}{subsection.5.3}\protected@file@percent }
-\newlabel{sec:real-world-cloth-seg}{{\mbox  {V-C}}{16}{Real-World Garment Segmentation}{subsection.5.3}{}}
-\newlabel{sec:real-world-cloth-seg@cref}{{[subsection][3][5]\mbox  {V-C}}{[1][16][]16}}
 \citation{hafner2019learning}
 \citation{prudencio2023survey}
 \citation{agarwal2020optimistic}
 \citation{chi2023diffusionpolicy}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Real-World Garment Segmentation}{17}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:real-world-cloth-seg}{{\mbox  {V-C}}{17}{Real-World Garment Segmentation}{subsection.5.3}{}}
+\newlabel{sec:real-world-cloth-seg@cref}{{[subsection][3][5]\mbox  {V-C}}{[1][17][]17}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Grasping}{17}{subsection.5.4}\protected@file@percent }
 \newlabel{sec:grasping}{{\mbox  {V-D}}{17}{Grasping}{subsection.5.4}{}}
-\newlabel{sec:grasping@cref}{{[subsection][4][5]\mbox  {V-D}}{[1][16][]17}}
+\newlabel{sec:grasping@cref}{{[subsection][4][5]\mbox  {V-D}}{[1][17][]17}}
 \@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{17}{section.6}\protected@file@percent }
 \newlabel{sec:discussion}{{VI}{17}{Discussion}{section.6}{}}
 \newlabel{sec:discussion@cref}{{[section][6][]VI}{[1][17][]17}}
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{17}{section.7}\protected@file@percent }
-\newlabel{sec:conclusion}{{VII}{17}{Conclusion}{section.7}{}}
-\newlabel{sec:conclusion@cref}{{[section][7][]VII}{[1][17][]17}}
 \bibstyle{IEEEtran}
 \bibdata{IEEEabrv,ref}
 \bibcite{nayak2018introduction}{1}
@@ -517,6 +512,10 @@
 \bibcite{lee2021learning}{27}
 \bibcite{he2024fabricfolding}{28}
 \bibcite{gu2023learning}{29}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{18}{section.7}\protected@file@percent }
+\newlabel{sec:conclusion}{{VII}{18}{Conclusion}{section.7}{}}
+\newlabel{sec:conclusion@cref}{{[section][7][]VII}{[1][18][]18}}
+\@writefile{toc}{\contentsline {section}{References}{18}{section*.18}\protected@file@percent }
 \bibcite{arnold2023cloth}{30}
 \bibcite{lin2022learning}{31}
 \bibcite{lips2024learning}{32}
@@ -527,7 +526,6 @@
 \bibcite{wu2024unigarmentmanip}{37}
 \bibcite{doumanoglou2014autonomous}{38}
 \bibcite{sun2015accurate}{39}
-\@writefile{toc}{\contentsline {section}{References}{18}{section*.18}\protected@file@percent }
 \bibcite{hoque2021lazydagger}{40}
 \bibcite{hafner2025mastering}{41}
 \bibcite{duan2024learning}{42}
@@ -564,4 +562,4 @@
 \bibcite{kirillov2023segment}{73}
 \bibcite{prudencio2023survey}{74}
 \bibcite{agarwal2020optimistic}{75}
-\gdef \@abspage@last{19}
+\gdef \@abspage@last{20}

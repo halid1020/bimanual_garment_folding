@@ -1,4 +1,27 @@
-name: multi-primitive-diffusion
+name: magpie
+device: 'cuda'
+
+# --- Recover the LaGarNet diffusion policy via Magpie's DDPM mode (config-only) ---
+# Magpie is the evolved diffusion agent: loss_type 'diffusion' runs classic DDPM over
+# num_diffusion_iters steps with a ConditionalUnet1D backbone; primitive_integration
+# 'none' makes it a single-primitive policy emitting the raw 4-D pick-and-place action.
+loss_type: diffusion
+noise_pred_net: unet
+action_shape: [4]
+vision_encoder: 'original'        # ResNet18 + GroupNorm -> 512-D (DRAPER vision lineage)
+# Diffusion-policy training hyperparameters (the external diffusion_policy agent carried
+# these as defaults; set explicitly for Magpie). Not from the LaGarNet paper's exact run.
+optimiser_class: 'adamw'
+optimiser_params: { lr: 1.0e-4, weight_decay: 1.0e-6 }
+num_warmup_steps: 500
+ema_power: 0.75
+grad_clip_norm: 1.0
+val_interval: 1000
+validate_training: True
+feature_noise_factor: 0.0
+predict_goal_state: False
+mask_out_irrelavent_action_dim: False
+
 oracle: False # TODO: fix this, I need to add this because of build_agent function
 obs_dim: 512
 action_dim: 4

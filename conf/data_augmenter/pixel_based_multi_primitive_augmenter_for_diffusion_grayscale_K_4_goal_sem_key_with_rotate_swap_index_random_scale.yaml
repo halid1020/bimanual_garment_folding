@@ -1,0 +1,34 @@
+# Grayscale input, otherwise the standard v126/v150 augmentation.
+#
+# Collapsing RGB to luma removes the colour nuisance dimension outright, which is a far
+# stronger appearance invariance than the 6-way `random_channel_permutation` it replaces
+# (that only covers channel order, not white balance, specular highlights or table texture).
+# Channel permutation is therefore disabled: with luma weights it would leak back in as an
+# uncontrolled brightness jitter that differs between sim and real.
+#
+# Pair with `input_obs: 'gray+goal_gray'` in the agent config (2 encoder input channels).
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+to_grayscale: true
+random_rotation: true
+rotation_degree: 1
+vertical_flip: true
+debug: false
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: false
+use_goal: True
+goal_aug: "same_as_obs"
+use_workspace: False
+K: 4
+not_rotate_primitives: [0]
+augment_sem_key: True
+
+random_scale: true
+scale_range: [0.7, 1.0]
+
+random_swap_actions: true
+swap_action_prob: 0.5
+swap_action_mapping:
+  0: [[0, 1], [2, 3]]
+  1: [[0, 1, 4, 5], [2, 3, 6, 7]]

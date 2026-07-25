@@ -1,0 +1,36 @@
+# Conservative augmentation for sim-to-real transfer.
+#
+# Drops the three geometric augmentations whose invariances hold in simulation but NOT on
+# the real dual-arm rig:
+#   - rotation is bounded to +/-20 deg instead of the full circle (fixed camera, fixed arm
+#     placement, and out-of-frame targets get clamped onto the image border rather than dropped);
+#   - action swap is off, because gripper order is NOT interchangeable when each arm has a
+#     limited reach, and training it bimodal invites midpoint-collapsed grasps;
+#   - random scale is off, because the camera-to-table distance is fixed at deployment.
+#
+# Photometric augmentation (colour jitter, channel permutation) is retained.
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+random_rotation: true
+rotation_degree: 1
+rotation_max_degree: 20
+vertical_flip: true
+debug: false
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: true
+use_goal: True
+goal_aug: "same_as_obs"
+use_workspace: False
+K: 4
+not_rotate_primitives: [0]
+augment_sem_key: True
+
+random_scale: false
+scale_range: [0.7, 1.0]
+
+random_swap_actions: false
+swap_action_prob: 0.5
+swap_action_mapping:
+  0: [[0, 1], [2, 3]]
+  1: [[0, 1, 4, 5], [2, 3, 6, 7]]

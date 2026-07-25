@@ -1,0 +1,33 @@
+# Grayscale input + conservative geometric augmentation.
+#
+# Combines the two independent sim-to-real hypotheses: colour is a nuisance dimension the
+# real camera does not reproduce, and the rotation / swap / scale invariances trained in
+# simulation do not hold on a fixed-camera, limited-reach dual-arm rig.
+#
+# Pair with `input_obs: 'gray+goal_gray'` in the agent config (2 encoder input channels).
+name: pixel-based-multi-primitive-data-augmenter-for-diffusion
+to_grayscale: true
+random_rotation: true
+rotation_degree: 1
+rotation_max_degree: 20
+vertical_flip: true
+debug: false
+color_jitter: true
+img_dim: [96, 96]
+randomise_prim_acts: false
+random_channel_permutation: false
+use_goal: True
+goal_aug: "same_as_obs"
+use_workspace: False
+K: 4
+not_rotate_primitives: [0]
+augment_sem_key: True
+
+random_scale: false
+scale_range: [0.7, 1.0]
+
+random_swap_actions: false
+swap_action_prob: 0.5
+swap_action_mapping:
+  0: [[0, 1], [2, 3]]
+  1: [[0, 1, 4, 5], [2, 3, 6, 7]]

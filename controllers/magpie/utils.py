@@ -153,6 +153,40 @@ def compute_classification_metrics(logits, targets, num_classes):
 # Network Architecture Utilities
 # =============================================================================
 
+def rgb_to_gray(t: torch.Tensor, channel_dim: int = 1) -> torch.Tensor:
+    """
+    Collapses an RGB tensor to a single luminance channel (ITU-R BT.601).
+
+    Used by the grayscale input mode ('gray+goal_gray'). Grayscale removes the
+    colour nuisance dimension entirely, which is a far stronger invariance than
+    the 6-way `random_channel_permutation` and is intended to narrow the
+    sim-to-real appearance gap (different white balance, specular highlights,
+    table texture).
+
+    The channel dimension is kept (size 1) so the result can be concatenated
+    with other modalities exactly like the RGB tensor it replaces.
+
+    Args:
+        t (torch.Tensor): Tensor with 3 channels along `channel_dim`.
+        channel_dim (int): Index of the channel axis (default: 1, i.e. B,C,H,W).
+
+    Returns:
+        torch.Tensor: Same shape as `t` but with size 1 along `channel_dim`.
+    """
+    if t.shape[channel_dim] == 1:
+        return t  # Already grayscale; idempotent so callers need not guard.
+    if t.shape[channel_dim] != 3:
+        raise ValueError(
+            f"rgb_to_gray expected 3 channels at dim {channel_dim}, got {t.shape[channel_dim]} "
+            f"(tensor shape {tuple(t.shape)})"
+        )
+
+    weights = torch.tensor([0.299, 0.587, 0.114], device=t.device, dtype=t.dtype)
+    shape = [1] * t.ndim
+    shape[channel_dim] = 3
+    return (t * weights.reshape(shape)).sum(dim=channel_dim, keepdim=True)
+
+
 def get_resnet(name: str, input_channel=3, weights=None, **kwargs) -> nn.Module:
     """
     Instantiates a standard ResNet vision encoder from torchvision.

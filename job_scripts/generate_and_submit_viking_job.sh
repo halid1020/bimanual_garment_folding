@@ -23,6 +23,8 @@ usage() {
     echo "  -r  Run hydra_transfer_eval.py (uses transfer_eval/ configs)"
     echo "  -a  Run hydra_train_and_transfer.py (uses transfer_eval/ configs)"
     echo "  -z  Run hydra_horizon_ablation.py (uses transfer_eval/ configs)"
+    echo "  -o  Run magpie/eval_action_prediction.py: offline inferred-vs-human action"
+    echo "      scoring on the real dataset (uses sim_exp/ configs; cheap, fits gpu_short)"
     exit 1
 }
 
@@ -38,7 +40,8 @@ EXP_NAME=${EXP_NAME#transfer_eval/}
 shift
 
 # Added 'a' to getopts
-while getopts "t:m:c:p:g:eraz" opt; do
+JOB_SUFFIX=""
+while getopts "t:m:c:p:g:erazo" opt; do
   case $opt in
     t) 
       # Smart time parsing
@@ -74,6 +77,14 @@ while getopts "t:m:c:p:g:eraz" opt; do
       PY_SCRIPT="hydra_horizon_ablation.py"
       CONFIG_DIR="transfer_eval"
       ;;
+    o)
+      # Offline action-prediction eval against the real-world human demonstrations.
+      # Needs no simulator, so it is cheap enough for gpu_short.
+      PY_SCRIPT="magpie/eval_action_prediction.py"
+      CONFIG_DIR="sim_exp"
+      # Distinct filename so this does not overwrite the experiment's training submit script.
+      JOB_SUFFIX="_offline_eval"
+      ;;
     *) usage ;;
   esac
 done
@@ -88,7 +99,7 @@ elif [ -z "$TIME_STRING" ]; then
 fi
 
 OUT_DIR="./tmp"
-SAFE_EXP_NAME="${EXP_NAME//\//_}"
+SAFE_EXP_NAME="${EXP_NAME//\//_}${JOB_SUFFIX}"
 SCRIPT_PATH="${OUT_DIR}/submit_${SAFE_EXP_NAME}.sh"
 
 mkdir -p "$OUT_DIR"

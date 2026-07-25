@@ -52,7 +52,11 @@ def build_networks_and_optimizers(agent):
         'rgb+goal_mask': 4,
         'rgb-workspace-mask': 5, 
         'rgb+goal_rgb': 6,
-        'rgb-workspace-mask-goal': 8
+        'rgb-workspace-mask-goal': 8,
+        # Grayscale observation + grayscale goal (1 luma channel each). The augmenter
+        # receives the 6-channel RGB pair and collapses each half to luma, so only the
+        # encoder's first conv needs to know about the reduced width.
+        'gray+goal_gray': 2,
     }
     agent.input_channel = input_channel_map.get(config.input_obs, 3)
 

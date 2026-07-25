@@ -166,17 +166,79 @@ class MagpieAgent(TrainableAgent):
         print(f'Loaded checkpoint: {checkpoint}')
         self.loaded = True
 
+    def init_from_pretrained(self):
+        """
+        Initialises the networks from another experiment's checkpoint (sim pre-training).
+
+        Enables the two-stage sim-pretrain -> real-finetune recipe. Driven by two
+        optional config keys:
+
+        - `init_from_exp`: experiment name whose checkpoint to start from. Resolved as
+          `<save_root>/<init_from_exp>/checkpoints/net_<checkpoint>.pt`, using the same
+          `<save_root>/<exp_name>` layout `tool/hydra_train.py` builds.
+        - `init_from_checkpoint`: 'best' (default) or an explicit update-step number.
+
+        Loading is non-strict and shape-filtered, so a stage-1 model whose architecture
+        differs slightly (e.g. a different `conv1` width when switching to grayscale)
+        still transfers every compatible layer instead of raising.
+
+        Returns:
+            bool: True if pretrained weights were applied.
+        """
+        init_exp = self.config.get('init_from_exp', None)
+        if not init_exp:
+            return False
+
+        checkpoint = self.config.get('init_from_checkpoint', 'best')
+        # save_dir is <save_root>/<exp_name>; its parent is <save_root>.
+        save_root = os.path.dirname(os.path.normpath(self.save_dir))
+        ckpt_file = os.path.join(save_root, init_exp, 'checkpoints', f'net_{checkpoint}.pt')
+
+        if not os.path.exists(ckpt_file):
+            raise FileNotFoundError(
+                f"[MagpieAgent, init_from_pretrained] init_from_exp='{init_exp}' but no checkpoint "
+                f"at {ckpt_file}. Has the stage-1 run finished?"
+            )
+
+        pretrained = torch.load(ckpt_file, map_location=self.device)
+        current = self.nets.state_dict()
+
+        compatible, skipped = {}, []
+        for k, v in pretrained.items():
+            if k in current and current[k].shape == v.shape:
+                compatible[k] = v
+            else:
+                skipped.append(k)
+
+        missing = [k for k in current if k not in compatible]
+        self.nets.load_state_dict(compatible, strict=False)
+
+        print(f"[MagpieAgent, init_from_pretrained] Initialised from '{init_exp}' "
+              f"(checkpoint '{checkpoint}'): {len(compatible)}/{len(current)} tensors loaded.")
+        if skipped:
+            print(f"[MagpieAgent, init_from_pretrained] Skipped {len(skipped)} incompatible "
+                  f"tensors, e.g. {skipped[:5]}")
+        if missing:
+            print(f"[MagpieAgent, init_from_pretrained] Left {len(missing)} tensors at their "
+                  f"random init, e.g. {missing[:5]}")
+
+        self.loaded = True
+        return True
+
     def load(self):
         """Automatically loads the most recent non-'best' checkpoint."""
         ckpt_path = os.path.join(self.save_dir, 'checkpoints')
         os.makedirs(ckpt_path, exist_ok=True)
         ckpt_files = [c for c in os.listdir(ckpt_path) if c.endswith('.pt') and 'best' not in c]
-        
+
         # Sort sequentially based on update step encoded in filename
         ckpt_files = sorted(ckpt_files, key=lambda x: int(x.split('_')[1].split('.')[0]))
-        
+
         if not ckpt_files:
             print('[MultiPrimitiveDiffusion, load] No checkpoint found')
+            # Only seed from a pretrained run when this experiment has no progress of its
+            # own, so resuming after preemption always continues from the local checkpoint.
+            self.init_from_pretrained()
             return 0
             
         ckpt_file = ckpt_files[-1]
@@ -834,6 +896,12 @@ class MagpieAgent(TrainableAgent):
             info['observation']['rgb+goal_rgb'] = np.concatenate(
                 [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
 
+        if self.config.input_obs == 'gray+goal_gray':
+            # Hand the augmenter the 6-channel RGB pair; it collapses each half to a
+            # single luma channel after augmentation, yielding the 2-channel encoder input.
+            info['observation']['gray+goal_gray'] = np.concatenate(
+                [info['observation']['rgb'].astype(np.float32), info['observation']['goal_rgb'].astype(np.float32)], axis=-1)
+
         def resize_mask_to_rgb(mask):
                 """Helper to strictly align mask spatial dimensions with main RGB frames."""
                 H, W = rgb.shape[:2]
@@ -917,10 +985,17 @@ class MagpieAgent(TrainableAgent):
             obs['vector_state'] = vector_state.cpu()
 
         input_obs = self.data_augmenter.postprocess(obs)[self.config.input_obs]
+        vis_obs = input_obs.transpose(1, 2, 0)
+
+        # Grayscale input is 2 channels (luma obs + luma goal), which the downstream
+        # OpenCV overlay helpers cannot draw on. Replicate the observation luma to RGB
+        # so the debug visualisation stays viewable.
+        if self.config.input_obs == 'gray+goal_gray':
+            vis_obs = np.repeat(vis_obs[..., :1], 3, axis=-1)
 
         # Log observation format for debugging
         self.internal_states[info['arena_id']].update(
-            {'input_obs': input_obs.transpose(1,2,0),
+            {'input_obs': vis_obs,
              'input_type': self.config.input_obs}
         )
         

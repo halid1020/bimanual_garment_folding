@@ -23,6 +23,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         
         # --- Original Configs ---
         self.random_rotation = config.get("random_rotation", False)
+        # Bound the rotation to +/- this many degrees instead of the full circle.
+        # Unset (None) keeps the historical behaviour: uniform over all 360 degrees.
+        # A fixed camera and fixed arm placement mean the real setup is NOT SO(2)
+        # symmetric, so full-circle rotation trains an invariance that does not hold
+        # at deployment (and clamps out-of-frame targets onto the image border).
+        self.rotation_max_degree = config.get("rotation_max_degree", None)
+        # Collapse RGB observation and goal to single luma channels at the end of the
+        # pipeline, after all geometric and photometric augmentation.
+        self.to_grayscale = config.get("to_grayscale", False)
         self.vertical_flip = config.get("vertical_flip", False)
         self.debug = config.get("debug", False)
         self.color_jitter = self.config.get("color_jitter", False)
@@ -238,6 +247,13 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
         if self.use_goal and 'rgb+goal_rgb' in sample:
             sample['rgb'] = sample['rgb+goal_rgb'][:, :, :, :, :3]
             sample['goal_rgb'] = sample['rgb+goal_rgb'][:, :, :, :, 3:6]
+
+        # Grayscale mode: the environment still hands over a 6-channel RGB pair, so it is
+        # unpacked exactly like 'rgb+goal_rgb'. The luma collapse happens at the very end
+        # (see RESHAPE BACK), after every geometric and photometric transform.
+        if self.use_goal and 'gray+goal_gray' in sample:
+            sample['rgb'] = sample['gray+goal_gray'][:, :, :, :, :3]
+            sample['goal_rgb'] = sample['gray+goal_gray'][:, :, :, :, 3:6]
         
         if self.use_goal and 'rgb+goal_mask' in sample:
             sample['rgb'] = sample['rgb+goal_mask'][:, :, :, :, :3]
@@ -446,10 +462,15 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
             inv_S = 1.0 / S
 
             if do_rotation:
-                degree = self.config.rotation_degree * torch.randint(
-                    int(360 / self.config.rotation_degree), size=(1,)
-                )
-                thetas = torch.deg2rad(degree) 
+                step_deg = self.config.rotation_degree
+                if self.rotation_max_degree is not None:
+                    # Bounded: uniform over [-max, +max], quantised by rotation_degree.
+                    num_steps = int(self.rotation_max_degree / step_deg)
+                    degree = step_deg * torch.randint(-num_steps, num_steps + 1, size=(1,))
+                else:
+                    # Unbounded (historical default): uniform over the full circle.
+                    degree = step_deg * torch.randint(int(360 / step_deg), size=(1,))
+                thetas = torch.deg2rad(degree)
                 cos_theta = torch.cos(thetas)
                 sin_theta = torch.sin(thetas)
 
@@ -644,6 +665,18 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
                     self._save_debug_image(cpu_goal_img, pa_cpu, orients=oa_cpu, sem_keys=gsk_cpu, prefix="aug_after_goal", step=b)
                      
         # =========================
+        #      GRAYSCALE COLLAPSE
+        # =========================
+        # Done last so every geometric and photometric transform above still operates on
+        # colour, and so the same collapse applies identically at train and eval time.
+        if self.to_grayscale:
+            from controllers.magpie.utils import rgb_to_gray
+            if use_rgb:
+                rgb_obs = rgb_to_gray(rgb_obs, channel_dim=1)
+            if use_goal_rgb:
+                goal_obs = rgb_to_gray(goal_obs, channel_dim=1)
+
+        # =========================
         #      RESHAPE BACK
         # =========================
         if use_rgb:
@@ -661,6 +694,10 @@ class PixelBasedMultiPrimitiveDataAugmenterForDiffusion:
 
         if 'rgb+goal_rgb' in sample:
             sample['rgb+goal_rgb'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
+
+        if 'gray+goal_gray' in sample:
+            # 2 channels out (1 luma observation + 1 luma goal), replacing the 6 that came in.
+            sample['gray+goal_gray'] = torch.cat([sample["rgb"], sample['goal_rgb']], dim=2)
 
         if train:
             pixel_actions = self._unflatten_bt(pixel_actions, BB, TT-1)

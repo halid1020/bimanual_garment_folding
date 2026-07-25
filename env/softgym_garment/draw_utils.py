@@ -78,7 +78,7 @@ def draw_big_arrowhead(img, p_from, p_to, color, size=28):
 
     cv2.fillPoly(img, [pts], color)
 
-def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20):
+def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20, arrow_size=30):
     """
     Draw a straight line from p_start → p_end with color gradient.
     p_start, p_end: (x, y) in pixel coords
@@ -105,7 +105,7 @@ def draw_colored_line(img, p_start, p_end, cmap, thickness=8, num_samples=20):
         (xs[-2], ys[-2]),
         (xs[-1], ys[-1]),
         color,
-        size=30
+        size=arrow_size
     )
 
 def draw_text_with_bg(img, text, org, color, scale=1.2, thickness=4):
@@ -150,11 +150,15 @@ def draw_pick_and_place(img, action):
         left_pick  = norm_to_px(action[:2], W, H)
         left_place  = norm_to_px(action[2:4], W, H)
 
-   
+
     # BLUE = left, RED = right
 
-    # ----- Draw arrows with SMALLER arrowheads -----
-    small_tip = 0.08    # << smaller arrowhead tip size
+    # ----- Sizes adaptive to the drawn image dimension -----
+    s = min(H, W)
+    thickness  = max(1, round(s * 0.008))   # ~4px @512, ~1px @128
+    arrow_size = max(3, round(s * 0.03))    # ~15px @512, ~4px @128
+    circle_r   = max(2, round(s * 0.012))   # ~6px @512
+    circle_th  = max(1, round(s * 0.006))   # ~3px @512
 
     # Colormaps (same convention as fling)
     cmap_left  = cv2.COLORMAP_COOL   # BLUE-ish
@@ -165,8 +169,9 @@ def draw_pick_and_place(img, action):
         swap(left_pick),
         swap(left_place),
         cmap_left,
-        thickness=8,
-        num_samples=20
+        thickness=thickness,
+        num_samples=20,
+        arrow_size=arrow_size
     )
 
     if len(action) > 4:
@@ -175,23 +180,24 @@ def draw_pick_and_place(img, action):
             swap(right_pick),
             swap(right_place),
             cmap_right,
-            thickness=8,
-            num_samples=20
+            thickness=thickness,
+            num_samples=20,
+            arrow_size=arrow_size
         )
 
 
     BLUE = cv2.applyColorMap(
         np.uint8([[[0]]]), cmap_left
     )[0, 0].tolist()
-                    
+
     RED = cv2.applyColorMap(
         np.uint8([[[0]]]), cmap_right
     )[0, 0].tolist()
-    
+
     # ----- Hollow circles -----
-    cv2.circle(img, swap(left_pick),  10, BLUE, 3)
+    cv2.circle(img, swap(left_pick),  circle_r, BLUE, circle_th)
 
     if len(action) > 4:
-        cv2.circle(img, swap(right_pick), 10, RED,  3)
+        cv2.circle(img, swap(right_pick), circle_r, RED,  circle_th)
 
     return img

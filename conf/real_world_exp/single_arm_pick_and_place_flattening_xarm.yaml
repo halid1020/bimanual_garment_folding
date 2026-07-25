@@ -1,0 +1,13 @@
+# @package _global_
+# LaGarNet-style single-arm pick-and-place on one xArm Lite 6. Mirrors
+# single_arm_pick_and_place_flattening.yaml; only the arena is swapped to the xArm
+# single-arm arena.
+defaults:
+  - /agent@agent: real_world_single_arm_pick_and_place_human
+  - /real_world_arena@arena: xarm_single_arm_pick_and_place
+  - /task@task: real_world_flattening
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: single_arm_pick_and_place_flattening_xarm
+measure_time: True

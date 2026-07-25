@@ -12,6 +12,7 @@ class VideoLogger(Logger):
     def __call__(self, episode_config, result, filename=None, wandb_logger=None):
 
         eid, save_video = episode_config['eid'], episode_config['save_video']
+        save_gif = episode_config.get('save_gif', False)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
         
@@ -44,12 +45,12 @@ class VideoLogger(Logger):
             header= (False if written else True)
         )
 
-        if save_video and 'frames' in result:    
-            sv(result['frames'], 
+        if save_video and 'frames' in result:
+            sv(result['frames'],
                 os.path.join(self.log_dir, filename, 'performance_visualisation'),
                 'episode_{}'.format(eid))
 
-        if save_video and 'frames' in result:    
+        if save_gif and 'frames' in result:
             sg(
                 result['frames'], 
                 path=os.path.join(

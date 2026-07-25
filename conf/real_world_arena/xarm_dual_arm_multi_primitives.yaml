@@ -1,0 +1,14 @@
+name: "real-world-xarm-dual-arm-multi-primitive"
+left_ip: "192.168.1.201"
+right_ip: "192.168.1.202"
+dry_run: False
+action_horizon: 20
+debug: False
+measure_time: True
+snap_to_cloth_mask: True
+maskout_background: True
+use_sim_workspace: False
+track_trajectory: True
+num_eval_trials: 200
+# Annular reach mask (m from each arm base): tune on hardware (Lite6 reach ~0.44 m).
+workspace_radius: [0.12, 0.40]

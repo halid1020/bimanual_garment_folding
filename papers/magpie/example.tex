@@ -16,6 +16,7 @@
 % \usepackage{subfigure}
 % \usepackage{natbib}
 \usepackage{tabularx,booktabs,caption,ragged2e}
+\usepackage{stfloats} % allow bottom-placed figure* on the page where it is issued (page-1 teaser)
 \usepackage{graphics, wrapfig}
 
 \DeclareMathOperator{\E}{\mathbb{E}}
@@ -81,6 +82,16 @@ Deformable object manipulation, dual-arm manipulation, imitation learning, flow 
 
 \IEEEpeerreviewmaketitle
 
+\begin{figure*}[!b]
+    \centering
+    \includegraphics[width=\linewidth]{plots/Magpie-Primitives.jpg}
+    \caption{MAGPIE's action primitives executed on our physical dual-arm system.
+    From a crumpled initial state (left), the policy sequences three parameterised
+    primitives---single-arm pick-and-place, dual-arm pick-and-fling, and dual-arm
+    pick-and-place---to flatten, align, and fold the garment.}
+    \label{fig:primitives}
+\end{figure*}
+
 \section{Introduction}
 
 Robotic manipulation of cloth-like deformable objects presents a significant technical challenge with profound societal and economic implications \cite{kadi2023data}. Automating cloth handling is essential for high-volume garment manufacturing \cite{nayak2018introduction}, and assistive care for elderly and mobility-impaired populations \cite{ohneberg2023assistive}. Despite this broad demand, reliable robotic cloth handling remains exceptionally difficult; garments confound traditional control through a high-dimensional state space, severe self-occlusions, and highly underactuated physical dynamics \cite{xue2023unifolding}.
@@ -88,7 +99,7 @@ Robotic manipulation of cloth-like deformable objects presents a significant tec
 Consequently, the garment manipulation literature has historically divided the control pipeline into isolated subtasks: flattening and downstream folding. A pervasive methodological split has emerged to address these distinct phases in the multi-primitive control setup. For flattening, Deep Reinforcement Learning (DRL) is heavily favoured \cite{canberk2022cloth, avigal2022speedfolding, ha2022flingbot}; this is because formulating a geometric coverage reward is relatively straightforward, whereas collecting comprehensive human demonstrations across near-infinite crumpled states for Imitation Learning (IL) is intractable. Conversely, for the folding phase, the paradigm flips---formulating a dense RL reward for heavily self-occluded, folded geometries is notoriously difficult \cite{kadi2025lagarnet}, prompting researchers to rely on IL or heuristic template/keypoint-based approaches \cite{barbany2025bifold}. While stitching together these separate policies can yield functional systems \cite{avigal2022speedfolding, canberk2022cloth, xue2023unifolding}, they rely on disjointed classifiers and complex heuristic switching. Consequently, they are inherently brittle---if a garment deforms or a fold fails mid-execution, the agent typically cannot recover or switch back to a flattening primitive without resetting the entire pipeline.
 
 
-In this paper, we resolve the above challenges through unifying the two processes with a multi-primitive imitation learning framework that can be learned in a strict end-to-end manner. Our method, MAGPIE (\textbf{M}ulti-primitive \textbf{A}pproach for \textbf{G}arment manipulation with \textbf{P}ixel-based \textbf{I}mitation l\textbf{E}arning), bypasses intractable RL exploration by directly cloning human expert strategies. It resolves IL's compounding error by learning both \textit{which} behavioural primitive to execute and \textit{how} to continuously parameterise it directly from visual observations. To achieve efficient, stable learning, we ground our policy in Conditioned Optimal Transport Flow Matching (COT-FM) \cite{lipman2022flow, black2024pi0}, mitigating the slow and highly curved inference trajectories of standard diffusion models \cite{chi2025diffusion}. In general, our main contributions are as follows:
+In this paper, we resolve the above challenges through unifying the two processes with a multi-primitive imitation learning framework that can be learned in a strict end-to-end manner. Our method, MAGPIE (\textbf{M}ulti-primitive \textbf{A}pproach for \textbf{G}arment manipulation with \textbf{P}ixel-based \textbf{I}mitation l\textbf{E}arning), bypasses intractable RL exploration by directly cloning human expert strategies. It resolves IL's compounding error by learning both \textit{which} behavioural primitive to execute and \textit{how} to continuously parameterise it directly from visual observations (Figure \ref{fig:primitives}). To achieve efficient, stable learning, we ground our policy in Conditioned Optimal Transport Flow Matching (COT-FM) \cite{lipman2022flow, black2024pi0}, mitigating the slow and highly curved inference trajectories of standard diffusion models \cite{chi2025diffusion}. In general, our main contributions are as follows:
 \begin{enumerate}
     \item We propose MAGPIE, a unified, end-to-end, hierarchical data-driven method that bridges flattening and folding under a single multi-primitive Imitation Learning framework.
 
@@ -142,7 +153,7 @@ In robotics, policies are often developed over a discrete set of action primitiv
 
 \subsection{Action Primitives} \label{sec:action_primitives}
 
-MAGPIE adopts four types of primitives essential for effective and robust performance. Each primitive is parameterised by a set of normalised 2-D pixel coordinates in $[-1, 1]$ (a total of $4$, $8$, $4$, and $0$ parameters, respectively), which are de-normalised and projected onto the table plane before execution.
+MAGPIE adopts four types of primitives essential for effective and robust performance; see Figure \ref{fig:primitives}. Each primitive is parameterised by a set of normalised 2-D pixel coordinates in $[-1, 1]$ (a total of $4$, $8$, $4$, and $0$ parameters, respectively), which are de-normalised and projected onto the table plane before execution.
 
 \paragraph{Pick-and-Fling:} Primarily utilised for highly crumpled states or garment reorientation, the action flips the garment's orientation, reveals hidden key-points, and helps untangle the cloth; it is parameterised by one 2-D grasp point per arm ($4$ values).
 

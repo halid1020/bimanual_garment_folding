@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 
 from .draw_utils import *
 # Make sure to import your NumpyEncoder from wherever it lives in your project
-from real_robot.utils.save_utils import NumpyEncoder 
+from real_robot.utils.save_utils import NumpyEncoder
+from .step_data_utils import save_step_data, save_final_state
 
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
@@ -34,49 +35,61 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         os.makedirs(out_dir, exist_ok=True)
 
         # =======================================================================
-        # --- NEW: Setup Directory for Step Data and Save Internal States ---
+        # --- Setup Directory for Step Data and Save Internal States ---
+        # Opt-in via episode_config['save_step_data'] (default OFF).
         # =======================================================================
-        episode_data_dir = os.path.join(self.log_dir, filename, f'episode_{eid}')
-        os.makedirs(episode_data_dir, exist_ok=True)
+        if episode_config.get('save_step_data', False):
+            episode_data_dir = os.path.join(self.log_dir, filename, f'episode_{eid}')
+            os.makedirs(episode_data_dir, exist_ok=True)
 
-        # Iterate through ALL steps to save internal states (including the final state)
-        for i, info in enumerate(result["information"]):
-            step_dir = os.path.join(episode_data_dir, f'step_{i}')
-            os.makedirs(step_dir, exist_ok=True)
-            
-            step_internal_state = info.get('internal_states')
-            
-            # Fallback if it's stored in the main result dict
-            if step_internal_state is None and 'internal_states' in result and i < len(result['internal_states']):
-                step_internal_state = result['internal_states'][i]
+            # Iterate through ALL steps to save internal states (including the final state)
+            for i, info in enumerate(result["information"]):
+                step_dir = os.path.join(episode_data_dir, f'step_{i}')
+                os.makedirs(step_dir, exist_ok=True)
 
-            if step_internal_state is not None:
-                # 1. Make a shallow copy to safely mutate
-                state_to_save = step_internal_state.copy()
-                
-                # 2. Extract heavy arrays/tensors to save as .npy
-                npy_keys = [
-                    'noise_actions_history', 'primitive_probabilities',
-                    'predicted_keypoints', 'gt_keypoints',
-                    # Add any other big arrays you might have here like 'recon_obs', etc.
-                ]
-                
-                for key in npy_keys:
-                    if key in state_to_save:
-                        data_arr = state_to_save.pop(key)
-                        
-                        # Safely convert PyTorch tensors or Lists to numpy arrays
-                        if hasattr(data_arr, 'cpu'):
-                            data_arr = data_arr.cpu().detach().numpy()
-                        elif not isinstance(data_arr, np.ndarray):
+                # Persist rgb/depth/mask(s), action, info and garment name per step,
+                # matching the real-world imp logger. information has N+1 entries vs N
+                # actions; the terminal state is written as final_state below instead.
+                if i < len(actions):
+                    save_step_data(step_dir, info, actions[i], eid, episode_config)
+
+                step_internal_state = info.get('internal_states')
+
+                # Fallback if it's stored in the main result dict
+                if step_internal_state is None and 'internal_states' in result and i < len(result['internal_states']):
+                    step_internal_state = result['internal_states'][i]
+
+                if step_internal_state is not None:
+                    # 1. Make a shallow copy to safely mutate
+                    state_to_save = step_internal_state.copy()
+
+                    # 2. Extract heavy arrays/tensors to save as .npy
+                    npy_keys = [
+                        'noise_actions_history', 'primitive_probabilities',
+                        'predicted_keypoints', 'gt_keypoints',
+                        # Add any other big arrays you might have here like 'recon_obs', etc.
+                    ]
+
+                    for key in npy_keys:
+                        if key in state_to_save:
+                            data_arr = state_to_save.pop(key)
+
+                            # Safely convert PyTorch tensors or Lists to numpy arrays
+                            if hasattr(data_arr, 'cpu'):
+                                data_arr = data_arr.cpu().detach().numpy()
+                            elif not isinstance(data_arr, np.ndarray):
+                                if data_arr is not None:
+                                    data_arr = np.array(data_arr)
+
                             if data_arr is not None:
-                                data_arr = np.array(data_arr)
-                                
-                        if data_arr is not None:
-                            np.save(os.path.join(step_dir, f'{key}.npy'), data_arr)
+                                np.save(os.path.join(step_dir, f'{key}.npy'), data_arr)
 
+            # Save the terminal state (result["information"] has N+1 entries vs N
+            # actions, so the per-step loop above never writes it as step data).
+            if result["information"]:
+                save_final_state(episode_data_dir, result["information"][-1], eid, episode_config)
         # =======================================================================
-                    
+
         images = []
         for i, act in enumerate(actions):
             info = result["information"][i]

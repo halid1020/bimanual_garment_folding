@@ -29,6 +29,30 @@ class MultiGarmentEnv(GarmentEnv):
             
         super().__init__(config)
 
+    def _log_flags(self):
+        # Optional, opt-in logging toggles threaded into episode_config so the
+        # loggers can gate gif and per-step-data saving. Both default OFF; enable
+        # at launch e.g. `+arena.save_gif=true +arena.save_step_data=true`.
+        return {
+            'save_gif': bool(self.config.get('save_gif', False)),
+            'save_step_data': bool(self.config.get('save_step_data', False)),
+        }
+
+    def get_eval_configs(self):
+        return [{'eid': eid, 'tier': 0,
+                 'save_video': bool(self.config.get('save_video', True)),
+                 **self._log_flags()} for eid in range(self.num_eval_trials)]
+
+    def get_val_configs(self):
+        return [{'eid': eid, 'tier': 0,
+                 'save_video': bool(self.config.get('save_video', True)),
+                 **self._log_flags()} for eid in range(self.num_val_trials)]
+
+    def get_train_configs(self):
+        return [{'eid': eid, 'tier': 0,
+                 'save_video': bool(self.config.get('save_video', False)),
+                 **self._log_flags()} for eid in range(self.num_train_trials)]
+
     def reset(self, episode_config=None):
         if episode_config is None:
             episode_config = {}

@@ -1,0 +1,13 @@
+# @package _global_
+# MAGPIE (dual-arm) on the dual xArm Lite 6 cell. Reuses the SAME trained agent and
+# task as magpie_ctr_align_longsleeve_p4_v10.yaml; only the arena is swapped to the
+# xArm dual-arm arena, so no retraining is needed.
+defaults:
+  - /agent/magpie@agent: magpie_ctr_align_longsleeve_p4_v10
+  - /real_world_arena@arena: xarm_dual_arm_multi_primitives
+  - /task@task: real_world_alignment
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: magpie_ctr_align_longsleeve_p4_v10_xarm
+measure_time: True

@@ -184,7 +184,7 @@ if __name__ == "__main__":
                         help="Base directory where datasets are stored.")
     parser.add_argument('--sim_name', type=str, default="all_garments_multi_primitive_alignment", 
                         help="Folder name of the simulation dataset.")
-    parser.add_argument('--real_name', type=str, default="real_world_longsleeve", 
+    parser.add_argument('--real_name', type=str, default="real_world_longsleeve_alignment_human", 
                         help="Folder name of the real-world dataset.")
     parser.add_argument('--output_name', type=str, default="sim_and_real_garments_combined_multi_primitive_alignment", 
                         help="Folder name for the new output dataset.")

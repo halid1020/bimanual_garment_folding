@@ -157,6 +157,17 @@ def build_eval_dataset(agent_cfg, data_path, data_dir):
     obs_config = {k: v for k, v in dataset_config['obs_config'].items()
                   if k not in SEMKEY_OBS_KEYS}
 
+    # TrajectoryDataset's own "does not exist" error does not say what IS there, which
+    # makes a misremembered store name needlessly hard to diagnose.
+    full_path = os.path.join(data_dir, data_path)
+    if not os.path.exists(full_path):
+        available = sorted(os.listdir(data_dir)) if os.path.isdir(data_dir) else []
+        raise FileNotFoundError(
+            f"[eval_action_prediction] Dataset '{data_path}' not found at {full_path}.\n"
+            f"  Available under {data_dir}: {available}\n"
+            f"  Override with: offline_eval.data_path=<name>"
+        )
+
     return TrajectoryDataset(
         data_path=data_path,
         data_dir=data_dir,
@@ -296,7 +307,7 @@ def main(cfg: DictConfig):
     OmegaConf.set_struct(cfg, True)
 
     offline_cfg = cfg.get('offline_eval', {})
-    data_path = offline_cfg.get('data_path', 'real_world_longsleeve')
+    data_path = offline_cfg.get('data_path', 'real_world_longsleeve_alignment_human')
     data_dir = offline_cfg.get('data_dir', cfg.agent.dataset_config.get('data_dir', './data/datasets'))
     batch_size = int(offline_cfg.get('batch_size', 64))
     image_size = int(offline_cfg.get('image_size', 128))

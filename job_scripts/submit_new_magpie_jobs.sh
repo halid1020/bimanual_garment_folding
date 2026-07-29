@@ -30,13 +30,32 @@
 #   ./job_scripts/submit_new_magpie_jobs.sh --stage all        # both
 #   ./job_scripts/submit_new_magpie_jobs.sh --offline-eval     # offline real-action scoring
 #   ./job_scripts/submit_new_magpie_jobs.sh --dry-run          # print commands only
+#   ./job_scripts/submit_new_magpie_jobs.sh --mem 64G --time 72:00:00   # override resources
 #
 # 80% of training jobs go to the `gpu` partition, 20% to `gpuplus`
 # (deterministic: every 5th submission goes to gpuplus).
+#
+# Resources: the first batch ran at 24G/58h and produced both OUT_OF_MEMORY (v157, v167)
+# and timeout failures.
+#
+# Memory. Every agent runs `train_mode: 'from_policy'` with `io_mode: "w"`, so each job
+# re-collects all 800/839 demos into a fresh store, and `cache_in_memory: True` keeps them
+# resident. TrajectoryDataset grows that cache with `np.concatenate` on every added
+# trajectory, which holds the old and new arrays at once -- so peak RSS is roughly TWICE
+# the final cache and is reached at the END of collection, ~1-1.5 h in. That is exactly
+# where both OOM failures landed. 64G covers the doubling with margin.
+#
+# Time. With `-a` the job must also fit a 6-arena zero-shot transfer eval after 120k
+# training steps, which is what overran 58h.
 
 DRY_RUN=false
 STAGE="1"
 OFFLINE_EVAL=false
+
+# Training resources. Raised from 24G/58:00:00 after the first batch hit OOM and timeouts.
+TRAIN_MEM="36G"
+TRAIN_TIME="60:00:00"
+TRAIN_CPUS=6
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -44,7 +63,13 @@ while [ $# -gt 0 ]; do
         --offline-eval) OFFLINE_EVAL=true; shift ;;
         --stage)        STAGE="$2"; shift 2 ;;
         --stage=*)      STAGE="${1#*=}"; shift ;;
-        -h|--help)      sed -n '3,36p' "$0"; exit 0 ;;
+        --mem)          TRAIN_MEM="$2"; shift 2 ;;
+        --mem=*)        TRAIN_MEM="${1#*=}"; shift ;;
+        --time)         TRAIN_TIME="$2"; shift 2 ;;
+        --time=*)       TRAIN_TIME="${1#*=}"; shift ;;
+        --cpus)         TRAIN_CPUS="$2"; shift 2 ;;
+        --cpus=*)       TRAIN_CPUS="${1#*=}"; shift ;;
+        -h|--help)      sed -n '3,49p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -114,8 +139,8 @@ submit_training() {
         partition="gpuplus"
     fi
 
-    local cmd="./job_scripts/generate_and_submit_viking_job.sh ${exp} -c 6 -m 24G -p ${partition} -t 58:00:00 -a"
-    echo "[submit_new_magpie_jobs] [train:${partition}] ${exp}"
+    local cmd="./job_scripts/generate_and_submit_viking_job.sh ${exp} -c ${TRAIN_CPUS} -m ${TRAIN_MEM} -p ${partition} -t ${TRAIN_TIME} -a"
+    echo "[submit_new_magpie_jobs] [train:${partition}:${TRAIN_MEM}:${TRAIN_TIME}] ${exp}"
     if [ "$DRY_RUN" = false ]; then $cmd; else echo "    $cmd"; fi
 }
 

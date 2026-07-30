@@ -197,7 +197,7 @@ Kasim Terzi{\'c}$^{2}$,~\IEEEmembership{Member,~IEEE},~\orcidlink{0000-0001-6692
     % --- ROW 1 ---
     
     % First Subfigure: Simulation vs Real Goals
-    \subfloat[Initial simulated garments with goals.\label{fig:sim-train-init}]{
+    \subfloat[Simulated garments' initial and goal states.\label{fig:sim-train-init}]{
         \begin{minipage}[c]{0.300\textwidth}
             \centering
             % Grouping the two original sub-images side-by-side
@@ -205,14 +205,14 @@ Kasim Terzi{\'c}$^{2}$,~\IEEEmembership{Member,~IEEE},~\orcidlink{0000-0001-6692
         \end{minipage}
     }
     % Second Subfigure: Real Garments
-    \subfloat[Real garments used for real-world evaluation. \label{fig:real-garments}]{
+    \subfloat[Garments used for real-world evaluation. \label{fig:real-garments}]{
         \begin{minipage}[c]{0.415\textwidth}
             \centering
             \includegraphics[width=1.0\linewidth]{plots/lagarnet-real-garments.jpg}
         \end{minipage}
     }
     % Second Subfigure: Real Garments
-    \subfloat[UR5e Flattening a skirt  \label{fig:ur5e-onrobot}]{
+    \subfloat[UR5e flattening a skirt. \label{fig:ur5e-onrobot}]{
         \begin{minipage}[c]{0.222\textwidth}
             \centering
             \includegraphics[width=1.0\linewidth]{plots/lagarnet-real-setup.jpg}
@@ -232,11 +232,11 @@ Kasim Terzi{\'c}$^{2}$,~\IEEEmembership{Member,~IEEE},~\orcidlink{0000-0001-6692
     }
     
     % Overall Figure Caption
-    \caption{Overview of LaGarNet, trained in simulation \cite{canberk2023cloth} and transferred zero-shot to a UR5e with the \text{DRAPER} framework \cite{kadi2025draper}. (a) Initial and goal states of the simulated \text{Cloth3D} garments \cite{bertiche2020cloth3d}. (b) Real garments used for physical evaluation, whose shapes and materials are out of the training distribution. (c) The UR5e with an OnRobot RG2 gripper. (d) LaGarNet flattening a real dress: bright blue arrows are the mean of the action Gaussian in the early CEM iterations and purple arrows the resulting final ones (top); the bottom row reports normalised coverage (NC), maximum IoU, the ground-truth reward and the prior reward predicted at the last planning step, all multiplied by 100.}
+    \caption{Overview of LaGarNet. (a) Initial and goal states of the simulated \text{Cloth3D} garments \cite{bertiche2020cloth3d}. (b) Real garments used for physical evaluation, where the shape and material of the yellow dress are out-of-distribution. (c) The UR5e real-world setup with an OnRobot RG2 gripper; input images are taken by a top-down RealSense camera. (d) LaGarNet flattening a real dress: bright blue arrows are the mean of the action Gaussian in the early CEM iterations and purple arrows the resulting final ones (top); the bottom row reports normalised coverage (NC), maximum IoU, the ground-truth reward and the prior reward predicted at the last planning step, all multiplied by 100. Trained in simulation \cite{canberk2023cloth}, LaGarNet transfers zero-shot to the real world for garment flattening.}
     \label{fig:LaGarNet}
 \end{strip}
 
-\begin{abstract} Manipulating cloth is a grand challenge in robotics: its many degrees of freedom yield an enormous state-action space that makes learning-based control extremely difficult to train. We present a goal-conditioned recurrent state-space model (GC-RSSM) that learns the latent dynamics of pick-and-place garment manipulation. Unlike the velocity- and position-controlled settings in which latent world models are usually studied, high-level pick-and-place is quasi-static: consecutive observations are not temporally continuous, and each transition is a single large deformation. We show that a recurrent latent world model nonetheless learns useful dynamics in this regime, and that our method LaGarNet matches the state-of-the-art performance of mesh-based methods on the difficult task of garment flattening whilst using five times fewer parameters and inferring over an order of magnitude faster---the first successful application of state-space models to complex garments. LaGarNet trains on a coverage-alignment reward and on data collected by a general procedure combining a random policy with a diffusion policy learned from a few human demonstrations, and a single policy flattens four garment types in both simulation and the real world.
+\begin{abstract} Manipulating cloth is a grand challenge in robotics: its many degrees of freedom yield an enormous state-action space that makes learning-based control extremely difficult to train. We present a goal-conditioned recurrent state-space model (GC-RSSM) that learns the latent dynamics of pick-and-place garment manipulation. Unlike the velocity- and position-controlled settings in which latent world models are usually studied, high-level pick-and-place is quasi-static: consecutive observations are not temporally continuous, and each transition is a single large deformation. We show that a recurrent latent world model nonetheless learns useful dynamics in this regime, and that our method LaGarNet matches the state-of-the-art performance of mesh-based methods on the difficult task of garment flattening whilst using five times fewer parameters and inferring over an order of magnitude faster---the first successful application of state-space models to complex garments. LaGarNet trains on our coverage-alignment reward and on our generalisable data collection procedure, producing a single policy that flattens four garment types in both simulation and the real world.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -247,32 +247,23 @@ Robot Learning, Cloth Manipulation, World Model, Model-Based Reinforcement Learn
 
 \section{Introduction} \label{sec:introduction}
 
-Robotic manipulation of cloth-like deformable objects is a significant technical challenge with profound societal and economic implications. Automating it is essential for modernising garment manufacturing \cite{nayak2018introduction}, for assisting elderly and mobility-impaired populations \cite{WHOaged2024, disablity2011world}, for domestic laundry, and for sterile handling in clinical settings \cite{cornish2021clinical}. It remains difficult due to the complex, underactuated dynamics of cloth, and garment flattening is a foundational milestone preceding tasks such as folding, ironing and pressing \cite{doumanoglou2016folding}.
+Robotic manipulation of cloth-like deformable objects is a significant technical challenge with profound societal and economic implications. Automating it is essential for modernising garment manufacturing \cite{nayak2018introduction}, for assisting elderly and mobility-impaired populations \cite{WHOaged2024, disablity2011world}, for domestic laundry, and for sterile handling in clinical settings \cite{cornish2021clinical}. Cloth manipulation remains difficult due to the complex, underactuated dynamics of cloth. Garment flattening is a foundational milestone preceding tasks such as folding, ironing and pressing \cite{doumanoglou2016folding}.
 
-Model-based methods learn and utilise a world model (i.e., the dynamics) of the environment \cite{ha2018world, hafner2019learning}, but cloth's large degrees of freedom make such controllers extremely difficult to train \cite{kadi2023data}, and world models have remained elusive here due to the difficulty of capturing accurate deformation and self-occlusion \cite{ma2021learning,yan2021learning,lin2020softgym}.
+Data-driven garment flattening is dominated by two families. Behaviour cloning (BC) is conceptually simple, but the space of crumpled configurations is vast and covering it demands an impractical volume of human demonstrations \cite{weng2022fabricflownet, lips2024learning, huang2025sis}; BC flatteners therefore depend on scripted oracles or narrow their scope to a single garment type. Reinforcement learning (RL) explores that distribution directly in simulation, which is why most general flattening controllers are trained this way \cite{matas2018sim, lin2020softgym, canberk2023cloth, gu2023learning, ha2022flingbot}---and almost always with model-free algorithms. Model-based RL, which learns and exploits a world model of the environment \cite{ha2018world, hafner2019learning}, remains rare on garments: cloth's large degrees of freedom make such controllers extremely difficult to train \cite{kadi2023data}, and accurate world models have stayed elusive because of deformation and self-occlusion \cite{ma2021learning,yan2021learning,lin2020softgym}.
 
-We present LaGarNet, a general single-policy method capable of flattening complex garment types (Figure \ref{fig:LaGarNet}). It mitigates the strong inductive biases of previous data-driven cloth manipulation methods \cite{kadi2025draper, weng2022fabricflownet, hoque2022visuospatial}, which rely on domain-specific architectures, reward functions and datasets from a particular blend of expert and random oracle policies, and generalise poorly to complex garments since each type needs its own engineered oracle. LaGarNet instead couples a goal-conditioned recurrent state-space model (GC-RSSM) with a general data-collection procedure supported by an expert proximal Diffusion Policy \cite{chi2023diffusionpolicy} and a coverage-alignment reward.
+In our experiments, we adopt a top-down camera view and a single-gripper pick-and-place (PnP) primitive. Our human-in-the-loop experiments show operators flatten diverse garments exceptionally well with single-arm commands alone, indicating the primary bottleneck is physical reasoning rather than hardware. Restricting ourselves to one gripper isolates this challenge and focuses the work on representation learning, bypassing the complexities of bimanual coordination and multi-primitive control \cite{canberk2023cloth} at the cost of more iterations.
 
-We adopt a top-down camera view and a single-gripper pick-and-place (PnP) primitive. Our human-in-the-loop experiments show operators flatten diverse garments exceptionally well with single-arm commands alone, indicating the primary bottleneck is physical reasoning rather than hardware. Restricting ourselves to one gripper isolates this cognitive challenge and focuses the work on representation learning, whilst bypassing the complexities of bimanual coordination and multi-primitive control \cite{canberk2023cloth}, at the cost of more iterations.
-
-
-
-
-
-
-% In addition, bi-manual manipulation on cloth-like objects introduces larger complexity in control presents many different types of failure modes \cite{gusseme2025insights}, whilst single-gripper PnP only suffers from misgrasping, multi-layer grasping as well as cloth slipping issues \cite{lin2022learning, hoque2022visuospatial}. The failures of PnP have been investigated and addressed from both hardware and control perspectives \cite{kadi2025draper, hoque2021lazydagger}. This paper aims to apply the \text{DRAPER} framework to more complex garment types, such as T-shirts, trousers, skirts and dresses as shown in Figure \ref{fig:sim-garments} and \ref{fig:real-garments}
-
-% Single-gripper pick-and-place (\text{PnP})  has been empirically shown to be inferior to these hybrid actions \cite{ha2022flingbot, canberk2023cloth}, and this has impacted the field to move away from using a single robot arm. 
+We present LaGarNet, a general single-policy method capable of flattening complex garment types (Figure \ref{fig:LaGarNet}). It mitigates the strong inductive biases of previous data-driven cloth manipulation methods \cite{kadi2025draper, weng2022fabricflownet, hoque2022visuospatial}, which rely on domain-specific architectures, reward functions and datasets from a particular blend of expert and random oracle policies, and generalise poorly since each garment type needs its own engineered oracle. LaGarNet instead couples a goal-conditioned recurrent state-space model (GC-RSSM) with a general data-collection procedure supported by an expert proximal Diffusion Policy \cite{chi2023diffusionpolicy} and a coverage-alignment reward. 
 
 \text{LaGarNet} flattens four types of complex garments across the whole workspace of a real robot arm (Figure \ref{fig:ur3e-real-action-inference}). It outperforms strong baselines such as PlaNet-ClothPick \cite{kadi2024planet} and Diffusion Policy \cite{chi2023diffusionpolicy} and, most importantly, matches the mesh-based planner MEDOR \cite{huang2022mesh} with 17$\times$ faster inference and 5$\times$ fewer parameters, planning in a compact latent space rather than over a mesh. It is also competitive with human operators under the same single-arm constraint, although humans retain the highest success rate at long horizons. Transferred zero-shot, it averages 90\% NC, 80\% NI and 81\% Max IoU on the real garments of Figure \ref{fig:real-garments}. We make four contributions:
 
 1. We propose a goal-conditioned recurrent state-space model (GC-RSSM) and show that a recurrent latent world model is effective in the \emph{quasi-static} pick-and-place regime, where consecutive frames are not temporally continuous, enabling \text{LaGarNet} to flatten garments in simulation and the real world at a fraction of the parameter count and inference cost of mesh-based world models.
 
-2. We develop a general data-collection strategy for offline training of \text{PnP} garment-flattening controllers, mixing an expert \text{Diffusion Policy} learned from few demonstrations with a mask-biased random policy.
+2. We develop a data-collection strategy for offline \text{PnP} garment flattening, mixing a \text{Diffusion Policy} expert learned from few demonstrations with a mask-biased random policy.
 
-3. We design a coverage-alignment reward function for general garment flattening, computable in both simulation and the real world.
+3. We design a coverage-alignment reward for garment flattening, computable in both simulation and the real world.
 
-4. We develop a sampling and transfer heuristic adapting the policy from its fixed square observation window to a robot arm's ring-shaped workspace.
+4. We develop a transfer heuristic adapting the policy from a square observation window to a ring-shaped robot workspace.
 
 % Apart from the introduction (Section \ref{sec:introduction}) and the conclusion (Section \ref{sec:conclusion}), the remainder of this paper is organised as follows. Section \ref{sec:related-workd} presents the state-of-the-art development of garment flattening in robotics. Section \ref{sec:planet-clothpick++} details the proposed method, \text{LaGarNet}. Section \ref{sec:transfer-heuristic} describes the transfer heuristic employed to bridge the gap between simulation and real-world observation-action space. Section \ref{sec:experiments} presents both simulation, real-world experimental results and a set of detailed ablation studies, along with corresponding analyses. Finally, Section \ref{sec:discussion} addresses the current limitations of our approach and outlines potential directions for future research.
 
@@ -292,9 +283,9 @@ Most model-based methods reconstruct a 3D mesh and its dynamics for the target c
 
 Among mesh-free approaches, \text{Contrastive Forward Modelling (CFM)} \cite{yan2021learning} trains latent dynamics for planning, and Hoque et al.~\cite{hoque2022visuospatial} propose \text{Visual Foresight Modelling (VSF)}, integrating variational video prediction models within the \text{Visual MPC} framework \cite{ebert2018visual} to address model exploitation. VSF nevertheless shows limited efficacy in garment flattening, and neither mesh-free planner has matched mesh-based VCD \cite{lin2022learning}. In contrast, our mesh-free planning method \text{LaGarNet} matches the state-of-the-art performance of the above mesh-based methods on flattening whilst using fewer parameters and inferring faster.
 
-The mesh-free \text{Deep Planning Network (PlaNet)} \cite{hafner2019learning} has been widely studied in control tasks \cite{yan2021learning, ma2021learning, lin2020softgym}, but shows limited efficacy on deformable objects, attributed to blurred visual reconstructions that lose the edge and corner details critical for shaping \cite{yan2021learning, lin2022learning}. \text{PlaNet-ClothPick} \cite{kadi2024planet}, a cloth-flattening algorithm based on a recurrent state-space model (RSSM), mitigates this by restricting pick actions to the cloth mask, designing a flattening-specific reward and using an engineered offline dataset; it achieves perfect flattening in simulation and over 70\% NC on real towels \cite{kadi2024planet, kadi2025draper}, but fails to generalise to complex garments due to these strong inductive biases. Our single-policy \text{LaGarNet} reduces them through a general data-collection procedure and a coverage-alignment reward.
+The mesh-free \text{Deep Planning Network (PlaNet)} \cite{hafner2019learning} is widely studied in control tasks \cite{yan2021learning, ma2021learning, lin2020softgym}, but shows limited efficacy on deformable objects, attributed to blurred visual reconstructions that lose the edge and corner details critical for shaping \cite{yan2021learning, lin2022learning}. \text{PlaNet-ClothPick} \cite{kadi2024planet}, a cloth-flattening algorithm based on a recurrent state-space model (RSSM), mitigates this by restricting pick actions to the cloth mask, a flattening-specific reward and an engineered offline dataset; it achieves perfect flattening in simulation and over 70\% NC on real towels \cite{kadi2024planet, kadi2025draper}, but fails to generalise to complex garments because of these inductive biases. Our single-policy \text{LaGarNet} reduces them through a general data-collection procedure and a coverage-alignment reward.
 
-Lastly, model-based methods derive reward signals from the difference between current and goal observations \cite{hoque2022visuospatial, yan2021learning}. Arnold et al.~\cite{arnold2023cloth} extend this to mesh-level goal-conditioned policies for complex tasks, but remain limited to fabric manipulation. Model-free approaches train goal-conditioned representations \cite{mo2022foldsformer}, flow networks \cite{weng2022fabricflownet}, or use a \text{Hindsight Replay Buffer} \cite{andrychowicz2017hindsight, lee2021learning}, yet are also restricted to simple fabrics. We instead propose a goal-conditioned RSSM (GC-RSSM) that predicts step-wise flattening rewards and flattens four garment types: longsleeved T-shirts, trousers, skirts and dresses.
+Model-based methods derive rewards from the difference between current and goal observations \cite{hoque2022visuospatial, yan2021learning}. Arnold et al.~\cite{arnold2023cloth} extend this to mesh-level goal-conditioned policies limited to fabrics. Model-free approaches train goal-conditioned representations \cite{mo2022foldsformer}, flow networks \cite{weng2022fabricflownet}, or use a \text{Hindsight Replay Buffer} \cite{andrychowicz2017hindsight, lee2021learning}, yet remain restricted to simple fabrics. We instead propose a goal-conditioned RSSM (GC-RSSM) predicting step-wise flattening rewards, which flattens longsleeved T-shirts, trousers, skirts and dresses.
 
 
 
@@ -315,11 +306,11 @@ Reward engineering is essential to the success of a reinforcement learning (RL) 
 
 \subsection{Data Collection and Preparation}
 
-The high-dimensional state-action space of deformable objects makes policy representations, dynamics models and value functions hard to train, and model-based cloth-shaping methods further suffer from model exploitation (choosing actions the model incorrectly estimates as optimal) and compounding error in imagined roll-outs. The effectiveness of a learned world model depends on how diverse and comprehensive the training trajectories are \cite{duan2024learning}, and training typically requires large amounts of data collected with carefully designed blends of policies \cite{hoque2022visuospatial, yan2021learning, kadi2024planet}. Prior work has used demonstration data \cite{matas2018sim}, corner-biased sampling that steers pick actions towards fabric corners and edges \cite{hoque2022visuospatial,weng2022fabricflownet}, and other engineered strategies \cite{arnold2023cloth,lin2022learning}---all of which impose strong inductive biases on the learning algorithm. We instead propose a general data collection procedure combining a Diffusion Policy \cite{chi2023diffusionpolicy} trained from a few human demonstrations with a random oracle policy, which empirically yields effective training data for MBRL algorithms.
+The high-dimensional state-action space of deformable objects makes policy representations, dynamics models and value functions hard to train, and model-based cloth-shaping methods further suffer from model exploitation (choosing actions the model incorrectly estimates as optimal) and compounding error in imagined roll-outs. A learned world model's effectiveness depends on how diverse and comprehensive the training trajectories are \cite{duan2024learning}, and training typically needs large amounts of data from carefully designed blends of policies \cite{hoque2022visuospatial, yan2021learning, kadi2024planet}. Prior work has used demonstration data \cite{matas2018sim}, corner-biased sampling that steers pick actions towards fabric corners and edges \cite{hoque2022visuospatial,weng2022fabricflownet}, and other engineered strategies \cite{arnold2023cloth,lin2022learning}---all of which impose strong inductive biases on the learning algorithm. We instead propose a general data collection procedure combining a Diffusion Policy \cite{chi2023diffusionpolicy} trained from a few human demonstrations with a random oracle policy, which empirically yields effective MBRL training data.
 
 
 \subsection{Goal-Conditioned Methods using RSSM}
-Previous research has integrated goal-conditioned learning into RSSMs. Pertsch et al.~\cite{pertsch2020long} propose a goal-condition predictor \text{(GCP)} conditioned on the initial and goal states of a subtask of a long-horizon task, improving planning with a hierarchical divide-and-conquer scheme in which the action is inferred inversely from the current state and an optimised sub-goal. Duan et al.~\cite{duan2024learning} present the goal-directed exploration algorithm \text{MUN} and devise \text{GC-Dreamer} as a baseline, but condition its goal on the actor and critic networks instead of the world model. We differ by conditioning the goal directly on the latent state inference of the RSSM, which learns a better representation.
+Previous research has integrated goal-conditioned learning into RSSMs. Pertsch et al.~\cite{pertsch2020long} propose a goal-condition predictor \text{(GCP)} conditioned on the initial and goal states of a subtask of a long-horizon task, improving planning with a hierarchical divide-and-conquer scheme that infers the action inversely from the current state and an optimised sub-goal. Duan et al.~\cite{duan2024learning} present the goal-directed exploration algorithm \text{MUN} and devise \text{GC-Dreamer} as a baseline, but condition its goal on the actor and critic networks instead of the world model. We instead condition the goal directly on the RSSM's latent state inference, which learns a better representation.
 
 
 
@@ -683,7 +674,7 @@ Previous research has integrated goal-conditioned learning into RSSMs. Pertsch e
     \setcounter{subfigure}{3}% (d)
     \begin{subfigure}[b]{0.32\linewidth}
         \centering
-        \scalebox{0.90}{\begin{tikzpicture}[
+        \scalebox{0.80}{\begin{tikzpicture}[
             >={Stealth[length=2mm]},
             node distance=5mm,
             box/.style={rectangle, draw, thick, rounded corners=2pt, align=center,
@@ -692,20 +683,22 @@ Previous research has integrated goal-conditioned learning into RSSMs. Pertsch e
                         inner sep=1pt, font=\footnotesize},
             lbl/.style={font=\scriptsize, inner sep=1pt}
         ]
-            \node[box, fill=green!20] (demo) {Human demos $\mathcal{D}_{\text{demo}}$};
-            \node[dec, below=of demo, fill=gray!15] (dec) {$u\sim\mathcal{U}(0,1)$};
-            \node[box, below left=6mm and -6mm of dec, fill=blue!15]  (diff) {Diffusion policy\\$\pi_{\text{diff}}$};
-            \node[box, below right=6mm and -6mm of dec, fill=orange!20] (rdm) {Mask-biased random\\$\pi_{\text{rdm}}$};
-            \node[box, below=14mm of dec, fill=white] (unroll) {Unroll trajectory $\tau$};
+            \node[box, fill=gray!10] (start) {Start: $\mathcal{D}\leftarrow\emptyset$};
+            \node[dec, below=4mm of start, fill=gray!15] (dec) {$u\sim\mathcal{U}(0,1)$};
+            \node[box, below left=9mm and 2mm of dec, fill=blue!15]  (diff) {Diffusion policy\\$\pi_{\text{diff}}$};
+            \node[box, below right=9mm and 2mm of dec, fill=orange!20] (rdm) {Mask-biased random\\$\pi_{\text{rdm}}$};
+            \node[box, above=9mm of diff, fill=green!20] (demo) {Human demos\\$\mathcal{D}_{\text{demo}}$};
+            \node[box, below=17mm of dec, fill=white] (unroll) {Unroll trajectory $\tau$};
             \node[box, below=of unroll, fill=purple!20] (data) {$\mathcal{D}\leftarrow\mathcal{D}\cup\{\tau\}$};
 
-            \draw[->, thick] (demo) -- node[lbl, right] {train} (dec);
+            \draw[->, thick] (start) -- (dec);
+            \draw[->, thick] (demo) -- node[lbl, left] {train} (diff);
             \draw[->, thick] (dec) -- node[lbl, above left=-1mm] {$u<r$} (diff);
             \draw[->, thick] (dec) -- node[lbl, above right=-1mm] {$u\geq r$} (rdm);
             \draw[->, thick] (diff) |- (unroll);
             \draw[->, thick] (rdm)  |- (unroll);
             \draw[->, thick] (unroll) -- (data);
-            \draw[->, thick] (data.east) -- ++(6mm,0) |- node[lbl, right, pos=0.25] {$\times M$} (dec.east);
+            \draw[->, thick] (data.east) -- ++(20mm,0) |- (dec.east);
         \end{tikzpicture}}
         \caption{Data Collection Procedure}
         \label{fig:data-collection}
@@ -803,7 +796,7 @@ Our coverage-alignment reward $\mathcal{R}_{CA}$ combines the step-wise normalis
 \begin{equation}
     \mathcal{R}_{CA} = \alpha_r \times\mathcal{R}_{dc} + (1-\alpha_r)\times \mathcal{R}_{du},
 \end{equation}
-where $\mathcal{R}_{dC} = \text{NC}_t - \text{NC}_{t-1}$ and $\mathcal{R}_{du} = \text{MaxIoU}_t - \text{MaxIoU}_{t-1}$; both $\mathcal{R}_{dC}$ and $\mathcal{R}_{du} \in [-1, 1]$, so that $\mathcal{R}_{CA} \in [-1, 1]$. In our experiments, we set $\alpha_r$ as 0.3 for our final LaGarNet. This reward function turns out to be easy to learn due to its continuous and linear nature.
+where $\mathcal{R}_{dC} = \text{NC}_t - \text{NC}_{t-1}$ and $\mathcal{R}_{du} = \text{MaxIoU}_t - \text{MaxIoU}_{t-1}$; both $\mathcal{R}_{dC}$ and $\mathcal{R}_{du} \in [-1, 1]$, so that $\mathcal{R}_{CA} \in [-1, 1]$. In our experiments, we set $\alpha_r$ to 0.3 for our final LaGarNet. This reward function turns out to be easy to learn due to its continuous and linear nature.
 
 % \begin{figure*}[t!]
 %     \centering
@@ -822,7 +815,7 @@ where $\mathcal{R}_{dC} = \text{NC}_t - \text{NC}_{t-1}$ and $\mathcal{R}_{du} =
 %     \caption{LaGarNet's Reward and Data Collection Procedure.}
 %     \label{fig:lagarnet}
 % \end{figure*}
-\subsection{Data Collection with Proximal Expert and Random Policies} \label{sec:data-collection}
+\subsection{Proximal Expert and Random Policy Data Collection} \label{sec:data-collection}
 
 Previous RSSM-based cloth flattening models \cite{kadi2024planet} rely on strong inductive biases stemming from a complex, specific blend of data collection policies. Engineering flattening oracles for complex garments such as T-shirts and trousers is extremely challenging, which defeats the simplicity advantage of imitation learning and hinders offline RL by preventing easy collection of trajectories around the successful region of the distribution. \text{LaGarNet} mitigates these biases with a proximal expert policy and a mask-biased random policy (Figure \ref{fig:data-collection}). 
 
@@ -837,7 +830,7 @@ Our experiments answer four research questions: how LaGarNet compares against st
 
 We evaluate our garment flattening policy with four standard metrics. \textbf{Normalised Coverage (NC)} is the ratio of the garment's current 2D projected area to its maximally flattened area, isolating the extent of unfolding and bounded to $[0,1]$. \textbf{Normalised Improvement (NI)} is the relative coverage increase from the initial configuration, $\frac{c_t - c_0}{c_{\text{max}} - c_0}$, with $c_t$, $c_0$ and $c_{\text{max}}$ the current, initial and maximally flattened coverage. \textbf{Maximum Intersection-over-Union (Max IoU)} is the highest IoU between the current garment mask and the target flattened mask over rotation and translation, evaluating precise spatial alignment and shape matching. \textbf{Success Rate (SR)} is the percentage of trials reaching a state with both $\text{NC} > 90\%$ and $\text{Max IoU} > 80\%$.
 
-All metrics are cumulative over the horizon: at horizon $k$, NC, NI and Max IoU report the maximum reached within the first $k$ steps rather than the value at step $k$, and SR counts trials meeting the criteria at any step up to $k$. Unless stated otherwise we report a 20-step horizon. In both settings each garment's goal state (its maximally flattened configuration) is captured beforehand, serving as the ground-truth reference and as input to goal-conditioned policies: in simulation we use the states of Canberk et al.~\cite{canberk2023cloth}, whilst in the real world we first flatten the garment and then manually crumple it. We ignore the slight discrepancy caused by the relative position of garment and camera, as it does not noticeably affect training or evaluation.
+All metrics are cumulative over the horizon: at horizon $k$, NC, NI and Max IoU report the maximum reached within the first $k$ steps rather than the value at step $k$, and SR counts trials meeting the criteria at any step up to $k$. Unless stated otherwise we report a 20-step horizon. Simulated evaluation episodes nevertheless run to 30 steps: they are fully automated and the simulator is fast, so the extra steps are essentially free and reveal how each policy behaves once the easy gains are exhausted. Real-world trials stop at 20 steps, since a single physical step costs about 25\,s plus a manual reset (Section \ref{sec:real-exp}) and garments are generally flattened well within 20 steps. In both settings each garment's goal state (its maximally flattened configuration) is captured beforehand, serving as the ground-truth reference and as input to goal-conditioned policies: in simulation we use the states of Canberk et al.~\cite{canberk2023cloth}, whilst in the real world we first flatten the garment and then manually crumple it. We ignore the slight discrepancy caused by the relative position of garment and camera, as it does not noticeably affect training or evaluation.
 \begin{table}[!t]
 \centering
 \caption{Simulation configurations. Garments in our longsleeve set are scaled down by 0.32 to obtain MEDOR's optimal performance.}
@@ -857,19 +850,19 @@ Damping & 1 & 1 \\
 \end{tabular}
 \end{table}
 
-We train all models for 50,000 update steps and validated every 1,000 steps to save the best checkpoint. Simulation uses 200 training, 10 validation and 30 evaluation trials, with trajectories of up to 20 steps. We compare checkpoints by a combined score summing average final NC and average Max IoU over the validation trials; if two checkpoints both exceed 1.90 (out of 2.0), we prefer the one completing the task in fewer steps, otherwise we take the highest combined score.
+We train all models for 50,000 update steps and validate every 1,000 steps to save the best checkpoint. Simulation uses 200 training, 10 validation and 30 evaluation trials; training and validation trajectories are capped at 20 steps, whilst evaluation trials run the full 30. We compare checkpoints by a combined score summing average final NC and average Max IoU over the validation trials; if two checkpoints both exceed 1.90 (out of 2.0), we prefer the one completing the task in fewer steps, otherwise we take the highest combined score.
 
 \subsection{Comparison of \text{LaGarNet} against Other Neural Controllers} \label{sec:comp-sota}
 
 \begin{figure*}[t!]
 \centering
 \subfloat[Longsleeved T-shirt flattening against SoTA baselines.]{%
-    \includegraphics[width=0.64\linewidth]{plots/lagarnet_flattening_heatmap.png}%
+    \includegraphics[width=0.56\linewidth]{plots/lagarnet_flattening_heatmap.png}%
     \label{fig:longsleeve-flattening}}\hfill
 \subfloat[All-garment generalisation by action step 20.]{%
-    \includegraphics[width=0.33\linewidth]{plots/multi_arena_radar_2x2.png}%
+    \includegraphics[width=0.40\linewidth]{plots/multi_arena_radar_2x2.png}%
     \label{fig:sim-lagarnet-results}}
-\caption{Simulation results for single-arm pick-and-place (\text{PnP}) controllers. \textbf{(a)} Per-horizon longsleeve flattening: for each metric the columns report the cumulative \emph{Max} (best value reached within the horizon) and the \emph{Last} (final-step) value at 5, 10, 20 and 30 action steps; cell colour encodes the score in $[0,1]$. Only the single-arm PnP primitive of \text{ClothFunnels}~\cite{canberk2023cloth} is enabled; \text{Diffusion Policy}~\cite{kadi2025draper, chi2023diffusionpolicy} is trained on 200 human demonstrations, and \text{MEDOR}~\cite{huang2022mesh} is evaluated in its own simulation setup. All-Garment \text{LaGarNet} is comparable to MEDOR at a small fraction of its inference cost and competitive with human experts at intermediate horizons, although humans remain ahead at 30 steps; the small Max$\to$Last gap indicates that final configurations remain stable. \textbf{(b)} Performance on all four garment types by action step 20, where \text{LaGarNet} consistently outperforms all-garment \text{PlaNet-ClothPick} and task-specific \text{Diffusion Policy}.}
+\caption{Simulation results for single-arm pick-and-place (\text{PnP}) controllers. \textbf{(a)} Per-horizon longsleeve flattening: each metric reports the cumulative \emph{Max} (best value within the horizon) and the \emph{Last} (final-step) value at 5, 10, 20 and 30 steps; cell colour encodes the score in $[0,1]$. Only the single-arm PnP primitive of \text{ClothFunnels}~\cite{canberk2023cloth} is enabled; \text{Diffusion Policy}~\cite{kadi2025draper, chi2023diffusionpolicy} is trained on 200 human demonstrations, and \text{MEDOR}~\cite{huang2022mesh} is evaluated in its own simulation setup. All-Garment \text{LaGarNet} is comparable to MEDOR at a small fraction of its inference cost and competitive with human experts at intermediate horizons, although humans remain ahead at 30 steps. NC and Max IoU barely change between Max and Last, but the SR gap is large (76.7\% versus 13.3\% at 20 steps): LaGarNet reaches a success state without reliably remaining in it (Section \ref{sec:discussion}). \textbf{(b)} Performance on all four garment types by action step 20, where \text{LaGarNet} consistently outperforms all-garment \text{PlaNet-ClothPick} and task-specific \text{Diffusion Policy}.}
 \label{fig:sim-results}
 \end{figure*}
 
@@ -886,7 +879,7 @@ We develop \text{LaGarNet} in the garment simulation environment of Canberk et a
 
 We benchmark our model-based reinforcement learning (RL) method \textbf{LaGarNet} against past RSSM approaches like \textbf{PlaNet-ClothPick} \cite{kadi2024planet} and the off-the-shelf task-specific model-free method \textbf{ClothFunnels} \cite{canberk2023cloth} using its single-arm PnP primitives. We also compare against the state-of-the-art mesh-based planning method \textbf{MEDOR} \cite{huang2022mesh}  with its own simulation setup (see Table \ref{tab:sim-config})---we make sure our flattened garments are fully observable, looking similar to their own trial distribution. We also compare LaGarNet against the advanced deep behaviour cloning method \text{Diffusion Policy}, adapted for the PnP cloth-shaping domain \cite{chi2023diffusionpolicy, kadi2025draper}.  
 
-All trained methods apart from \text{ClothFunnels} and \text{MEDOR} use the \text{DRAPER} vision processing strategy for sim-to-real transfer \cite{kadi2025draper}, which aligns real and synthetic RGB observations through real-world adaptation and domain randomisation in simulation and a refined grasping procedure. \text{Diffusion Policy} is trained on 200 human expert trajectories, whilst \text{LaGarNet} and \text{PlaNet-ClothPick} learn from 5,000 episodes (100,000 transitional steps) generated by our data-collection strategy; \text{PlaNet-ClothPick} shares LaGarNet's hyperparameters but uses a different reward function and no goal observations. The all-garment variants draw on trajectories from all four garment types while keeping the same data size as the task-specific datasets. Human experiments use a PnP window interface operating directly on observation images in both settings.
+All trained methods apart from \text{ClothFunnels} and \text{MEDOR} use the \text{DRAPER} vision processing strategy for sim-to-real transfer \cite{kadi2025draper}, which aligns real and synthetic RGB observations through real-world adaptation and domain randomisation in simulation and a refined grasping procedure. \text{Diffusion Policy} is trained on 200 human expert trajectories, whilst \text{LaGarNet} and \text{PlaNet-ClothPick} learn from 5,000 episodes (100,000 transitional steps) generated by our data-collection strategy; \text{PlaNet-ClothPick} shares LaGarNet's hyperparameters but uses a different reward function and no goal observations. The all-garment variants draw on all four garment types whilst keeping the task-specific data size. Human experiments use a PnP window interface operating directly on observation images in both settings.
 
 \begin{table*}[t!]
     \centering
@@ -944,7 +937,7 @@ Table \ref{tab:efficiency-comparison} reveals the accompanying trade-off. MEDOR 
         }
     }
     
-    \caption{Diffusion Policy versus LaGarNet on the simulated longsleeve environment. \textbf{(a)} Validation performance over 50,000 training steps for task-specific Diffusion Policies trained with varying numbers of human demonstrations; bold lines are an exponential moving average (EMA, span = 15) of the success rate over the faint raw data. \textbf{(b)} Evaluation performance of these policies on the four primary metrics. \textbf{(c)} Architectural ablations by action step 20. All values are aggregated over 120 evaluation episodes (30 trials per garment type). The All-Garment LaGarNet trains stably and sample-efficiently and, trained on 5,000 episodes of mixed-quality transitions, substantially outperforms every Diffusion Policy variant trained on an equivalent volume of success-only trajectories.} 
+    \caption{Diffusion Policy versus LaGarNet on the simulated longsleeve environment. \textbf{(a)} Validation performance over 50,000 training steps for task-specific Diffusion Policies trained with varying numbers of human demonstrations; bold lines are an exponential moving average (EMA, span = 15) of the success rate over the faint raw data. \textbf{(b)} Evaluation performance of these policies on the four primary metrics. \textbf{(c)} Architectural ablations by action step 20. All values are aggregated over 120 evaluation episodes (30 trials per garment type). The All-Garment LaGarNet trains stably and, on 5,000 episodes of mixed-quality transitions, substantially outperforms every Diffusion Policy variant trained on an equivalent volume of success-only trajectories.} 
     \label{fig:diff-vs-lagarnet-performance-combined}
 \end{figure*}
 
@@ -955,109 +948,103 @@ Table \ref{tab:efficiency-comparison} reveals the accompanying trade-off. MEDOR 
 \subsection{Diffusion Policy vs. LaGarNet}  \label{sec:comp-diff}
 
 
-Using the setup of Section \ref{sec:simulation}, we investigate whether LaGarNet's advantage over Diffusion Policy stems from explicit forward planning, from extended temporal context, or simply from data scale: we examine how scaling human demonstrations affects a task-specific Diffusion Policy (Figures \ref{fig:diffusion-human-val} and \ref{fig:diffusion-human-eval}), design ablated baselines (Section \ref{sec:diff-baselines}), and analyse their primary metrics (Section \ref{sec:diff-result}). 
+Using the setup of Section \ref{sec:simulation}, we ask whether LaGarNet's advantage over Diffusion Policy stems from explicit forward planning, from extended temporal context, or simply from data scale, examining how the number of human demonstrations affects a task-specific Diffusion Policy (Figures \ref{fig:diffusion-human-val} and \ref{fig:diffusion-human-eval}) alongside the ablated baselines below.
 
 
 \subsubsection{Baselines} \label{sec:diff-baselines}
 
-To isolate the specific architectural components that contribute to LaGarNet's superiority over Diffusion Policies, we design the following baseline policies: (a) \textbf{GC-DP}: a Goal-Conditioned Diffusion Policy (Appendix \ref{sec:diffusion}) taking the concatenated current and goal RGB images as input, trained on 5,000 episodes of diffusion-induced, success-only data spanning all garment types. (b) \textbf{GC-DP-Comp}: GC-DP with hyperparameters aligned to LaGarNet for a fair comparison: the ResNet-18 encoder is replaced by PlaNet's CNN encoder, the current and goal observation embeddings are concatenated before the downstream networks, and the observation sequence length is raised from 1 to 4. (c) \textbf{LaGarNet-Comp}: LaGarNet with hyperparameters constrained for direct comparison against the diffusion baselines, most significantly a training sequence length reduced from 50 to 4. 
-
-We also have (d) \textbf{LaGarNet-RSSM}: The standard LaGarNet architecture utilising its full RSSM dynamics model. (e) \textbf{GC-RSSM-DP}: GC-DP-Comp using LaGarNet's pre-trained latent dynamics model, with the noise predictor's conditioning dimension set to 360. At each step the historical memory is wiped by zeroing the previous latent state, and the current posterior latent state is obtained by feeding a ``no-op'' action into the dynamics model; both the vision encoder and the dynamics model of the pre-trained GC-RSSM are frozen during training. (f) \textbf{LaGarNet-CNN-DP}: GC-DP-Comp using LaGarNet's frozen pre-trained vision encoder, giving a 2048-dimensional observation embedding formed by concatenating LaGarNet's current and goal embeddings. We train all policies using the appropriate hyperparameters detailed in Table \ref{tab:all-hyperparameters}.c, applying consistent data augmentation schemes across all methods (Appendix \ref{sec:data-aug}).
+To isolate which architectural components drive LaGarNet's advantage, we design six baselines. (a) \textbf{GC-DP}: a Goal-Conditioned Diffusion Policy (Appendix \ref{sec:diffusion}) taking the concatenated current and goal RGB images, trained on 5,000 episodes of diffusion-induced, success-only data spanning all garment types. (b) \textbf{GC-DP-Comp}: GC-DP aligned to LaGarNet's hyperparameters---PlaNet's CNN encoder in place of ResNet-18, the two embeddings concatenated before the downstream networks, and the observation sequence length raised from 1 to 4. (c) \textbf{LaGarNet-Comp}: LaGarNet with its training sequence length cut from 50 to 4 for direct comparison. (d) \textbf{LaGarNet-RSSM}: LaGarNet using its full, unconditioned RSSM dynamics. (e) \textbf{GC-RSSM-DP}: GC-DP-Comp using LaGarNet's frozen pre-trained encoder and latent dynamics, with the noise predictor's conditioning dimension set to 360; each step wipes memory by zeroing the previous latent state and recovers the posterior by feeding a ``no-op'' action into the dynamics model. (f) \textbf{LaGarNet-CNN-DP}: GC-DP-Comp using only LaGarNet's frozen vision encoder, giving a 2048-dimensional embedding of the current and goal images. All policies use the hyperparameters of Table \ref{tab:all-hyperparameters}.c and identical data augmentation (Appendix \ref{sec:data-aug}).
 
 \subsubsection{Results} \label{sec:diff-result}
 
-As detailed in Table \ref{tab:comp-diff-lagarnet}, LaGarNet substantially outperforms the diffusion baselines, reaching a success rate of 72.5\% against GC-DP's 40.0\%---notable given that LaGarNet trains on 5,000 episodes of mixed-quality transitional data whereas GC-DP uses an equivalent volume of strictly success-only trajectories. LaGarNet leads on every metric, peaking at 96.1 $\pm$ 1.1\% NC and 91.3 $\pm$ 2.3\% NI, suggesting that its model-based architecture is better suited to garment flattening. 
-The ablated variants underscore the importance of LaGarNet's extended temporal context: constraining it to a sequence length of 4 (LaGarNet-Comp) collapses the success rate to 5.0\%, indicating that a world model trained over a long context horizon is essential for the long-horizon dynamics of deformable objects. Reverting to the original RSSM (LaGarNet-RSSM) reduces the success rate by around 30\%, confirming the importance of goal conditioning.
+LaGarNet substantially outperforms the diffusion baselines (Table \ref{tab:comp-diff-lagarnet}), reaching 72.5\% success against GC-DP's 40.0\% and leading on every metric at 96.1 $\pm$ 1.1\% NC and 91.3 $\pm$ 2.3\% NI---notable given that it trains on 5,000 episodes of mixed-quality transitions whereas GC-DP uses an equivalent volume of success-only data.
 
-Transplanting LaGarNet's pre-trained visual or latent representations into the diffusion framework (LaGarNet-CNN-DP and GC-RSSM-DP) yields success rates of only 8.3\% and 6.7\%. This exposes a fundamental limitation of the diffusion baselines: their efficacy rests almost entirely on an end-to-end, reactive mapping from observations to action noise rather than on a structured understanding of environment dynamics, so without the capacity to reason explicitly over future states they cannot exploit these rich pre-trained representations. LaGarNet instead uses its decoupled world model to anticipate and plan for complex non-rigid deformations, indicating that its model-based paradigm, grounded in explicit forward planning, is far better suited to long-horizon garment manipulation than the purely reactive, data-hungry diffusion models.
+The ablations isolate why. Cutting the training sequence length to 4 (LaGarNet-Comp) collapses success to 5.0\%, so a long context horizon is essential for the long-horizon dynamics of deformable objects, and reverting to the unconditioned RSSM costs around 30\%, confirming the value of goal conditioning. Transplanting LaGarNet's pre-trained visual or latent representations into the diffusion framework yields only 8.3\% (LaGarNet-CNN-DP) and 6.7\% (GC-RSSM-DP): the diffusion baselines rest on a reactive end-to-end mapping from observations to action noise rather than a structured understanding of dynamics, so without the capacity to reason over future states they cannot exploit these representations. LaGarNet instead plans with its decoupled world model, a paradigm far better suited to long-horizon manipulation.
 \subsection{Ablation Study on \text{LaGarNet}} \label{sec:abl}
 
 \begin{figure*}[t!]
     \centering
     
     % --- LEFT COLUMN: Ablation Plots and Table ---
-    \begin{minipage}[t]{0.52\textwidth}
+    \begin{minipage}[t]{0.5\textwidth}
         \vspace{0pt} % <-- TRICK: Forces top alignment of the minipage content
         \centering
         % Top Row (Left Column): Ablation Plots side-by-side
         \subfloat[\centering Latent Dynamic and Goal Ablation \label{fig:goal-ablation}]{
-            \includegraphics[width=0.40\linewidth]{plots/ablation_latent_bar.png}
+            \includegraphics[width=0.42\linewidth]{plots/ablation_latent_bar.png}
         }
         \subfloat[\centering Reward Ablation \label{fig:reward-ablation}]{
-            \includegraphics[width=0.40\linewidth]{plots/ablation_reward_bar.png}
+            \includegraphics[width=0.42\linewidth]{plots/ablation_reward_bar.png}
         }        
         
         \vspace{0.2cm} % Vertical spacing between plots and the table
 
-        \subfloat[\centering Data Size Ablation. \label{fig:datasize-ablation}]{
-            \includegraphics[width=0.40\linewidth]{plots/ablation_data_size_line.png}
+        \subfloat[\centering Data Size Ablation \label{fig:datasize-ablation}]{
+            \includegraphics[width=0.42\linewidth]{plots/ablation_data_size_line.png}
         } 
         \subfloat[\centering Data Composition Ablation \label{fig:dataratio-ablation}]{
-            \includegraphics[width=0.40\linewidth]{plots/ablation_data_ratio_bar.png}
+            \includegraphics[width=0.42\linewidth]{plots/ablation_data_ratio_bar.png}
         } 
        
     \end{minipage}\hfill % <-- Spreading out the columns
     % --- RIGHT COLUMN: Reconstruction Image ---
-    \begin{minipage}[t]{0.48\textwidth}
+    \begin{minipage}[t]{0.5\textwidth}
         \vspace{0pt} % <-- TRICK: Forces top alignment of the minipage content
         \centering
         \subfloat[\centering Observation reconstruction quality \label{fig:recon-quality}]{
             \includegraphics[width=0.88\linewidth]{plots/recon-all-garments.png}
         }
     \end{minipage}
-    
-    \caption{Comprehensive ablation study for LaGarNet in simulation environments. \textbf{(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf{(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times$64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants.}
+
+    \vspace{0.2cm}
+
+    % --- BOTTOM ROW: MPC planning-horizon ablation + reconstruction-quality table ---
+    \subfloat[\centering MPC Planning Ablation $H$ \label{fig:horizon-ablation}]{%
+        \begin{minipage}[b]{0.4\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{plots/ablation_mpc_horizon.png}
+        \end{minipage}}
+    \hfill
+    \subfloat[\centering Reconstruction quality (MSE, SSIM) \label{tab:recon-quality}]{%
+        \begin{minipage}[b]{0.53\textwidth}
+        \centering
+        \resizebox{\linewidth}{!}{%
+        \setlength{\tabcolsep}{2pt}%
+        \renewcommand{\arraystretch}{1.1}%
+        \begin{tabular}{l|cc|cc|cc|cc}
+         & \multicolumn{2}{c|}{Posterior} & \multicolumn{2}{c|}{Prior 1} & \multicolumn{2}{c|}{Prior 2} & \multicolumn{2}{c}{Prior 3} \\
+        \hline
+         Model, Metrics & MSE & SSIM   & MSE & SSIM   & MSE & SSIM   & MSE & SSIM  \\
+        \hline
+        RSSM & \textbf{0.26} & \textbf{94.09} &1.92 & 63.37 &2.60 & 62.00 &2.91 & 52.17\\
+        RSSM, GC-I & 0.28 & 94.72 &1.87 & 65.58 &2.59 & 58.46 &2.80 & 56.05\\
+        RSSM, GC-IO & 0.37 & 92.78 & \textbf{1.57} & \textbf{68.12} & \textbf{2.34}  & 62.10 &2.70 & 54.17\\
+        GC-RSSM & 0.32 & 94.03 &1.67 & 67.72 &2.40 & \textbf{63.27} & \textbf{2.70} & \textbf{57.66}\\
+        \bottomrule
+        \end{tabular}}
+        \end{minipage}}
+
+    \caption{Comprehensive ablation study for LaGarNet in simulation environments. \textbf{(a, b, c, and d)} Ablation study using the all-garment LaGarNet models; all components of LaGarNet are essential for the success of this policy in garment flattening. \textbf{(e)} Observation reconstruction quality of models from Figure (a); each grid is a 64$\times$64 RGB image. The green arrows in the first row represent pick-and-place actions; our GC-RSSM model demonstrates a superior ability to track garment sleeves in prior steps compared to other RSSM variants. \textbf{(f)} Flattening performance (left axis) and mean per-action planning time (right axis) against the MPC planning horizon $H$; hollow markers report the unconstrained-CEM variant at $H=1$. \textbf{(g)} The reconstructions of (e) scored by Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite{wang2004image}, both $\times$100 and averaged over 10 trials per garment; SSIM is informative here because it captures the local structure and contrast that blurring degrades. The models share all internal hyperparameters and differ only in structure and in their inputs and outputs; GC-RSSM reduces blurriness in the multi-step prior reconstructions.}
     \label{fig:ablation-and-recon-combined}
 \end{figure*}
-
-\begin{table}[t!]
-\caption{RGB image reconstruction quality of different world models, measured by Mean Squared Error (MSE) and Structural Similarity Index (SSIM) \cite{wang2004image}; SSIM is informative here because it captures the local structure and contrast that blurring degrades. All values are multiplied by 100 and averaged over 10 trials for each of the 4 garments. The models share the same internal hyperparameters and differ only in structure and in their inputs and outputs. Our GC-RSSM reduces blurriness in the multi-step prior reconstructions.}
-\label{tab:recon-quality}
-\resizebox{0.47\textwidth}{!}{
-\setlength{\tabcolsep}{2pt} % Default is 6pt, try 2pt or adjust as needed
-\renewcommand{\arraystretch}{1.1} % Optional: slightly increase row height for readability
-\begin{tabular}{l|cc|cc|cc|cc}
- & \multicolumn{2}{c|}{Posterior} & \multicolumn{2}{c|}{Prior 1} & \multicolumn{2}{c|}{Prior 2} & \multicolumn{2}{c}{Prior 3} \\
-\hline
- Model, Metrics & MSE & SSIM   & MSE & SSIM   & MSE & SSIM   & MSE & SSIM  \\
-\hline
-RSSM & \textbf{0.26} & \textbf{94.09} &1.92 & 63.37 &2.60 & 62.00 &2.91 & 52.17\\
-RSSM, GC-I & 0.28 & 94.72 &1.87 & 65.58 &2.59 & 58.46 &2.80 & 56.05\\
-RSSM, GC-IO & 0.37 & 92.78 & \textbf{1.57} & \textbf{68.12} & \textbf{2.34}  & 62.10 &2.70 & 54.17\\
-GC-RSSM & 0.32 & 94.03 &1.67 & 67.72 &2.40 & \textbf{63.27} & \textbf{2.70} & \textbf{57.66}\\
-\bottomrule
-\end{tabular}
-}
-\end{table}
-We examine the effects of LaGarNet's components---the latent dynamics structure, the reward function, the data size, the dataset mixture ratio and the planning horizon---in the simulation setup (Section \ref{sec:simulation}). Except for the latent dynamics ablations, which use RGB-to-RGB variants to inspect prediction capability (Figure \ref{fig:recon-quality}), all experiments use the default RGB-to-Mask variants.
+We ablate LaGarNet's components---latent dynamics, reward function, data size, dataset mixture ratio and planning horizon---in the simulation setup of Section \ref{sec:simulation}. All experiments use the default RGB-to-Mask variants except the latent dynamics ablations, which use RGB-to-RGB variants to inspect prediction quality (Figure \ref{fig:recon-quality}). Each model is evaluated on the 30 held-out hard initial states of all four garment arenas under the 20-step protocol and success criteria of Section \ref{sec:experiments}; the planning ablation isolates the longsleeve arena, the hardest of the four, and also logs per-action planning time.
 
 \subsubsection{Ablation Baselines}
 
 
-Alongside the \textbf{GC-RSSM} and \textbf{RSSM} models of Section \ref{sec:gc-rssm}, the latent dynamics and goal ablation evaluates \textbf{RSSM-GC-I}, which concatenates the goal RGB image with the current one as input but decodes only the current observation, and \textbf{RSSM-GC-IO}, which also predicts the goal image. This isolates whether LaGarNet benefits from goal-conditioning itself or from the structural differences between GC-RSSM and RSSM. The reward ablation replaces LaGarNet's reward with the alternatives of Section \ref{sec:reward-literature}: Learning2Unfold (\textbf{L2U}) \cite{gu2023learning}, ClothFunnels (\textbf{CF}) \cite{canberk2023cloth}, PlaNet-ClothPick (\textbf{PC}) \cite{kadi2024planet} and an approximation of SpeedFolding (\textbf{SFA}) \cite{avigal2022speedfolding}. The dataset ablations vary both the volume and the composition of the training data, including diffusion-only and random-only datasets and an online LaGarNet that follows PlaNet's exploration strategy \cite{hafner2019learning} by adding Gaussian noise to the MPC output. \textbf{TODO: talk about the ablation baselines.}
+Alongside the \textbf{GC-RSSM} and \textbf{RSSM} models of Section \ref{sec:gc-rssm}, the latent dynamics ablation adds \textbf{RSSM-GC-I}, which takes the goal image concatenated with the current one but decodes only the current observation, and \textbf{RSSM-GC-IO}, which also predicts the goal image; together they separate goal-conditioning from GC-RSSM's structure. The reward ablation substitutes the alternatives of Section \ref{sec:reward-literature}: Learning2Unfold (\textbf{L2U}) \cite{gu2023learning}, ClothFunnels (\textbf{CF}) \cite{canberk2023cloth}, PlaNet-ClothPick (\textbf{PC}) \cite{kadi2024planet} and an approximation of SpeedFolding (\textbf{SFA}) \cite{avigal2022speedfolding}. The dataset ablations vary training-data volume and composition, including diffusion-only and random-only sets and an online LaGarNet that adds Gaussian noise to the MPC output following PlaNet's exploration strategy \cite{hafner2019learning}. The planning ablation sweeps $H \equiv T_f \in \{1,2,3,5\}$ and adds an \textbf{unconstrained} variant keeping $H = 1$ without the mask rejection of Appendix \ref{sec:planning}, separating the constrained action space from lookahead depth.
  
 \subsubsection{Results}
 
-LaGarNet's advantage stems from the combination of its GC-RSSM latent dynamics, its coverage-alignment reward and its data collection process. Figure \ref{fig:goal-ablation} shows the advantage arises not only from goal-conditioning but from the structure of GC-RSSM: RSSM-GC-I performs similarly, whilst RSSM-GC-IO, which reconstructs both current and goal observations, performs much worse, likely because of the extra learning burden. Figure \ref{fig:recon-quality} and Table \ref{tab:recon-quality} further show that GC-RSSM yields a superior prior latent state representation, which is crucial for planning and hence control performance.
+LaGarNet's advantage stems from the combination of its GC-RSSM latent dynamics, its coverage-alignment reward and its data collection process. Figure \ref{fig:goal-ablation} shows the gain arises not only from goal-conditioning but from the structure of GC-RSSM: RSSM-GC-I performs similarly, whilst RSSM-GC-IO, which reconstructs both current and goal observations, performs much worse, likely because of the extra learning burden. Figures \ref{fig:recon-quality} and \ref{tab:recon-quality} confirm that GC-RSSM yields a superior prior latent state representation, which is crucial for planning and hence control. Figure \ref{fig:reward-ablation} shows the coverage-alignment reward is essential, with only the SFA reward approaching it, whilst Figures \ref{fig:datasize-ablation} and \ref{fig:dataratio-ablation} show performance plateauing beyond 1,000 episodes and confirm that the data collection procedure is critical.
 
-In addition, Figure \ref{fig:reward-ablation} indicates that the proposed coverage-alignment (CA) reward function is essential to the success of the policy, whilst reward SFA approaching our performance. Finally, Figure \ref{fig:datasize-ablation} reveals that the performance of LaGarNet plateaus beyond 1,000 data episodes, whilst Figure \ref{fig:dataratio-ablation} confirms that the proposed data collection procedure is critical to LaGarNet's overall success.
-
-\begin{figure}[t!]
-\centering
-% TODO: replace the placeholder box below with the real figure once the sweep finishes.
-% \includegraphics[width=\linewidth]{plots/ablation_mpc_horizon.png}
-\fbox{\parbox[c][0.16\linewidth][c]{0.94\linewidth}{\centering\color{gray}\footnotesize\textsc{Placeholder}: \texttt{plots/ablation\_mpc\_horizon.png}}}
-\caption{Ablation on the MPC planning horizon $H$. \textbf{TODO: results pending.}}
-\label{fig:horizon-ablation}
-\end{figure}
-
-The planning horizon $H$ trades control quality against computation: a longer horizon lets the CEM planner account for multi-step consequences of a pick-and-place, but the number of transition-model rollouts---and hence the per-step planning time---grows proportionally. Figure \ref{fig:horizon-ablation} will report normalised coverage, normalised improvement and per-step planning time for $H \in \{1,2,3,5\}$ under the same evaluation protocol as above, together with the unconstrained-CEM variant that plans without the cloth and workspace mask rejection. \textbf{TODO: this sweep has not yet been run; the figure and the accompanying discussion are placeholders.}
+Figure \ref{fig:horizon-ablation} shows the greedy one-step planner is strongest: success falls monotonically from 50.0\% at $H=1$ to 40.0\%, 26.7\% and 20.0\% at $H=2,3,5$, whilst mean planning time rises from 4.10\,s to 5.18\,s. A single primitive causes one large deformation, so prediction error compounds along multi-step rollouts and lookahead costs more than it buys, unlike in continuous control \cite{hafner2019learning}. The action constraint matters far more: dropping mask rejection at $H=1$ collapses success to 6.7\% and final IoU to 33.8, as most samples then miss the garment. This justifies $T_f=1$.
 
 
 \subsection{Transfer Ability of LaGarNet to Real-World Settings} \label{sec:real-exp}
 
 \begin{table*}[t!]
-\caption{Real-world garment flattening performance of different pick-and-place controllers. Mesh-based planning method, VCD \cite{lin2022learning}, reports to reach \colorbox{yellow!25}{79.2 $\pm$ 9.4 \% NI} and \colorbox{yellow!25}{77.3 $\pm$ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports to achieve around \colorbox{gray!25}{64\% NI} flattening for real trousers and \colorbox{gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance.}
+\caption{Real-world garment flattening performance of different pick-and-place controllers. The mesh-based planning method VCD \cite{lin2022learning} reports reaching \colorbox{yellow!25}{79.2 $\pm$ 9.4 \% NI} and \colorbox{yellow!25}{77.3 $\pm$ 14.1 \% NC} for real T-shirt flattening within 20 steps; its improved successor, MEDOR, reports achieving around \colorbox{gray!25}{64\% NI} flattening for real trousers and \colorbox{gray!25}{46.8\% NI} for real dresses within 10 steps. LaGarNet shows substantial performance improvements across all garments compared to PlaNet-ClothPick, though it still falls short of human-level performance.}
 \label{tab:real-worldflattening}
 \centering
 \resizebox{0.96\textwidth}{!}{%
@@ -1105,22 +1092,20 @@ We employ a UR5e arm with an OnRobot RG2 parallel gripper, observed by a RealSen
 \begin{figure*}[t!]
     \centering
     % --- LEFT SIDE: The Image (Subfigure a) ---
-    \begin{subfigure}[t]{0.47\textwidth}
-        \vspace{0pt} % CRITICAL: Forces top alignment baseline
+    \begin{subfigure}[b]{0.38\textwidth}
         \centering
-        \includegraphics[width=0.90\linewidth]{plots/lagarnet-failure.jpg}
+        \includegraphics[width=\linewidth]{plots/lagarnet-failure.jpg}
         \caption{Visual failure cases of LaGarNet.}
         \label{fig:failure-visuals}
     \end{subfigure}
     \hfill % Flexible space between left and right sides
     % --- RIGHT SIDE: Stacked Tables ---
-    \begin{minipage}[t]{0.5\textwidth}
-        \vspace{0pt} % CRITICAL: Matches the top baseline of the left subfigure
-        
+    \begin{minipage}[b]{0.58\textwidth}
+
         % --- TOP RIGHT: Failure Modes (Subtable b) ---
-        \begin{subtable}[t]{\linewidth}
+        \begin{subtable}[b]{\linewidth}
             \centering
-            \resizebox{\linewidth}{!}{% Auto-scales table to fit width
+            \footnotesize
             \begin{tabular}{@{}llc@{}}
             \toprule
             \textbf{Failure Category} & \textbf{Specific Mode} & \textbf{Rate} \\ \midrule
@@ -1134,8 +1119,7 @@ We employ a UR5e arm with an OnRobot RG2 parallel gripper, observed by a RealSen
             & Misgrasping failure & 3/800 \\
             & Messing-near-success state & 168/298 \\
             & As-if-manipulating-other-object & 28/800 \\ \bottomrule
-            \end{tabular}%
-            }
+            \end{tabular}
             \caption{Trajectory and step-wise failure rates.}
             \label{tab:failure-rates}
         \end{subtable}
@@ -1145,27 +1129,26 @@ We employ a UR5e arm with an OnRobot RG2 parallel gripper, observed by a RealSen
         % --- BOTTOM ROW: Two Side-by-Side Tables ---
         
         % Bottom Left: Timing Metrics (Subtable c)
-        \begin{subtable}[t]{0.52\linewidth}
+        \begin{subtable}[b]{0.55\linewidth}
             \centering
-            \resizebox{\linewidth}{!}{% Auto-scales to fit the 0.48 width
+            \footnotesize
             \begin{tabular}{@{}lc@{}}
 \toprule
 \textbf{System Phase} & \textbf{Time (s)} \\ \midrule
 Perception & 8.19 \\
 Action Inference & 7.05 \\
 Action Conversion & 0.03 \\
-Robot Execution & 9.20 \\ 
+Robot Execution & 9.20 \\
 \bottomrule
-\end{tabular}%
-            }
+\end{tabular}
             \caption{Average Time Consumption}
             \label{tab:timing_metrics}
         \end{subtable}
-        \hfill % Pushes the two bottom tables to the edges
+        %\hfill % Pushes the two bottom tables to the edges
         % Bottom Right: Unseen Dress Metrics (Subtable d)
-        \begin{subtable}[t]{0.4\linewidth}
+        \begin{subtable}[b]{0.42\linewidth}
             \centering
-            \resizebox{\linewidth}{!}{% Auto-scales to fit the 0.48 width
+            \footnotesize
             \begin{tabular}{@{}lc@{}}
 \toprule
 \textbf{Metric} & \textbf{Score} \\ \midrule
@@ -1174,48 +1157,48 @@ NI & 42.1 $\pm$ 22.6 \\
 Max IoU & 66.4 $\pm$ 3.2 \\
 SR & 0/10 \\
 \bottomrule
-\end{tabular}%
-            }
+\end{tabular}
             \caption{Unseen long-sleeve dress.}
             \label{tab:unseen-dress}
         \end{subtable}
         
     \end{minipage}
     
-    \vspace{0.15in} % Space between the sub-elements and the main caption
+    \vspace{0.1in} % Space between the sub-elements and the main caption
     
     % --- GENERAL CAPTION FOR THE ENTIRE FIGURE* ---
     \caption{Analysis of LaGarNet's real-world performance. \textbf{(a)} Failure cases; text colour indicates the source of failure: white for mechanical limitations, blue for assumption oversights, red for the learning process. \textbf{(b)} Failure-mode frequencies. A step-wise failure does not necessarily cause a trajectory failure; a trajectory succeeds if it reaches the success state within 20 steps. ``Messing-near-success state'' counts how often performance drops in the step immediately after a ``near-success'' step (NC $\geq$ 0.8 and IoU $\geq$ 0.7). \textbf{(c)} Timing breakdown across the perception-action cycle. \textbf{(d)} Zero-shot generalisation to an unseen longsleeved dress with soft material properties and high internal friction.}
     \label{fig:real_world_analysis}
 \end{figure*}
 
-
 \subsubsection{Results}
-Table \ref{tab:real-worldflattening} shows that the unified all-garment LaGarNet flattens longsleeved T-shirts, trousers, skirts and dresses in the real world, substantially improving on PlaNet-ClothPick, although it struggles with OOD garments (Table \ref{tab:unseen-dress}) and still trails the human baseline, particularly on garments with narrow appendages such as longsleeved T-shirts and trousers. Its NC and NI nonetheless surpass the reported state of the art for single-gripper real-world garment flattening by the mesh-based planners VCD \cite{lin2022learning} and MEDOR \cite{huang2022accelerating}. The results also show a strong topology dependence: LaGarNet reaches a perfect 10/10 success rate on dresses and skirts within 20 steps, whereas the more complex dynamics of trousers and longsleeved shirts yield only 3/10 and 4/10.
+Table \ref{tab:real-worldflattening} shows that the unified all-garment LaGarNet flattens longsleeved T-shirts, trousers, skirts and dresses in the real world, substantially improving on PlaNet-ClothPick, although it struggles with OOD garments (Table \ref{tab:unseen-dress}) and still trails the human baseline, particularly on garments with narrow appendages such as longsleeved T-shirts and trousers. Its NC and NI nonetheless surpass the reported state of the art for single-gripper real-world garment flattening by the mesh-based planners VCD \cite{lin2022learning} and MEDOR \cite{huang2022mesh}. The results also show a strong topology dependence: LaGarNet reaches a perfect 10/10 success rate on dresses and skirts within 20 steps, whereas the more complex dynamics of trousers and longsleeved shirts yield only 3/10 and 4/10.
 
 \subsubsection{Limitations and Failure Cases}
 
 LaGarNet still faces notable real-world challenges. We observe a persistent simulation-to-reality gap, as also documented in the mesh-based planning literature \cite{huang2022mesh, lin2022learning}, together with typical multi-task capacity issues: a unified all-garment policy underfits complex topologies (longsleeved T-shirts, trousers) and overfits simpler ones (skirts, dresses) as reflected in the per-garment disparities of Table \ref{tab:real-worldflattening}. It consequently fails to isolate and untwist narrow sections such as sleeves and trouser legs, and trousers are especially hard, with the system often manipulating trouser legs as if they were T-shirt sleeves (the ``As-if-manipulating-other-object'' error in Table \ref{tab:failure-rates}). The policy also occasionally disrupts already flattened garments: GC-RSSM cannot consistently predict the first-step prior reward accurately, leading to actions that degrade near-success states (``Messing-near-success state'' in Table \ref{tab:failure-rates} and Figure \ref{fig:failure-visuals}).
 
-Our framework assumes that intrinsic physical properties (e.g., stiffness, elasticity) are secondary to geometric representations for high-level policy learning, so LaGarNet struggles with garments of high internal friction and low stiffness (Table \ref{tab:unseen-dress}); the single-arm parallel-jaw gripper compounds this by limiting the ability to unfold stubborn folds and wrinkles. Distinguishing a garment's front from its back was also not a task criterion, so LaGarNet cannot perform this semantic orientation---a spatial task known to be challenging even for young children \cite{paoletti2012pink}. Finally, time consumption is a critical limitation for deployment in fast-paced garment factories. Figure \ref{fig:real_world_analysis}(c) shows that perception (8.19\,s) and action inference (7.05\,s) form a substantial computational bottleneck; with robot execution (9.20\,s) a single manipulation step takes about 24.5\,s, i.e. over 8 minutes for a 20-step episode. Scaling to industrial or domestic use therefore requires optimising the latent dynamics model's inference speed and the perception pipeline.
+Our framework assumes that intrinsic physical properties (e.g., stiffness, elasticity) are secondary to geometric representations for high-level policy learning, so LaGarNet struggles with garments of high internal friction and low stiffness (Table \ref{tab:unseen-dress}); the single-arm parallel-jaw gripper compounds this by limiting the ability to unfold stubborn folds and wrinkles. Distinguishing a garment's front from its back was also not a task criterion, so LaGarNet cannot perform this semantic orientation---a spatial task known to be challenging even for young children \cite{paoletti2012pink}. Finally, time consumption is a critical limitation for deployment in fast-paced garment factories. Figure \ref{fig:real_world_analysis}(c) shows that perception (8.19\,s) and action inference (7.05\,s) form a substantial computational bottleneck; with robot execution (9.20\,s) a single manipulation step takes about 24.5\,s, i.e., over 8 minutes for a 20-step episode. Scaling to industrial or domestic use therefore requires optimising both the latent dynamics inference and the perception pipeline.
 
 \section{Discussion} \label{sec:discussion}
 
-Our central finding is that a recurrent latent world model remains effective in a \emph{quasi-static} setting. Applying RSSM to pick-and-place cloth shaping poses two critical challenges: capturing the complex deformation of cloth, and the quasi-static nature of high-level primitives---inferred states are not as continuous as in velocity- or position-based control, so each transition is a single large deformation rather than a smooth increment. Latent world models are usually studied in the latter regime, and it was not obvious they would transfer. We find that \text{RSSM} \cite{hafner2019learning} with its goal-conditioned extension does learn the latent dynamics of cloth deformation under high-level primitives, and that planning in this compact latent space is both far cheaper than and competitive in accuracy with planning over an explicitly reconstructed mesh.
+We study latent dynamic representations because they promise generalisability beyond the laboratory. Applying RSSM to pick-and-place cloth shaping raises two challenges. Cloth deformation is complex, and high-level primitives are quasi-static, so the inferred states are far less continuous than in velocity or position control. Researchers usually study latent world models in the continuous regime, so it was not obvious they would transfer. We find that \text{RSSM} \cite{hafner2019learning} with our goal-conditioned extension still learns the latent dynamics of cloth deformation under these primitives.
 
-Offline RL generally suffers from distribution shift \cite{prudencio2023survey}, where test trajectories misalign with the training data, and most of the literature relies on datasets collected by a single policy \cite{agarwal2020optimistic}. We find that the behaviour cloning (BC) method \text{Diffusion Policy} \cite{chi2023diffusionpolicy} learns to flatten garments from only 50--200 human demonstrations and, producing diverse actions around the expert distribution, can then collect near-success data for offline RL. Combining a random policy with such a learned diffusion policy is therefore a potentially generalisable data-collection recipe.
+Offline RL suffers from distribution shift \cite{prudencio2023survey}, and most of the literature trains on data from a single policy \cite{agarwal2020optimistic}. We find that the behaviour cloning method \text{Diffusion Policy} \cite{chi2023diffusionpolicy} learns to flatten garments from only 50 to 200 human demonstrations. It also acts diversely around the expert distribution, so it collects the near-success data a random policy rarely reaches. We therefore pair a random policy with a learned diffusion policy, and we expect this recipe to generalise.
 
-LaGarNet is computationally cheaper than mesh-based planning, reaching comparable performance with fewer parameters and faster inference, and is more data-efficient and stable than model-free and online RL. Against BC, its policy is inherently explainable---it predicts the outcome of a candidate action---and is not limited by demonstration quality, whereas BC relies on extensive expert data that is laborious to collect without an oracle: 200 episodes of 20-step trajectories cost roughly nine hours of human labour per garment type.
+LaGarNet offers three advantages. It plans in a compact latent space instead of over a reconstructed mesh, so it matches mesh-based accuracy with five times fewer parameters and an order of magnitude faster inference. It is more data-efficient and more stable than model-free and online RL. It also predicts the outcome of each candidate action, which makes the policy explainable and frees it from the quality of the demonstrations. Behaviour cloning instead needs extensive expert data. Collecting 200 episodes of 20-step trajectories costs about nine hours of human labour per garment type.
 
-BC methods also transfer poorly. In our physical setup the workspace constraints fluctuate with where the heuristic crops the raw RGB image, and a Diffusion Policy trained without those exact constraints cannot easily be transferred, as enforcing workspace masks during action denoising is highly complex; training for all real-world variability would demand an impractical amount of data. LaGarNet handles this natively by constraining sampled actions to the workspace during planning, so a policy trained with loose constraints in simulation transfers to real setups with varying constraints without retraining a simulated twin.
+Behaviour cloning also struggles to transfer. Our workspace constraints change with where the heuristic crops the raw RGB image. A Diffusion Policy trained without those constraints does not transfer, because enforcing workspace masks during action denoising is difficult. Training for every real-world variation would need an impractical amount of data. LaGarNet constrains the sampled actions to the workspace while planning, so a policy trained with loose constraints in simulation transfers to real setups without a simulated twin.
 
-This opens an exciting direction for applying state-space models to broader deformable object manipulation---dough, clay or cables---whose complex dynamics and high degrees of freedom can be encoded into a latent space that accelerates planning and reasoning. Whilst we focus on reward-based planning for flattening, the model's future-feature prediction could be extended to goal-directed folding.
+However, LaGarNet still does not know when to stop. It reaches a success state in 76.7\% of simulated longsleeve trials within 20 steps, but holds it at the final step in only 13.3\% (Figure \ref{fig:longsleeve-flattening}). In the real world, 168 of 298 near-success steps end in a drop (Figure \ref{tab:failure-rates}). The reward predictor is least reliable once the garment lies flat, so the planner keeps acting when it should stop. Human operators stop as soon as the garment looks flat, which explains much of their advantage at long horizons. A learned stopping criterion would close this gap, so would a better world model.
+
+This research opens an exciting direction for state-space models in deformable object manipulation, such as handling dough, clay or cables. These models encode complex dynamics and high degrees of freedom into a latent space, which accelerates planning and reasoning. We focus on reward-based planning for flattening, but the model also predicts future features, so it could extend to goal-directed folding.
 
 %In future work, we intend to extend \text{LaGarNet} to achieve garment folding tasks with an improved learning and inference capability. We also aim to explore other action primitives, such as bimanual \text{pick-and-fling}, \text{pick-and-drag}, and hybrids of these actions \cite{avigal2022speedfolding,canberk2023cloth} to improve the versatility and efficiency of our system.  We also curious about the effectiveness of the proposed coverage-alignment reward in learning from real-world data. We also plan to investigate a transformer-based architecture \cite{deng2023facing} to replace the recurrent structure of our world model. The findings of the paper indicate that learning-based methods remain inferior to human-level manipulation under the same constraints. We speculate that one advantage humans possess is a strong understanding of the topological structures of various garment types. This naturally leads to new research questions: can neural controllers learn such topological structures of objects implicitly, enabling these controllers to achieve human-level manipulation?
 
 \section{Conclusion} \label{sec:conclusion}
 
-We introduce a general learning-based garment-flattening policy \text{LaGarNet} for single-arm pick-and-place (\text{PnP}) action primitives. It successfully flattens all four garment types with a single policy, including longsleeved T-shirt, trousers, skirts and dress, in both simulated and real-world environments. We achieve this through a more generalised goal-conditioned recurrent state-space model, a data-collection strategy and a coverage-alignment reward function. \text{LaGarNet} matches the state-of-the-art performance of mesh-based planning in garment flattening whilst using five times fewer parameters and inferring over an order of magnitude faster, marking the first successful application of state-space models on complex garments. We find that a simple recurrent latent world model remains effective in the quasi-static pick-and-place regime, in which consecutive observations are not temporally continuous. This research opens an exciting direction of applying state-space models in deformable object manipulation. 
+We introduce a general learning-based garment-flattening policy \text{LaGarNet} for single-arm pick-and-place (\text{PnP}) action primitives. It successfully flattens all four garment types with a single policy, including longsleeved T-shirts, trousers, skirts and dresses, in both simulated and real-world environments. We achieve this through a more generalised goal-conditioned recurrent state-space model, a data-collection strategy and a coverage-alignment reward function. \text{LaGarNet} matches the state-of-the-art performance of mesh-based planning in garment flattening whilst using five times fewer parameters and inferring over an order of magnitude faster, marking the first successful application of state-space models on complex garments. We find that a simple recurrent latent world model remains effective in the quasi-static pick-and-place regime, in which consecutive observations are not temporally continuous. This research opens an exciting direction of applying state-space models in deformable object manipulation. 
 
 \section*{Acknowledgment}
 We thank the Institute of Safe Autonomy at the University of York for hosting the experimental evaluations, and \textbf{Dr James Hilder} and \textbf{Dr Rob Woolley} for their help in setting up the robot platform; \textbf{Dr Stuart Norcross} at the University of St Andrews for access to essential GPU clusters; and \textbf{Dr Ivan Kapelyukh} at Imperial College London for insightful discussions on generalising this approach to dual-arm manipulation and cloth folding. We acknowledge the use of the Viking cluster at York, and of Google's Gemini 3 Flash Image to remove the background and enhance the image quality of the setup shown in Figure 1(c). This work was supported by the UK Engineering and Physical Sciences Research Council under grant EP/W014688/2 (DIGI-CORTEX).
@@ -1303,7 +1286,7 @@ This appendix specifies the exact architecture of LaGarNet, its test-time planni
 
 The observation decoder acts as a generative model $p(\hat{\bm{x}}_t \;|\; \bm{h}_t, \bm{z}_t)$ to reconstruct the mask image from the latent space, which is primarily used to compute the observation reconstruction loss. It takes the concatenated deterministic state $\bm{h}_t$ and stochastic state $\bm{z}_t$ (sampled from the posterior $\hat{\bm{z}}_t$ during training) as input, processes it through a linear dense layer, and reshapes it into a $1 \times 1$ spatial feature map. This is followed by four transposed convolutional layers with channel sizes of $\{128, 64, 32, C\}$, where $C$ is the number of channels in the output observation. The first two transposed convolutions use a kernel size of $5 \times 5$, whilst the final two use a kernel size of $6 \times 6$, all with a stride of $2$.
 
-\subsection{Goal-Conditioned Transition Model} The transition dynamics of the GC-RSSM composes of multi-layer perceptrons (MLPs) and a Gated Recurrent Unit (GRU) \cite{cho2014properties}. The recurrent state $\bm{h}_t = f(\bm{h}_{t-1}, \bm{z}_{t-1}, \bm{a}_{t-1})$ is updated using a GRU cell. The input to the GRU is the output of a 1-layer MLP that fuses the previous stochastic latent state $\bm{z}_{t-1}$ and the previous action $\bm{a}_{t-1}$. The prior stochastic state $\tilde{\bm{z}}_t \sim p(\tilde{\bm{z}} \;|\; \bm{h}_t, \bm{g})$ is predicted by concatenating the current deterministic state $\bm{h}_t$ and the goal embedding $\bm{e}_g$. This concatenated vector is passed through an embedding MLP, followed by a state-prior MLP that outputs the mean and variance of a diagonal Gaussian distribution. The standard deviation is parameterised using a Softplus function bounded by a minimum value ($\sigma_{\text{min}} = 0.1$) to prevent numerical instability and mode collapse.
+\subsection{Goal-Conditioned Transition Model} The transition dynamics of the GC-RSSM consist of multi-layer perceptrons (MLPs) and a Gated Recurrent Unit (GRU) \cite{cho2014properties}. The recurrent state $\bm{h}_t = f(\bm{h}_{t-1}, \bm{z}_{t-1}, \bm{a}_{t-1})$ is updated using a GRU cell. The input to the GRU is the output of a 1-layer MLP that fuses the previous stochastic latent state $\bm{z}_{t-1}$ and the previous action $\bm{a}_{t-1}$. The prior stochastic state $\tilde{\bm{z}}_t \sim p(\tilde{\bm{z}} \;|\; \bm{h}_t, \bm{g})$ is predicted by concatenating the current deterministic state $\bm{h}_t$ and the goal embedding $\bm{e}_g$. This concatenated vector is passed through an embedding MLP, followed by a state-prior MLP that outputs the mean and variance of a diagonal Gaussian distribution. The standard deviation is parameterised using a Softplus function bounded by a minimum value ($\sigma_{\text{min}} = 0.1$) to prevent numerical instability and mode collapse.
 
 During training, the posterior stochastic state $\hat{\bm{z}}_t \sim q(\hat{\bm{z}} \;|\; \bm{h}_t, \bm{x}_t, \bm{g})$ incorporates the current observation $\bm{x}_t$. The deterministic state $\bm{h}_t$, goal embedding $\bm{e}_g$, and current observation embedding $\bm{e}_t$ are concatenated and processed through an embedding MLP. A subsequent state-posterior MLP outputs the mean and variance of the posterior diagonal Gaussian distribution, similarly bounded by the Softplus function.
 
@@ -1352,7 +1335,7 @@ In order to ensure the robust generalisation of our visual policy, we employ a c
 
 The RGB inputs undergo an appearance-level augmentation where they are remapped to a [0, 1] range and injected with subtle Gaussian noise with $\sigma$ of 0.01. Then, we apply rigorous spatial transformations to the current state observations to expand the effective dataset and enforce $SE(2)$ equivariance in the learned policy --- we apply continuous random rotations with 1 degree intervals and vertical flips with a 50\% probability to the current RGB and mask images. Crucially, to maintain geometric consistency, we strictly couple these visual transformations with the action space. When the images are rotated or flipped, the corresponding 2D spatial pixel actions (the pick-and-place coordinates) are transformed via equivalent rotation matrices and coordinate inversions,  discarding any transformations that push the pixel actions out of bounds.
 
-Finally, to enable robust goal-conditioned behaviour in the real world, the pipeline applies independent affine transformations to the goal RGB observation. These images undergo randomised 2D rigid body transformations, combining rotations and translational shifts (up to a translation scale of 0.2). By independently augmenting the target visual states, we prevent the transformer from simply memorising exact pixel-to-pixel mappings between the current and goal images; it forces the architecture to learn deeper, spatially robust relational features for the pick-and-place task.
+Finally, to enable robust goal-conditioned behaviour in the real world, the pipeline applies independent affine transformations to the goal RGB observation. These images undergo randomised 2D rigid body transformations, combining rotations and translational shifts (up to a translation scale of 0.2). By independently augmenting the target visual states, we prevent the network from simply memorising exact pixel-to-pixel mappings between the current and goal images; it forces the architecture to learn deeper, spatially robust relational features for the pick-and-place task.
 
 
 \section{Simulation Garment Distribution} \label{sec:garment-dist}
@@ -1379,13 +1362,13 @@ Figure \ref{fig:garment-distribution} characterises the 30 ``hard'' initial stat
         \caption{Colour Distribution}
         \label{fig:colour-distribution}
     \end{subfigure}
-    \caption{The initial state distribution of simulation garments.}
+    \caption{The initial state distribution of the simulated garments.}
     \label{fig:garment-distribution}
 \end{figure*}
 
 \section{Real Robot Setup} \label{sec:real-world-setup}
 
-In cloth manipulation literature, robot arms are often fixed on a table  \cite{lin2022learning,lee2024learning,canberk2023cloth}, leading to a ring-shaped workspace for Pick-and-Place (PnP) primitives. Real garments are generally larger than simple fabrics, and it becomes physically impossible to flatten the garments on a fixed square window within the workspace of a single robot arm, which is a common practice in this domain \cite{kadi2025draper, hoque2022visuospatial, lee2021learning}. Thereby, it requires us to develop a transfer strategy to bridge the gap between observation and the workspace in addition to the gap between the simulation and the real robot environment.
+In the cloth manipulation literature, robot arms are often fixed on a table \cite{lin2022learning,lee2024learning,canberk2023cloth}, leading to a ring-shaped workspace for Pick-and-Place (PnP) primitives. Real garments are generally larger than simple fabrics, so it becomes physically impossible to flatten them within a fixed square window inside the workspace of a single robot arm---a common practice in this domain \cite{kadi2025draper, hoque2022visuospatial, lee2021learning}. This requires us to develop a transfer strategy to bridge the gap between observation and the workspace in addition to the gap between the simulation and the real robot environment.
 \begin{figure*}[t!]
     \centering
     
@@ -1400,7 +1383,7 @@ In cloth manipulation literature, robot arms are often fixed on a table  \cite{l
     \begin{subfigure}[b]{0.45\linewidth}
         \centering
         \includegraphics[width=\linewidth]{plots/transfer-hueristic-single.jpg}
-        \caption{Heuristic of Transferring Policy in Region-of-Interest (ROI)}
+        \caption{Heuristic for Transferring the Policy within the Region-of-Interest (ROI)}
         \label{fig:transfer-hueristic}
     \end{subfigure}
     % --- Subpart (c): Segmentation Parameters Table ---
@@ -1435,12 +1418,12 @@ In cloth manipulation literature, robot arms are often fixed on a table  \cite{l
     \end{subfigure}
     
     % --- Main Overarching Caption ---
-    \caption{Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can captures table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted as red (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any parts of the cloth, it re-select a window that centres around the cloth as shown; the most highlighted part on the rectangular images are the workspace of the \text{UR5e} Robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline.}
+    \caption{Overview of the real-world deployment setup. (a) Camera $P_c$ is set at the front of the robot and top of the table surface; whilst the camera can capture the table view highlighted in yellow, our system operates on the Region-of-Interest (ROI) highlighted in red. (b) The heuristic approach for transferring the simulated policy to the real world; the heuristic prioritises the selection of the middle window for network inputs, but if the selected window does not contain any part of the cloth, it re-selects a window that centres around the cloth as shown; the most highlighted part of the rectangular images is the workspace of the \text{UR5e} robot for a particular action step. (c) The empirical parameters utilised in the segmentation pipeline.}
     \label{fig:real-world-overview}
 \end{figure*}
 As shown in Figure \ref{fig:ur5e-onrobot}, we employ a UR5e robot arm equipped with an OnRobot RG2 electric parallel gripper to conduct our real-world experiments. We position a RealSense D435i camera $P_c$ in front of the robot and above a table covered with a dark foam surface. As in simulation, we use only RGB frames with automatic exposure as input to our method in the real-world setup.
 
-The workspace of our UR5e robot is defined by a far radius $r_{f}$ and a near radius $r_{n}$. To isolate the effective workspace, we crop the visual input to a Region of Interest (ROI) as in Figure \ref{fig:robot-camera}. Given the top-down camera perspective, we compute the spatial position $p_w$ in the world frame for each pixel $p_x$ in the camera view using the camera intrinsics and the transformation matrix. Consequently, we determine whether $p_x$ lies within the workspace by checking if $r_n \leq ||p_w - b_w||_2 \leq r_f$, where $b_w$ represents the position of the robot base in the world frame. Please refer to Table \ref{tab:seg-para} for the exact parameters of our real-robot setup. We use UR-RTDE package \cite{urrtde2025} for conducting Cartesian planning for executing pick-and-place primitive, as they stably produce reliable trajectories.
+The workspace of our UR5e robot is defined by a far radius $r_{f}$ and a near radius $r_{n}$. To isolate the effective workspace, we crop the visual input to a Region of Interest (ROI) as in Figure \ref{fig:robot-camera}. Given the top-down camera perspective, we compute the spatial position $p_w$ in the world frame for each pixel $p_x$ in the camera view using the camera intrinsics and the transformation matrix. Consequently, we determine whether $p_x$ lies within the workspace by checking if $r_n \leq ||p_w - b_w||_2 \leq r_f$, where $b_w$ represents the position of the robot base in the world frame. Please refer to Table \ref{tab:seg-para} for the exact parameters of our real-robot setup. We use the UR-RTDE package \cite{urrtde2025} for conducting Cartesian planning to execute pick-and-place primitives, as it reliably produces stable trajectories.
 
 This section first introduces the transfer heuristic, which integrates the real robot arm's workspace into LaGarNet's planning method (Section \ref{sec:transfer-hueristic}). Next, we discuss how we conduct our hand-eye calibration (Section \ref{sec:calibration}) for the transformation between the camera pixel space and robot base space. Then, we explain our approach to segmenting the physical garments from the camera observations (Section \ref{sec:real-world-cloth-seg}). Finally, we detail our grasping implementation, designed to ensure the precise and robust picking of garments (Section \ref{sec:grasping}).
 
@@ -1462,10 +1445,10 @@ To guarantee precise physical manipulation based on visual input, we conducted a
 
 
 \subsection{Real-World Garment Segmentation} \label{sec:real-world-cloth-seg}
-Following standard practices in the domain \cite{canberk2023cloth, lin2022learning, kadi2025draper}, we utilise the Segment Anything Model (SAM) \cite{kirillov2023segment} to isolate the target garment. This segmentation is crucial for stripping the background from policy inputs and enabling accurate real-world evaluation. Given an RGB observation, SAM generates a set of $K$ binary candidate masks. To efficiently isolate the true garment, we convert the image to the HSV color space and apply a multi-stage heuristic filtering pipeline. First, we apply spatial pruning: masks are retained only if their total pixel area $A \in [A_{\text{min}}, A_{\text{max}}]$. To eliminate broad background surfaces, we reject any candidate whose active border pixels exceed 30\% of the image perimeter, formalised as $P_{\text{mask}} > \alpha_{border} \times 2(h + w)$. Next, we apply chromatic and variance filters to distinguish the garment from its environment. For each mask, we compute the mean saturation $\bar{S}$ and RGB intensity variance $V$. We discard grey areas if $\bar{S} < S_{\text{min}}$ as low saturation. We further reject grey backgrounds by ensuring $ V \geq V_{min}$. Finally, the optimal mask is selected by maximising a utility score that prioritises large, distinctly coloured objects $\text{Score}_i = A_i \cdot \bar{V}_i$. This pipeline reliably yields high-fidelity garment segmentations for downstream manipulation tasks. The specific parameters used in our real-world experiments are detailed in Table \ref{tab:seg-para}.
+Following standard practices in the domain \cite{canberk2023cloth, lin2022learning, kadi2025draper}, we utilise the Segment Anything Model (SAM) \cite{kirillov2023segment} to isolate the target garment. This segmentation is crucial for stripping the background from policy inputs and enabling accurate real-world evaluation. Given an RGB observation, SAM generates a set of $K$ binary candidate masks. To efficiently isolate the true garment, we convert the image to the HSV colour space and apply a multi-stage heuristic filtering pipeline. First, we apply spatial pruning: masks are retained only if their total pixel area $A \in [A_{\text{min}}, A_{\text{max}}]$. To eliminate broad background surfaces, we reject any candidate whose active border pixels exceed 30\% of the image perimeter, formalised as $P_{\text{mask}} > \alpha_{border} \times 2(h + w)$. Next, we apply chromatic and variance filters to distinguish the garment from its environment. For each mask, we compute the mean saturation $\bar{S}$ and RGB intensity variance $V$. We discard low-saturation grey areas, for which $\bar{S} < S_{\text{min}}$. We further reject grey backgrounds by ensuring $ V \geq V_{min}$. Finally, the optimal mask is selected by maximising a utility score that prioritises large, distinctly coloured objects $\text{Score}_i = A_i \cdot \bar{V}_i$. This pipeline reliably yields high-fidelity garment segmentations for downstream manipulation tasks. The specific parameters used in our real-world experiments are detailed in Table \ref{tab:seg-para}.
 \subsection{Grasping} \label{sec:grasping}
 
-Accurately grasping garments without failure remains a significant challenge for parallel grippers. We build upon the grasping protocol proposed by DRAPER \cite{kadi2025draper} which adjust the pick position on an eroded mask of the garment and ensures the axis connecting the two gripper fingers is perpendicular to the target mask cutline. However, while DRAPER utilises a custom pincher extension, our approach employs a standard OnRobot RG2 parallel gripper. To mitigate misgrasping errors, we initialised the gripper to a 3~cm opening width before the approach towards garments. The end-effector then executes a guarded descent, lowering gradually until the robot's force-torque sensor detects an upward reaction force of approximately 5~N. This force-based threshold ensures the garment is firmly contacted while preventing gripper faults or misgrasps caused by excessive collision resistance from the underlying workspace table.
+Accurately grasping garments without failure remains a significant challenge for parallel grippers. We build upon the grasping protocol proposed by DRAPER \cite{kadi2025draper}, which adjusts the pick position on an eroded mask of the garment and ensures the axis connecting the two gripper fingers is perpendicular to the target mask cutline. However, while DRAPER utilises a custom pincher extension, our approach employs a standard OnRobot RG2 parallel gripper. To mitigate misgrasping errors, we initialise the gripper to a 3~cm opening width before the approach towards garments. The end-effector then executes a guarded descent, lowering gradually until the robot's force-torque sensor detects an upward reaction force of approximately 5~N. This force-based threshold ensures the garment is firmly contacted while preventing gripper faults or misgrasps caused by excessive collision resistance from the underlying workspace table.
 
 
 

@@ -20,16 +20,11 @@
 \providecommand{\BIBdecl}{\relax}
 \BIBdecl
 
-\bibitem{canberk2023cloth}
-A.~Canberk, C.~Chi, H.~Ha, B.~Burchfiel, E.~Cousineau, S.~Feng, and S.~Song, ``{Cloth Funnels}: Canonicalized-alignment for multi-purpose garment manipulation,'' in \emph{2023 IEEE International Conference on Robotics and Automation (ICRA)}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2023, pp. 5872--5879.
-
-\bibitem{kadi2025draper}
-\BIBentryALTinterwordspacing
-H.~A. Kadi, J.~A. Chandy, L.~Figueredo, K.~Terzi{\'c}, and P.~Caleb-Solly, ``{DRAPER}: Towards a robust robot deployment and reliable evaluation for quasi-static pick-and-place cloth-shaping neural controllers,'' 2025. [Online]. Available: \url{https://arxiv.org/abs/2409.15159}
-\BIBentrySTDinterwordspacing
-
 \bibitem{bertiche2020cloth3d}
 H.~Bertiche, M.~Madadi, and S.~Escalera, ``{CLOTH3D}: Clothed 3d humans,'' in \emph{European Conference on Computer Vision}.\hskip 1em plus 0.5em minus 0.4em\relax Springer, 2020, pp. 344--359.
+
+\bibitem{canberk2023cloth}
+A.~Canberk, C.~Chi, H.~Ha, B.~Burchfiel, E.~Cousineau, S.~Feng, and S.~Song, ``{Cloth Funnels}: Canonicalized-alignment for multi-purpose garment manipulation,'' in \emph{2023 IEEE International Conference on Robotics and Automation (ICRA)}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2023, pp. 5872--5879.
 
 \bibitem{nayak2018introduction}
 R.~Nayak and R.~Padhye, ``Introduction to automation in garment manufacturing,'' in \emph{Automation in garment manufacturing}.\hskip 1em plus 0.5em minus 0.4em\relax Elsevier, 2018, pp. 1--27.
@@ -46,6 +41,27 @@ N.~E. Cornish, N.~L. Anderson, D.~G. Arambula, M.~J. Arduino, A.~Bryan, N.~C. Bu
 \bibitem{doumanoglou2016folding}
 A.~Doumanoglou, J.~Stria, G.~Peleka, I.~Mariolis, V.~Petrik, A.~Kargakos, L.~Wagner, V.~Hlav{\'a}{\v{c}}, T.-K. Kim, and S.~Malassiotis, ``Folding clothes autonomously: A complete pipeline,'' \emph{IEEE Transactions on Robotics}, vol.~32, no.~6, pp. 1461--1478, 2016.
 
+\bibitem{weng2022fabricflownet}
+T.~Weng, S.~M. Bajracharya, Y.~Wang, K.~Agrawal, and D.~Held, ``Fabricflownet: Bimanual cloth manipulation with a flow-based policy,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax uckland, New Zealand: PMLR, 15–18 December 2022, pp. 192--202.
+
+\bibitem{lips2024learning}
+T.~Lips, V.-L. De~Gusseme, and F.~wyffels, ``Learning keypoints for robotic cloth manipulation using synthetic data,'' \emph{IEEE Robotics and Automation Letters}, 2024.
+
+\bibitem{huang2025sis}
+X.~Huang, A.~Seino, F.~Tokuda, A.~Kobayashi, D.~Chen, Y.~Hirata, N.~C. Tien, and K.~Kosuge, ``{SIS}: Seam-informed strategy for t-shirt unfolding,'' \emph{IEEE Robotics and Automation Letters}, vol.~10, no.~7, pp. 7342--7349, 2025.
+
+\bibitem{matas2018sim}
+J.~Matas, S.~James, and A.~J. Davison, ``Sim-to-real reinforcement learning for deformable object manipulation,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax Zurich, Switzerland: PMLR, 9--31 October 2018, pp. 734--743.
+
+\bibitem{lin2020softgym}
+X.~Lin, Y.~Wang, J.~Olkin, and D.~Held, ``Softgym: Benchmarking deep reinforcement learning for deformable object manipulation,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax London, UK: PMLR, 8--11 November 2021, pp. 432--448.
+
+\bibitem{gu2023learning}
+N.-Q. Gu, R.~He, and L.~Yu, ``Learning to unfold garment effectively into oriented direction,'' \emph{IEEE Robotics and Automation Letters}, vol.~9, no.~2, pp. 1051--1058, 2024.
+
+\bibitem{ha2022flingbot}
+H.~Ha and S.~Song, ``Flingbot: The unreasonable effectiveness of dynamic manipulation for cloth unfolding,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax Auckland, New Zealand: PMLR, 15--18 Decemeber 2022, pp. 24--33.
+
 \bibitem{ha2018world}
 D.~Ha and J.~Schmidhuber, ``World models,'' \emph{arXiv preprint arXiv:1803.10122}, 2018.
 
@@ -61,11 +77,10 @@ X.~Ma, D.~Hsu, and W.~S. Lee, ``Learning latent graph dynamics for visual manipu
 \bibitem{yan2021learning}
 W.~Yan, A.~Vangipuram, P.~Abbeel, and L.~Pinto, ``Learning predictive representations for deformable objects using contrastive estimation,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax London, UK: PMLR, 8--11 November 2021, pp. 564--574.
 
-\bibitem{lin2020softgym}
-X.~Lin, Y.~Wang, J.~Olkin, and D.~Held, ``Softgym: Benchmarking deep reinforcement learning for deformable object manipulation,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax London, UK: PMLR, 8--11 November 2021, pp. 432--448.
-
-\bibitem{weng2022fabricflownet}
-T.~Weng, S.~M. Bajracharya, Y.~Wang, K.~Agrawal, and D.~Held, ``Fabricflownet: Bimanual cloth manipulation with a flow-based policy,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax uckland, New Zealand: PMLR, 15–18 December 2022, pp. 192--202.
+\bibitem{kadi2025draper}
+\BIBentryALTinterwordspacing
+H.~A. Kadi, J.~A. Chandy, L.~Figueredo, K.~Terzi{\'c}, and P.~Caleb-Solly, ``{DRAPER}: Towards a robust robot deployment and reliable evaluation for quasi-static pick-and-place cloth-shaping neural controllers,'' 2025. [Online]. Available: \url{https://arxiv.org/abs/2409.15159}
+\BIBentrySTDinterwordspacing
 
 \bibitem{hoque2022visuospatial}
 R.~Hoque, D.~Seita, A.~Balakrishna, A.~Ganapathi, A.~K. Tanwani, N.~Jamali, K.~Yamane, S.~Iba, and K.~Goldberg, ``Visuospatial foresight for physical sequential fabric manipulation,'' \emph{Autonomous Robots}, vol.~46, no.~1, pp. 175--199, 2022.
@@ -79,14 +94,8 @@ H.~A. Kadi and K.~Terzi{\'c}, ``{PlaNet-ClothPick}: Effective fabric flattening 
 \bibitem{huang2022mesh}
 Z.~Huang, X.~Lin, and D.~Held, ``Mesh-based dynamics with occlusion reasoning for cloth manipulation,'' in \emph{Proceedings of Robotics: Science and Systems (RSS)}, New York City, NY, USA, June 2022.
 
-\bibitem{matas2018sim}
-J.~Matas, S.~James, and A.~J. Davison, ``Sim-to-real reinforcement learning for deformable object manipulation,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax Zurich, Switzerland: PMLR, 9--31 October 2018, pp. 734--743.
-
 \bibitem{lee2021learning}
 R.~Lee, D.~Ward, V.~Dasagi, A.~Cosgun, J.~Leitner, and P.~Corke, ``Learning arbitrary-goal fabric folding with one hour of real robot experience,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax London, UK: PMLR, 11 November 2021, pp. 2317--2327.
-
-\bibitem{gu2023learning}
-N.-Q. Gu, R.~He, and L.~Yu, ``Learning to unfold garment effectively into oriented direction,'' \emph{IEEE Robotics and Automation Letters}, vol.~9, no.~2, pp. 1051--1058, 2024.
 
 \bibitem{avigal2022speedfolding}
 Y.~Avigal, L.~Berscheid, T.~Asfour, T.~Kr{\"o}ger, and K.~Goldberg, ``Speedfolding: Learning efficient bimanual folding of garments,'' in \emph{2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2022, pp. 1--8.
@@ -97,14 +106,8 @@ S.~Arnold, D.~Tanaka, and K.~Yamazaki, ``Cloth manipulation planning on basis of
 \bibitem{lin2022learning}
 X.~Lin, Y.~Wang, Z.~Huang, and D.~Held, ``Learning visible connectivity dynamics for cloth smoothing,'' in \emph{Conference on Robot Learning}.\hskip 1em plus 0.5em minus 0.4em\relax Auckland, New Zealand: PMLR, 5--18 December 2022, pp. 256--266.
 
-\bibitem{lips2024learning}
-T.~Lips, V.-L. De~Gusseme, and F.~wyffels, ``Learning keypoints for robotic cloth manipulation using synthetic data,'' \emph{IEEE Robotics and Automation Letters}, 2024.
-
 \bibitem{mo2022foldsformer}
 K.~Mo, C.~Xia, X.~Wang, Y.~Deng, X.~Gao, and B.~Liang, ``Foldsformer: Learning sequential multi-step cloth manipulation with space-time attention,'' \emph{IEEE Robotics and Automation Letters}, vol.~8, no.~2, pp. 760--767, 2023.
-
-\bibitem{huang2025sis}
-X.~Huang, A.~Seino, F.~Tokuda, A.~Kobayashi, D.~Chen, Y.~Hirata, N.~C. Tien, and K.~Kosuge, ``{SIS}: Seam-informed strategy for t-shirt unfolding,'' \emph{IEEE Robotics and Automation Letters}, vol.~10, no.~7, pp. 7342--7349, 2025.
 
 \bibitem{wu2024unigarmentmanip}
 R.~Wu, H.~Lu, Y.~Wang, Y.~Wang, and H.~Dong, ``Unigarmentmanip: A unified framework for category-level garment manipulation via dense visual correspondence,'' in \emph{Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition}, 2024, pp. 16\,340--16\,350.
@@ -151,9 +154,6 @@ Y.~Li, J.~Wu, R.~Tedrake, J.~B. Tenenbaum, and A.~Torralba, ``Learning particle 
 
 \bibitem{wang2004image}
 Z.~Wang, A.~C. Bovik, H.~R. Sheikh, and E.~P. Simoncelli, ``Image quality assessment: from error visibility to structural similarity,'' \emph{IEEE transactions on image processing}, vol.~13, no.~4, pp. 600--612, 2004.
-
-\bibitem{huang2022accelerating}
-T.~Huang, J.~Wang, and X.~Chen, ``Accelerating representation learning with view-consistent dynamics in data-efficient reinforcement learning,'' \emph{arXiv preprint arXiv:2201.07016}, 2022.
 
 \bibitem{paoletti2012pink}
 J.~B. Paoletti, \emph{Pink and blue: Telling the boys from the girls in America}.\hskip 1em plus 0.5em minus 0.4em\relax Indiana University Press, 2012.

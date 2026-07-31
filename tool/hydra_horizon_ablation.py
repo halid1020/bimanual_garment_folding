@@ -92,6 +92,10 @@ def main(cfg: DictConfig) -> None:
         agent_cfg = copy.deepcopy(train_cfg.agent)
         agent_cfg.policy.params.planning_horizon = horizon
         agent_cfg.policy.params.constrain_actions = constrained
+        # Ablation arenas define no robot workspace (no 'robot0_mask' in obs);
+        # the horizon ablation isolates planning depth, so drop the workspace
+        # constraint. No-op for policies that already leave it False.
+        agent_cfg.policy.params.apply_workspace = False
 
         agent = ag_ar.build_agent(
             agent_cfg.name,

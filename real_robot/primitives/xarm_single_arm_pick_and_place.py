@@ -13,7 +13,8 @@ from real_robot.utils.transform_utils import point_on_table_base
 from real_robot.utils.xarm_constants import (
     XARM_TABLE_Z, XARM_MIN_Z, XARM_GRIPPER_OFFSET, XARM_APPROACH_DIST,
     XARM_LIFT_DIST, XARM_MOVE_SPEED, XARM_MOVE_ACC, XARM_WORKSPACE_RADIUS,
-    XARM_DOWN_ROTVEC,
+    XARM_DOWN_ROTVEC, XARM_TABLE_Z_BY_SIDE, XARM_GRIPPER_OFFSET_BY_SIDE,
+    XARM_WORKSPACE_RADIUS_BY_SIDE, for_side,
 )
 from .utils import apply_local_z_rotation
 
@@ -29,11 +30,22 @@ class XArmSingleArmPickAndPlaceSkill:
         self.move_speed = config.get('speed', XARM_MOVE_SPEED)
         self.move_acc = config.get('acc', XARM_MOVE_ACC)
         self.home_after = True
-        self.base_safe_radius = config.get('base_safe_radius', XARM_WORKSPACE_RADIUS[0])
+        # The table height and the gripper length are measured PER ARM: the two
+        # controllers are configured independently, so one arm's calibration is not
+        # evidence about the other's.
+        self.side = getattr(scene, 'side', 'left')
+        self.table_z = config.get('table_z', for_side(XARM_TABLE_Z_BY_SIDE, self.side,
+                                                      XARM_TABLE_Z))
+        self.gripper_offset = config.get(
+            'gripper_offset', for_side(XARM_GRIPPER_OFFSET_BY_SIDE, self.side,
+                                       XARM_GRIPPER_OFFSET))
+        self.base_safe_radius = config.get(
+            'base_safe_radius',
+            for_side(XARM_WORKSPACE_RADIUS_BY_SIDE, self.side, XARM_WORKSPACE_RADIUS)[0])
 
     def reset(self):
         self.scene.open_gripper()
-        self.scene.home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+        self.scene.home(blocking=True)
         time.sleep(0.5)
 
     def _get_collision_free_path(self, start_pose, end_pose):
@@ -72,10 +84,14 @@ class XArmSingleArmPickAndPlaceSkill:
 
         target_rot = apply_local_z_rotation(np.array(XARM_DOWN_ROTVEC, dtype=float), rotation_angle)
 
-        p_pick = point_on_table_base(pick_pixel[0], pick_pixel[1], self.scene.intr, self.scene.T_cam, XARM_TABLE_Z)
-        p_place = point_on_table_base(place_pixel[0], place_pixel[1], self.scene.intr, self.scene.T_cam, XARM_TABLE_Z)
-        p_pick[2] = max(self.min_z, float(p_pick[2])) + XARM_GRIPPER_OFFSET
-        p_place[2] = max(self.min_z, float(p_place[2])) + XARM_GRIPPER_OFFSET
+        p_pick = point_on_table_base(pick_pixel[0], pick_pixel[1], self.scene.intr, self.scene.T_cam, self.table_z)
+        p_place = point_on_table_base(place_pixel[0], place_pixel[1], self.scene.intr, self.scene.T_cam, self.table_z)
+        # Clamp the COMMANDED z, not the table plane. Clamping first and then adding
+        # the gripper offset lifts every grasp by min_z (5 mm with the table at
+        # z = 0), so the fingertips stop short of the fabric -- and the floor still
+        # does its job here, because it is the commanded height it needs to bound.
+        p_pick[2] = max(self.min_z, float(p_pick[2]) + self.gripper_offset)
+        p_place[2] = max(self.min_z, float(p_place[2]) + self.gripper_offset)
 
         print(f"[XArmSingleArmPnP] pick {pick_pixel} -> place {place_pixel} | rot {rotation_angle:.2f}")
 
@@ -103,4 +119,4 @@ class XArmSingleArmPickAndPlaceSkill:
         self.scene.movel(retract, speed=self.move_speed, acc=self.move_acc)
 
         if self.home_after:
-            self.scene.home(speed=self.move_speed, acc=self.move_acc)
+            self.scene.home()

@@ -21,7 +21,7 @@ from real_robot.utils.transform_utils import point_on_table_base, transform_poin
 from real_robot.utils.xarm_constants import (
     XARM_TABLE_Z, XARM_MIN_Z, XARM_GRIPPER_OFFSET, XARM_APPROACH_DIST,
     XARM_LIFT_DIST, XARM_MOVE_SPEED, XARM_MOVE_ACC, XARM_COLLISION_THRESHOLD,
-    XARM_DOWN_ROTVEC,
+    XARM_DOWN_ROTVEC, XARM_TABLE_Z_BY_SIDE, XARM_GRIPPER_OFFSET_BY_SIDE, for_side,
 )
 from real_robot.utils.thread_utils import ThreadWithResult
 from .utils import check_trajectories_close, apply_local_z_rotation
@@ -44,7 +44,7 @@ class XArmPickAndPlaceSkill:
 
     def reset(self):
         self.scene.both_open_gripper()
-        self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+        self.scene.both_home(blocking=True)
         time.sleep(0.5)
 
     # ------------------------------------------------------------------
@@ -71,10 +71,10 @@ class XArmPickAndPlaceSkill:
 
         p_pick_l = p_place_l = rot_l = None
         if active_l:
-            p_pick_l, p_place_l, rot_l = self._process_coords(pick_l, place_l, ang_l, self.scene.T_left_cam)
+            p_pick_l, p_place_l, rot_l = self._process_coords(pick_l, place_l, ang_l, self.scene.T_left_cam, 'left')
         p_pick_r = p_place_r = rot_r = None
         if active_r:
-            p_pick_r, p_place_r, rot_r = self._process_coords(pick_r, place_r, ang_r, self.scene.T_right_cam)
+            p_pick_r, p_place_r, rot_r = self._process_coords(pick_r, place_r, ang_r, self.scene.T_right_cam, 'right')
 
         print(f"[XArmPickAndPlace] active -> left: {active_l}, right: {active_r}")
 
@@ -90,40 +90,45 @@ class XArmPickAndPlaceSkill:
                       p_place_r_in_l + [0, 0, self.approach_dist], p_place_r_in_l]
             conflict, _ = check_trajectories_close(traj_l, traj_r, threshold=self.collision_threshold)
 
-            self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+            self.scene.both_home(blocking=True)
             self.scene.both_open_gripper()
 
             if conflict:
                 print("[XArmPickAndPlace] Collision predicted; executing sequentially.")
                 self._execute_single(self.scene.left, p_pick_l, p_place_l, rot_l)
-                self.scene.left.home(speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+                self.scene.left.home(blocking=True)
                 self._execute_single(self.scene.right, p_pick_r, p_place_r, rot_r)
-                self.scene.right.home(speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+                self.scene.right.home(blocking=True)
             else:
                 self._execute_dual(p_pick_l, p_place_l, rot_l, p_pick_r, p_place_r, rot_r)
 
         elif active_l:
-            self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+            self.scene.both_home(blocking=True)
             self.scene.left.open_gripper()
             self._execute_single(self.scene.left, p_pick_l, p_place_l, rot_l)
             if self.home_after:
-                self.scene.left.home(speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+                self.scene.left.home(blocking=True)
 
         elif active_r:
-            self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+            self.scene.both_home(blocking=True)
             self.scene.right.open_gripper()
             self._execute_single(self.scene.right, p_pick_r, p_place_r, rot_r)
             if self.home_after:
-                self.scene.right.home(speed=self.move_speed, acceleration=self.move_acc, blocking=True)
+                self.scene.right.home(blocking=True)
         else:
             print("[XArmPickAndPlace] No active arms; skipping.")
 
     # ------------------------------------------------------------------
-    def _process_coords(self, pick_xy, place_xy, rot_angle, cam_T):
-        p_pick = point_on_table_base(pick_xy[0], pick_xy[1], self.scene.intr, cam_T, XARM_TABLE_Z)
-        p_place = point_on_table_base(place_xy[0], place_xy[1], self.scene.intr, cam_T, XARM_TABLE_Z)
-        p_pick[2] = max(self.min_z, float(p_pick[2])) + XARM_GRIPPER_OFFSET
-        p_place[2] = max(self.min_z, float(p_place[2])) + XARM_GRIPPER_OFFSET
+    def _process_coords(self, pick_xy, place_xy, rot_angle, cam_T, side='left'):
+        table_z = for_side(XARM_TABLE_Z_BY_SIDE, side, XARM_TABLE_Z)
+        offset = for_side(XARM_GRIPPER_OFFSET_BY_SIDE, side, XARM_GRIPPER_OFFSET)
+        p_pick = point_on_table_base(pick_xy[0], pick_xy[1], self.scene.intr, cam_T, table_z)
+        p_place = point_on_table_base(place_xy[0], place_xy[1], self.scene.intr, cam_T, table_z)
+        # Clamp the COMMANDED z, not the table plane: clamping first and adding the
+        # gripper offset afterwards lifts every grasp by min_z, so the fingertips
+        # stop short of the fabric.
+        p_pick[2] = max(self.min_z, float(p_pick[2]) + offset)
+        p_place[2] = max(self.min_z, float(p_place[2]) + offset)
         rot = apply_local_z_rotation(np.array(XARM_DOWN_ROTVEC, dtype=float), rot_angle)
         return p_pick, p_place, rot
 
@@ -174,7 +179,7 @@ class XArmPickAndPlaceSkill:
         time.sleep(0.2)
         self.scene.both_movel(app_place_l, app_place_r, speed=self.move_speed, acc=self.move_acc, blocking=True)
         if self.home_after:
-            self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+            self.scene.both_home(blocking=True)
 
     def _inward_release(self, p_place_l, p_place_r, rot_l, rot_r):
         """Optional gentle position-based nudge of each TCP toward the other arm,

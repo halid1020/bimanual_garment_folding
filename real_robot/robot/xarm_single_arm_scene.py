@@ -17,14 +17,18 @@ from real_robot.utils.xarm_constants import XARM_TABLE_Z, XARM_WORKSPACE_RADIUS
 
 
 class XArmSingleArmScene:
-    def __init__(self, robot_ip="192.168.1.201", dry_run=False, radius=XARM_WORKSPACE_RADIUS):
+    def __init__(self, robot_ip="192.168.1.201", dry_run=False, radius=XARM_WORKSPACE_RADIUS,
+                 side='left'):
         self.dry_run = dry_run
         self.gripper_type = 'lite6'
-        self.calib_file = f"{os.environ['MP_FOLD_PATH']}/real_robot/calibration/xarm-left-calib.yaml"
+        self.side = side
+        calib_name = 'xarm-left-calib.yaml' if side == 'left' else 'xarm-right-calib.yaml'
+        self.calib_file = f"{os.environ['MP_FOLD_PATH']}/real_robot/calibration/{calib_name}"
         self.radius = tuple(radius)
 
         if not dry_run:
-            self.arm = XArmLite6(robot_ip, self.gripper_type)
+            # side= also selects this arm's virtual walls (see xarm_walls.py).
+            self.arm = XArmLite6(robot_ip, self.gripper_type, side=side)
             self.camera = RealsenseCamera(debug=True)
             self.intr = self.camera.get_intrinsic()
             self.arm.open_gripper()
@@ -50,10 +54,15 @@ class XArmSingleArmScene:
     def movel(self, pose, speed, acc, blocking=True, record=False):
         return safe_movel(self.arm, pose, speed, acc, blocking, self.dry_run)
 
-    def home(self, speed=0.2, acc=0.5, blocking=True):
+    # home()/out_scene() are JOINT moves, so their speed is rad/s and rad/s^2 -- NOT
+    # the Cartesian m/s the rest of this class takes. Defaulting to None lets
+    # XArmLite6.movej apply XARM_JOINT_SPEED / XARM_JOINT_ACC. Passing a Cartesian
+    # speed here is what made homing crawl: 0.2 m/s was read as 0.2 rad/s (11 deg/s)
+    # and 0.5 m/s^2 as 0.5 rad/s^2, a tenth of the intended joint acceleration.
+    def home(self, speed=None, acc=None, blocking=True):
         return safe_home(self.arm, speed, acc, blocking, self.dry_run)
 
-    def out_scene(self, speed=0.2, acc=0.5, blocking=True):
+    def out_scene(self, speed=None, acc=None, blocking=True):
         return safe_out_scene(self.arm, speed, acc, blocking, self.dry_run)
 
     def open_gripper(self):

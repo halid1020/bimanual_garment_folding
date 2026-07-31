@@ -42,6 +42,7 @@ from scipy.spatial.transform import Rotation
 from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.utils.motion_utils import safe_movel
 from real_robot.utils.thread_utils import ThreadWithResult
+from real_robot.utils.xarm_walls import check_pose
 
 
 # Common xArm CONTROLLER error codes. Not exhaustive -- UFACTORY Studio shows the
@@ -64,6 +65,7 @@ ERROR_HINTS = {
 ROT_TOL_DEG = 1.0      # stage 1: re-commanding the measured pose must not rotate the wrist
 POS_TOL_M = 0.005      # stage 1: ...nor translate it
 JOG_TOL_M = 0.008      # stage 2: measured jog must match the commanded delta
+SINGULARITY_MARGIN_DEG = 12.0   # joint 5 this close to +/-90 deg blocks linear moves
 
 
 def _fmt(v, prec=4):
@@ -138,6 +140,120 @@ def confirm(msg, auto_yes):
     return reply != 's'
 
 
+def _nonzero(seq, tol=1e-6):
+    try:
+        return any(abs(float(v)) > tol for v in seq)
+    except Exception:
+        return False
+
+
+def report_controller_settings(driver):
+    """Print the controller-side settings that PERSIST between sessions.
+
+    These outlive the process and the power cycle, and every one of them silently
+    changes what a command means: a stale safety boundary refuses moves this
+    process thinks are unconstrained, and a world/TCP offset means get_position is
+    not reporting base-frame coordinates at all. If they are not printed, a wrong
+    one is invisible.
+
+    Returns True if everything looks sane.
+    """
+    sdk = driver.arm
+    ok = True
+    print("  controller settings (PERSISTENT -- these survive restarts):")
+    print(f"    firmware: {getattr(sdk, 'version', '?')}")
+
+    try:
+        code, states = sdk.get_reduced_states()
+    except Exception as e:
+        code, states = -1, None
+        print(f"    !! cannot read the reduced/boundary state: {e}")
+    if code == 0 and states:
+        fence_on = bool(states[5]) if len(states) > 5 else False
+        boundary = list(states[1])[:6] if len(states) > 1 else []
+        print(f"    safety boundary: {'ON' if fence_on else 'off'}   boundary {boundary} mm")
+        print(f"    reduced mode: {'ON -- SPEEDS ARE CAPPED' if states[0] else 'off'}"
+              f"   max tcp {states[2]}, max joint {states[3]}")
+        if fence_on and driver.bounds is None:
+            ok = False
+            print("    !! a boundary is ARMED but this driver has no walls configured.")
+            print("       The driver should have cleared it at connect -- it did not, so")
+            print("       every move below will be refused with error 35.")
+        if states[0]:
+            print("    !! reduced mode caps TCP/joint speed; the fling needs it OFF.")
+    else:
+        ok = False
+        print(f"    !! reduced/boundary state unreadable (code {code}) -- treat the "
+              f"controller boundary as UNKNOWN.")
+
+    # No get_world_offset()/get_tcp_offset() exist in the SDK; these are properties
+    # fed by the report stream (xarm/wrapper/xarm_api.py).
+    for label, value in (('world_offset', getattr(sdk, 'world_offset', None)),
+                         ('tcp_offset', getattr(sdk, 'tcp_offset', None))):
+        if value is None:
+            print(f"    {label}: unavailable")
+            continue
+        print(f"    {label}: {_fmt(value, 2)}")
+        if _nonzero(value):
+            ok = False
+            print(f"    !! {label} is NON-ZERO. get_position is then reported in a shifted")
+            print("       frame, so every coordinate here -- including XARM_TABLE_Z and the")
+            print("       walls -- means something other than what this code assumes.")
+            print("       Clear it in UFACTORY Studio before calibrating anything.")
+    return ok
+
+
+def stage_clear_tcp_offset(name, driver, auto_yes):
+    """Zero the controller's tool-frame offset and PERSIST the change.
+
+    ``XArmLite6`` and every primitive assume the commanded point is the flange --
+    no tool is configured. A non-zero tcp_offset silently reframes every
+    coordinate: on the right arm a leftover [-288.7, 0, +238.2] mm tool made its
+    table-touch height read 0.24 m below the left arm's for the same physical
+    contact, and collapsed its IK reach to a 7 cm shell.
+
+    save_conf() matters in both directions: without it the clear is lost on the
+    next reboot and the phantom tool comes back.
+    """
+    sdk = driver.arm
+    before = getattr(sdk, 'tcp_offset', None)
+    print(f"\n--- [{name}] clear the tool (TCP) offset ---")
+    if before is None:
+        print("  !! tcp_offset is unavailable on this firmware; nothing to do.")
+        return False
+    print(f"  current tcp_offset: {_fmt(before, 2)}")
+    if not _nonzero(before):
+        print("  already zero -- nothing to change.")
+        return True
+    if sdk.state != 0:
+        print(f"  !! the arm is in state {sdk.state}, not 0 (ready). Clear the fault first;")
+        print("     changing the tool frame on a stopped arm is not something to guess at.")
+        return False
+
+    print("  This sets the tool frame to zero so the commanded point becomes the flange,")
+    print("  then calls save_conf() so it survives a reboot. The arm does NOT move.")
+    if not confirm(f"[{name}] zero the tool offset and save it", auto_yes):
+        print("  skipped -- nothing was changed.")
+        return False
+
+    code = sdk.set_tcp_offset([0.0] * 6)
+    print(f"  set_tcp_offset -> code {code}")
+    code_s = sdk.save_conf()
+    print(f"  save_conf      -> code {code_s}")
+    time.sleep(0.5)     # the offset reaches the property via the report stream
+
+    after = getattr(sdk, 'tcp_offset', None)
+    print(f"  tcp_offset now: {_fmt(after, 2)}" if after is not None else "  read-back failed")
+    if after is not None and not _nonzero(after):
+        print("  OK: the tool offset is zero. Power-cycle and re-run --info-only to confirm")
+        print("      save_conf() took, then re-teach this arm -- its old calibration was")
+        print("      measured through the phantom tool and is meaningless.")
+        return True
+    print("  !! the offset did not clear. Do it in UFACTORY Studio (Settings -> Tool "
+          "Coordinate).")
+    return False
+
+
 # ----------------------------------------------------------------------
 # Stages
 # ----------------------------------------------------------------------
@@ -153,6 +269,19 @@ def stage_report(name, driver):
     code, joints_deg = sdk.get_servo_angle(is_radian=False)
     print(f"  SDK get_servo_angle (code {code}): {_fmt(joints_deg, 2)} deg")
 
+    # Joint 5 near +/-90 deg is a wrist singularity. Worth knowing about, but it is
+    # only one of several reasons a Cartesian jog can abort -- do NOT present it as
+    # the explanation for a stage-2 failure. A latched controller error (which
+    # _ok() now prints before clearing) is the authority on that.
+    if code == 0 and len(joints_deg) >= 5:
+        j5 = float(joints_deg[4])
+        margin = min(abs(abs(j5) - 90.0), abs(abs(j5) - 270.0))
+        if margin < SINGULARITY_MARGIN_DEG:
+            print(f"  ~  note: joint 5 = {j5:+.2f} deg is {margin:.1f} deg from a wrist")
+            print("     singularity. If a straight-line jog below aborts with NO controller")
+            print("     error latched, that is the likely cause: run stage 3 (the JOINT jog)")
+            print("     first to rotate joint 5 away, or re-run with --motion-type 1.")
+
     pose = driver.get_tcp_pose()
     print(f"  Driver get_tcp_pose: xyz = {_fmt(pose[:3])} m, "
           f"rotvec = {_fmt(pose[3:6])} rad")
@@ -162,7 +291,7 @@ def stage_report(name, driver):
     print(f"  error_code = {sdk.error_code}, warn_code = {sdk.warn_code}, "
           f"mode = {sdk.mode}, state = {sdk.state}")
 
-    healthy = True
+    healthy = report_controller_settings(driver)
     if sdk.error_code:
         healthy = False
         hint = ERROR_HINTS.get(sdk.error_code)
@@ -174,8 +303,25 @@ def stage_report(name, driver):
         healthy = False
         print("  !! state = 4 (STOP): the arm is not enabled, so joint/pose readback above")
         print("     may be stale or zeroed -- do not trust it until the arm is ready.")
+
+    # Parked outside the walls: every jog below would be refused before being sent,
+    # which produces a confusing cascade and, worse, a stage-1 "no motion" result
+    # that means nothing. Catch it once, here.
+    if driver.bounds is not None:
+        inside, violations = check_pose(pose, driver.bounds)
+        if not inside:
+            healthy = False
+            print("  !! the arm is parked OUTSIDE its virtual walls:")
+            for v in violations:
+                print(f"       {v}")
+            print("     Every jog would be refused before being sent, so no stage below")
+            print("     could tell you anything. Either hand-guide/jog it back onto the")
+            print("     table first, or re-run this script with --no-walls to bring it")
+            print("     back inside, then re-run normally.")
+
     if healthy:
-        print("  OK: no errors, arm is ready to move.")
+        where = "inside the walls, " if driver.bounds is not None else ""
+        print(f"  OK: no errors, {where}arm is ready to move.")
     return pose, healthy
 
 
@@ -187,7 +333,18 @@ def stage_roundtrip(name, driver, speed, acc, auto_yes):
 
     p0 = driver.get_tcp_pose()
     print(f"  measured p0    : {_fmt(p0)}")
-    driver.movel(p0, speed=speed, acceleration=acc, blocking=True)
+    sent = driver.movel(p0, speed=speed, acceleration=acc, blocking=True)
+    if not sent:
+        # The arm did not execute the move, so "it did not move" proves nothing.
+        # Saying OK here would be a false pass on the one check that matters.
+        print("\n  !! INCONCLUSIVE: the arm never executed the re-command, so a")
+        print("     stationary arm tells us nothing about the Euler order.")
+        if driver.last_move_refused:
+            print("     It was refused by the virtual walls before being sent -- see above.")
+        else:
+            print("     It was sent and the controller rejected or aborted it -- see the")
+            print("     code above. Fix that first, then re-run this stage.")
+        return False
     time.sleep(0.3)
     p1 = driver.get_tcp_pose()
     print(f"  after re-command: {_fmt(p1)}")
@@ -208,7 +365,7 @@ def stage_roundtrip(name, driver, speed, acc, auto_yes):
     return True
 
 
-def stage_cartesian(name, driver, delta, speed, acc, auto_yes):
+def stage_cartesian(name, driver, delta, speed, acc, auto_yes, motion_type=None):
     """Stage 2: small jogs along each base axis, returning to start each time."""
     axis_names = ['+X', '+Y', '+Z']
     # Jog Z first: it moves away from the table, so it is the safest of the three.
@@ -224,7 +381,19 @@ def stage_cartesian(name, driver, delta, speed, acc, auto_yes):
         target = p0.copy()
         target[i] += delta
 
-        driver.movel(target, speed=speed, acceleration=acc, blocking=True)
+        if not driver.movel(target, speed=speed, acceleration=acc, blocking=True,
+                            motion_type=motion_type):
+            # Either way the arm did not perform the jog, so a zero measured delta
+            # is NOT evidence of a scaling error -- do not diagnose it as one.
+            if driver.last_move_refused:
+                print(f"  -- {axis_names[i]}: SKIPPED, refused by the virtual walls "
+                      f"before being sent.")
+            else:
+                print(f"  !! {axis_names[i]}: the move WAS sent and the controller "
+                      f"rejected or aborted it (see the code above).")
+            ok = False
+            continue
+
         time.sleep(0.3)
         p1 = driver.get_tcp_pose()
 
@@ -239,7 +408,10 @@ def stage_cartesian(name, driver, delta, speed, acc, auto_yes):
                   f"frame is not what the geometry code assumes.")
             ok = False
 
-        driver.movel(p0, speed=speed, acceleration=acc, blocking=True)
+        if not driver.movel(p0, speed=speed, acceleration=acc, blocking=True,
+                            motion_type=motion_type):
+            print(f"  !! could not return to the start pose after the {axis_names[i]} jog.")
+            ok = False
         time.sleep(0.3)
 
     return ok
@@ -260,12 +432,19 @@ def stage_joint(name, driver, joint_delta_deg, auto_yes):
 
     q1 = q0.copy()
     q1[0] += np.deg2rad(joint_delta_deg)
-    driver.movej(q1, blocking=True)
+    if not driver.movej(q1, blocking=True):
+        if driver.last_move_refused:
+            print("  -- SKIPPED: refused by the virtual walls before being sent.")
+        else:
+            print("  !! the joint move was sent and the controller rejected or aborted it.")
+        return False
     time.sleep(0.3)
     _, q_mid = driver.arm.get_servo_angle(is_radian=False)
     print(f"  jogged joints: {_fmt(q_mid, 2)} deg")
 
-    driver.movej(q0, blocking=True)
+    if not driver.movej(q0, blocking=True):
+        print("  !! could not return to the start joints; the arm is left jogged.")
+        return False
     time.sleep(0.3)
     _, q_end = driver.arm.get_servo_angle(is_radian=False)
     print(f"  returned     : {_fmt(q_end, 2)} deg")
@@ -348,13 +527,28 @@ def main():
     ap.add_argument('--test-gripper', action='store_true', help="include the gripper stage")
     ap.add_argument('--dual', action='store_true',
                     help="include the simultaneous both-arm stage (requires --arm both)")
+    ap.add_argument('--no-walls', action='store_true',
+                    help="force the virtual walls off (they are already off unless "
+                         "XARM_GEOMETRY_VERIFIED is True)")
+    ap.add_argument('--motion-type', type=int, default=None, choices=[0, 1, 2],
+                    help="controller path planner: 0 strictly linear (default), "
+                         "1 linear where possible else joint planning, 2 always joint. "
+                         "Use 1 to get out of a pose where linear moves are refused -- "
+                         "it does NOT guarantee a straight line")
+    ap.add_argument('--walls', action='store_true',
+                    help="force the virtual walls ON even before the cell geometry has "
+                         "been verified")
+    ap.add_argument('--clear-tcp-offset', dest='clear_tcp', action='store_true',
+                    help="zero the controller's tool-frame offset and save it, then stop. "
+                         "A non-zero tcp_offset reframes every reported coordinate, so no "
+                         "calibration is valid until it is gone. No motion.")
     args = ap.parse_args()
 
     names = ['left', 'right'] if args.arm == 'both' else [args.arm]
     ips = {'left': args.left_ip, 'right': args.right_ip}
 
-    if args.info_only:
-        motion_desc = "NONE (--info-only)"
+    if args.info_only or args.clear_tcp:
+        motion_desc = "NONE (--info-only)" if args.info_only else "NONE (--clear-tcp-offset)"
     else:
         motion_desc = (f"{args.delta*100:.0f} cm / {args.joint_delta:.0f} deg jogs "
                        f"at {args.speed} m/s, relative to the current pose")
@@ -382,9 +576,32 @@ def main():
                 print_network_help(ips[name], err)
                 return 1
             # gripper='none' -> the driver skips the pneumatic init (no air supply yet).
+            # walls: the jogs below are relative to wherever the arm currently is,
+            # which may be outside the table box (e.g. parked high), so --no-walls
+            # exists for that case.
+            # 'auto' (not True): bring-up is when the base frame is still being
+            # established, so the walls stay off until XARM_GEOMETRY_VERIFIED says
+            # they can be placed correctly. --walls forces them on anyway.
+            if args.no_walls:
+                walls = False
+            elif args.walls:
+                walls = True
+            else:
+                walls = 'auto'
             drivers[name] = XArmLite6(ips[name],
-                                      gripper='lite6' if args.test_gripper else 'none')
+                                      gripper='lite6' if args.test_gripper else 'none',
+                                      side=name, walls=walls)
             _, healthy[name] = stage_report(name, drivers[name])
+
+        if args.clear_tcp:
+            # Deliberately its own mode rather than a stage in the normal run: it
+            # changes persistent controller configuration, which should never be a
+            # side effect of a smoke test.
+            # List, not a generator: with --arm both, a failure on the first arm
+            # must not skip the second.
+            ok = all([stage_clear_tcp_offset(n, drivers[n], args.yes) for n in names])
+            print("\n--clear-tcp-offset: done, nothing was moved.")
+            return 0 if ok else 1
 
         if args.info_only:
             print("\n--info-only: done, nothing was moved.")
@@ -395,14 +612,16 @@ def main():
             if not healthy[name]:
                 # Never command an arm the controller has faulted: motion_enable
                 # failed, so commands are either refused or act on stale state.
-                print(f"\n[{name}] FAULTED -- skipping all motion stages for this arm.")
+                print(f"\n[{name}] NOT READY -- skipping all motion stages for this arm "
+                      f"(see the reason above).")
                 all_ok = False
                 continue
             if not stage_roundtrip(name, d, args.speed, args.acc, args.yes):
                 print(f"\n[{name}] stage 1 failed -- skipping the remaining motion stages.")
                 all_ok = False
                 continue
-            all_ok &= stage_cartesian(name, d, args.delta, args.speed, args.acc, args.yes)
+            all_ok &= stage_cartesian(name, d, args.delta, args.speed, args.acc, args.yes,
+                                      motion_type=args.motion_type)
             all_ok &= stage_joint(name, d, args.joint_delta, args.yes)
             if args.test_gripper:
                 all_ok &= stage_gripper(name, d, args.yes)

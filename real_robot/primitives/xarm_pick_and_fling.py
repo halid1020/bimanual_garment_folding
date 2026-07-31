@@ -22,6 +22,7 @@ from real_robot.utils.transform_utils import (
 from real_robot.utils.xarm_constants import (
     XARM_TABLE_Z, XARM_MIN_Z, XARM_GRIPPER_OFFSET, XARM_APPROACH_DIST,
     XARM_MOVE_SPEED, XARM_MOVE_ACC, XARM_COLLISION_THRESHOLD, XARM_DOWN_ROTVEC,
+    XARM_TABLE_Z_BY_SIDE, XARM_GRIPPER_OFFSET_BY_SIDE, for_side,
 )
 from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path
 
@@ -91,8 +92,8 @@ class XArmPickAndFlingSkill:
         pick_l, ang_l = pair_0['pick'], pair_0['angle']
         pick_r, ang_r = pair_1['pick'], pair_1['angle']
 
-        p_pick_l = self._table_point(pick_l, self.scene.T_left_cam)
-        p_pick_r = self._table_point(pick_r, self.scene.T_right_cam)
+        p_pick_l = self._table_point(pick_l, self.scene.T_left_cam, 'left')
+        p_pick_r = self._table_point(pick_r, self.scene.T_right_cam, 'right')
 
         # Collision check in the LEFT base frame.
         p_pick_r_in_l = transform_point(self.scene.T_left_right, p_pick_r)
@@ -108,7 +109,7 @@ class XArmPickAndFlingSkill:
 
         # 1. Approach + fixed-height grasp
         self.scene.both_open_gripper()
-        self.scene.both_home(speed=self.move_speed, acc=self.move_acc, blocking=True)
+        self.scene.both_home(blocking=True)
         app_l = np.concatenate([p_pick_l + [0, 0, self.approach_dist], rot_l])
         app_r = np.concatenate([p_pick_r + [0, 0, self.approach_dist], rot_r])
         self.scene.both_movel(app_l, app_r, speed=self.move_speed, acc=self.move_acc, blocking=True)
@@ -170,8 +171,13 @@ class XArmPickAndFlingSkill:
         self.scene.both_home()
         return full_traj
 
-    def _table_point(self, pixel, cam_T):
-        p = point_on_table_base(pixel[0], pixel[1], self.scene.intr, cam_T, XARM_TABLE_Z)
+    def _table_point(self, pixel, cam_T, side='left'):
+        table_z = for_side(XARM_TABLE_Z_BY_SIDE, side, XARM_TABLE_Z)
+        offset = for_side(XARM_GRIPPER_OFFSET_BY_SIDE, side, XARM_GRIPPER_OFFSET)
+        p = point_on_table_base(pixel[0], pixel[1], self.scene.intr, cam_T, table_z)
         p = np.asarray(p, dtype=float)
-        p[2] = max(self.min_z, float(p[2])) + XARM_GRIPPER_OFFSET
+        # Clamp the COMMANDED z, not the table plane: clamping first and adding the
+        # gripper offset afterwards lifts every grasp by min_z, so the fingertips
+        # stop short of the fabric.
+        p[2] = max(self.min_z, float(p[2]) + offset)
         return p

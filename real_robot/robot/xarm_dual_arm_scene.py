@@ -44,8 +44,10 @@ class XArmDualArmScene:
         self.right_radius = tuple(workspace_radius)
 
         if not dry_run:
-            self.left = XArmLite6(left_robot_ip, self.gripper_type)
-            self.right = XArmLite6(right_robot_ip, self.gripper_type)
+            # side= gives each driver the virtual walls in its OWN base frame
+            # (the right base is yawed 180 deg, so the table box transforms).
+            self.left = XArmLite6(left_robot_ip, self.gripper_type, side='left')
+            self.right = XArmLite6(right_robot_ip, self.gripper_type, side='right')
             self.camera = RealsenseCamera(debug=True)
             self.intr = self.camera.get_intrinsic()
             self.both_open_gripper()
@@ -126,7 +128,10 @@ class XArmDualArmScene:
             return t1.result and t2.result
         return True
 
-    def both_home(self, speed=XARM_MOVE_SPEED, acc=XARM_MOVE_ACC, blocking=True):
+    # JOINT moves: speed is rad/s, not the Cartesian m/s used elsewhere here. None
+    # lets XArmLite6.movej apply XARM_JOINT_SPEED / XARM_JOINT_ACC; passing a
+    # Cartesian speed made homing crawl at a tenth of the intended acceleration.
+    def both_home(self, speed=None, acc=None, blocking=True):
         t1 = ThreadWithResult(target=safe_home, args=(self.left, speed, acc, blocking, self.dry_run))
         t2 = ThreadWithResult(target=safe_home, args=(self.right, speed, acc, blocking, self.dry_run))
         t1.start(); t2.start()
@@ -135,7 +140,7 @@ class XArmDualArmScene:
             return t1.result and t2.result
         return True
 
-    def both_out_scene(self, speed=XARM_MOVE_SPEED, acc=XARM_MOVE_ACC, blocking=True):
+    def both_out_scene(self, speed=None, acc=None, blocking=True):
         t1 = ThreadWithResult(target=safe_out_scene, args=(self.left, speed, acc, blocking, self.dry_run))
         t2 = ThreadWithResult(target=safe_out_scene, args=(self.right, speed, acc, blocking, self.dry_run))
         t1.start(); t2.start()

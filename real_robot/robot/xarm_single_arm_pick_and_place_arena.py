@@ -33,6 +33,7 @@ class XArmSingleArmPickAndPlaceArena(SingleArmPickAndPlaceArena):
             robot_ip=config.get("robot_ip", config.get("xarm_ip", "192.168.1.201")),
             dry_run=dry_run,
             radius=config.get('radius', XARM_WORKSPACE_RADIUS),
+            side=config.get('arm_side', 'left'),
         )
 
         self.pick_and_place_skill = XArmSingleArmPickAndPlaceSkill(self.single_arm)

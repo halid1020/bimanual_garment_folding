@@ -9,11 +9,12 @@ nothing but tool-GPIO writes to a solenoid valve::
 
 so it needs air pressure, correct tool-IO wiring, and firmware >= 1.10.0.
 
-The point of stage 4: ``XArmLite6.close_gripper()`` does close -> sleep -> STOP,
-and stop drives BOTH lines low. Whether the fingers keep holding after that
-depends on the valve (a double-solenoid valve latches; a spring-return one vents).
-If they release, then every grasp in every primitive silently drops the garment
-and the driver needs a hold path. This script answers that empirically.
+``stop`` drives BOTH lines low, and whether the fingers keep holding after that
+depends on the valve: a double-solenoid valve latches, a spring-return one vents.
+``XArmLite6.close_gripper()`` used to call stop after closing, so on this cell it
+released the garment the instant the call returned; it now leaves the solenoid
+driven, which is correct either way. Stage 3 still identifies the valve type,
+because that decides whether ``stop_gripper()`` is safe while something is held.
 
 Safe to run with the arm parked -- it never commands a motion.
 
@@ -27,6 +28,7 @@ import os
 import sys
 import time
 
+from real_robot.utils.term import green, red, yellow
 from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.test.test_xarm_lite6_bringup import (
     ERROR_HINTS, preflight, print_network_help, confirm,
@@ -84,10 +86,12 @@ def stage_report(name, driver):
         return False
     print("  error/warn      : {} / {}".format(arm.error_code, arm.warn_code))
 
-    code, io = arm.get_tgpio_digital()
-    print("  tool digital IO : code={} state={}".format(code, io))
+    # OUTPUT, not get_tgpio_digital: that reads the tool digital INPUTS, which say
+    # nothing about what the solenoids are being driven with.
+    code, io = arm.get_tgpio_output_digital()
+    print("  tool digital OUT: code={} state={}".format(code, io))
     if code != 0:
-        print("  !! cannot read the tool IO -- check the end-effector cable.")
+        print(red("  !! cannot read the tool IO -- check the end-effector cable."))
         return False
     print("\n  Before continuing: is the air supply ON and connected to the gripper?")
     return True
@@ -108,7 +112,7 @@ def stage_raw_io(name, driver, dwell, auto_yes):
         arm.set_tgpio_digital(0, d0)
         arm.set_tgpio_digital(1, d1)
         time.sleep(dwell)
-        code, io = arm.get_tgpio_digital()
+        code, io = arm.get_tgpio_output_digital()
         print("  {} -> DO0={} DO1={}   readback: code={} {}".format(label, d0, d1, code, io))
         seen.append(io)
     arm.set_tgpio_digital(0, 0)
@@ -116,7 +120,7 @@ def stage_raw_io(name, driver, dwell, auto_yes):
 
     moved = ask("Did the fingers actually move during that sequence?", auto_yes)
     if not moved:
-        print("  !! No movement with the DO lines confirmed switching means the fault is")
+        print(red("  !! No movement with the DO lines confirmed switching means the fault is"))
         print("     downstream of the controller: air supply off, air line not connected,")
         print("     or the solenoid valve not wired to tool DO0/DO1.")
     return moved
@@ -137,18 +141,25 @@ def stage_driver_cycle(name, driver, cycles, auto_yes):
             i + 1, cycles, t1 - t0, t2 - t1))
     full = ask("Did the fingers fully open AND fully close every cycle?", auto_yes)
     if not full:
-        print("  !! Increase sleep_time in XArmLite6.open_gripper/close_gripper (currently")
+        print(red("  !! Increase sleep_time in XArmLite6.open_gripper/close_gripper (currently"))
         print("     0.6 s), or raise the air pressure -- the valve is not being given long")
         print("     enough to complete its stroke.")
     return full
 
 
 def stage_hold(name, driver, hold_seconds, auto_yes):
-    """THE important one: does the grip survive stop_lite6_gripper()?"""
+    """Is the valve bistable (latches) or spring-return (vents when de-energised)?
+
+    The driver no longer depends on the answer -- close_gripper() keeps the solenoid
+    driven, which works for either type. (It used to call stop_lite6_gripper()
+    afterwards, which on a spring-return valve released the grasp the instant the
+    call returned.) This stage still tells you which valve you have, and therefore
+    whether stop_gripper() is safe to call while something is held.
+    """
     print("\n--- [{}] stage 3: does the grip HOLD after stop? ---".format(name))
-    print("  XArmLite6.close_gripper() ends with stop_lite6_gripper(), which drives both")
-    print("  DO lines low. If the valve vents on that, every primitive grasp releases as")
-    print("  soon as the gripper call returns.")
+    print("  stop_lite6_gripper() drives both DO lines low. A bistable valve latches")
+    print("  and keeps holding; a spring-return valve vents and drops the load. The")
+    print("  driver holds the coil either way, so this is about stop_gripper() only.")
     if not confirm("Close the gripper, then stop it, and watch for {:.0f} s"
                    .format(hold_seconds), auto_yes):
         return None
@@ -169,13 +180,12 @@ def stage_hold(name, driver, hold_seconds, auto_yes):
         print("    inconclusive -- the gripper never closed under drive. Fix stage 1/2 first.")
         return None
     if still_closed:
-        print("    HOLDS. The valve latches, so XArmLite6.close_gripper()'s trailing")
-        print("    stop_lite6_gripper() is safe and the primitives can carry a garment.")
+        print(green("    HOLDS -- a bistable valve. stop_gripper() is safe even with a garment"))
+        print("    held, and the coil need not stay energised during a long carry.")
     else:
-        print("    RELEASES. XArmLite6.close_gripper() cannot hold cloth as written: the")
-        print("    trailing stop_lite6_gripper() vents the valve. The driver needs a hold")
-        print("    path that leaves DO1 driven (and stops only on open_gripper()).")
-        print("    Report this before running any primitive that grasps.")
+        print(yellow("    RELEASES -- a spring-return valve. NEVER call stop_gripper() while"))
+        print("    something is held: it vents and drops the load. The driver's")
+        print("    close_gripper() keeps the coil driven, so grasps are fine.")
     arm.set_tgpio_digital(0, 1)
     arm.set_tgpio_digital(1, 0)
     time.sleep(0.6)
@@ -204,7 +214,7 @@ def stage_fabric(name, driver, hold_seconds, auto_yes):
         print("    fabric grip survives stop: {}".format("YES" if still else "NO"))
     else:
         still = False
-        print("  !! The gripper cannot hold this fabric. Check air pressure, and whether")
+        print(red("  !! The gripper cannot hold this fabric. Check air pressure, and whether"))
         print("     the fingertips suit cloth (flat fingers slide off a single layer).")
 
     driver.open_gripper()

@@ -25,6 +25,7 @@ import types
 import numpy as np
 
 from real_robot.utils import xarm_constants as C
+from real_robot.utils.term import green, red
 from real_robot.utils.xarm_walls import walls_for_side, to_sdk_boundary_mm
 
 
@@ -43,6 +44,8 @@ class FakeXArmAPI:
         self.boundary = list(self.STALE_FENCE) if self.STALE_FENCE else None
         self.fence_on = self.STALE_FENCE is not None
         self.reduced_mode_on = 0
+        self.tgpio = [0, 0]
+        self.gripper_calls = []
         self.error_code = 0
         self.warn_code = 0
         self.state = 0
@@ -62,9 +65,18 @@ class FakeXArmAPI:
     def set_state(self, state): self.state = state; return 0
     def set_collision_sensitivity(self, v): return 0
     def set_self_collision_detection(self, v): return 0
-    def open_lite6_gripper(self): return 0
-    def close_lite6_gripper(self): return 0
-    def stop_lite6_gripper(self): return 0
+    # Tool DO lines: DO0 = open solenoid, DO1 = close solenoid.
+    def open_lite6_gripper(self): self.tgpio = [1, 0]; self.gripper_calls.append('open'); return 0
+    def close_lite6_gripper(self): self.tgpio = [0, 1]; self.gripper_calls.append('close'); return 0
+    def stop_lite6_gripper(self): self.tgpio = [0, 0]; self.gripper_calls.append('stop'); return 0
+
+    def get_tgpio_output_digital(self, ionum=None):
+        return 0, list(self.tgpio)
+
+    def get_tgpio_digital(self, ionum=None):
+        # The tool INPUTS -- deliberately different from the outputs, so anything
+        # verifying the solenoid drive against these fails the test.
+        return 0, [0, 0]
     def disconnect(self): return 0
 
     # -- fence ----------------------------------------------------------
@@ -274,6 +286,59 @@ def t_stale_fence_cleared():
                 f"cannot move while its TCP is outside it")
 
 
+@check("close_gripper keeps the solenoid DRIVEN (does not vent the grasp)")
+def t_gripper_holds():
+    from real_robot.robot.xarm_lite6 import XArmLite6
+    d = XArmLite6('0.0.0.0', gripper='lite6', side='left', walls=False)
+    # Connect parks it open, driven -- not with both lines low, which on a
+    # spring-return valve leaves the fingers wherever the spring puts them.
+    assert d.arm.tgpio == [1, 0], d.arm.tgpio
+
+    d.arm.gripper_calls.clear()
+    d.close_gripper(sleep_time=0.0)
+    # THE regression: a trailing stop_lite6_gripper() drops both lines, and a
+    # spring-return valve then releases the object the instant the call returns.
+    assert 'stop' not in d.arm.gripper_calls, (
+        "close_gripper must not de-energise the valve: {}".format(d.arm.gripper_calls))
+    assert d.arm.tgpio == [0, 1], d.arm.tgpio
+
+    d.open_gripper(sleep_time=0.0)
+    assert 'stop' not in d.arm.gripper_calls, d.arm.gripper_calls
+    assert d.arm.tgpio == [1, 0], d.arm.tgpio
+
+    # Releasing the solenoids stays available, but only when asked for explicitly.
+    d.stop_gripper()
+    assert d.arm.tgpio == [0, 0], d.arm.tgpio
+
+
+@check("disconnect leaves the gripper open and DE-ENERGISED")
+def t_gripper_parked_on_disconnect():
+    from real_robot.robot.xarm_lite6 import XArmLite6
+    d = XArmLite6('0.0.0.0', gripper='lite6', side='left', walls=False)
+    fake = d.arm
+    d.close_gripper(sleep_time=0.0)
+    assert fake.tgpio == [0, 1]
+
+    d.disconnect()
+    # Holding the coil is what makes a grasp work, so something has to release it:
+    # the controller keeps the tool DO state after the process exits, and an
+    # energised solenoid would sit there powered until the next run.
+    assert fake.tgpio == [0, 0], (
+        "disconnect left the solenoid driven: {}".format(fake.tgpio))
+    # Opened first, so the resting state is known for a bistable valve too.
+    assert fake.gripper_calls[-2:] == ['open', 'stop'], fake.gripper_calls
+
+
+@check("gripper verification reads the tool OUTPUTS, not the inputs")
+def t_gripper_verify_uses_outputs():
+    from real_robot.robot.xarm_lite6 import XArmLite6
+    d = XArmLite6('0.0.0.0', gripper='none', side='left', walls=False)
+    # The fake reports inputs as [0, 0] and outputs as whatever was driven, so a
+    # verify that reads get_tgpio_digital would fail here.
+    assert d.close_gripper(sleep_time=0.0, verify=True) is True
+    assert d.open_gripper(sleep_time=0.0, verify=True) is True
+
+
 @check("a stale fence is REPLACED, not merged, when walls are on")
 def t_stale_fence_replaced():
     # A leftover boundary must not survive alongside ours: the controller keeps
@@ -361,16 +426,18 @@ def main():
     for name, fn in CHECKS:
         try:
             fn()
-            print("  PASS  {}".format(name))
+            print("  {}  {}".format(green("PASS"), name))
         except AssertionError as e:
             failures += 1
-            print("  FAIL  {}\n          {}".format(name, e))
+            print("  {}  {}\n          {}".format(red("FAIL"), name, red(str(e))))
         except Exception as e:
             failures += 1
-            print("  ERROR {}\n          {!r}".format(name, e))
+            print("  {} {}\n          {}".format(red("ERROR"), name, red(repr(e))))
 
     print("=" * 72)
-    print("{}/{} checks passed.".format(len(CHECKS) - failures, len(CHECKS)))
+    passed = len(CHECKS) - failures
+    summary = "{}/{} checks passed.".format(passed, len(CHECKS))
+    print(green(summary) if not failures else red(summary))
     return 1 if failures else 0
 
 

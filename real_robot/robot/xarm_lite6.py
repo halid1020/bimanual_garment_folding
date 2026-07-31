@@ -22,6 +22,12 @@ return zeros and ``start_force_mode`` is unsupported. The xArm primitives descen
 to a fixed calibrated table height instead of probing for contact, and rely on
 the controller's collision detection as the safety stop.
 
+GRIPPER: the Lite6 end-effector is PNEUMATIC, driven by two tool digital outputs
+(DO0 = open, DO1 = close). ``open_gripper``/``close_gripper`` energise the
+corresponding line and LEAVE IT DRIVEN, because a spring-return valve vents the
+moment both lines go low -- which silently released every grasp. ``stop_gripper``
+de-energises deliberately, and is only safe when nothing is held.
+
 VIRTUAL WALLS: every arm is confined to a box around the table (``XARM_WALLS``,
 transformed into this arm's base frame by ``side``). Enforced twice:
   * the controller's own safety boundary (``set_reduced_tcp_boundary`` +
@@ -112,6 +118,9 @@ class XArmLite6:
         # anything was sent. A controller rejection or abort leaves it False, so
         # callers can tell "never sent" from "sent and then failed".
         self.last_move_refused = False
+        # 'open' / 'close' / 'stopped' / None -- what the solenoids are being driven
+        # to, which on a spring-return valve is also what the fingers are doing.
+        self._gripper_state = None
         self.home_joint = list(home_joint) if home_joint is not None else list(XARM_HOME_JOINT)
         self.out_scene_joint = list(out_scene_joint) if out_scene_joint is not None else list(XARM_OUT_SCENE_JOINT)
 
@@ -162,14 +171,13 @@ class XArmLite6:
         if self.bounds is not None:
             self._warn_if_outside_walls()
 
-        # Lite6 gripper is a pneumatic open/close end-effector.
+        # Lite6 gripper is a pneumatic open/close end-effector. Park it OPEN and
+        # leave the solenoid driven: dropping both lines here would let a
+        # spring-return valve settle wherever its spring puts it, which is not
+        # something to assume at start-up. verify=True so a gripper that is not
+        # wired or has no air says so at connect rather than mid-grasp.
         if gripper == 'lite6':
-            try:
-                self.arm.open_lite6_gripper()
-                time.sleep(0.5)
-                self.arm.stop_lite6_gripper()
-            except Exception as e:
-                print(f"[XArmLite6] Lite6 gripper init warning: {e}")
+            self.open_gripper(sleep_time=0.5, verify=True)
 
         print(f"[XArmLite6] Connected to {ip} (gripper={gripper}).")
 
@@ -182,8 +190,32 @@ class XArmLite6:
         except Exception:
             pass
 
+    def park_gripper(self):
+        """Leave the gripper open and DE-ENERGISED.
+
+        Because open/close hold their solenoid driven, something has to release it
+        or the coil stays powered after the process exits -- the controller keeps
+        the tool DO state, so it would sit there hissing until the next run.
+
+        Open first, then stop: that settles a bistable valve latched open and a
+        spring-return valve on its spring, so the resting state is known either way.
+        If the gripper is currently closed this RELEASES whatever it holds, which is
+        why it is a shutdown action rather than something the primitives call.
+        """
+        if self.gripper_type != 'lite6' or getattr(self, 'arm', None) is None:
+            return True
+        if self._gripper_state == 'close':
+            print("[XArmLite6] parking the gripper: it is closed, so anything held "
+                  "will be released.")
+        self.open_gripper(sleep_time=0.4)
+        return self.stop_gripper()
+
     def disconnect(self):
         if getattr(self, 'arm', None) is not None:
+            try:
+                self.park_gripper()
+            except Exception as e:
+                print(f"[XArmLite6] gripper park on disconnect failed: {e}")
             self.arm.disconnect()
             self.arm = None
 
@@ -483,23 +515,140 @@ class XArmLite6:
         return self.movel(p, speed=speed, acceleration=acceleration, blocking=blocking)
 
     # ------------------------------------------------------------------
+    # Joint effort -- the closest thing this arm has to a force sensor
+    # ------------------------------------------------------------------
+    # The Lite 6 has NO force/torque sensor, so the UR primitives' force-mode
+    # stretch and contact probe have no direct equivalent. What the controller does
+    # expose is per-joint EFFORT (get_joint_states, firmware >= 1.9.0), which rises
+    # when the arm is loaded -- by taut fabric, or by the table.
+    #
+    # ⚠️ LIMITATION, and it matters. This is a 0.61 kg-payload arm and a garment
+    # weighs almost nothing, so the effort delta from taut cloth sits close to the
+    # noise floor, and it also moves with pose (gravity) and joint friction. Treat
+    # it as a hint that can stop a motion EARLY, never as a bound: every caller must
+    # keep a hard geometric cap (a width limit, a depth limit) as the real safety
+    # boundary, and must still behave correctly if the effort signal never fires.
+    def get_joint_effort(self):
+        """Per-joint effort, or None if this firmware cannot report it."""
+        try:
+            code, states = self.arm.get_joint_states(is_radian=True, num=3)
+            if code == 0 and states is not None and len(states) >= 3:
+                return np.asarray(states[2], dtype=float)
+        except Exception:
+            pass
+        try:
+            code, torque = self.arm.get_joints_torque()
+            if code == 0 and torque is not None:
+                return np.asarray(torque, dtype=float)
+        except Exception:
+            pass
+        return None
+
+    def effort_baseline(self, samples=10, dt=0.02):
+        """Mean effort over a short window. Take this while the arm is HOLDING
+        STILL and unloaded -- it is the reference the rise is measured against, so
+        sampling it mid-motion makes every later comparison meaningless."""
+        readings = []
+        for _ in range(max(1, int(samples))):
+            e = self.get_joint_effort()
+            if e is not None:
+                readings.append(e)
+            time.sleep(dt)
+        if not readings:
+            return None
+        return np.mean(np.asarray(readings, dtype=float), axis=0)
+
+    def effort_delta(self, baseline):
+        """L2 norm of the effort rise above ``baseline``; None if unavailable."""
+        if baseline is None:
+            return None
+        now = self.get_joint_effort()
+        if now is None or len(now) != len(baseline):
+            return None
+        return float(np.linalg.norm(np.asarray(now, dtype=float) - baseline))
+
+    def effort_exceeded(self, baseline, threshold):
+        """Has the load risen past ``threshold``? False when unreadable, so an arm
+        with no effort feedback simply runs to its geometric cap."""
+        delta = self.effort_delta(baseline)
+        return delta is not None and delta > float(threshold)
+
+    # ------------------------------------------------------------------
     # Gripper (Lite6 pneumatic: open/close only)
     # ------------------------------------------------------------------
-    def open_gripper(self, sleep_time=0.6):
-        try:
-            self.arm.open_lite6_gripper()
-            time.sleep(sleep_time)
-            self.arm.stop_lite6_gripper()
-        except Exception as e:
-            print(f"[XArmLite6] open_gripper warning: {e}")
+    def _gripper_dio(self):
+        """(DO0, DO1) as currently DRIVEN, or (None, None) if unreadable.
 
-    def close_gripper(self, sleep_time=0.6):
+        Must be ``get_tgpio_output_digital``: ``get_tgpio_digital`` reads the tool
+        digital INPUTS, which say nothing about what we are driving the solenoids
+        with and would make every verification fail.
+        """
         try:
-            self.arm.close_lite6_gripper()
-            time.sleep(sleep_time)
-            self.arm.stop_lite6_gripper()
+            ret = self.arm.get_tgpio_output_digital()
+        except Exception:
+            return None, None
+        if isinstance(ret, (list, tuple)) and len(ret) >= 2 and ret[0] == 0:
+            io = ret[1]
+            if isinstance(io, (list, tuple)) and len(io) >= 2:
+                return int(io[0]), int(io[1])
+        return None, None
+
+    def _drive_gripper(self, what, sleep_time, verify):
+        """Energise the solenoid for ``what`` ('open'/'close') and LEAVE IT DRIVEN.
+
+        The Lite6 gripper is pneumatic: ``open_lite6_gripper`` drives DO0=1/DO1=0
+        and ``close_lite6_gripper`` DO0=0/DO1=1, while ``stop_lite6_gripper`` drops
+        BOTH low. Calling stop after a close de-energises the valve -- and if it is
+        a spring-return (single-solenoid) valve rather than a bistable one, the
+        gripper vents and lets go of whatever it just picked up. That is what made
+        every grasp fail silently.
+
+        Holding the coil is correct for either valve type: a bistable valve simply
+        ignores the sustained signal, a spring-return one needs it. Use
+        ``stop_gripper()`` to de-energise deliberately when nothing is held.
+        """
+        fn = self.arm.close_lite6_gripper if what == 'close' else self.arm.open_lite6_gripper
+        expected = (0, 1) if what == 'close' else (1, 0)
+        try:
+            code = fn()
         except Exception as e:
-            print(f"[XArmLite6] close_gripper warning: {e}")
+            print(f"[XArmLite6] {what}_gripper failed: {e}")
+            print("[XArmLite6]   The Lite6 pneumatic gripper needs controller firmware "
+                  ">= 1.10.0.")
+            return False
+        if code not in (0, None):
+            print(f"[XArmLite6] {what}_gripper returned code {code}")
+            return False
+        time.sleep(sleep_time)
+        self._gripper_state = what
+
+        if verify:
+            do0, do1 = self._gripper_dio()
+            if do0 is None:
+                print(f"[XArmLite6] {what}_gripper: tool DO state unreadable; cannot confirm.")
+            elif (do0, do1) != expected:
+                print(f"[XArmLite6] !! {what}_gripper: tool DO reads ({do0}, {do1}), expected "
+                      f"{expected}. The gripper is not being driven -- check the tool "
+                      f"connector and the air supply.")
+                return False
+        return True
+
+    def open_gripper(self, sleep_time=0.6, verify=False):
+        return self._drive_gripper('open', sleep_time, verify)
+
+    def close_gripper(self, sleep_time=0.6, verify=False):
+        return self._drive_gripper('close', sleep_time, verify)
+
+    def stop_gripper(self):
+        """De-energise both solenoids. Only safe when nothing is being held: on a
+        spring-return valve this releases the grip."""
+        try:
+            self.arm.stop_lite6_gripper()
+            self._gripper_state = 'stopped'
+            return True
+        except Exception as e:
+            print(f"[XArmLite6] stop_gripper warning: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # State readback (UR-convention)

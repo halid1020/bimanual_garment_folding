@@ -39,6 +39,7 @@ from real_robot.test.test_xarm_lite6_bringup import (
     ERROR_HINTS, preflight, print_network_help, confirm, _fmt,
     report_controller_settings,
 )
+from real_robot.utils.term import green, red, yellow
 from real_robot.test.xarm_test_scene import CELL_YAML, load_cell, save_cell
 
 
@@ -177,7 +178,7 @@ def measure_table(driver, name, table_z, samples, auto_yes):
             print("  !! >5 mm of spread: the table is not level in the base frame, or the "
                   "arm was pressed into it. A fixed-height grasp will miss on one side.")
     if not (0.0 <= gripper_offset <= 0.30):
-        print("  !! implausible offset -- NOTHING WAS WRITTEN.")
+        print(red("  !! implausible offset -- NOTHING WAS WRITTEN."))
         print("     A closed Lite6 gripper is a few centimetres long, so this is a frame")
         print("     error, not a measurement. Check tcp_offset / world_offset on this")
         print("     controller, and that --table-z matches where the table actually is")
@@ -217,7 +218,7 @@ def measure_home(driver, name, auto_yes):
     print("\n  joints (deg) : {}".format(_fmt(deg, 2)))
     print("  TCP xyz      : {}   XY radius {:.3f} m".format(_fmt(pose[:3]), r_xy))
     if pose[2] < 0.10:
-        print("  !! TCP is less than 10 cm up -- homing from a grasp would scrape the table.")
+        print(red("  !! TCP is less than 10 cm up -- homing from a grasp would scrape the table."))
     radius = C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, name)
     if not (radius[0] <= r_xy <= radius[1]):
         print("  !! home XY radius is outside this arm's XARM_WORKSPACE_RADIUS "
@@ -320,7 +321,7 @@ def sweep_reach(driver, name, table_z, gripper_offset):
             print("  !! The stretch step as written is NOT commandable -- retune "
                   "HANG_HEIGHT / STRETCH_MAX_WIDTH in xarm_pick_and_fling.py.")
         else:
-            print("  ok: the stretch target is reachable.")
+            print(green("  ok: the stretch target is reachable."))
     return results
 
 
@@ -356,7 +357,7 @@ def measure_geometry(left, right, marks, auto_yes):
     print("  Put {} marks on the table where BOTH arms can touch them -- spread them".format(marks))
     print("  out along the arm line, not in a cluster, or the yaw fit will be noisy.")
     if marks < 2:
-        print("  !! need at least 2 marks to determine the yaw.")
+        print(red("  !! need at least 2 marks to determine the yaw."))
         return None
 
     p_L, p_R = [], []
@@ -393,11 +394,11 @@ def measure_geometry(left, right, marks, auto_yes):
         print("     Every right-arm target and every virtual wall depends on this, so the")
         print("     assumed value was placing them wrong.")
     if residuals.max() > 0.01:
-        print("  !! >10 mm fit residual: the marks were probably touched imprecisely, or the")
+        print(red("  !! >10 mm fit residual: the marks were probably touched imprecisely, or the"))
         print("     two arms disagree about where the same point is. Re-measure before"
               " trusting this.")
     if abs(dz) > 0.01:
-        print("  !! >10 mm height difference: one XARM_TABLE_Z cannot serve both arms.")
+        print(red("  !! >10 mm height difference: one XARM_TABLE_Z cannot serve both arms."))
 
     _merge_cell(updates_cell={'base_yaw': round(yaw, 6),
                               'base_separation': round(separation, 4),
@@ -462,7 +463,7 @@ def measure_separation(left, right, mark_dx, mark_dy, auto_yes):
         print("  !! >1 cm height difference: a single XARM_TABLE_Z cannot be right for both "
               "arms. Shim the bases, or give each arm its own table_z.")
     if abs(separation - C.XARM_BASE_SEPARATION) > 0.02:
-        print("  !! differs from XARM_BASE_SEPARATION by more than 2 cm -- update it.")
+        print(red("  !! differs from XARM_BASE_SEPARATION by more than 2 cm -- update it."))
 
     _merge_cell(updates_cell={'base_separation': round(separation, 4),
                               'lateral_residual': round(res_y, 4),

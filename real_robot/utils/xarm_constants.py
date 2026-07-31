@@ -126,16 +126,16 @@ XARM_OUT_SCENE_JOINT = np.deg2rad([45.0, 20.0, -40.0, 0.0, 20.0, 0.0]).tolist()
 # test_xarm_teach.py writes the measured ones into
 # real_robot/calibration/xarm-cell.yaml under arms.<side>.
 XARM_GRIPPER_OFFSET_BY_SIDE = {
-    'left': 0.0864,
-    'right': 0.0852,
+    'left': 0.086,
+    'right': 0.0857,
 }
 XARM_TABLE_Z_BY_SIDE = {
     'left': 0,
     'right': 0,
 }
 XARM_HOME_JOINT_BY_SIDE = {
-    'left': np.deg2rad([5.1, 0.8, 92.5, -176.2, -92.6, 8.9]).tolist(),
-    'right': np.deg2rad([-1.0, 0.3, 92.4, -4.8, 90.4, 163.1]).tolist(),
+    'left': np.deg2rad([3.8, -33.6, 24.7, -176.2, -58.2, 2.9]).tolist(),
+    'right': np.deg2rad([-4.0, -39.6, 21.9, 6.8, 60.9, 166.8]).tolist(),
 }
 XARM_WORKSPACE_RADIUS_BY_SIDE = {
     'left': tuple(XARM_WORKSPACE_RADIUS),
@@ -157,3 +157,55 @@ def for_side(mapping, side, default=None):
 # TCP orientation that points the gripper straight down at the table, as an
 # axis-angle (rotvec): flip about base X so tool-Z points to -base-Z.
 XARM_DOWN_ROTVEC = [np.pi, 0.0, 0.0]
+
+# --- Pick-and-fling ----------------------------------------------------------
+# These are NOT free parameters. get_base_fling_poses() builds the swing in a frame
+# centred between the two bases, so with separation S each gripper sits at
+#
+#     x = (S - width) / 2          from its own base,
+#
+# and the wind-up waypoint is at (x, -stroke, hang) in that arm's base frame. Two
+# constraints follow, and both are violated by a naive port of the UR numbers:
+#
+#     (1) base keepout:   x >= r_min
+#     (2) reach:          x^2 + stroke^2 + hang^2 <= r_max^2
+#
+# With S = 0.66 and the measured (r_min, r_max) = (0.12, 0.41):
+#     width <= S - 2*r_min = 0.42 m, and at width 0.36 -> x = 0.150 m,
+#     stroke <= sqrt(0.41^2 - 0.150^2 - 0.25^2) = 0.288 m.
+# The values below give a swing radius of 0.363 m, ~11% inside the reach limit.
+#
+# For scale: the UR cell runs width 0.65, hang 0.35, stroke 0.65 -- but a UR5e
+# reaches ~0.85 m. The Lite 6 fling is about half-size, which is geometry, not a
+# tuning choice. If XARM_BASE_SEPARATION or the measured reach changes, RE-DERIVE
+# these; test_xarm_walls_offline.py asserts the two constraints above.
+XARM_FLING_WIDTH = 0.36            # m, gripper separation after the stretch
+XARM_FLING_HANG = 0.25             # m, hang height = swing height above the table
+XARM_FLING_STROKE = 0.25           # m, wind-up stroke of the swing
+XARM_FLING_ANGLE = np.pi / 4       # rad, wrist pitch at the swing extremes
+XARM_FLING_PLACE_Z = 0.10          # m, touch-down height before the drag
+XARM_FLING_MIN_WIDTH = 0.20        # m, never stretch narrower than this
+# Swing dynamics. The UR uses 3.0 m/s at 7.0 m/s^2; the Lite 6 is a 0.61 kg-payload
+# arm, so this is scaled down. Raise only after the swing looks stable on hardware.
+XARM_FLING_SPEED = 1.5             # m/s
+XARM_FLING_ACC = 3.0               # m/s^2
+
+# Vertical shake after the stretch, to loosen folds (UR: 3 x 0.03 m, speed 2, acc 4).
+XARM_SHAKE_COUNT = 3
+XARM_SHAKE_AMPLITUDE = 0.03        # m
+XARM_SHAKE_SPEED = 1.0             # m/s
+XARM_SHAKE_ACC = 2.0               # m/s^2
+
+# Position-based substitutes for the UR's force-mode stages (no F/T sensor here).
+XARM_STRETCH_STEP = 0.01           # m, outward increment per stretch iteration
+XARM_STRETCH_MAX_TIME = 5.0        # s, matches the UR's stretch_max_time
+XARM_STRETCH_SPEED = 0.10          # m/s, slow -- this is pulling on fabric
+XARM_RELEASE_DIST = 0.03           # m, inward move to slacken the cloth before opening
+XARM_PROBE_STEP = 0.005            # m, descent increment for the contact probe
+# ⚠️ TUNE ON HARDWARE, per arm. The L2 rise in joint effort that counts as "loaded".
+# Too low and the stretch stops immediately; too high and it never fires and the
+# geometric width cap does all the work (which is the safe failure mode).
+XARM_EFFORT_THRESHOLD = {
+    'left': 2.0,
+    'right': 2.0,
+}

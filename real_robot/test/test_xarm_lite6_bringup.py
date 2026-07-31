@@ -42,6 +42,7 @@ from scipy.spatial.transform import Rotation
 from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.utils.motion_utils import safe_movel
 from real_robot.utils.thread_utils import ThreadWithResult
+from real_robot.utils.term import green, red, yellow
 from real_robot.utils.xarm_walls import check_pose
 
 
@@ -219,14 +220,14 @@ def stage_clear_tcp_offset(name, driver, auto_yes):
     before = getattr(sdk, 'tcp_offset', None)
     print(f"\n--- [{name}] clear the tool (TCP) offset ---")
     if before is None:
-        print("  !! tcp_offset is unavailable on this firmware; nothing to do.")
+        print(red("  !! tcp_offset is unavailable on this firmware; nothing to do."))
         return False
     print(f"  current tcp_offset: {_fmt(before, 2)}")
     if not _nonzero(before):
         print("  already zero -- nothing to change.")
         return True
     if sdk.state != 0:
-        print(f"  !! the arm is in state {sdk.state}, not 0 (ready). Clear the fault first;")
+        print(red(f"  !! the arm is in state {sdk.state}, not 0 (ready). Clear the fault first;"))
         print("     changing the tool frame on a stopped arm is not something to guess at.")
         return False
 
@@ -245,7 +246,7 @@ def stage_clear_tcp_offset(name, driver, auto_yes):
     after = getattr(sdk, 'tcp_offset', None)
     print(f"  tcp_offset now: {_fmt(after, 2)}" if after is not None else "  read-back failed")
     if after is not None and not _nonzero(after):
-        print("  OK: the tool offset is zero. Power-cycle and re-run --info-only to confirm")
+        print(green("  OK: the tool offset is zero. Power-cycle and re-run --info-only to confirm"))
         print("      save_conf() took, then re-teach this arm -- its old calibration was")
         print("      measured through the phantom tool and is meaningless.")
         return True
@@ -301,7 +302,7 @@ def stage_report(name, driver):
         print("     still present is PHYSICALLY asserted -- clear the cause, then re-run.")
     if sdk.state == 4:
         healthy = False
-        print("  !! state = 4 (STOP): the arm is not enabled, so joint/pose readback above")
+        print(red("  !! state = 4 (STOP): the arm is not enabled, so joint/pose readback above"))
         print("     may be stale or zeroed -- do not trust it until the arm is ready.")
 
     # Parked outside the walls: every jog below would be refused before being sent,
@@ -311,7 +312,7 @@ def stage_report(name, driver):
         inside, violations = check_pose(pose, driver.bounds)
         if not inside:
             healthy = False
-            print("  !! the arm is parked OUTSIDE its virtual walls:")
+            print(red("  !! the arm is parked OUTSIDE its virtual walls:"))
             for v in violations:
                 print(f"       {v}")
             print("     Every jog would be refused before being sent, so no stage below")
@@ -321,7 +322,7 @@ def stage_report(name, driver):
 
     if healthy:
         where = "inside the walls, " if driver.bounds is not None else ""
-        print(f"  OK: no errors, {where}arm is ready to move.")
+        print(green(f"  OK: no errors, {where}arm is ready to move."))
     return pose, healthy
 
 
@@ -361,7 +362,7 @@ def stage_roundtrip(name, driver, speed, acc, auto_yes):
         print("     Do NOT run any garment motion until this passes.")
         return False
 
-    print("  OK: rotvec<->RPY and the mm scaling round-trip physically.")
+    print(green("  OK: rotvec<->RPY and the mm scaling round-trip physically."))
     return True
 
 
@@ -410,7 +411,7 @@ def stage_cartesian(name, driver, delta, speed, acc, auto_yes, motion_type=None)
 
         if not driver.movel(p0, speed=speed, acceleration=acc, blocking=True,
                             motion_type=motion_type):
-            print(f"  !! could not return to the start pose after the {axis_names[i]} jog.")
+            print(red(f"  !! could not return to the start pose after the {axis_names[i]} jog."))
             ok = False
         time.sleep(0.3)
 
@@ -425,7 +426,7 @@ def stage_joint(name, driver, joint_delta_deg, auto_yes):
 
     code, q0_deg = driver.arm.get_servo_angle(is_radian=False)
     if code != 0:
-        print(f"  !! get_servo_angle returned code {code}; skipping.")
+        print(red(f"  !! get_servo_angle returned code {code}; skipping."))
         return False
     q0 = np.deg2rad(np.asarray(q0_deg, dtype=float))
     print(f"  start joints: {_fmt(q0_deg, 2)} deg")
@@ -436,14 +437,14 @@ def stage_joint(name, driver, joint_delta_deg, auto_yes):
         if driver.last_move_refused:
             print("  -- SKIPPED: refused by the virtual walls before being sent.")
         else:
-            print("  !! the joint move was sent and the controller rejected or aborted it.")
+            print(red("  !! the joint move was sent and the controller rejected or aborted it."))
         return False
     time.sleep(0.3)
     _, q_mid = driver.arm.get_servo_angle(is_radian=False)
     print(f"  jogged joints: {_fmt(q_mid, 2)} deg")
 
     if not driver.movej(q0, blocking=True):
-        print("  !! could not return to the start joints; the arm is left jogged.")
+        print(red("  !! could not return to the start joints; the arm is left jogged."))
         return False
     time.sleep(0.3)
     _, q_end = driver.arm.get_servo_angle(is_radian=False)
@@ -451,9 +452,9 @@ def stage_joint(name, driver, joint_delta_deg, auto_yes):
 
     back_err = float(np.max(np.abs(np.asarray(q_end) - np.asarray(q0_deg))))
     if back_err > 0.5:
-        print(f"  !! did not return to the start joints (max error {back_err:.2f} deg).")
+        print(red(f"  !! did not return to the start joints (max error {back_err:.2f} deg)."))
         return False
-    print("  OK: joint move and return.")
+    print(green("  OK: joint move and return."))
     return True
 
 
@@ -466,7 +467,7 @@ def stage_gripper(name, driver, auto_yes):
     time.sleep(1.0)
     print("  opening...")
     driver.open_gripper()
-    print("  OK: gripper commands sent (confirm visually -- the Lite6 gripper has no feedback).")
+    print(green("  OK: gripper commands sent (confirm visually -- the Lite6 gripper has no feedback)."))
     return True
 
 
@@ -657,7 +658,8 @@ def main():
                 pass
 
     print("\n" + "=" * 70)
-    print("  RESULT: " + ("all stages passed." if all_ok else "SOMETHING FAILED -- see above."))
+    print("  RESULT: " + (green("all stages passed.") if all_ok
+                         else red("SOMETHING FAILED -- see above.")))
     if all_ok and not args.info_only:
         print("  Next: calibrate XARM_TABLE_Z / XARM_GRIPPER_OFFSET, then tune")
         print("  XARM_HOME_JOINT / XARM_OUT_SCENE_JOINT in real_robot/utils/xarm_constants.py.")

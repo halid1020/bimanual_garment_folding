@@ -37,6 +37,7 @@ from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.robot.xarm_dual_arm_scene import XArmDualArmScene
 from real_robot.robot.xarm_single_arm_scene import XArmSingleArmScene
 from real_robot.utils import xarm_constants as C
+from real_robot.utils.term import green, red, yellow, mark
 from real_robot.utils.xarm_walls import walls_for_side, check_pose, describe
 
 
@@ -140,12 +141,12 @@ def _valid_radius(value, where):
     try:
         lo, hi = float(value[0]), float(value[1])
     except (TypeError, ValueError, IndexError):
-        print("[xarm-test] !! ignoring malformed workspace_radius {!r} in {}".format(
-            value, where))
+        print(yellow("[xarm-test] !! ignoring malformed workspace_radius {!r} in {}".format(
+            value, where)))
         return None
     if not (0.0 <= lo < hi):
-        print("[xarm-test] !! ignoring workspace_radius ({:.3f}, {:.3f}) in {}: the annulus "
-              "has no interior.".format(lo, hi, where))
+        print(yellow("[xarm-test] !! ignoring workspace_radius ({:.3f}, {:.3f}) in {}: the "
+                     "annulus has no interior.".format(lo, hi, where)))
         print("[xarm-test]    Re-run test_xarm_teach.py --reach for that arm; falling back "
               "to xarm_constants.py.")
         return None
@@ -287,6 +288,11 @@ class IKGuardedArm:
         self.bounds = bounds if bounds is not None else walls_for_side(
             name if name in ('left', 'right') else 'left')
         self.checked = []             # [(pose, ok, reason)] for the summary table
+        # Where the arm WOULD be if every checked waypoint had executed. Primitives
+        # that read their own pose back mid-sequence -- the fling's stretch, shake,
+        # release and its re-read before the swing -- need an answer even when
+        # nothing is moving, or the whole tail of the sequence goes unchecked.
+        self._sim_pose = None
 
     def __getattr__(self, item):
         # Only reached for attributes not defined on this class.
@@ -294,6 +300,17 @@ class IKGuardedArm:
             raise AttributeError(
                 "{} has no driver (offline mode); '{}' is unavailable".format(self.name, item))
         return getattr(self.driver, item)
+
+    # Effort feedback degrades to "no signal" without a driver, which is exactly
+    # how the primitives are required to behave when the arm cannot report it.
+    def effort_baseline(self, *a, **kw):
+        return None if self.driver is None else self.driver.effort_baseline(*a, **kw)
+
+    def effort_delta(self, *a, **kw):
+        return None if self.driver is None else self.driver.effort_delta(*a, **kw)
+
+    def effort_exceeded(self, *a, **kw):
+        return False if self.driver is None else self.driver.effort_exceeded(*a, **kw)
 
     # -- checking ---------------------------------------------------------
     def _check_pose(self, pose):
@@ -368,9 +385,9 @@ class IKGuardedArm:
             tag = "{}[{}]".format(label or "waypoint", i)
             self.checked.append((self.name, tag, np.array(p), ok, reason))
             if self.verbose:
-                mark = "  ok " if ok else "  !! "
                 print("{}{:<10s} {:<8s} xyz=({:+.3f}, {:+.3f}, {:+.3f})  {}".format(
-                    mark, self.name, tag, p[0], p[1], p[2], reason))
+                    mark(ok), self.name, tag, p[0], p[1], p[2],
+                    reason if ok else red(reason)))
             all_ok = all_ok and ok
         if not all_ok and self.strict:
             raise Unreachable(
@@ -379,9 +396,17 @@ class IKGuardedArm:
         return all_ok
 
     # -- intercepted motion ----------------------------------------------
+    def _advance_sim(self, p):
+        """Remember the last waypoint as where the arm would now be."""
+        p = np.asarray(p, dtype=float)
+        last = p if p.ndim == 1 else p[-1]
+        if len(last) >= 6:
+            self._sim_pose = np.array(last[:6], dtype=float)
+
     def movel(self, p, speed=1.5, acceleration=1.0, blocking=True,
               avoid_singularity=False, **kwargs):
         self.check(p, label="movel")
+        self._advance_sim(p)
         if not self.execute:
             return True
         return self.driver.movel(p, speed=speed, acceleration=acceleration,
@@ -402,6 +427,9 @@ class IKGuardedArm:
     def home(self, speed=None, acceleration=None, blocking=True):
         if self.verbose:
             print("  -> {} home".format(self.name))
+        # Joint move: we cannot cheaply say where the TCP lands, so drop the
+        # simulated pose and let it be re-derived on the next readback.
+        self._sim_pose = None
         if not self.execute:
             return True
         return self.driver.home(speed=speed, acceleration=acceleration, blocking=blocking)
@@ -653,8 +681,8 @@ def selfcheck_calibration(verbose=True):
         assert lo < hi, "inverted radius was accepted for {}: {}".format(side, (lo, hi))
 
     if verbose:
-        print("[xarm-test] calibration self-check: per-arm isolation, legacy fallback, "
-              "disagreement detection and range validation all OK.")
+        print(green("[xarm-test] calibration self-check: per-arm isolation, legacy fallback, "
+                    "disagreement detection and range validation all OK."))
     return True
 
 

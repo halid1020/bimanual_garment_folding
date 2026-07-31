@@ -43,6 +43,7 @@ from real_robot.primitives.xarm_single_arm_pick_and_place import XArmSingleArmPi
 from real_robot.primitives.xarm_pick_and_place import XArmPickAndPlaceSkill
 from real_robot.primitives.xarm_pick_and_fling import XArmPickAndFlingSkill
 from real_robot.utils import xarm_constants as C
+from real_robot.utils.term import green, red
 from real_robot.utils.transform_utils import point_on_table_base
 from real_robot.test.test_xarm_lite6_bringup import (
     ERROR_HINTS, preflight, print_network_help, confirm, _fmt,
@@ -146,7 +147,7 @@ def check_cell(cell, force):
         print("     The primitives import these constants directly, so paste the measured")
         print("     values into real_robot/utils/xarm_constants.py before running for real.")
         return force
-    print("  cell calibration: OK (matches xarm_constants.py)")
+    print("  cell calibration: {} (matches xarm_constants.py)".format(green("OK")))
     return True
 
 
@@ -161,6 +162,11 @@ def shutdown(scene):
             if err:
                 print("  [{}] controller error {}: {}".format(
                     arm.name, err, ERROR_HINTS.get(err, "see UFACTORY Studio")))
+            # Park the gripper BEFORE stopping the arm: open/close hold their
+            # solenoid driven, so something must release it or the coil stays
+            # powered after the process exits. disconnect() parks too, but doing it
+            # here means it happens while the controller is still in a ready state.
+            arm.driver.park_gripper()
             arm.driver.arm.set_state(4)      # stop
         except Exception:
             pass
@@ -173,10 +179,11 @@ def shutdown(scene):
 def summarise(scene, label):
     checked = scene.checked_poses()
     bad = [c for c in checked if not c[3]]
-    print("\n  {} -- {} waypoints checked, {} unreachable.".format(label, len(checked), len(bad)))
+    count = "{} waypoints checked, {} unreachable.".format(len(checked), len(bad))
+    print("\n  {} -- {}".format(label, red(count) if bad else green(count)))
     for name, tag, pose, _, reason in bad:
-        print("    !! {:<6s} {:<12s} xyz=({:+.3f}, {:+.3f}, {:+.3f})  {}".format(
-            name, tag, pose[0], pose[1], pose[2], reason))
+        print(red("    !! {:<6s} {:<12s} xyz=({:+.3f}, {:+.3f}, {:+.3f})  {}".format(
+            name, tag, pose[0], pose[1], pose[2], reason)))
     return not bad
 
 
@@ -327,8 +334,8 @@ def main():
     # there; anything that touches hardware needs the real numbers.
     ok = check_cell(cell, args.force_uncalibrated or args.offline)
     if not ok:
-        print("\n  Refusing to continue. Pass --force-uncalibrated to override, or "
-              "--offline to check geometry only.")
+        print(red("\n  Refusing to continue. Pass --force-uncalibrated to override, or "
+                  "--offline to check geometry only."))
         return 1
 
     if not args.offline:
@@ -357,16 +364,16 @@ def main():
                     shutdown(s)
         print("\n" + "=" * 72)
         if failed:
-            print("UNREACHABLE waypoints in: {}".format(", ".join(failed)))
-            print("Retune the offending constants, then re-run the dry run.")
+            print(red("UNREACHABLE waypoints in: {}".format(", ".join(failed))))
+            print(red("Retune the offending constants, then re-run the dry run."))
             return 1
-        print("All waypoints reachable in: {}".format(", ".join(names)))
+        print(green("All waypoints reachable in: {}".format(", ".join(names))))
         if not args.execute:
             print("Dry run only -- nothing moved. Re-run with --execute when ready.")
         return 0
 
     except Unreachable as e:
-        print("\n  !! ABORTED before moving: {}".format(e))
+        print(red("\n  !! ABORTED before moving: {}".format(e)))
         return 1
     except KeyboardInterrupt:
         print("\n\nAborted by user.")

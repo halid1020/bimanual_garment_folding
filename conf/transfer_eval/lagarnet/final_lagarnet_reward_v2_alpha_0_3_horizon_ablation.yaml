@@ -13,5 +13,5 @@ eval_name: transfer_eval_final_lagarnet_reward_v2_alpha_0_3_horizon
 train_exp_config: sim_exp/lagarnet/final_lagarnet_reward_v2_alpha_0_3
 
 eval_arenas:
-  - arena: lagarnet/multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200
+  - arena: lagarnet/multi_longsleeve_single_picker_readjust_pick_provide_semkey_pixel_no_success_stop_resol_128_train_200_horizon_30
     task: lagarnet/flattening_overstretch_penalty_1_no_big_bonus

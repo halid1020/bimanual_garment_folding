@@ -49,7 +49,10 @@ from real_robot.utils.xarm_constants import (
     XARM_RELEASE_DIST, XARM_PROBE_STEP, XARM_EFFORT_THRESHOLD,
 )
 from real_robot.utils.thread_utils import ThreadWithResult
-from .utils import check_trajectories_close, apply_local_z_rotation, points_to_fling_path
+from .utils import (
+    check_trajectories_close, apply_local_z_rotation, points_to_fling_path,
+    sort_pairs_by_table_x,
+)
 
 
 class XArmPickAndFlingSkill:
@@ -107,13 +110,16 @@ class XArmPickAndFlingSkill:
             print(f"[XArmPickAndFling] ABORT: invalid pick (flags {valid_0}, {valid_1}).")
             return full_traj
 
-        # Sort so the larger-pixel-x pick goes to the LEFT arm, as the UR skill does.
-        pair_0 = {'pick': pick_0_xy, 'angle': angle_0}
-        pair_1 = {'pick': pick_1_xy, 'angle': angle_1}
-        if pair_0['pick'][0] < pair_1['pick'][0]:
-            pair_0, pair_1 = pair_1, pair_0
-        pick_l, ang_l = pair_0['pick'], pair_0['angle']
-        pick_r, ang_r = pair_1['pick'], pair_1['angle']
+        # The pick nearer the left base goes to the LEFT arm. Compared on the TABLE,
+        # not in pixels -- see sort_pairs_by_table_x for why the pixel sort the UR
+        # skill uses cannot be carried over here.
+        pair_l, pair_r = sort_pairs_by_table_x(
+            {'pick': pick_0_xy, 'angle': angle_0},
+            {'pick': pick_1_xy, 'angle': angle_1},
+            self.scene.intr, self.scene.T_left_cam,
+            for_side(XARM_TABLE_Z_BY_SIDE, 'left', XARM_TABLE_Z))
+        pick_l, ang_l = pair_l['pick'], pair_l['angle']
+        pick_r, ang_r = pair_r['pick'], pair_r['angle']
 
         p_pick_l = self._table_point(pick_l, self.scene.T_left_cam, 'left')
         p_pick_r = self._table_point(pick_r, self.scene.T_right_cam, 'right')
@@ -151,11 +157,18 @@ class XArmPickAndFlingSkill:
         time.sleep(0.5)
 
         # 2. Lift to the hang height, centred on the base-to-base axis.
+        #
+        # The separation here is the CURRENT distance between the two picked
+        # points, not the stretch cap -- the UR does the same (`curr_width`). Using
+        # the cap would put the grippers at full stretch before the stretch stage
+        # runs, leaving it nothing to do. The upper clamp is ours: the UR applies it
+        # later via points_to_gripper_pose, but on this cell the cap is a reach
+        # limit, so it has to bind before anything is commanded.
         base_to_base = self.scene.T_left_right[:3, 3]
         center = base_to_base / 2.0
         axis = base_to_base / (np.linalg.norm(base_to_base) + 1e-9)
-        width = min(self.stretch_max_width,
-                    max(XARM_FLING_MIN_WIDTH, float(np.linalg.norm(base_to_base))))
+        curr_width = float(np.linalg.norm(p_pick_r_in_l - p_pick_l))
+        width = min(self.stretch_max_width, max(XARM_FLING_MIN_WIDTH, curr_width))
 
         target_l_in_l = center - axis * width / 2.0
         target_r_in_l = center + axis * width / 2.0
@@ -201,6 +214,13 @@ class XArmPickAndFlingSkill:
         # NOTE: `right_point`/`left_point` name the FLING frame, not our arms.
         # points_to_fling_path puts `right_point` at x = -width/2, which in the left
         # base frame is the smaller x -- our LEFT arm. This pairing is correct.
+        #
+        # WHICH WAY THE SWING GOES is not chosen here: points_to_action_frame takes
+        # forward = z x (left_point - right_point), so with our left arm at the
+        # smaller x it comes out as base +y -- the FRONT of the table. The arm winds
+        # up toward the back (stroke 0.25 m into 0.68 m of table) and lays the cloth
+        # down toward the front (drag 0.10 m into 0.52 m). Both fit; the direction
+        # follows from the front being at +y, so it reverses if that convention does.
         left_path_full, right_path_full = points_to_fling_path(
             right_point=np.asarray(p_l, dtype=float),
             left_point=np.asarray(p_r_in_l, dtype=float),
@@ -270,9 +290,14 @@ class XArmPickAndFlingSkill:
                 break
 
             tcp_distance = self.scene.get_tcp_distance()
-            if tcp_distance >= max_width:
+            remaining = max_width - tcp_distance
+            if remaining <= 1e-4:
                 print(f"[Stretch] width cap reached: {tcp_distance:.3f} m.")
                 break
+            # Shrink the last step so the width lands ON the cap instead of one
+            # increment past it. Overshooting is not cosmetic here: the cap is set
+            # by the reach limit, so 2 cm past it is 2 cm of margin spent.
+            this_step = min(step, remaining / 2.0)
 
             loaded_l = self.scene.left.effort_exceeded(base_l, thr_l)
             loaded_r = self.scene.right.effort_exceeded(base_r, thr_r)
@@ -286,9 +311,9 @@ class XArmPickAndFlingSkill:
                 break
 
             # One increment outward for each arm, along the base-to-base axis.
-            p_l = self.scene.left.get_tcp_pose()[:3] - axis * step
+            p_l = self.scene.left.get_tcp_pose()[:3] - axis * this_step
             p_r_in_l = transform_point(self.scene.T_left_right,
-                                       self.scene.right.get_tcp_pose()[:3]) + axis * step
+                                       self.scene.right.get_tcp_pose()[:3]) + axis * this_step
             p_r = transform_point(np.linalg.inv(self.scene.T_left_right), p_r_in_l)
             ok = self.scene.both_movel(
                 np.concatenate([p_l, rot_l]), np.concatenate([p_r, rot_r]),

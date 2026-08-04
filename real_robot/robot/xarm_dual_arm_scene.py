@@ -24,8 +24,10 @@ from real_robot.utils.transform_utils import (
 )
 from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.robot.realsense_camera import RealsenseCamera
+from real_robot.utils.xarm_camera import crop_window, describe_orientation
 from real_robot.utils.xarm_constants import (
     XARM_TABLE_Z, XARM_WORKSPACE_RADIUS, XARM_MOVE_SPEED, XARM_MOVE_ACC,
+    XARM_BASE_SEPARATION,
 )
 
 
@@ -57,6 +59,21 @@ class XArmDualArmScene:
             self.T_right_cam = load_camera_to_base(self.right_calib_file)
             self.T_left_right = self.T_left_cam @ np.linalg.inv(self.T_right_cam)
 
+            # Everything downstream sees a square window of the table centred
+            # between the two arms, with the principal point shifted to match, so
+            # crop pixels invert straight back to the same metres. take_rgbd() is
+            # the only place the crop is applied -- self.intr and every image this
+            # scene hands out belong to the same frame by construction.
+            self.crop = crop_window(self.intr, self.T_left_cam,
+                                    separation=XARM_BASE_SEPARATION,
+                                    table_z=XARM_TABLE_Z, verbose=True)
+            self.intr = self.crop.intrinsic(self.intr)
+
+            # How the mount actually came out. Reported, not enforced -- see
+            # describe_orientation.
+            print(describe_orientation(self.T_left_cam, self.intr,
+                                       XARM_BASE_SEPARATION, XARM_TABLE_Z)[1])
+
             # World frame at the base midpoint, at table height, LEFT-aligned axes.
             self.T_left_world = np.eye(4)
             self.T_left_world[:3, 3] = self.T_left_right[:3, 3] / 2.0
@@ -71,6 +88,7 @@ class XArmDualArmScene:
         else:
             print("[XArmDualArmScene][Dry-run] Skipping robot and camera init.")
             self.left = self.right = self.camera = None
+            self.crop = None            # no intrinsic to crop against
             self.intr = np.eye(3)
             self.T_left_cam = np.eye(4); self.T_left_cam[0, 3] = 0.175
             self.T_right_cam = np.eye(4); self.T_right_cam[0, 3] = -0.175
@@ -182,7 +200,16 @@ class XArmDualArmScene:
         self.both_out_scene()
 
     def take_rgbd(self):
-        return self.camera.take_rgbd()
+        """The SQUARE window between the arms, not the raw frame.
+
+        Paired with the shifted ``self.intr``, so a pixel in what comes back here
+        still inverts to the right point on the table. ``self.camera.take_rgbd()``
+        is still the way to get the full frame (e.g. for calibration).
+        """
+        rgb, depth = self.camera.take_rgbd()
+        if self.crop is None:
+            return rgb, depth
+        return self.crop.apply(rgb), self.crop.apply(depth)
 
     def restart_camera(self):
         self.camera.restart()

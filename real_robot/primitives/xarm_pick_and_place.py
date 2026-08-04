@@ -11,8 +11,10 @@ pixel coordinates), but adapted to the Lite 6:
   * The ``check_trajectories_close`` sequential-vs-simultaneous fallback is kept,
     because at ~35 cm base separation the two arms can meet in the middle.
 
-Arm mapping mirrors the UR skill: the larger-x pick goes to the LEFT arm (the
-UR5e analogue), the smaller-x pick to the RIGHT arm.
+Arm mapping: the pick nearer the LEFT base (the UR5e analogue) goes to the left
+arm. Unlike the UR skill this is decided on the TABLE rather than by pixel column,
+because which column is "left" depends on how the camera is rolled -- see
+``sort_pairs_by_table_x``.
 """
 import time
 import numpy as np
@@ -24,7 +26,9 @@ from real_robot.utils.xarm_constants import (
     XARM_DOWN_ROTVEC, XARM_TABLE_Z_BY_SIDE, XARM_GRIPPER_OFFSET_BY_SIDE, for_side,
 )
 from real_robot.utils.thread_utils import ThreadWithResult
-from .utils import check_trajectories_close, apply_local_z_rotation
+from .utils import (
+    check_trajectories_close, apply_local_z_rotation, sort_pairs_by_table_x,
+)
 
 
 class XArmPickAndPlaceSkill:
@@ -61,13 +65,16 @@ class XArmPickAndPlaceSkill:
             angle_0, angle_1 = 0.0, 0.0
             active_0, active_1 = True, True
 
-        # Sort by pick-x so the larger-x pick -> LEFT arm (UR5e analogue).
-        pair_0 = {'pick': pick_0_xy, 'place': place_0_xy, 'angle': angle_0, 'active': active_0}
-        pair_1 = {'pick': pick_1_xy, 'place': place_1_xy, 'angle': angle_1, 'active': active_1}
-        if pair_0['pick'][0] < pair_1['pick'][0]:
-            pair_0, pair_1 = pair_1, pair_0
-        pick_l, place_l, ang_l, active_l = pair_0['pick'], pair_0['place'], pair_0['angle'], pair_0['active']
-        pick_r, place_r, ang_r, active_r = pair_1['pick'], pair_1['place'], pair_1['angle'], pair_1['active']
+        # The pick nearer the left base -> LEFT arm (UR5e analogue). Compared on the
+        # TABLE, not in pixels; the place/angle/active that belong with each pick
+        # travel with it, because whole dicts are swapped.
+        pair_l, pair_r = sort_pairs_by_table_x(
+            {'pick': pick_0_xy, 'place': place_0_xy, 'angle': angle_0, 'active': active_0},
+            {'pick': pick_1_xy, 'place': place_1_xy, 'angle': angle_1, 'active': active_1},
+            self.scene.intr, self.scene.T_left_cam,
+            for_side(XARM_TABLE_Z_BY_SIDE, 'left', XARM_TABLE_Z))
+        pick_l, place_l, ang_l, active_l = pair_l['pick'], pair_l['place'], pair_l['angle'], pair_l['active']
+        pick_r, place_r, ang_r, active_r = pair_r['pick'], pair_r['place'], pair_r['angle'], pair_r['active']
 
         p_pick_l = p_place_l = rot_l = None
         if active_l:

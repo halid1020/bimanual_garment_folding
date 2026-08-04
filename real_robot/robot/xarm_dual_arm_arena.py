@@ -28,7 +28,13 @@ class XArmDualArmArena(DualArmArena):
         self.config = config
         self.draw_fatten_contour = False
         self.measure_time = config.get('measure_time', False)
-        self.roi_off_x = config.get('roi_off_x', 60)
+        # 0, not the UR cell's 60. XArmDualArmScene.take_rgbd() already returns the
+        # square window centred between the two arms, so the parent's own
+        # crop_size = min(h, w) crop is deliberately an IDENTITY here and needs no
+        # nudge. The 60 px inherited from the UR arena was a hand-tuned offset for
+        # a camera that was not above the midpoint; applying it on top of a square
+        # frame would shift the window off the end of the image.
+        self.roi_off_x = config.get('roi_off_x', 0)
 
         dry_run = config.get("dry_run", False)
         self.dual_arm = XArmDualArmScene(

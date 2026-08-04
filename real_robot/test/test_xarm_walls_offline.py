@@ -339,6 +339,44 @@ def t_gripper_verify_uses_outputs():
     assert d.open_gripper(sleep_time=0.0, verify=True) is True
 
 
+@check("the fling constants satisfy their own geometric derivation")
+def t_fling_envelope():
+    """The fling constants are DERIVED from the cell, not chosen.
+
+    get_base_fling_poses builds the swing in a frame centred between the bases, so
+    each gripper sits at x = (S - width)/2 from its own base and the wind-up
+    waypoint is at (x, -stroke, hang). Two constraints follow, and a naive port of
+    the UR numbers violates both. Assert them here so a later edit to the
+    separation or the measured reach fails on a laptop, not on the arm.
+    """
+    S = C.XARM_BASE_SEPARATION
+    width, hang = C.XARM_FLING_WIDTH, C.XARM_FLING_HANG
+    stroke = C.XARM_FLING_STROKE
+    x = (S - width) / 2.0
+
+    for side in ('left', 'right'):
+        r_min, r_max = C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, side)
+        assert x >= r_min, (
+            "{}: stretch puts the gripper {:.3f} m from its base, inside the {:.3f} m "
+            "keepout. Reduce XARM_FLING_WIDTH to <= {:.3f} m.".format(
+                side, x, r_min, S - 2 * r_min))
+        swing = float(np.sqrt(x ** 2 + stroke ** 2 + hang ** 2))
+        assert swing <= r_max, (
+            "{}: the wind-up waypoint is {:.3f} m out, beyond the {:.3f} m reach. "
+            "Max stroke at this width/hang is {:.3f} m.".format(
+                side, swing, r_max, np.sqrt(max(r_max ** 2 - x ** 2 - hang ** 2, 0.0))))
+        # The touch-down and drag waypoints are lower and nearer, but check them
+        # rather than assume it.
+        for label, y, z in (('touch-down', 0.0, C.XARM_FLING_PLACE_Z),
+                            ('drag', 0.10, C.XARM_FLING_PLACE_Z)):
+            r = float(np.sqrt(x ** 2 + y ** 2 + z ** 2))
+            assert r <= r_max, "{}: {} waypoint at {:.3f} m exceeds reach".format(
+                side, label, r)
+
+    assert C.XARM_FLING_MIN_WIDTH <= width, "min stretch width exceeds the cap"
+    assert C.XARM_FLING_PLACE_Z < hang, "touch-down must be below the hang height"
+
+
 @check("a stale fence is REPLACED, not merged, when walls are on")
 def t_stale_fence_replaced():
     # A leftover boundary must not survive alongside ours: the controller keeps
@@ -411,6 +449,264 @@ def t_primitive_targets_inside():
         ok, bad = check_pose(base, bounds[side])
         assert ok, "{} target ({:+.3f}, {:+.3f}) is outside the walls: {}".format(
             side, x, y, bad)
+
+
+@check("the crop is centred between the arms and still inverts to metres")
+def t_crop_centred():
+    """The window handed to perception must be centred on the arm midpoint, and a
+    pixel in it must invert to the point it was derived from.
+
+    Both halves matter. The centre is the user-visible requirement; the round-trip
+    is what stops the crop from silently mis-aiming every grasp, because the whole
+    scheme rests on the principal point moving with the image.
+    """
+    from real_robot.test.xarm_test_scene import (
+        synthetic_T_left_cam, synthetic_intrinsic, table_xy_to_pixel,
+    )
+    from real_robot.utils.transform_utils import point_on_table_base
+    from real_robot.utils.xarm_camera import base_to_pixel, crop_window
+
+    S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
+    intr, T = synthetic_intrinsic(), synthetic_T_left_cam(S, tz)
+    win = crop_window(intr, T, S, tz)
+    assert not win.clamped, "the crop had to be clamped: {}".format(win)
+
+    # Where the arm midpoint lands in the WINDOW. Note this must not be phrased as
+    # "the principal point inverts to the midpoint": the principal point is the
+    # point under the camera whatever the crop, so that version passes for any
+    # offset window and tests the camera's placement rather than the crop's.
+    cropped = win.intrinsic(intr)
+    mid = base_to_pixel([S / 2.0, C.XARM_CAM_CENTRE_Y, tz], T, cropped)
+    off = float(np.linalg.norm(mid - np.array([win.side / 2.0, win.side / 2.0])))
+    assert off <= 1.0, (
+        "the arm midpoint sits at pixel ({:.1f}, {:.1f}) of a {} px window whose "
+        "centre is ({:.1f}, {:.1f}) -- {:.1f} px off".format(
+            mid[0], mid[1], win.side, win.side / 2.0, win.side / 2.0, off))
+
+    worst = 0.0
+    for x in np.linspace(S / 2 - 0.25, S / 2 + 0.25, 5):
+        for y in np.linspace(-0.25, 0.25, 5):
+            px = table_xy_to_pixel(x, y, S, tz, intr=cropped)
+            assert 0 <= px[0] < win.side and 0 <= px[1] < win.side, (
+                "({:+.3f}, {:+.3f}) m falls outside the {} px crop at pixel "
+                "({:.1f}, {:.1f})".format(x, y, win.side, px[0], px[1]))
+            back = point_on_table_base(px[0], px[1], cropped, T, tz)
+            worst = max(worst, float(np.linalg.norm(back - np.array([x, y, tz]))))
+    assert worst < 1e-9, "cropped pixels do not round-trip: {:.3e} m".format(worst)
+
+
+@check("the crop window fits the frame for the sim and a real RealSense")
+def t_crop_fits():
+    """XARM_CROP_SIZE is a length on the TABLE, so whether it fits depends on the
+    lens and the mounting height. A clamped window is no longer centred between the
+    arms, which is a silent aiming error -- so check the two cameras this cell will
+    actually use before either is bolted up.
+    """
+    from real_robot.test.xarm_test_scene import (
+        SyntheticIntrinsic, synthetic_T_left_cam, synthetic_intrinsic,
+    )
+    from real_robot.utils.xarm_camera import crop_window
+
+    S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
+    cams = [("sim placeholder at {:.1f} m".format(C.XARM_CAM_HEIGHT),
+             synthetic_intrinsic(), C.XARM_CAM_HEIGHT),
+            ("RealSense colour (fx 900) at 1.50 m",
+             SyntheticIntrinsic(900.0, 900.0, 640.0, 360.0, 1280, 720), 1.50)]
+    for label, intr, height in cams:
+        T = synthetic_T_left_cam(S, tz)
+        T[2, 3] = tz + height
+        win = crop_window(intr, T, S, tz)
+        assert not win.clamped, (
+            "{}: a {:.2f} m crop does not fit -- {}. Lower XARM_CROP_SIZE or raise "
+            "the camera.".format(label, C.XARM_CROP_SIZE, win))
+        assert win.side >= 128, (
+            "{}: the crop is only {} px, too coarse once resized".format(
+                label, win.side))
+
+
+@check("the photo pose is home with joint 1 swung to that arm's left")
+def t_photo_pose():
+    """The pose is derived, never written out.
+
+    Only J1 may change: J1 turns about the base z axis, so the TCP keeps home's
+    height and radius and the pose inherits home's clearance over the table. If a
+    later edit moves any other joint, that guarantee is gone and this fails.
+    """
+    for side in ('left', 'right'):
+        home = C.for_side(C.XARM_HOME_JOINT_BY_SIDE, side)
+        photo = C.for_side(C.XARM_OUT_SCENE_JOINT_BY_SIDE, side)
+        assert len(photo) == len(home) == 6
+        d = np.asarray(photo) - np.asarray(home)
+        assert abs(d[0] - C.XARM_PHOTO_YAW) < 1e-9, (
+            "{}: J1 moves {:+.1f} deg, expected {:+.1f}".format(
+                side, np.rad2deg(d[0]), np.rad2deg(C.XARM_PHOTO_YAW)))
+        assert np.allclose(d[1:], 0.0), (
+            "{}: joints 2-6 must be untouched, they moved by {} deg".format(
+                side, np.round(np.rad2deg(d[1:]), 3)))
+
+    # And the driver must derive it from the home it was actually given, so a home
+    # taught into xarm-cell.yaml carries through instead of being ignored.
+    taught = [0.10, -0.20, 0.30, -0.40, 0.50, -0.60]
+    d = _driver(side='right', walls=False)
+    assert np.allclose(d.out_scene_joint,
+                       C.photo_pose_from_home(d.home_joint)), \
+        "the driver's out-scene pose is not derived from its own home"
+    d2 = _driver_with_home(taught)
+    assert np.allclose(d2.home_joint, taught), "an explicit home was overridden"
+    assert np.allclose(d2.out_scene_joint, C.photo_pose_from_home(taught)), (
+        "a taught home did not carry into the photo pose: {}".format(
+            np.round(d2.out_scene_joint, 3)))
+
+
+def _driver_with_home(home):
+    from real_robot.robot.xarm_lite6 import XArmLite6
+    return XArmLite6('0.0.0.0', gripper='none', side='left', walls=False,
+                     home_joint=home)
+
+
+@check("the table's front edge is at base +y")
+def t_table_front_back():
+    """Which physical edge base +y points at is half of the view convention.
+
+    A camera looking straight down cannot put the right arm on the right AND the
+    front edge at the top unless the front edge is at +y, so this constant and
+    ``synthetic_T_left_cam``'s roll have to agree. Flipping one without the other
+    gives a frame that is upside down and walls that protect the wrong half of the
+    table.
+    """
+    lo, hi = C.XARM_TABLE_RECT['y']
+    assert abs(hi - C.XARM_BASE_TO_FRONT) < 1e-12, (
+        "the front edge is at y={:+.3f}, expected +{:.3f} (front must be +y)".format(
+            hi, C.XARM_BASE_TO_FRONT))
+    assert abs((hi - lo) - C.XARM_TABLE_SIZE[1]) < 1e-12, (
+        "the table rect spans {:.3f} m but XARM_TABLE_SIZE says {:.3f}".format(
+            hi - lo, C.XARM_TABLE_SIZE[1]))
+    assert lo < 0 < hi, "the arm line must be inside the table: y {}".format((lo, hi))
+
+
+@check("the frame has the left arm on the left and the front at the top")
+def t_image_orientation():
+    """The view convention, checked on the synthetic camera.
+
+    Both halves have been wrong: until this change the frame was mirrored, so the
+    arm named 'right' was drawn on the left of the image.
+    """
+    from real_robot.test.xarm_test_scene import (
+        synthetic_T_left_cam, synthetic_intrinsic,
+    )
+    from real_robot.utils.xarm_camera import base_to_pixel, describe_orientation
+
+    S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
+    intr, T = synthetic_intrinsic(), synthetic_T_left_cam(S, tz)
+
+    # A rotation, not a reflection. A reflection puts the corners where you expect
+    # and then quietly breaks every handedness-dependent quantity downstream.
+    det = float(np.linalg.det(T[:3, :3]))
+    assert abs(det - 1.0) < 1e-9, "the camera rotation has det {:+.3f}".format(det)
+
+    left = base_to_pixel([0.0, 0.0, tz], T, intr)
+    right = base_to_pixel([S, 0.0, tz], T, intr)
+    assert right[0] > left[0], (
+        "the right arm is drawn at u={:.0f}, LEFT of the left arm at u={:.0f} -- "
+        "the frame is mirrored".format(right[0], left[0]))
+
+    front = base_to_pixel([S / 2, C.XARM_TABLE_RECT['y'][1], tz], T, intr)
+    back = base_to_pixel([S / 2, C.XARM_TABLE_RECT['y'][0], tz], T, intr)
+    assert front[1] < back[1], (
+        "the front edge is drawn at v={:.0f}, BELOW the back edge at v={:.0f}".format(
+            front[1], back[1]))
+
+    ok, msg = describe_orientation(T, intr, S, tz)
+    assert ok, msg
+
+
+@check("arms are assigned by table position, not by pixel column")
+def t_side_assignment():
+    """The pick nearer the left base goes to the left arm, under ANY camera roll.
+
+    The old pixel sort ("larger pixel-x -> left arm") was correct only for the
+    camera roll it was written against. Rolling the camera 180 deg -- which is
+    exactly what this change did, and what a differently-bolted bracket would do on
+    hardware -- silently handed each arm the other one's target: both grasps stay
+    individually reachable, so nothing complains.
+    """
+    from real_robot.primitives.utils import sort_pairs_by_table_x
+    from real_robot.test.xarm_test_scene import (
+        synthetic_T_left_cam, synthetic_intrinsic, base_to_pixel,
+    )
+    from real_robot.utils.transform_utils import point_on_table_base
+
+    S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
+    intr = synthetic_intrinsic()
+    T = synthetic_T_left_cam(S, tz)
+    # The same camera rolled 180 deg about its optical axis: the frame is mirrored,
+    # every table point lands in a different pixel column, the geometry is unchanged.
+    T_rolled = T.copy()
+    T_rolled[:3, :3] = T[:3, :3] @ np.diag([-1.0, -1.0, 1.0])   # roll pi about +z_cam
+
+    near_left, near_right = (0.20, -0.12), (0.46, 0.12)
+    for label, cam in (("as built", T), ("rolled 180 deg", T_rolled)):
+        px_l = base_to_pixel([near_left[0], near_left[1], tz], cam, intr)
+        px_r = base_to_pixel([near_right[0], near_right[1], tz], cam, intr)
+        for order, (a, b) in (("in order", (px_l, px_r)),
+                              ("reversed", (px_r, px_l))):
+            pair_l, pair_r = sort_pairs_by_table_x(
+                {'pick': a, 'tag': 'first'}, {'pick': b, 'tag': 'second'},
+                intr, cam, tz)
+            got_l = point_on_table_base(pair_l['pick'][0], pair_l['pick'][1],
+                                        intr, cam, tz)
+            got_r = point_on_table_base(pair_r['pick'][0], pair_r['pick'][1],
+                                        intr, cam, tz)
+            assert abs(got_l[0] - near_left[0]) < 1e-6, (
+                "{}, {}: the left arm was given x={:+.3f}, expected {:+.3f}".format(
+                    label, order, got_l[0], near_left[0]))
+            assert got_l[0] < got_r[0], "{}, {}: the arms are crossed".format(
+                label, order)
+
+
+@check("the executed-path overlay is drawn on the table plane")
+def t_overlay_drops_to_table():
+    """The overlay must answer "did the arm go where I clicked".
+
+    A lifted sample has to be drawn at its shadow, not where the camera would see
+    it: at the 0.25 m hang height under a 1.0 m camera the two differ by tens of
+    pixels in a 330 px window, and the wind-up leaves the frame entirely.
+    """
+    from real_robot.sim.run_sim_ui import path_to_pixels
+    from real_robot.test.xarm_test_scene import (
+        synthetic_T_left_cam, synthetic_intrinsic, table_xy_to_pixel,
+    )
+    from real_robot.utils.xarm_camera import base_to_pixel, crop_window
+
+    S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
+
+    class _Scene:                       # the three attributes path_to_pixels reads
+        separation, table_z = S, tz
+        intr = crop_window(synthetic_intrinsic(), synthetic_T_left_cam(S, tz),
+                           S, tz).intrinsic(synthetic_intrinsic())
+
+    scene = _Scene()
+    T = synthetic_T_left_cam(S, tz)
+
+    # A grasp and the wind-up above it: both must draw at the same table pixel.
+    x, y = 0.15, -C.XARM_FLING_STROKE
+    grasp = [x, y, tz + C.XARM_GRIPPER_OFFSET]
+    hang = [x, y, tz + C.XARM_FLING_HANG]
+    px = path_to_pixels(scene, [grasp, hang])
+    want = table_xy_to_pixel(x, y, S, tz, scene.intr)
+    for i, (name, p) in enumerate((('grasp', grasp), ('hang', hang))):
+        assert np.linalg.norm(px[i] - want) < 1e-6, (
+            "the {} sample is drawn at {} instead of its table shadow {}".format(
+                name, np.round(px[i], 2), np.round(want, 2)))
+        assert (0 <= px[i]).all() and (px[i] < scene.intr.width).all(), (
+            "the {} sample falls outside the {} px window".format(
+                name, scene.intr.width))
+
+    # And confirm the difference this avoids is real, not a rounding argument.
+    persp = base_to_pixel(hang, T, scene.intr)
+    assert np.linalg.norm(persp - want) > 20.0, (
+        "perspective and table projections differ by only {:.1f} px here, so this "
+        "check is not testing what it claims".format(np.linalg.norm(persp - want)))
 
 
 # ----------------------------------------------------------------------

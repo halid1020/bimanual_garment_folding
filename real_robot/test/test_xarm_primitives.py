@@ -55,7 +55,7 @@ from real_robot.test.xarm_test_scene import (
 
 
 # Targets in table metres for the measured 0.66 m separation. (x, y): x from the
-# LEFT base across toward the right base, y along the arm line (front is -y).
+# LEFT base across toward the right base, y along the arm line (front is +y).
 # Right-arm targets are given in TABLE coordinates too, so x_right_base = 0.66 - x.
 SINGLE_CASES = {
     'basic':        dict(pick=(0.25, -0.10), place=(0.25, 0.10), rot=0.0),
@@ -100,7 +100,10 @@ def preview_point(label, xy, cell, T_cam, intr, arm_name):
     will actually derive, so a mapping error is visible before anything moves."""
     # Table coordinates are the LEFT base frame, which is the frame the synthetic
     # camera is built in -- so this is the left arm's table_z for either arm.
-    px = table_xy_to_pixel(xy[0], xy[1], cell.separation, cell.table_z('left'))
+    # Pass the scene's own intrinsic: if it is a cropped one, the pixel has to be
+    # expressed in the cropped frame, which is what the primitive will invert.
+    px = table_xy_to_pixel(xy[0], xy[1], cell.separation, cell.table_z('left'),
+                           intr=intr)
     base = point_on_table_base(px[0], px[1], intr, T_cam, cell.table_z('left'))
     r_xy = float(np.linalg.norm(base[:2]))
     print("    {:<12s} table ({:+.3f}, {:+.3f}) -> pixel ({:7.1f}, {:7.1f}) -> "
@@ -223,9 +226,12 @@ def run_dual(args, cell, case_name, holder):
     lr = preview_point("place R", case['place_r'], cell, scene.T_right_cam, scene.intr, 'right')
     a0, a1 = case['active']
     print("    active       left={} right={}".format(bool(a0), bool(a1)))
-    if pl[0] < pr[0]:
-        print("    !! pick L has a SMALLER pixel x than pick R, so the skill's sort will send")
-        print("       it to the RIGHT arm. Check the synthetic camera orientation.")
+    # The skill assigns arms on the TABLE, not by pixel column, so a pick's pixel x
+    # says nothing about which arm gets it -- only its base x does. Check that
+    # instead: it is the property the case names claim.
+    if case['pick_l'][0] > case['pick_r'][0]:
+        print("    !! the 'left' pick is FARTHER from the left base than the 'right' one,")
+        print("       so the skill will swap them. The case is mis-named, not the camera.")
 
     skill = XArmPickAndPlaceSkill(scene, {'speed': args.speed, 'acc': args.acc})
     action = np.array([pl[0], pl[1], pr[0], pr[1],
@@ -252,7 +258,19 @@ def run_fling(args, cell, case_name, holder):
     v0, v1 = case['valid']
     print("    valid flags  {} {}".format(v0, v1))
 
-    skill = XArmPickAndFlingSkill(scene, {'speed': args.speed, 'acc': args.acc})
+    # Each stage can be switched off, so the fling can be brought up on hardware a
+    # piece at a time rather than committing to the whole swing on the first run.
+    skill = XArmPickAndFlingSkill(scene, {
+        'speed': args.speed, 'acc': args.acc,
+        'probe_contact': not args.skip_probe,
+        'shake': not args.skip_shake,
+        'release_tension': not args.skip_release,
+    })
+    stages = [name for name, on in (('probe', not args.skip_probe),
+                                    ('shake', not args.skip_shake),
+                                    ('release', not args.skip_release)) if not on]
+    if stages:
+        print("    stages OFF   {}".format(", ".join(stages)))
     action = np.array([pl[0], pl[1], pr[0], pr[1], 0.0, 0.0, v0, v1])
     print("    action (8)   {}".format(_fmt(action, 1)))
 
@@ -298,6 +316,14 @@ def main():
     ap.add_argument('--yes', action='store_true', help="don't prompt before running")
     ap.add_argument('--force-uncalibrated', action='store_true',
                     help="run even though the cell has not been measured")
+    # Fling stages, for incremental hardware bring-up.
+    ap.add_argument('--skip-probe', action='store_true',
+                    help="fling: skip the effort-gated contact probe and descend "
+                         "straight to the calibrated grasp height")
+    ap.add_argument('--skip-shake', action='store_true',
+                    help="fling: skip the vertical shake after the stretch")
+    ap.add_argument('--skip-release', action='store_true',
+                    help="fling: open the grippers without the inward tension release")
     args = ap.parse_args()
 
     # Either safety flag wins over --execute, so an accidental combination of the

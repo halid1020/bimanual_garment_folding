@@ -240,16 +240,12 @@ def sweep_reach(driver, name, table_z, gripper_offset):
     fling hang height, and reports the reachable annulus at each. This is what
     decides whether the fling's stretch targets are commandable at all.
     """
-    from real_robot.primitives.xarm_pick_and_fling import (
-        HANG_HEIGHT, STRETCH_MAX_WIDTH, MIN_STRETCH_DIST,
-    )
-
     print("\n=== [{}] REACH SWEEP (inverse kinematics only -- the arm does not move) ==="
           .format(name))
     rot = np.array(C.XARM_DOWN_ROTVEC, dtype=float)
     heights = [('grasp', table_z + gripper_offset),
                ('lift  (+{:.2f})'.format(C.XARM_LIFT_DIST), table_z + gripper_offset + C.XARM_LIFT_DIST),
-               ('hang  ({:.2f})'.format(HANG_HEIGHT), table_z + HANG_HEIGHT)]
+               ('hang  ({:.2f})'.format(C.XARM_FLING_HANG), table_z + C.XARM_FLING_HANG)]
     yaws = np.deg2rad([-60.0, -30.0, 0.0, 30.0, 60.0])
     radii = np.arange(0.05, 0.65, 0.005)
 
@@ -311,15 +307,15 @@ def sweep_reach(driver, name, table_z, gripper_offset):
         # XArmPickAndFlingSkill stretches to center +/- width/2 about the base
         # midpoint, at HANG_HEIGHT. Check that target against the sweep.
         S = C.XARM_BASE_SEPARATION
-        width = min(STRETCH_MAX_WIDTH, max(MIN_STRETCH_DIST, S))
+        width = min(C.XARM_FLING_WIDTH, max(C.XARM_FLING_MIN_WIDTH, S))
         r_target = abs(S / 2.0 - width / 2.0)
         print("\n  Fling check: the stretch step targets r = |{:.2f}/2 - {:.2f}/2| = {:.3f} m"
               .format(S, width, r_target))
         print("  from each base at the {:.2f} m hang height; reachable there over r = "
-              "{:.3f} - {:.3f} m.".format(HANG_HEIGHT, hang[0], hang[1]))
+              "{:.3f} - {:.3f} m.".format(C.XARM_FLING_HANG, hang[0], hang[1]))
         if r_target < hang[0] or r_target > hang[1]:
             print("  !! The stretch step as written is NOT commandable -- retune "
-                  "HANG_HEIGHT / STRETCH_MAX_WIDTH in xarm_pick_and_fling.py.")
+                  "XARM_FLING_HANG / XARM_FLING_WIDTH in xarm_constants.py.")
         else:
             print(green("  ok: the stretch target is reachable."))
     return results

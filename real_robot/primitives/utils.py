@@ -84,6 +84,87 @@ def check_trajectories_close(traj0_points, traj1_points, threshold=0.1):
                 return True, min_dist
     return False, min_dist
 
+# --- HELPER: which arm gets which pick ---
+def sort_pairs_by_table_x(pair_0, pair_1, intr, T_left_cam, table_z, key='pick'):
+    """Split two action pairs between the arms -> ``(left_pair, right_pair)``.
+
+    The pick nearer the LEFT base along the base-to-base axis goes to the left arm.
+
+    Assigns by position on the TABLE, not by pixel column. The xArm skills used to
+    sort on pixel x ("larger pixel-x -> left arm"), which was only ever true for one
+    particular camera roll: with the frame laid out so the left arm appears on the
+    left, the same line hands each arm the OTHER one's target, and nothing downstream
+    notices -- both grasps are individually reachable and the fling just stretches
+    the cloth the wrong way. Which pixel column is "left" is decided by how the
+    camera is bolted on and reported by hand-eye calibration, so it is not something
+    a primitive can assume. Base-frame x is the same answer under any roll.
+
+    ``pair_*`` are dicts carrying whatever else belongs with that pick (place, angle,
+    active flags); whole dicts are swapped, so those stay attached to their pick.
+    ``T_left_cam`` must be the LEFT arm's camera transform, so both picks are
+    compared in ONE frame -- projecting each through its own arm's transform would
+    compare two different x axes, which point opposite ways.
+    """
+    from real_robot.utils.transform_utils import point_on_table_base
+
+    def base_x(pair):
+        px = pair[key]
+        return float(point_on_table_base(px[0], px[1], intr, T_left_cam, table_z)[0])
+
+    return (pair_0, pair_1) if base_x(pair_0) <= base_x(pair_1) else (pair_1, pair_0)
+
+
+# --- HELPER: which of the two equivalent wrist orientations to command ---
+def nearest_wrist_branch(target_rotvec, current_rotvec):
+    """The equivalent grasp orientation nearest the wrist's CURRENT one.
+
+    A parallel jaw is symmetric under 180 deg about the tool z, so ``R`` and
+    ``R * Rz(pi)`` are the SAME physical grasp: same gripper axis, same finger
+    line, same contact. They are not the same joint configuration, and the arm
+    does not get to pick -- it goes wherever the commanded rotation says.
+
+    ⚠️ This is not a micro-optimisation, it is a joint-limit fix. get_base_fling_poses
+    builds its orientations from ``init_rot = Rz(pi)``, which is 180 deg about the
+    tool z away from XARM_DOWN_ROTVEC. Transforming the right arm's copy of the
+    path by inv(T_left_right) (a 180 deg yaw) cancels that for the right arm and
+    leaves it standing for the left, so the left arm was being told to spin its
+    wrist half a turn -- under load, mid-swing, at fling speed -- to enter the
+    fling. On 2026-08-04 that drove J4 to -363 deg against a -360 deg limit and
+    both arms e-stopped with ``servo_id=4, code=23`` (joint angle exceeds limit).
+    Both taught homes are ~178 deg about tool z from XARM_DOWN_ROTVEC as well, so
+    the approach was already flipping the wrist before the fling flipped it back.
+
+    Snapping to the nearer branch removes every such flip while leaving the tool z
+    axis -- where the gripper actually points -- bit-identical. Only the roll about
+    it changes, and that is the axis the jaw is symmetric in.
+    """
+    r_target = R.from_rotvec(np.asarray(target_rotvec, dtype=float))
+    r_current = R.from_rotvec(np.asarray(current_rotvec, dtype=float))
+    r_flipped = r_target * R.from_euler('z', np.pi)
+    if (r_flipped * r_current.inv()).magnitude() < (r_target * r_current.inv()).magnitude():
+        return r_flipped.as_rotvec()
+    return r_target.as_rotvec()
+
+
+def snap_path_wrist(poses, current_rotvec):
+    """``nearest_wrist_branch`` along a whole trajectory, in order.
+
+    Each waypoint is snapped against the PREVIOUS SNAPPED one, not against the
+    pose the arm started in, so a multi-waypoint path stays in one branch instead
+    of flipping somewhere in the middle -- which is the failure this exists to
+    prevent. ``poses`` is (N, 6) UR-convention; a copy is returned.
+    """
+    poses = np.array(poses, dtype=float)
+    single = poses.ndim == 1
+    if single:
+        poses = poses.reshape(1, -1)
+    ref = np.asarray(current_rotvec, dtype=float)
+    for i in range(poses.shape[0]):
+        poses[i, 3:6] = nearest_wrist_branch(poses[i, 3:6], ref)
+        ref = poses[i, 3:6]
+    return poses[0] if single else poses
+
+
 # --- HELPER: Apply Rotation ---
 def apply_local_z_rotation(axis_angle, angle_rad):
     if abs(angle_rad) < 1e-4:

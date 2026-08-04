@@ -156,7 +156,7 @@ def _selfcheck(verbose=True):
                   S, XARM_TABLE_SIZE[0], XARM_TABLE_SIZE[1],
                   XARM_BASE_TO_FRONT, XARM_TABLE_Z))
         print("[xarm-walls] table  : x [{:+.3f}, {:+.3f}]  y [{:+.3f}, {:+.3f}] m  "
-              "(edges, left base frame; front is -y)".format(
+              "(edges, left base frame; front is +y)".format(
                   XARM_TABLE_RECT['x'][0], XARM_TABLE_RECT['x'][1],
                   XARM_TABLE_RECT['y'][0], XARM_TABLE_RECT['y'][1]))
         print("[xarm-walls] walls  : {}".format(describe(

@@ -38,20 +38,46 @@ from real_robot.robot.xarm_dual_arm_scene import XArmDualArmScene
 from real_robot.robot.xarm_single_arm_scene import XArmSingleArmScene
 from real_robot.utils import xarm_constants as C
 from real_robot.utils.term import green, red, yellow, mark
+from real_robot.utils.xarm_camera import base_to_pixel as _base_to_pixel
 from real_robot.utils.xarm_walls import walls_for_side, check_pose, describe
 
 
 # --- Synthetic top-down camera -------------------------------------------------
-# Image u runs along the BASE-TO-BASE axis, increasing toward the LEFT arm. That
-# orientation is not cosmetic: both dual-arm skills assign the larger-pixel-x pick
-# to the left arm (`if pair_0['pick'][0] < pair_1['pick'][0]: swap`), so a camera
-# rolled the other way would hand each arm the other one's target.
-# Image v runs along the table's long axis (base-frame +y).
+# THE VIEW. The frame is laid out the way someone standing at the front of the cell
+# would draw it: the LEFT arm on the left, the RIGHT arm on the right, the FRONT
+# edge at the top. That means image u runs toward base +x and image v toward
+# base -y (front is +y).
+#
+# Those two are ONE choice, not two. For a camera looking straight down the frame
+# is right-handed with the view direction as camera +z, so u -> +x forces v -> -y;
+# "right arm on the right AND front at the top" is only consistent because the
+# front edge is at base +y (see the sign note on XARM_TABLE_RECT).
+#
+# Nothing in the primitives depends on this any more -- they assign arms by
+# position on the TABLE (``sort_pairs_by_table_x``), so a camera mounted rolled is
+# a view you dislike rather than a swapped grasp. It used to matter: the dual-arm
+# skills sorted on pixel column, and a roll silently handed each arm the other
+# one's target.
+#
 # At f = 500 px and 1.0 m height that is 2.0 mm/px, covering 2.56 m along u (only
 # 0.80 m is needed) and 1.44 m along v (>= the 1.20 m table length).
 IMAGE_W, IMAGE_H = 1280, 720
 FOCAL_PX = 500.0
-CAM_HEIGHT = 1.0        # m above the table plane
+CAM_HEIGHT = C.XARM_CAM_HEIGHT      # m above the table plane
+
+
+def _cam_centre_y():
+    """y of the camera's optical axis in the LEFT base frame.
+
+    The camera looks straight down at the midpoint of the two arm BASES, i.e. the
+    arm line, y = 0. That is not the table's centre: the arm line sits 0.52 m from
+    the front edge (+y) and 0.68 m from the back, so the table midline is y = -0.08.
+
+    ``synthetic_T_left_cam`` and ``table_xy_to_pixel`` are inverses of each other
+    and BOTH reference this, so they cannot drift apart -- moving the camera by
+    editing one of them silently breaks the pixel mapping.
+    """
+    return C.XARM_CAM_CENTRE_Y
 
 # Lite 6 published reach, used only by the OFFLINE geometric fallback check.
 # On hardware the controller's own IK is authoritative.
@@ -83,28 +109,37 @@ def synthetic_intrinsic():
                               IMAGE_W, IMAGE_H)
 
 
-def _table_centre_y():
-    """y of the table's midline in the LEFT base frame (the arms are off-centre)."""
-    return (C.XARM_TABLE_RECT['y'][0] + C.XARM_TABLE_RECT['y'][1]) / 2.0
-
-
 def synthetic_T_left_cam(separation, table_z):
-    """Camera-to-LEFT-base transform: the camera hovers over the table centre
-    looking straight down.
+    """Camera-to-LEFT-base transform: the camera hovers over the midpoint of the
+    two arm bases, looking straight down.
 
     Columns of R are the camera's axes expressed in the base frame:
-    camera +x (image u) -> base -x (i.e. toward the LEFT arm),
-    camera +y (image v) -> base +y, camera +z (view direction) -> base -z.
-    det(R) = +1.
+    camera +x (image u) -> base +x  (toward the RIGHT arm),
+    camera +y (image v) -> base -y  (toward the BACK; front is +y, so it is at the
+                                     top of the frame),
+    camera +z (view direction) -> base -z.
+    det(R) = +1 -- it is a ROTATION. Writing it as a reflection (e.g. flipping only
+    one axis) would still project the corners where you expect and then quietly
+    break every handedness-dependent quantity downstream.
     """
     T = np.eye(4)
-    T[:3, :3] = np.array([[-1.0, 0.0, 0.0],
-                          [0.0, 1.0, 0.0],
+    T[:3, :3] = np.array([[1.0, 0.0, 0.0],
+                          [0.0, -1.0, 0.0],
                           [0.0, 0.0, -1.0]])
-    # Centred over the TABLE, which is not centred on the arm line: the arms sit
-    # XARM_BASE_TO_FRONT from the front edge, so the table's y midpoint is offset.
-    T[:3, 3] = [separation / 2.0, _table_centre_y(), table_z + CAM_HEIGHT]
+    T[:3, 3] = [separation / 2.0, _cam_centre_y(), table_z + CAM_HEIGHT]
     return T
+
+
+def base_to_pixel(points, T_cam, intr=None):
+    """Project 3D base-frame points to pixels -- the FULL pinhole projection.
+
+    The implementation now lives in ``real_robot/utils/xarm_camera.py`` so the
+    production scenes can use it without importing this test module; this wrapper
+    keeps the name and the "default to the synthetic camera" convenience that the
+    test tooling was written against.
+    """
+    return _base_to_pixel(points, T_cam,
+                          synthetic_intrinsic() if intr is None else intr)
 
 
 def face_to_face_T_left_right(separation):
@@ -116,15 +151,21 @@ def face_to_face_T_left_right(separation):
     return T
 
 
-def table_xy_to_pixel(x, y, separation, table_z):
+def table_xy_to_pixel(x, y, separation, table_z, intr=None):
     """Inverse of ``point_on_table_base`` for the synthetic camera.
 
     Takes a point on the table in LEFT-base metres and returns the (u, v) pixel a
     primitive should be given so that it derives that same point back.
+
+    Pass ``intr`` when the scene is CROPPED (``scene.intr``): the answer must be a
+    pixel in the same frame the scene will hand the primitive, and a crop moves the
+    principal point. With no ``intr`` this is the full-frame synthetic camera, as
+    before -- for that case it is the closed form
+    ``u = W/2 + f(x - S/2)/h``, ``v = H/2 - f(y - y_cam)/h``, which is what
+    projecting through ``synthetic_T_left_cam`` reduces to.
     """
-    u = IMAGE_W / 2.0 - FOCAL_PX * (x - separation / 2.0) / CAM_HEIGHT
-    v = IMAGE_H / 2.0 + FOCAL_PX * (y - _table_centre_y()) / CAM_HEIGHT
-    return np.array([u, v], dtype=float)
+    return base_to_pixel([x, y, table_z], synthetic_T_left_cam(separation, table_z),
+                         intr)
 
 
 # --- Cell calibration ----------------------------------------------------------
@@ -456,11 +497,27 @@ class IKGuardedArm:
         return self.driver.close_gripper(*a, **kw)
 
     def get_tcp_pose(self):
-        if self.driver is None:
-            # Offline: a plausible pose inside the annulus, so callers that read
-            # the current pose (e.g. trajectory recording) still work.
-            return np.array([self.radius[0] + 0.1, 0.0, 0.2, np.pi, 0.0, 0.0])
-        return self.driver.get_tcp_pose()
+        """The real pose when executing; the SIMULATED one otherwise.
+
+        A --dry-run is connected but stationary, so the controller reports the
+        parked pose rather than where the primitive believes the arm is. Handing
+        that back would send every waypoint of a pose-relative stage -- the fling's
+        stretch, shake, release, and its re-read before the swing -- to the wrong
+        place, and check nothing useful. ``_advance_sim`` tracks the last commanded
+        waypoint instead, so those stages are walked and validated.
+        """
+        if self.execute and self.driver is not None:
+            return self.driver.get_tcp_pose()
+        if self._sim_pose is None:
+            if self.driver is not None:
+                self._sim_pose = np.asarray(self.driver.get_tcp_pose(), dtype=float)
+            else:
+                # Offline with no controller: start from a plausible pose inside the
+                # annulus. Waypoints derived from it are still checked, so a bad one
+                # is still caught.
+                self._sim_pose = np.array(
+                    [self.radius[0] + 0.1, 0.0, 0.2, np.pi, 0.0, 0.0], dtype=float)
+        return np.array(self._sim_pose, dtype=float)
 
     def disconnect(self):
         if self.driver is not None:
@@ -633,7 +690,7 @@ def print_reach_map(cell):
     print("  right arm : {:.2f} - {:.2f} m".format(r_near, r_far))
     if cell.workspace_radius('left') != cell.workspace_radius('right'):
         print("              (the two arms measured DIFFERENT usable radii)")
-    print("  table     : x [{:+.2f}, {:+.2f}]  y [{:+.2f}, {:+.2f}] m  (front is -y)".format(
+    print("  table     : x [{:+.2f}, {:+.2f}]  y [{:+.2f}, {:+.2f}] m  (front is +y)".format(
         C.XARM_TABLE_RECT['x'][0], C.XARM_TABLE_RECT['x'][1],
         C.XARM_TABLE_RECT['y'][0], C.XARM_TABLE_RECT['y'][1]))
     print("  walls     : {}   (table frame)".format(describe(C.XARM_WALLS)))

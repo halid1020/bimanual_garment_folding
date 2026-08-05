@@ -57,7 +57,6 @@ from real_robot.utils.xarm_constants import (
 from real_robot.utils.xarm_walls import (
     AXES, walls_for_side, check_pose, to_sdk_boundary_mm, describe,
 )
-from real_robot.primitives.utils import snap_path_wrist
 
 
 # SDK return codes (xarm.x3.code.APIState). These are the RETURN value of a call,
@@ -487,18 +486,17 @@ class XArmLite6:
         arm out of a pose where a straight-line path cannot be planned; it does
         NOT guarantee a straight line, so the TCP may take an unexpected route.
 
-        Orientations are snapped to the nearer of the two equivalent wrist
-        branches before being sent -- see ``snap_path_wrist``. The commanded
-        gripper AXIS is untouched; only the roll about it, which a parallel jaw is
-        symmetric in, may change. Without this the fling asked one arm for a
-        180 deg wrist spin and tripped its J4 limit.
+        The commanded orientation is sent AS GIVEN. It is tempting to normalise it
+        here -- a parallel jaw is symmetric under 180 deg about the tool z, so the
+        driver could pick whichever branch is nearer the current wrist -- and that
+        was tried and measured as a fix for the 2026-08-04 J4 fault. It is worse:
+        a greedy per-waypoint choice flips the wrist mid-swing once the tilt is
+        past 90 deg. Continuity has to come from whoever builds the path and knows
+        what it means (retarget_path_to_grasp), not from the driver.
         """
         p = np.asarray(p, dtype=float)
         if p.ndim == 1:
             p = p.reshape(1, -1)
-        here = self._current_rotvec()
-        if here is not None:
-            p = np.atleast_2d(snap_path_wrist(p, here))
 
         # Check the WHOLE trajectory before sending any of it, so a bad waypoint
         # in the middle does not leave the arm stranded part-way through.
@@ -680,24 +678,6 @@ class XArmLite6:
         xyz_m = np.asarray(pose[:3], dtype=float) / 1000.0
         rotvec = rpy_to_rotvec(pose[3:6])
         return np.concatenate([xyz_m, rotvec])
-
-    def _current_rotvec(self):
-        """This arm's current TCP orientation, or None if it cannot be read.
-
-        ``movel`` needs it to pick the wrist branch. Returning None (rather than
-        raising, or substituting a default) makes an unreadable pose degrade to
-        the previous behaviour -- the commanded orientation is sent as given --
-        instead of turning a readback hiccup into a refused move.
-        """
-        try:
-            code, pose = self.arm.get_position(is_radian=True)
-            if code != 0 or pose is None or len(pose) < 6:
-                return None
-            return rpy_to_rotvec(pose[3:6])
-        except Exception as e:
-            print(f"[XArmLite6] could not read the TCP orientation ({e}); "
-                  f"sending the commanded wrist angle unchanged.")
-            return None
 
     def get_tcp_speed(self):
         # Lite 6 exposes only a scalar realtime speed; the force-mode loops that

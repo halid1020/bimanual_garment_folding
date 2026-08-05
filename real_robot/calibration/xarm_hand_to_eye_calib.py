@@ -43,7 +43,59 @@ def matrix_to_pose_lists(T):
     return T[:3, :3], T[:3, 3]
 
 # --- Hand-Eye Solver ---
-def run_hand_eye(samples, output_file):
+def intrinsics_to_dict(intr):
+    """The pyrealsense2 intrinsics we actually streamed, as plain YAML data."""
+    return {'fx': float(intr.fx), 'fy': float(intr.fy),
+            'ppx': float(intr.ppx), 'ppy': float(intr.ppy),
+            'width': int(intr.width), 'height': int(intr.height)}
+
+
+def merge_into_yaml(output_file, extra):
+    """Add keys to a calibration YAML without dropping what is already there.
+
+    The extrinsic is expensive to produce -- 39 poses and a board in the gripper --
+    so writing the intrinsics must never be able to clobber it.
+    """
+    data = {}
+    if os.path.exists(output_file):
+        with open(output_file, 'r') as f:
+            data = yaml.safe_load(f) or {}
+    data.update(extra)
+    with open(output_file, 'w') as f:
+        yaml.dump(data, f)
+    return data
+
+
+def dump_intrinsics(calib_files):
+    """Write the live colour-stream intrinsics into the calibration files.
+
+    Hand-eye reads these off the stream to solve PnP and then throws them away, so
+    the calibration files have only ever carried extrinsics. Everything that turns
+    a pixel into a position on the table needs the intrinsic too, and until it is
+    saved the simulator and the offline tests run on a NOMINAL one -- which is what
+    decides, for example, whether the base-to-base perception crop fits the sensor.
+
+    Needs no ChArUco board and moves no arm: it starts the stream, reads the
+    profile and stops.
+    """
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    profile = pipeline.start(config)
+    try:
+        intr = (profile.get_stream(rs.stream.color)
+                .as_video_stream_profile().intrinsics)
+        block = intrinsics_to_dict(intr)
+        print("\nColour stream intrinsics: fx={fx:.2f} fy={fy:.2f} "
+              "ppx={ppx:.2f} ppy={ppy:.2f} ({width}x{height})".format(**block))
+        for path in calib_files:
+            merge_into_yaml(path, {'intrinsics': block})
+            print("  wrote intrinsics into {}".format(path))
+    finally:
+        pipeline.stop()
+
+
+def run_hand_eye(samples, output_file, intrinsics=None):
     if len(samples) < 3:
         print(f"Not enough samples for {output_file}. Need at least 3 valid detections.")
         return
@@ -88,6 +140,11 @@ def run_hand_eye(samples, output_file):
         'camera_to_base': {'matrix': X.tolist()},
         'meta': {'samples': len(samples), 'board_type': 'charuco'}
     }
+    # Save the intrinsic ALONGSIDE the extrinsic it was solved with. They are one
+    # calibration: a pixel only becomes a position on the table through both, and
+    # keeping them in separate places is how they drift apart.
+    if intrinsics is not None:
+        out['intrinsics'] = intrinsics
 
     with open(output_file, 'w') as f:
         yaml.dump(out, f)
@@ -128,18 +185,42 @@ def input_thread(state_dict):
                 state_dict['running'] = False
                 break
 
+# --- Background Error Monitor Thread ---
+def error_monitor_thread(arms, state_dict):
+    """Silently catches Error 37 and forces arms back into free-drive."""
+    while state_dict['running']:
+        if state_dict.get('freedrive_active', False):
+            for r in arms:
+                if r.arm.error_code != 0:
+                    err = r.arm.error_code
+                    r.arm.clean_error()
+                    if err == 37:
+                        time.sleep(0.1)
+                        r.arm.set_mode(2)
+                        r.arm.set_state(0)
+        time.sleep(0.1)
+
 # --- Execution ---
 def main():
     parser = argparse.ArgumentParser(description='Single-arm xArm Hand-to-Eye calibration using RealSense + ChArUco')
     parser.add_argument('--mode', type=str, choices=['auto', 'manual'], default='auto', help='Run mode: auto uses saved poses if available, manual forces recording.')
     parser.add_argument('--arm', type=str, choices=['left', 'right'], default='left', help='Which arm to calibrate (left or right)')
+    parser.add_argument('--dump-intrinsics', action='store_true',
+                        help='Write the live colour-stream intrinsics into both '
+                             'calib YAMLs and exit. No board, no arm motion.')
     args = parser.parse_args()
 
-    calib_dir = "calibration"
+    calib_dir = "real_robot/calibration"
     os.makedirs(calib_dir, exist_ok=True)
-    
+
     pose_file = os.path.join(calib_dir, f"xarm-{args.arm}-poses.yaml")
     calib_file = os.path.join(calib_dir, f"xarm-{args.arm}-calib.yaml")
+
+    # Before anything is connected or powered: this needs only the camera.
+    if args.dump_intrinsics:
+        dump_intrinsics([os.path.join(calib_dir, "xarm-left-calib.yaml"),
+                         os.path.join(calib_dir, "xarm-right-calib.yaml")])
+        return
 
     poses_exist = os.path.exists(pose_file)
     recorded_poses = []
@@ -156,6 +237,7 @@ def main():
         sq_size = data.get('board', {}).get('square_length', DEFAULT_SQUARE_SIZE)
         mk_size = data.get('board', {}).get('marker_length', DEFAULT_MARKER_SIZE)
         
+        # Load poses only if we aren't forcing a manual overwrite
         if args.mode == 'auto':
             poses_deg = data.get('poses', [])
             recorded_poses = [[math.radians(deg) for deg in p] for p in poses_deg]
@@ -174,49 +256,68 @@ def main():
     pipeline.start(config)
     align = rs.align(rs.stream.color)
 
-    # 3. Configure OpenCV ChArUco Detectors (Using UR Reference Logic)[cite: 2]
+    # 3. Configure OpenCV ChArUco Detectors
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     try:
         board = cv2.aruco.CharucoBoard((sq_x, sq_y), sq_size, mk_size, aruco_dict)
-        detector_params = cv2.aruco.DetectorParameters()
-        detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
+        charuco_detector = cv2.aruco.CharucoDetector(board)
     except AttributeError:
-        print("⚠️ Warning: Using legacy OpenCV 4.x API.[cite: 2]")
-        board = cv2.aruco.CharucoBoard_create(sq_x, sq_y, sq_size, mk_size, aruco_dict)
-        detector = None 
+        print("Error: OpenCV version mismatch. Please ensure opencv-contrib-python is installed.")
+        sys.exit(1)
 
-    # 4. Connect to Arm
-    print(f"Connecting to {args.arm} arm at {target_ip}...")
-    robot = XArmLite6(target_ip, gripper='lite6', side=args.arm, walls=False)
+    # 4. Connect to BOTH Arms
+    print(f"Connecting to left arm at {DEFAULT_LEFT_IP} and right arm at {DEFAULT_RIGHT_IP}...")
+    left_arm = XArmLite6(DEFAULT_LEFT_IP, gripper='lite6', side='left', walls=False)
+    right_arm = XArmLite6(DEFAULT_RIGHT_IP, gripper='lite6', side='right', walls=False)
 
-    robot.arm.clean_error()
-    robot.arm.clean_warn()
-    robot.arm.motion_enable(enable=True)
-    robot.arm.set_mode(0)
-    robot.arm.set_state(0)
+    arms = [left_arm, right_arm]
+    target_robot = left_arm if args.arm == 'left' else right_arm
 
-    # 5. Manual Recording Mode Logic
+    for r in arms:
+        r.arm.clean_error()
+        r.arm.clean_warn()
+        r.arm.motion_enable(enable=True)
+        r.arm.set_mode(0)
+        r.arm.set_state(0)
+
+    # 5. Start Background Error Monitor
+    # This thread will keep the arms from locking up when payloads change in free-drive
+    monitor_state = {'running': True, 'freedrive_active': False}
+    err_thread = threading.Thread(target=error_monitor_thread, args=(arms, monitor_state), daemon=True)
+    err_thread.start()
+
+    # 6. Pre-Grasp Positioning (BOTH Arms in Free-Drive)
+    print(f"\nOpening {args.arm} gripper...")
+    target_robot.open_gripper()
+    time.sleep(1.0) 
+
+    input("\n>>> FIRMLY HOLD BOTH ARMS to support their weight, then press ENTER to enable Free-Drive: ")
+
+    for r in arms:
+        r.arm.clean_error()
+        r.arm.set_mode(2)
+        r.arm.set_state(0)
+    
+    # Activate auto-error-clearing
+    monitor_state['freedrive_active'] = True
+
+    if args.mode == 'auto' and poses_exist:
+        input(f"\n>>> File loaded. Arrange BOTH arms, place the ChArUco board into the {args.arm} gripper, and press ENTER to close it: ")
+    else:
+        input(f"\n>>> Arrange BOTH arms, place the ChArUco board into the {args.arm} gripper, and press ENTER to close it: ")
+
+    print(f"Closing {args.arm} gripper...")
+    target_robot.close_gripper()
+    time.sleep(1.0)
+
+    # 7. Manual Recording Mode Logic
     if args.mode == 'manual' or not recorded_poses:
         if args.mode == 'manual':
             print(f"\nManual mode explicitly selected. Entering manual recording mode.")
         else:
             print(f"\nNo poses loaded. Falling back to manual recording mode.")
             
-        print(f"\nOpening {args.arm} gripper...")
-        robot.open_gripper()
-        time.sleep(1.0) 
-
-        input(f"\n>>> Place the ChArUco board into the {args.arm} gripper and press ENTER to close it: ")
-
-        print(f"Closing {args.arm} gripper...")
-        robot.close_gripper()
-        time.sleep(1.0)
-
-        input(f"\n>>> FIRMLY HOLD THE {args.arm.upper()} ARM NOW to support its weight, then press ENTER to enable Free-Drive: ")
-        
-        robot.arm.clean_error()
-        robot.arm.set_mode(2)
-        robot.arm.set_state(0)
+        print(f"\n*** BOTH arms are currently in Free-Drive. Move the {args.arm} arm to desired poses. ***")
 
         state = {'running': True, 'cmd': None}
         ui_thread = threading.Thread(target=input_thread, args=(state,), daemon=True)
@@ -224,18 +325,6 @@ def main():
 
         try:
             while state['running']:
-                if robot.arm.error_code != 0:
-                    err = robot.arm.error_code
-                    if err == 37:
-                        print("\n⚠️ Error 37 detected! The arm locked itself. Clearing error and re-enabling free-drive...")
-                        robot.arm.clean_error()
-                        time.sleep(0.1)
-                        robot.arm.set_mode(2)
-                        robot.arm.set_state(0)
-                    else:
-                        print(f"\n⚠️ Unexpected Error {err} detected. Clearing...")
-                        robot.arm.clean_error()
-
                 try:
                     frames = pipeline.wait_for_frames(timeout_ms=5000)
                 except RuntimeError:
@@ -249,7 +338,7 @@ def main():
                     cv2.waitKey(1)
                 
                 if state['cmd'] == 'R':
-                    code, q = robot.arm.get_servo_angle(is_radian=True)
+                    code, q = target_robot.arm.get_servo_angle(is_radian=True)
                     if code == 0:
                         recorded_poses.append(np.array(q).tolist())
                         print(f"✅ Pose #{len(recorded_poses)} recorded.")
@@ -258,17 +347,21 @@ def main():
                     state['cmd'] = None
 
         finally:
+            monitor_state['freedrive_active'] = False
             print("\nFree-drive off, position mode restored.")
-            robot.arm.set_mode(0)
-            robot.arm.set_state(0)
+            for r in arms:
+                r.arm.set_mode(0)
+                r.arm.set_state(0)
             time.sleep(0.5)
             
         if state['cmd'] == 'Q':
             print("Quitting without sampling.")
+            monitor_state['running'] = False
             pipeline.stop()
             cv2.destroyAllWindows()
-            robot.open_gripper()
-            robot.disconnect()
+            target_robot.open_gripper()
+            for r in arms:
+                r.disconnect()
             return
 
         if len(recorded_poses) > 0:
@@ -278,28 +371,30 @@ def main():
                 save_poses_yaml(pose_file, target_ip, 'lite6', sq_x, sq_y, sq_size, mk_size, recorded_poses)
         else:
             print("No poses recorded. Exiting.")
+            monitor_state['running'] = False
             pipeline.stop()
             cv2.destroyAllWindows()
-            robot.open_gripper()
-            robot.disconnect()
+            target_robot.open_gripper()
+            for r in arms:
+                r.disconnect()
             return
-
     else:
-        print(f"\nOpening {args.arm} gripper...")
-        robot.open_gripper()
-        time.sleep(1.0) 
-        input(f"\n>>> File loaded. Place the ChArUco board into the {args.arm} gripper and press ENTER to close it and begin sampling: ")
-        print(f"Closing {args.arm} gripper...")
-        robot.close_gripper()
-        time.sleep(1.0)
+        # If we loaded from file, we lock the arms here before sampling
+        monitor_state['freedrive_active'] = False
+        print("\nFree-drive off, position mode restored.")
+        for r in arms:
+            r.arm.set_mode(0)
+            r.arm.set_state(0)
+        time.sleep(0.5)
 
-    # 6. Automatic Execution and Sampling
+    # 8. Automatic Execution and Sampling
     print(f"\nStarting automatic sampling. Targets: {len(recorded_poses)}")
     samples = []
+    stream_intrinsics = None
     
     for i, q in enumerate(recorded_poses):
         print(f"\nMoving {args.arm} arm to pose {i+1}/{len(recorded_poses)}...")
-        robot.movej(q, blocking=True)
+        target_robot.movej(q, blocking=True)
         
         print("Waiting for arm to settle and camera auto-exposure to adjust...")
         for _ in range(60):
@@ -314,7 +409,7 @@ def main():
             except RuntimeError:
                 pass
         
-        pose_tcp = robot.get_tcp_pose()
+        pose_tcp = target_robot.get_tcp_pose()
         
         try:
             frames = pipeline.wait_for_frames(timeout_ms=5000)
@@ -331,67 +426,61 @@ def main():
         gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
 
         intr = color_frame.profile.as_video_stream_profile().intrinsics
+        stream_intrinsics = intrinsics_to_dict(intr)
         camera_matrix = np.array([[intr.fx, 0, intr.ppx], [0, intr.fy, intr.ppy], [0, 0, 1]], dtype=float)
         dist_coeffs = np.zeros((5, 1), dtype=float) 
 
-        # --- ChArUco Detection (Two-Step Process)[cite: 2] ---
-        if detector is not None:
-            corners, ids, rejected = detector.detectMarkers(gray)
-        else:
-            corners, ids, rejected = cv2.aruco.detectMarkers(gray, aruco_dict)
-            
-        if corners and len(corners) > 0:
-            cv2.aruco.drawDetectedMarkers(color, corners, ids)
-            ret, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, board)
+        charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
+        active_board = board
+        
+        if marker_corners is not None and len(marker_corners) > 0:
+            cv2.aruco.drawDetectedMarkers(color, marker_corners, marker_ids)
             
             # --- AUTO-ROTATION FALLBACK ---
             if charuco_corners is None or len(charuco_corners) < 4:
-                try:
-                    swapped_board = cv2.aruco.CharucoBoard((sq_y, sq_x), sq_size, mk_size, aruco_dict)
-                except AttributeError:
-                    swapped_board = cv2.aruco.CharucoBoard_create(sq_y, sq_x, sq_size, mk_size, aruco_dict)
-                    
-                ret_s, charuco_corners_swap, charuco_ids_swap = cv2.aruco.interpolateCornersCharuco(corners, ids, gray, swapped_board)
+                swapped_board = cv2.aruco.CharucoBoard((sq_y, sq_x), sq_size, mk_size, aruco_dict)
+                swapped_detector = cv2.aruco.CharucoDetector(swapped_board)
+                charuco_corners_swap, charuco_ids_swap, _, _ = swapped_detector.detectBoard(gray)
+                
                 if charuco_corners_swap is not None and len(charuco_corners_swap) >= 4:
                     print("🔄 Automatically swapped squares_x and squares_y to match board orientation.")
                     charuco_corners = charuco_corners_swap
                     charuco_ids = charuco_ids_swap
-                    board = swapped_board 
+                    active_board = swapped_board
 
-            if charuco_corners is not None and len(charuco_corners) >= 4:
-                # SolvePnP Robust Fix[cite: 2]
-                all_obj_points = board.getChessboardCorners()
-                obj_points = all_obj_points[charuco_ids.flatten()]
-                
-                valid, rvec, tvec = cv2.solvePnP(obj_points, charuco_corners, camera_matrix, dist_coeffs)
-                if valid:
-                    samples.append({'robot_pose': pose_tcp, 'rvec': rvec.flatten().tolist(), 'tvec': tvec.flatten().tolist()})
-                    print(f"✅ Sample {i+1} captured.")
-                    cv2.drawFrameAxes(color, camera_matrix, dist_coeffs, rvec, tvec, 0.1)
-                    cv2.aruco.drawDetectedCornersCharuco(color, charuco_corners, charuco_ids)
-                else:
-                    print("❌ Pose estimation failed.[cite: 2]")
+        if charuco_corners is not None and len(charuco_corners) >= 4:
+            all_obj_points = active_board.getChessboardCorners()
+            obj_points = all_obj_points[charuco_ids.flatten()]
+            
+            valid, rvec, tvec = cv2.solvePnP(obj_points, charuco_corners, camera_matrix, dist_coeffs)
+            if valid:
+                samples.append({'robot_pose': pose_tcp, 'rvec': rvec.flatten().tolist(), 'tvec': tvec.flatten().tolist()})
+                print(f"✅ Sample {i+1} captured.")
+                cv2.drawFrameAxes(color, camera_matrix, dist_coeffs, rvec, tvec, 0.1)
+                cv2.aruco.drawDetectedCornersCharuco(color, charuco_corners, charuco_ids)
             else:
-                num_found = len(charuco_corners) if charuco_corners is not None else 0
-                print(f"❌ Not enough ChArUco corners (Found {num_found}, Need 4+).[cite: 2]")
+                print("❌ Pose estimation failed.")
         else:
-            print("❌ No ArUco markers detected. (Check Dict 50 vs 250)[cite: 2]")
+            num_found = len(charuco_corners) if charuco_corners is not None else 0
+            print(f"❌ Not enough ChArUco corners (Found {num_found}, Need 4+).")
 
         cv2.imshow('Camera View', color)
         cv2.waitKey(1500)
 
-    # 7. Process Solutions
+    # 9. Process Solutions
     if samples:
-        run_hand_eye(samples, calib_file)
+        run_hand_eye(samples, calib_file, intrinsics=stream_intrinsics)
 
     print("\nCalibration sequence complete.")
     print(f"Opening {args.arm} gripper to release board...")
-    robot.open_gripper()
+    target_robot.open_gripper()
     time.sleep(1.0)
     
+    monitor_state['running'] = False
     pipeline.stop()
     cv2.destroyAllWindows()
-    robot.disconnect()
+    for r in arms:
+        r.disconnect()
 
 if __name__ == "__main__":
     main()

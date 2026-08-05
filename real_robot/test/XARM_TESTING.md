@@ -20,9 +20,9 @@ at −y**; `z` is up, table at `z = table_z`. The table edges are therefore
 
 ## Simulation — no robots needed
 
-A PyBullet model of the cell, with the top-down camera and a click UI. The
-**unmodified** primitives run against it, so this is the place to try things before
-the arms are switched on.
+A **MuJoCo** model of the cell, with the **calibrated** top-down camera, a simulated
+cloth and a click UI. The **unmodified** primitives run against it, so this is the
+place to try things before the arms are switched on.
 
 ```bash
 python real_robot/sim/fetch_lite6_assets.py          # once: ~3.1 MB into assets/
@@ -33,33 +33,93 @@ python real_robot/sim/run_sim_ui.py --headless --auto --primitive fling   # self
 ```
 
 `--delay 0.002` makes the swing watchable; `--seed N` moves the garment; `--loop`
-keeps going. The click helpers are the same `human_utils` ones the real-robot human
-policies use.
+keeps going; `--headless` sets `MUJOCO_GL=egl` for ssh and CI. No `nvrun` needed —
+that is a PyFlex problem, not a MuJoCo one. The click helpers are the same
+`human_utils` ones the real-robot human policies use.
+
+> Replaced the PyBullet cell (`xarm_cell_sim.py`, deleted). Two things drove it: the
+> cloth was a drawn catenary, so "did the fling move the garment" could not be asked
+> at all; and PyBullet's IK does 8 random restarts, which **reconfigures the arm
+> between IK branches**. The xArm controller plans a straight Cartesian line and
+> cannot do that, so the sim was passing paths that e-stopped both arms. The MuJoCo
+> IK is warm-start-only damped least squares, which is the faithful model.
 
 **What is real and what is not:**
 
 | | |
 |---|---|
 | Kinematics | **real** — UFACTORY's own URDF; its FK reproduces poses measured on your hardware to **2–4 mm** |
-| Camera | **real projection**, built from the same intrinsic `point_on_table_base` inverts (agrees with the analytic model to 0.9 px) |
-| Cloth | **not** physics — a drawn catenary between the grippers |
-| IK | PyBullet's solver, **not** the xArm controller's |
+| Camera | **real and calibrated** — the hand-eye extrinsic, rendered by MuJoCo; the render agrees with the analytic `base_to_pixel` model to **0.82 px** (`test_xarm_mujoco_camera.py::t_projection_round_trip`) |
+| Cell geometry | **measured** — 0.7489 m base separation, 178.68° yaw, from `T_left_cam @ inv(T_right_cam)` |
+| Cloth | **real physics** — a 9×9 MuJoCo `flexcomp` sheet; grasps are `mjEQ_CONNECT` equalities to the nearest vertex |
+| Cloth mask | free — the flex's own segmentation id, cropped like the RGB, so `valid_flag` means what it means on hardware |
+| IK | **ours**, not the xArm controller's — warm-start damped least squares on `mj_jacBody(link_eef)`, no restarts |
+| Arm drive | kinematic: qpos is written each interpolation step and `mj_step` integrates the cloth against it. Deliberate — a servo would blur "unreachable" into "the controller lagged" |
 | Joint effort | not simulated — reports "no signal", so the primitives take their hardware fallback |
 
-> The sim validates sequencing, framing and gross reachability. The controller's own
-> `get_inverse_kinematics` (what `IKGuardedArm` uses) stays the authority before real
-> motion, and `test_xarm_primitives.py --offline` stays the fast gate.
+> The sim validates sequencing, framing, cloth motion and gross reachability. The
+> controller's own `get_inverse_kinematics` (what `IKGuardedArm` uses) stays the
+> authority before real motion, and `test_xarm_primitives.py --offline` stays the
+> fast gate.
 
-The headless run asserts every commanded pose was reached, no joint limit was
-exceeded and the arms never touched — checks the offline reach-*sphere* test cannot
-make, because it has no kinematic chain.
+The headless run asserts every commanded pose was reached, **no reconfiguration
+happened**, no joint limit was exceeded and the arms never touched — checks the
+offline reach-*sphere* test cannot make, because it has no kinematic chain. It also
+prints the **worst per-joint step** and where the cloth ended up. Read both:
+
+- A joint step above ~5° per waypoint is the wrist-singularity slide. At J5 ≈ 0, J4
+  and J6 turn about the same axis, so the tool pose does not constrain their
+  difference and the solver drifts along it — once measured at **+54° / −53° in a
+  single step**, equal and opposite. The null-space pull toward the seed holds it to
+  ~3°. If it comes back, check that the null-space projector uses a **true**
+  pseudo-inverse: the damped one is non-zero everywhere and biases the tracking term.
+- `cloth centroid … moved +0.257 m in y (toward the front), −287 px in v (up the
+  frame)` — both halves, in metres and in pixels, because those two disagreeing is
+  the class of bug that put the garment at the back of the table on 2026-08-04.
 
 After a run the UI redraws the frame with the executed TCP paths on it. Those are the
 paths' **shadow on the table**, not where the camera would see them: with the camera
-1.0 m up, a gripper at the 0.25 m fling height is magnified ~40 %, which moved the
+0.84 m up, a gripper at the 0.25 m fling height is magnified ~40 %, which moved the
 swing by up to 52 px in a 330 px window and pushed the wind-up off the top edge. The
 shadow puts each grasp exactly on the pixel you clicked, at the cost of not showing
-height. Raising the camera shrinks the gap between the two.
+height.
+
+**Offline camera checks** (no hardware, no arms):
+
+```bash
+python real_robot/test/test_xarm_mujoco_camera.py
+```
+
+Seven checks against the **real calibration files**. Two of them are expected to be
+RED right now, and they are a hardware finding rather than a bug — see the square
+window section below.
+
+### The same UI, on the real arms
+
+`test_xarm_pixel_primitives_ui.py` is the hardware twin of `run_sim_ui.py`: same
+square crop, same `human_utils` click helpers, same **unmodified** skills. The fling's
+swing shape lives in `xarm_base_fling_poses` and belongs to the skill, not to either
+scene, so what you watched in the sim is what the arms do.
+
+```bash
+# 1. no hardware at all -- click path, pixel->table math, IK, waypoints
+python real_robot/test/test_xarm_pixel_primitives_ui.py --primitive fling --dry-run --auto --once
+# 2. still no hardware, but you drive it by clicking
+python real_robot/test/test_xarm_pixel_primitives_ui.py --primitive fling --dry-run
+# 3. the real arms (asks you to type 'go' first)
+python real_robot/test/test_xarm_pixel_primitives_ui.py --primitive fling
+```
+
+`--dry-run` loads the **real** calibration — camera, crop, cell geometry — and stubs
+only the drivers, so the arithmetic it checks is the arithmetic that will run.
+`--auto` needs no display, so step 1 works over ssh. The fling prints the swing it is
+about to execute, in metres, before it executes it; check those numbers against what
+you then watch happen.
+
+> ⚠️ `XArmDualArmScene`'s third positional argument is `dry_run`, **not** the cell
+> calibration — the scene loads that itself. Passing a `CellCalibration` there puts
+> the scene silently into dry-run: you click, the console looks healthy, and the arms
+> never move.
 
 ### Which way up the frame is
 
@@ -72,14 +132,32 @@ right-handed with the view direction as camera +z, so "u runs toward base +x" fo
 the back (0.68 m) edge at −y. Flip one of those without the other and you get a frame
 that is upside down and virtual walls that protect the wrong half of the table.
 
+**This is now measured, not assumed.** Column 1 of `xarm-left-calib.yaml`'s
+`camera_to_base` is camera +y (image *down*) → base −y, so the top of the frame is
+base +y, and the operator confirms the mounted camera shows exactly the layout above
+with no software flip. `test_xarm_mujoco_camera.py::t_frame_layout` asserts it
+against the real files.
+
+> **Why there is no view mirror.** One was designed on 2026-08-04 and deliberately
+> does not exist. It was only ever there to rescue the layout from the wrong sign of
+> y: with front at −y, a down-looking camera genuinely cannot show "left arm on the
+> left" and "front at the top" at once, and a reflection is the only escape. The sign
+> was wrong — it had been read off a fling that **e-stopped during its wind-up**, and
+> the wind-up travels backwards, so what looked like "the garment was flung to the
+> back" was a motion that never finished. With front at +y the mounting gives both
+> halves for free. A mirrored view would have been a permanent cost — every garment
+> read mirrored, a left sleeve appearing where a right one is — paid to hide a
+> one-character error. If anyone reaches for a flip again, **check the sign of y
+> first**, and never put a reflection in `T_cam`: that matrix must stay a proper
+> rotation (det +1) or every handedness-dependent quantity downstream breaks quietly.
+
 Nothing depends on it any more: the dual-arm skills assign arms by position on the
 **table** (`sort_pairs_by_table_x`), not by pixel column, so a camera bolted on rotated
 gives a view you dislike rather than a swapped grasp. It used to matter — the skills
 sorted on pixel x, and a roll silently handed each arm the other one's target.
 
-- [ ] Once the camera is mounted, check the `[xarm-camera] frame: …` line printed at
-      scene init against what you see. `-- as intended` means the mount matches the
-      convention above; anything else tells you which way it actually came out.
+- [x] Camera mounted and hand-eye calibrated; the `[xarm-camera] frame: …` line reads
+      `left arm on the left, front at the top -- as intended`.
 
 ### What the camera hands you: a square window between the arms
 
@@ -88,16 +166,46 @@ on the midpoint of the two arm bases**, not the raw camera image. The scene crop
 and shifts its own intrinsic's principal point to match, so a pixel in that window
 still inverts to the right point on the table and no call site needs to know.
 
-| knob | where | default |
-|---|---|---|
-| `XARM_CROP_SIZE` | `xarm_constants.py` | `0.66` m — the base separation, i.e. the square spanned between the arms |
+**`XARM_CROP_SIZE` is not a tuning knob any more.** The window side **is** the base
+separation, so the two base centres land exactly on the left and right edges of the
+crop — that is what the constant's comment always claimed it meant, it was just being
+computed from an assumed 0.66 m. `crop_window()` defaults `size_m` to the separation
+it is given, so a cell measured at 0.7489 m gets a 0.7489 m window with nothing to
+keep in step; the constant survives only as the fallback for an uncalibrated cell.
+`test_xarm_mujoco_camera.py::t_crop_bases_on_the_edges` asserts the property directly.
 
-**This is the one to tune on hardware.** It is a length on the *table* in metres, so
-it keeps meaning the same patch when the camera height or the lens changes. At the
-default it resolves to 330 px in the sim (f = 500 px at 1.0 m) and ~396 px on a
-RealSense colour stream at 1.5 m — both upsampled to the arena's 512. If you enlarge
-it much past ~1.1 m the arms' own bases come into frame; if you make it too big to
-fit, `crop_window` says so loudly rather than quietly sliding the window off-centre.
+#### ⚠️ It does not currently fit the sensor
+
+Hand-eye puts the camera **0.839 m** above the table. That is a measurement, not a
+choice, so **the height is an input now** — the old advice here ("raise the bracket to
+~1.5 m") is dead. Against a D435i **colour** stream at 1280×720:
+
+| | needed | available |
+|---|---|---|
+| across the arms (u) | 0.749 m = **826 px** | 1280 px ✓ |
+| along the arm line (v) | 0.749 m = **826 px** | **720 px ✗** — only 0.653 m of table |
+
+96 mm short, 13 %. `crop_window` clamps and says so loudly rather than quietly sliding
+the window off-centre, but a clamped window is no longer centred between the arms, so
+every pixel handed to a primitive carries a silent offset.
+
+**The fix is a wider field of view, not a higher camera.** The D435i **depth** stream
+is 87° × 58° (fx ≈ 674, fy ≈ 649 at 1280×720), covering 0.93 m along the arm line and
+making the window 579 px — still well above the 512 px the arena upsamples to.
+`RealsenseCamera` currently does `rs.align(rs.stream.color)`, which throws that width
+away by resampling depth into the narrow colour frame; aligning the other way keeps
+it, and the hand-eye result survives with no re-calibration, because the device
+reports the colour→depth extrinsic (`T_left_depth = T_left_cam @ T_cam_depth`).
+
+> ⚠️ All of the above is against a **nominal** D435i intrinsic — the calibration files
+> carry extrinsics only. Settle it first:
+>
+> ```bash
+> python real_robot/calibration/xarm_hand_to_eye_calib.py --dump-intrinsics
+> ```
+>
+> No board, no arm motion. It writes an `intrinsics:` block into the calib YAML, and
+> then `t_crop_fits` is answering with your camera rather than a datasheet.
 
 ### The photo pose: each arm swings to its own left
 
@@ -410,24 +518,55 @@ Bring it up one stage at a time — each can be switched off:
 --skip-release   # open without the inward tension release
 ```
 
-**The fling constants are derived, not chosen.** `get_base_fling_poses` builds the
-swing in a frame centred between the bases, so each gripper sits at
-`x = (S − width)/2` from **its own** base and the wind-up waypoint is at
-`(x, −stroke, hang)`. Two constraints follow:
+**Which way it strokes.** After the shake the arms wind **up toward the back**, stroke
+**toward the front** (+y, the operator's side), touch down at the far end and drag
+back to lay the garment down. `xarm_base_fling_poses` in `primitives/utils.py` builds
+that order directly — it is a separate function from the UR-shared
+`get_base_fling_poses`, which is left untouched. The sim's `--cloth-report` line is
+the regression: the cloth must move **+y and up the frame**.
+
+**The fling constants are derived, not chosen.** The swing is built in a frame centred
+between the bases, so each gripper sits at `x = (S − width)/2` from **its own** base
+and the wind-up waypoint is at `(x, −stroke, hang)`. Two constraints follow:
 
 ```
-(1) base keepout:  (S − width)/2  >=  r_min          ->  width <= S − 2·r_min = 0.42 m
+(1) base keepout:  (S − width)/2  >=  r_min
 (2) reach:         x² + stroke² + hang²  <=  r_max²
 ```
 
-At `S = 0.66` and the measured `(0.12, 0.41)`: **width 0.36, hang 0.25, stroke 0.25**
-puts the swing at `r_3d = 0.363 m`, ~11% inside the limit. That is about half the UR
-cell's fling (width 0.65, hang 0.35, stroke 0.65) — a UR5e reaches ~0.85 m, so this
-is geometry, not timidity.
+⚠️ **They pull in opposite directions as the cell widens**, which is not obvious: a
+wider cell puts each gripper *further* from its own base, so (1) gets easier and (2)
+gets **harder**. It is tempting to read a wider cell as simply more comfortable for
+the fling — it is not. Hand-eye then measured `S = 0.7489 m` against the 0.66 m these
+numbers were derived for:
 
-`test_xarm_walls_offline.py` asserts both constraints, so if you change
-`XARM_BASE_SEPARATION` or the measured reach it fails on a laptop rather than at the
-arm. Re-derive the constants in `xarm_constants.py` rather than editing them by feel.
+```
+x = (0.7489 − 0.36)/2 = 0.1945 m
+swing radius = √(0.1945² + 0.25² + 0.25²) = 0.4035 m   vs   measured r_max = 0.410 m
+```
+
+It still fits, **by 1.6 %** — down from the 11 % the assumed separation gave. Thin
+enough that the next change to any of these gets re-derived rather than nudged. Two
+ways to buy margin back if the fling needs room:
+
+- `XARM_FLING_WIDTH >= 0.375 m` — a wider cell wants a wider stretch, which pulls each
+  gripper back toward its own base (and stretches the garment more, which the fling
+  wants anyway);
+- `XARM_FLING_STROKE <= 0.244 m` — a shorter wind-up.
+
+> ⚠️ It does **not** fit against `XARM_WORKSPACE_RADIUS`'s conservative `0.400`, which
+> is a stale fallback — step 4's `--reach` measured **0.41** and wrote it into
+> `xarm-cell.yaml`. Checking a *measured* separation against an *unmeasured* reach
+> mixes two different cells and reports a violation that does not exist. That is why
+> `t_fling_envelope` takes **both** numbers from the calibration file.
+
+For scale, this is about half the UR cell's fling (width 0.65, hang 0.35, stroke 0.65)
+— a UR5e reaches ~0.85 m, so it is geometry, not timidity.
+
+`test_xarm_walls_offline.py::t_fling_envelope` asserts both constraints against the
+measured cell, so a change to the separation or the reach fails on a laptop rather
+than at the arm. Re-derive the constants in `xarm_constants.py` rather than editing
+them by feel.
 
 - [ ] `--dry-run` clean, then `--execute --skip-shake --skip-release`
 - [ ] Add the shake, then the release
@@ -545,27 +684,33 @@ any coordinate:
 
 ## Reach reality check
 
-At the conservative `XARM_WORKSPACE_RADIUS = (0.12, 0.40)` and the measured 0.66 m
-separation, the two arms **genuinely overlap** over `x ∈ [0.26, 0.40]` — a band
-0.14 m deep about the midline. Step 4's `--reach` sweep measures the real radius and
-may widen it further. Dual-arm grasps on one garment still work best with the two
-grasp points on opposite halves, but a handover or a shared-point touch at the
-midline is now possible — which is what makes the one-mark `--separation`
-measurement work.
+At the **measured** `(0.12, 0.41)` reach and the **hand-eye measured 0.7489 m**
+separation, the two arms overlap over `x ∈ [0.339, 0.410]` — a band **0.07 m** deep
+about the midline, down from the 0.14 m the assumed 0.66 m implied. Dual-arm grasps on
+one garment still work best with the two grasp points on opposite halves; a handover
+or a shared-point touch at the midline is still possible, but the margin is 7 cm, not
+14. The same widening is what cut the fling's reach margin from 11 % to 1.6 % (§5c).
 
 `python real_robot/test/xarm_test_scene.py` prints the current reach map and
 verifies the synthetic camera round-trip, with no hardware at all.
 
 ## Still open after this runbook
 
-- Real hand-eye calibration (`hand_to_eye_calib.py`) to replace the identity
-  placeholders in `calibration/xarm-{left,right}-calib.yaml`; the synthetic camera
-  is a stand-in only. The crop centre is a real projection through `T_left_cam`, so
-  it follows the calibration; the crop *size* assumes the camera looks straight
-  down, and goes slightly non-square on the table if calibration finds a tilt.
-- Tune `XARM_CROP_SIZE` against the real camera, and settle its height — 1.0 m
-  clips the 1.20 m table length for a RealSense colour stream, ~1.50 m does not,
-  and the height also sets how many pixels the crop gets.
+- ~~Real hand-eye calibration~~ — **done** (39 ChArUco samples per arm). It also
+  measured the cell: 0.7489 m separation, 178.68° yaw. Note the crop *size* assumes
+  the camera looks straight down, so it goes slightly non-square on the table given
+  the small tilt calibration found.
+- **Dump the real intrinsics** (`xarm_hand_to_eye_calib.py --dump-intrinsics`) — the
+  calib files carry extrinsics only, and every crop number above is against a D435i
+  nominal. Do this first: it decides whether the base-to-base window fits at all.
+- **Decide the crop/stream question** — at the calibrated 0.839 m the base-to-base
+  square needs 826 px of a 720 px colour frame. Either switch to the wider depth
+  stream (align colour→depth) or accept a smaller crop with the bases outside it.
+- Check the measured 0.7489 m against a tape before it drives anything that moves.
+- `XARM_WORKSPACE_RADIUS = (0.12, 0.40)` in `xarm_constants.py` is now behind the
+  measured `(0.12, 0.41)` in `xarm-cell.yaml`. Harmless (everything that matters
+  reads the file) but worth reconciling — the fling's margin at the measured
+  separation is 1.6 %, and it is *negative* against the stale constant.
 - Fling dynamics tuning (stroke, swing angle, speeds) against real fabric.
 - Aligning controller firmware v2.2.2 / v2.3.0.
 - If xArm results are ever reported, `paper/example.tex` needs the real cell

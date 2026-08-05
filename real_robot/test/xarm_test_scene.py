@@ -214,6 +214,22 @@ class CellCalibration:
         arms = data.get('arms', {}) or {}
         self.calibrated = bool(data)
         self.separation = float(cell.get('base_separation', C.XARM_BASE_SEPARATION))
+        self.base_yaw = float(cell.get('base_yaw', C.XARM_BASE_YAW))
+        # The FULL measured transform when hand-eye has provided one, because
+        # separation + yaw alone throw away the parts that are not zero: the two
+        # calibrations put the right base 26 mm off the x axis and 9 mm higher
+        # than the left. Rebuilding it from two scalars would quietly square the
+        # cell up again, which is the assumption this is here to replace.
+        T = cell.get('T_left_right')
+        if T is not None:
+            self.T_left_right = np.array(T, dtype=float).reshape(4, 4)
+        else:
+            self.T_left_right = face_to_face_T_left_right(self.separation)
+            if abs(self.base_yaw - np.pi) > 1e-9:
+                rot = np.eye(4)
+                c, s = np.cos(self.base_yaw), np.sin(self.base_yaw)
+                rot[:2, :2] = [[c, -s], [s, c]]
+                self.T_left_right[:3, :3] = rot[:3, :3]
 
         self._table_z, self._gripper_offset = {}, {}
         self._workspace_radius, self._home_joint = {}, {}
@@ -262,7 +278,8 @@ class CellCalibration:
                    self.table_z(side), 1e-4),
                   ('XARM_GRIPPER_OFFSET', C.for_side(C.XARM_GRIPPER_OFFSET_BY_SIDE, side),
                    self.gripper_offset(side), 1e-4),
-                  ('XARM_BASE_SEPARATION', C.XARM_BASE_SEPARATION, self.separation, 5e-3)]
+                  ('XARM_BASE_SEPARATION', C.XARM_BASE_SEPARATION, self.separation, 5e-3),
+                  ('XARM_BASE_YAW', C.XARM_BASE_YAW, self.base_yaw, np.deg2rad(1.0))]
         for name, have, want, tol in checks:
             if abs(float(have) - float(want)) > tol:
                 out.append((name, float(have), float(want)))

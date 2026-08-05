@@ -114,55 +114,43 @@ def sort_pairs_by_table_x(pair_0, pair_1, intr, T_left_cam, table_z, key='pick')
     return (pair_0, pair_1) if base_x(pair_0) <= base_x(pair_1) else (pair_1, pair_0)
 
 
-# --- HELPER: which of the two equivalent wrist orientations to command ---
-def nearest_wrist_branch(target_rotvec, current_rotvec):
-    """The equivalent grasp orientation nearest the wrist's CURRENT one.
+# --- HELPER: keep a fling path continuous with the grasp being held ---
+def retarget_path_to_grasp(path, grasp_rot):
+    """Re-express a fling path's orientations as tilts ON TOP OF the grasp held.
 
-    A parallel jaw is symmetric under 180 deg about the tool z, so ``R`` and
-    ``R * Rz(pi)`` are the SAME physical grasp: same gripper axis, same finger
-    line, same contact. They are not the same joint configuration, and the arm
-    does not get to pick -- it goes wherever the commanded rotation says.
+    ``get_base_fling_poses`` writes absolute orientations built from a fixed
+    ``init_rot`` in the fling frame, which owes nothing to the pose the arm is
+    actually holding the cloth in. Because the two bases face each other, that
+    constant is 180 deg about the tool z away from the grasp for exactly one of
+    the arms -- so one arm was told to spin its wrist half a turn, under load and
+    at fling speed, to enter the swing. On 2026-08-04 that drove J4 to -363 deg
+    and e-stopped both arms with ``servo_id=4, code=23``.
 
-    ⚠️ This is not a micro-optimisation, it is a joint-limit fix. get_base_fling_poses
-    builds its orientations from ``init_rot = Rz(pi)``, which is 180 deg about the
-    tool z away from XARM_DOWN_ROTVEC. Transforming the right arm's copy of the
-    path by inv(T_left_right) (a 180 deg yaw) cancels that for the right arm and
-    leaves it standing for the left, so the left arm was being told to spin its
-    wrist half a turn -- under load, mid-swing, at fling speed -- to enter the
-    fling. On 2026-08-04 that drove J4 to -363 deg against a -360 deg limit and
-    both arms e-stopped with ``servo_id=4, code=23`` (joint angle exceeds limit).
-    Both taught homes are ~178 deg about tool z from XARM_DOWN_ROTVEC as well, so
-    the approach was already flipping the wrist before the fling flipped it back.
+    Only the DIFFERENCE between waypoints is meaningful in that path: it is the
+    wrist pitch that makes the swing a swing (``swing_angle`` about the
+    base-to-base axis). So keep the differences and drop the absolute reference:
+    each waypoint becomes ``(R_i * R_0^-1) * grasp_rot``, a base-frame tilt
+    applied to the orientation the arm is already in. Waypoint 0 then reproduces
+    the grasp exactly, so entering the fling costs no wrist motion at all, and
+    every later waypoint carries only the tilt that was intended.
 
-    Snapping to the nearer branch removes every such flip while leaving the tool z
-    axis -- where the gripper actually points -- bit-identical. Only the roll about
-    it changes, and that is the axis the jaw is symmetric in.
+    ``path`` is (N, 6) UR-convention in ONE frame, and ``grasp_rot`` (a scipy
+    Rotation) must be in that same frame. A copy is returned.
+
+    ⚠️ Do NOT "improve" this by snapping each commanded orientation to whichever
+    of the two equivalent wrist branches is nearer the arm's current one. That was
+    tried and measured: because the criterion compares whole orientations, a tilt
+    past 90 deg makes the flipped branch look nearer and the wrist flips in the
+    MIDDLE of the swing. In the cell it took reconfigurations from 2 back up to 35
+    and left the right arm's J4 with 9 deg of margin. Fixing the reference here,
+    once, is what makes the branch question go away.
     """
-    r_target = R.from_rotvec(np.asarray(target_rotvec, dtype=float))
-    r_current = R.from_rotvec(np.asarray(current_rotvec, dtype=float))
-    r_flipped = r_target * R.from_euler('z', np.pi)
-    if (r_flipped * r_current.inv()).magnitude() < (r_target * r_current.inv()).magnitude():
-        return r_flipped.as_rotvec()
-    return r_target.as_rotvec()
-
-
-def snap_path_wrist(poses, current_rotvec):
-    """``nearest_wrist_branch`` along a whole trajectory, in order.
-
-    Each waypoint is snapped against the PREVIOUS SNAPPED one, not against the
-    pose the arm started in, so a multi-waypoint path stays in one branch instead
-    of flipping somewhere in the middle -- which is the failure this exists to
-    prevent. ``poses`` is (N, 6) UR-convention; a copy is returned.
-    """
-    poses = np.array(poses, dtype=float)
-    single = poses.ndim == 1
-    if single:
-        poses = poses.reshape(1, -1)
-    ref = np.asarray(current_rotvec, dtype=float)
-    for i in range(poses.shape[0]):
-        poses[i, 3:6] = nearest_wrist_branch(poses[i, 3:6], ref)
-        ref = poses[i, 3:6]
-    return poses[0] if single else poses
+    path = np.array(path, dtype=float)
+    r0_inv = R.from_rotvec(path[0, 3:6]).inv()
+    for i in range(path.shape[0]):
+        tilt = R.from_rotvec(path[i, 3:6]) * r0_inv
+        path[i, 3:6] = (tilt * grasp_rot).as_rotvec()
+    return path
 
 
 # --- HELPER: Apply Rotation ---
@@ -200,6 +188,106 @@ def points_to_fling_path(
     right_path_w = transform_pose(tx_world_fling_base, right_path)
     left_path_w = transform_pose(tx_world_fling_base, left_path)
     return right_path_w, left_path_w
+
+# --- HELPER: the xArm fling swing ---------------------------------------------
+def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
+                          place_height=0.10, windup=0.06, place_y=-0.05):
+    """The Lite 6 fling swing, in the action frame (+y = forward = the FRONT).
+
+    ⚠️ SEPARATE FROM ``get_base_fling_poses`` ON PURPOSE. That one is in
+    ``transform_utils`` and belongs to the UR cell, which works and must not be
+    disturbed; this is the xArm shape, and the two are different motions.
+
+    The order matters and is what the operator asked for after watching it run::
+
+        0  centre, high                     -- where the stretch/shake left it
+        1  back a little, high (y=-windup)  -- wind up, JUST enough for momentum
+        2  FRONT, high         (y=+stroke)  -- STROKE: the fling itself
+        3  FRONT, low          (y=+stroke)  -- touch down at the far end
+        4  behind the line, low (y=place_y) -- DRAG BACK to lay the cloth flat
+
+                            z
+        --------------------^-------------------------> y (front)
+        |                                             |
+        |            1      0                    2    |  lift_height
+        |                                             |
+        |         4                             <-3   |  place_height
+        -----------------------------------------------
+                    ^ place_y (just behind y=0, the base-to-base line)
+
+    ⚠️ THE SHAPE IS ASYMMETRIC AND THAT IS THE POINT. ``windup`` is a small
+    fraction of ``stroke``, not its mirror. The first version used ``-stroke``
+    for waypoint 1, which made half the motion backwards -- watching it run, the
+    fling reads as "backwards, then forwards" rather than as a fling. The
+    backward leg exists only to load the cloth, so it gets the minimum that does
+    that and no more. If someone widens it back toward ``stroke``, this is undone.
+
+    The cloth is thrown FORWARD, lands ahead of the grippers, and is then pulled
+    back THROUGH the base-to-base line to ``place_y`` just behind it, so it
+    settles flat and stretched under the grippers rather than in a heap at the
+    far end -- and the release stays clear of the front table edge.
+
+    Returns (5, 6) poses -- xyz + rotvec -- in the action frame. The absolute
+    wrist reference here is meaningless; ``retarget_path_to_grasp`` replaces it
+    with the grasp the arm is actually holding, and only the DIFFERENCES between
+    these orientations survive.
+    """
+    windup = abs(float(windup))
+    pos = np.array([
+        [0, 0.0,        lift_height],    # 0: centre, high
+        [0, -windup,    lift_height],    # 1: small wind-up, toward the back
+        [0, +stroke,    lift_height],    # 2: stroke, toward the front
+        [0, +stroke,    place_height],   # 3: touch down at the far end
+        [0, place_y,    place_height],   # 4: drag back past the line, laying it down
+    ], dtype=float)
+
+    # Pitch about the action frame's x axis -- the base-to-base axis -- so the
+    # wrist leads the swing. Negative at the wind-up, positive at the stroke, and
+    # held constant through the drag so the gripper does not twist on the cloth.
+    # The wind-up pitch is scaled by how short the wind-up now is: a full -45 deg
+    # cock over a 6 cm move is a wrist flick, not a swing, and it throws the cloth.
+    cock = swing_angle * min(1.0, windup / max(stroke, 1e-6))
+    rot = R.from_euler('xyz', [
+        [0, 0, 0],
+        [-cock, 0, 0],
+        [+swing_angle, 0, 0],
+        [swing_angle / 8, 0, 0],
+        [swing_angle / 8, 0, 0],
+    ])
+    init_rot = R.from_rotvec([0, np.pi, 0])
+    out = np.zeros((5, 6))
+    out[:, :3] = pos
+    out[:, 3:] = (rot * init_rot).as_rotvec()
+    return out
+
+
+def xarm_points_to_fling_path(right_point, left_point, width=None,
+                              swing_stroke=0.25, swing_angle=np.pi / 4,
+                              lift_height=0.25, place_height=0.10,
+                              windup=0.06, place_y=-0.05):
+    """``xarm_base_fling_poses`` placed in the world -> ``(right_path, left_path)``.
+
+    Mirrors ``points_to_fling_path`` exactly, including that ``right_point`` /
+    ``left_point`` name the FLING frame rather than our arms, and that the
+    forward direction is DERIVED as ``z x (left_point - right_point)``.
+    """
+    right_point = np.asarray(right_point, dtype=float)
+    left_point = np.asarray(left_point, dtype=float)
+    tx_world_action = points_to_action_frame(right_point, left_point)
+    tx_world_fling_base = tx_world_action.copy()
+    tx_world_fling_base[2, 3] = 0
+    base_fling = xarm_base_fling_poses(
+        stroke=swing_stroke, swing_angle=swing_angle, lift_height=lift_height,
+        place_height=place_height, windup=windup, place_y=place_y)
+    if width is None:
+        width = np.linalg.norm((right_point - left_point)[:2])
+    right_path = base_fling.copy()
+    right_path[:, 0] = -width / 2
+    left_path = base_fling.copy()
+    left_path[:, 0] = width / 2
+    return (transform_pose(tx_world_fling_base, right_path),
+            transform_pose(tx_world_fling_base, left_path))
+
 
 def move_until_contact(robot, start_pose, max_dist=0.10, force_threshold=CONTACT_FORCE_THRESH_UR16e):
     """

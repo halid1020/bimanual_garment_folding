@@ -339,39 +339,104 @@ def t_gripper_verify_uses_outputs():
     assert d.open_gripper(sleep_time=0.0, verify=True) is True
 
 
+def _measured_cell():
+    """The separation and the per-arm reach AS MEASURED, or the constants if not.
+
+    ⚠️ Both, from the same source, or neither. Hand-eye calibration measures the
+    separation now (T_left_cam @ inv(T_right_cam)) and it came out 0.749 m against
+    the assumed 0.66; test_xarm_teach.py --reach measured r_max at 0.41 m against
+    the constant's conservative 0.40. Checking the measured separation against the
+    UNmeasured reach mixes the two cells and reports a violation that does not
+    exist -- which is exactly what this check did on its first run.
+
+    Returns (separation, {side: (r_min, r_max)}, measured?).
+    """
+    import os
+    from real_robot.test.xarm_test_scene import load_cell
+    from real_robot.utils.scene_utils import cell_geometry_from_calibration
+    d = "{}/real_robot/calibration".format(os.environ.get('MP_FOLD_PATH', '.'))
+    radius = {s: C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, s)
+              for s in ('left', 'right')}
+    try:
+        _, separation, _ = cell_geometry_from_calibration(
+            os.path.join(d, 'xarm-left-calib.yaml'),
+            os.path.join(d, 'xarm-right-calib.yaml'))
+    except Exception:
+        return float(C.XARM_BASE_SEPARATION), radius, False
+    cal = load_cell(os.path.join(d, 'xarm-cell.yaml'))
+    if cal.calibrated:
+        radius = {s: tuple(cal.workspace_radius(s)) for s in ('left', 'right')}
+    return float(separation), radius, True
+
+
 @check("the fling constants satisfy their own geometric derivation")
 def t_fling_envelope():
     """The fling constants are DERIVED from the cell, not chosen.
 
-    get_base_fling_poses builds the swing in a frame centred between the bases, so
-    each gripper sits at x = (S - width)/2 from its own base and the wind-up
-    waypoint is at (x, -stroke, hang). Two constraints follow, and a naive port of
-    the UR numbers violates both. Assert them here so a later edit to the
-    separation or the measured reach fails on a laptop, not on the arm.
+    xarm_base_fling_poses builds the swing in a frame centred between the bases, so
+    each gripper sits at x = (S - width)/2 from its own base and the FURTHEST
+    waypoint is the forward stroke, at (x, +stroke, hang). Two constraints follow,
+    and a naive port of the UR numbers violates both. Assert them here so a later
+    edit to the separation or the measured reach fails on a laptop, not on the arm.
+
+    (The furthest waypoint used to be the WIND-UP, at (x, -stroke, hang), back when
+    the swing was symmetric. The wind-up is XARM_FLING_WINDUP now -- a quarter of
+    the stroke -- so it is nowhere near binding, but the radius is the same because
+    the constraint only sees |y|.)
+
+    ⚠️ S and the reach are both the MEASURED ones, not the constants. The two
+    constraints move in OPPOSITE directions as the cell widens -- the base keepout
+    gets easier (each gripper is further from its own base) and the reach gets
+    HARDER (for the same reason). It was tempting to assume a wider cell is simply
+    more comfortable for the fling; it is not. At the measured 0.7489 m the swing
+    radius is 0.4035 m, which clears the measured 0.410 m reach by 1.6% -- down
+    from the 11% the assumed 0.66 m gave, and it would FAIL against the constants'
+    conservative 0.400 m. That is why both numbers have to come from the same cell.
     """
-    S = C.XARM_BASE_SEPARATION
+    S, radius, measured = _measured_cell()
     width, hang = C.XARM_FLING_WIDTH, C.XARM_FLING_HANG
     stroke = C.XARM_FLING_STROKE
     x = (S - width) / 2.0
 
     for side in ('left', 'right'):
-        r_min, r_max = C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, side)
+        r_min, r_max = radius[side]
         assert x >= r_min, (
             "{}: stretch puts the gripper {:.3f} m from its base, inside the {:.3f} m "
             "keepout. Reduce XARM_FLING_WIDTH to <= {:.3f} m.".format(
                 side, x, r_min, S - 2 * r_min))
         swing = float(np.sqrt(x ** 2 + stroke ** 2 + hang ** 2))
         assert swing <= r_max, (
-            "{}: the wind-up waypoint is {:.3f} m out, beyond the {:.3f} m reach. "
-            "Max stroke at this width/hang is {:.3f} m.".format(
-                side, swing, r_max, np.sqrt(max(r_max ** 2 - x ** 2 - hang ** 2, 0.0))))
-        # The touch-down and drag waypoints are lower and nearer, but check them
-        # rather than assume it.
-        for label, y, z in (('touch-down', 0.0, C.XARM_FLING_PLACE_Z),
-                            ('drag', 0.10, C.XARM_FLING_PLACE_Z)):
+            "{}: the forward stroke waypoint is {:.3f} m out, beyond the {:.3f} m "
+            "reach, at the {} {:.4f} m separation. Either widen the stretch to "
+            ">= {:.3f} m (a wider cell wants a wider stretch: it pulls each gripper "
+            "back toward its own base) or shorten the stroke to <= {:.3f} m.".format(
+                side, swing, r_max, "MEASURED" if measured else "assumed", S,
+                S - 2 * np.sqrt(max(r_max ** 2 - stroke ** 2 - hang ** 2, 0.0)),
+                np.sqrt(max(r_max ** 2 - x ** 2 - hang ** 2, 0.0))))
+        # Every other waypoint of the swing, checked rather than assumed. The
+        # wind-up and the lay-down are both small in y now, and the last two are
+        # lower, so none should bind -- but "should not" is not a check.
+        for label, y, z in (('wind-up', -C.XARM_FLING_WINDUP, hang),
+                            ('touch-down', stroke, C.XARM_FLING_PLACE_Z),
+                            ('lay-down', C.XARM_FLING_PLACE_Y, C.XARM_FLING_PLACE_Z)):
             r = float(np.sqrt(x ** 2 + y ** 2 + z ** 2))
-            assert r <= r_max, "{}: {} waypoint at {:.3f} m exceeds reach".format(
-                side, label, r)
+            assert r <= r_max, (
+                "{}: the {} waypoint at ({:+.3f}, {:+.3f}) is {:.3f} m out, beyond "
+                "the {:.3f} m reach".format(side, label, y, z, r, r_max))
+
+    # The asymmetry is the operator's instruction, not a tuning accident: the swing
+    # must read as "forward" to someone watching it. Pin the ratio so a later edit
+    # cannot quietly restore the symmetric shape.
+    assert C.XARM_FLING_WINDUP < 0.5 * stroke, (
+        "the {:.3f} m wind-up is more than half the {:.3f} m forward stroke, so "
+        "the fling reads as backwards-then-forwards again".format(
+            C.XARM_FLING_WINDUP, stroke))
+    assert C.XARM_FLING_PLACE_Y < 0.0, (
+        "the garment is laid down at y={:+.3f}, in FRONT of the base-to-base line; "
+        "it should finish just behind it".format(C.XARM_FLING_PLACE_Y))
+    assert abs(C.XARM_FLING_PLACE_Y) < 0.5 * stroke, (
+        "the lay-down at y={:+.3f} is a long way behind the line, which drags the "
+        "garment back off the flung-out area".format(C.XARM_FLING_PLACE_Y))
 
     assert C.XARM_FLING_MIN_WIDTH <= width, "min stretch width exceeds the cap"
     assert C.XARM_FLING_PLACE_Z < hang, "touch-down must be below the hang height"
@@ -501,6 +566,11 @@ def t_crop_fits():
     lens and the mounting height. A clamped window is no longer centred between the
     arms, which is a silent aiming error -- so check the two cameras this cell will
     actually use before either is bolted up.
+
+    ⚠️ These are the two SYNTHETIC cameras, and they exist to check crop_window's
+    arithmetic. The verdict for the cell that is actually bolted up -- calibrated
+    extrinsic, measured separation, real or nominal RealSense intrinsic -- is
+    t_crop_fits in test_xarm_mujoco_camera.py, and it does not currently pass.
     """
     from real_robot.test.xarm_test_scene import (
         SyntheticIntrinsic, synthetic_T_left_cam, synthetic_intrinsic,
@@ -680,8 +750,13 @@ def t_overlay_drops_to_table():
 
     S, tz = C.XARM_BASE_SEPARATION, C.XARM_TABLE_Z
 
-    class _Scene:                       # the three attributes path_to_pixels reads
+    class _Scene:                       # the attributes path_to_pixels reads
         separation, table_z = S, tz
+        # table_px projects through the scene's OWN camera now (the cell's is the
+        # calibrated one), so the fake has to carry a camera as well as an
+        # intrinsic. With the synthetic camera this reduces to table_xy_to_pixel,
+        # which is what `want` below computes independently.
+        T_left_cam = synthetic_T_left_cam(S, tz)
         intr = crop_window(synthetic_intrinsic(), synthetic_T_left_cam(S, tz),
                            S, tz).intrinsic(synthetic_intrinsic())
 

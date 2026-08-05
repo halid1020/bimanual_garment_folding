@@ -34,6 +34,7 @@ the base, well outside the Lite 6's 0.41 m reach.
 import time
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from real_robot.utils.transform_utils import (
     point_on_table_base, transform_point, transform_pose,
@@ -43,15 +44,17 @@ from real_robot.utils.xarm_constants import (
     XARM_MOVE_SPEED, XARM_MOVE_ACC, XARM_COLLISION_THRESHOLD, XARM_DOWN_ROTVEC,
     XARM_TABLE_Z_BY_SIDE, XARM_GRIPPER_OFFSET_BY_SIDE, for_side,
     XARM_FLING_WIDTH, XARM_FLING_HANG, XARM_FLING_STROKE, XARM_FLING_ANGLE,
+    XARM_FLING_FORWARD_Y, XARM_EFFORT_VERIFIED, XARM_EFFORT_CONSECUTIVE,
     XARM_FLING_PLACE_Z, XARM_FLING_MIN_WIDTH, XARM_FLING_SPEED, XARM_FLING_ACC,
+    XARM_FLING_WINDUP, XARM_FLING_PLACE_Y,
     XARM_SHAKE_COUNT, XARM_SHAKE_AMPLITUDE, XARM_SHAKE_SPEED, XARM_SHAKE_ACC,
     XARM_STRETCH_STEP, XARM_STRETCH_MAX_TIME, XARM_STRETCH_SPEED,
     XARM_RELEASE_DIST, XARM_PROBE_STEP, XARM_EFFORT_THRESHOLD,
 )
 from real_robot.utils.thread_utils import ThreadWithResult
 from .utils import (
-    check_trajectories_close, apply_local_z_rotation, points_to_fling_path,
-    sort_pairs_by_table_x,
+    check_trajectories_close, apply_local_z_rotation, xarm_points_to_fling_path,
+    sort_pairs_by_table_x, retarget_path_to_grasp,
 )
 
 
@@ -69,6 +72,10 @@ class XArmPickAndFlingSkill:
         self.stretch_max_width = config.get('stretch_max_width', XARM_FLING_WIDTH)
         self.swing_stroke = config.get('swing_stroke', XARM_FLING_STROKE)
         self.place_height = config.get('place_height', XARM_FLING_PLACE_Z)
+        # The backward leg and where the cloth is laid down. Both are small and both
+        # are deliberately NOT derived from swing_stroke -- see xarm_base_fling_poses.
+        self.swing_windup = config.get('swing_windup', XARM_FLING_WINDUP)
+        self.place_y = config.get('place_y', XARM_FLING_PLACE_Y)
         # Each stage can be switched off for incremental hardware bring-up.
         self.do_probe = config.get('probe_contact', True)
         self.do_shake = config.get('shake', True)
@@ -207,28 +214,64 @@ class XArmPickAndFlingSkill:
         # Re-read where the arms ACTUALLY ended up. The stretch can stop early on
         # effort, so the commanded targets are not where the grippers are, and the
         # swing path has to start from the real poses (the UR does the same).
-        p_l = self.scene.left.get_tcp_pose()[:3]
-        p_r_in_l = transform_point(self.scene.T_left_right,
-                                   self.scene.right.get_tcp_pose()[:3])
+        pose_l = self.scene.left.get_tcp_pose()
+        pose_r = self.scene.right.get_tcp_pose()
+        p_l = pose_l[:3]
+        p_r_in_l = transform_point(self.scene.T_left_right, pose_r[:3])
+        # The ORIENTATIONS each arm is actually holding the cloth in, both
+        # expressed in the LEFT base frame (which is the frame the fling path is
+        # built in). The right arm's has to be rotated into it, exactly as its
+        # position is -- comparing a right-frame rotation against a left-frame path
+        # would be off by the 180 deg between the bases, which is the whole bug
+        # this retargeting exists to remove.
+        grasp_rot_l = Rotation.from_rotvec(pose_l[3:6])
+        grasp_rot_r_in_l = (Rotation.from_matrix(self.scene.T_left_right[:3, :3])
+                            * Rotation.from_rotvec(pose_r[3:6]))
 
         # NOTE: `right_point`/`left_point` name the FLING frame, not our arms.
-        # points_to_fling_path puts `right_point` at x = -width/2, which in the left
-        # base frame is the smaller x -- our LEFT arm. This pairing is correct.
         #
-        # WHICH WAY THE SWING GOES is not chosen here: points_to_action_frame takes
-        # forward = z x (left_point - right_point), so with our left arm at the
-        # smaller x it comes out as base +y -- the FRONT of the table. The arm winds
-        # up toward the back (stroke 0.25 m into 0.68 m of table) and lays the cloth
-        # down toward the front (drag 0.10 m into 0.52 m). Both fit; the direction
-        # follows from the front being at +y, so it reverses if that convention does.
-        left_path_full, right_path_full = points_to_fling_path(
-            right_point=np.asarray(p_l, dtype=float),
-            left_point=np.asarray(p_r_in_l, dtype=float),
+        # WHICH WAY THE SWING GOES is derived, not chosen: points_to_action_frame
+        # takes forward = z x (left_point - right_point), so handing it our arms in
+        # their natural order gives base +y -- which is the FRONT of this table, so
+        # the natural order is already the right one and this branch is not taken.
+        # xarm_base_fling_poses then winds up a LITTLE to y = -XARM_FLING_WINDUP
+        # (6 cm into the 0.68 m back -- just enough to load the cloth), STROKES
+        # forward to y = +stroke (into the 0.52 m front), touches down there, and
+        # drags back through the base line to XARM_FLING_PLACE_Y just behind it,
+        # laying the cloth out flat under the grippers.
+        #
+        # The swap branch stays because the direction should keep being CHECKED
+        # against XARM_FLING_FORWARD_Y rather than left as an unstated assumption:
+        # if the cell is ever re-laid so that front is -y, flipping that constant
+        # is the whole change. Swapping the two points reverses the cross product
+        # and so the whole swing; the returned paths swap with the arguments, hence
+        # the swapped unpacking -- points_to_fling_path puts `right_point` at
+        # x = -width/2, i.e. the smaller base x, i.e. our LEFT arm. The pairing is
+        # what keeps each arm on its own side; it is not what sets the direction.
+        toward_front = XARM_FLING_FORWARD_Y < 0
+        near, far = (np.asarray(p_r_in_l, dtype=float), np.asarray(p_l, dtype=float)) \
+            if toward_front else \
+            (np.asarray(p_l, dtype=float), np.asarray(p_r_in_l, dtype=float))
+        path_a, path_b = xarm_points_to_fling_path(
+            right_point=near,
+            left_point=far,
             width=None,
             swing_stroke=self.swing_stroke,
             swing_angle=XARM_FLING_ANGLE,
             lift_height=self.hang_height,
-            place_height=self.place_height)
+            place_height=self.place_height,
+            windup=self.swing_windup,
+            place_y=self.place_y)
+        left_path_full, right_path_full = (path_b, path_a) if toward_front \
+            else (path_a, path_b)
+
+        # Keep the swing's wrist PITCH, drop its absolute wrist reference: every
+        # waypoint becomes a base-frame tilt applied to the grasp this arm is
+        # already holding. Waypoint 0 then reproduces the current pose exactly, so
+        # entering the fling costs no wrist motion -- see retarget_path_to_grasp
+        # for what that was costing before (J4 to -363 deg, servo 4 code 23).
+        left_path_full = retarget_path_to_grasp(left_path_full, grasp_rot_l)
+        right_path_full = retarget_path_to_grasp(right_path_full, grasp_rot_r_in_l)
         left_path_full[0][:3] = p_l
         right_path_full[0][:3] = p_r_in_l
 

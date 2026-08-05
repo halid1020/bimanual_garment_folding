@@ -15,8 +15,75 @@ Kept out of ``xarm_test_scene.py`` so the production scenes do not import a test
 module; that file re-exports ``base_to_pixel`` under its original name.
 """
 import numpy as np
+import yaml
 
 from real_robot.utils import xarm_constants as C
+
+
+class PinholeIntrinsic:
+    """A pinhole intrinsic that duck-types the pyrealsense2 intrinsics object.
+
+    The production scenes put the RealSense object straight into ``scene.intr``,
+    and every helper here (plus ``intrinsic_to_params``) reads only
+    ``fx/fy/ppx/ppy/width/height``. This is the same shape, for the cases where
+    there is no camera plugged in: the simulator, and the offline tests.
+
+    ``xarm_test_scene.SyntheticIntrinsic`` is the same idea, but lives in a test
+    module -- and the whole reason this file exists is so production code does not
+    import test modules to do its projection.
+    """
+
+    def __init__(self, fx, fy, ppx, ppy, width, height, source='unspecified'):
+        self.fx, self.fy = float(fx), float(fy)
+        self.ppx, self.ppy = float(ppx), float(ppy)
+        self.width, self.height = int(width), int(height)
+        self.source = source
+
+    def __repr__(self):
+        return ("PinholeIntrinsic(fx={:.1f}, fy={:.1f}, ppx={:.1f}, ppy={:.1f}, "
+                "{}x{}, from {})".format(self.fx, self.fy, self.ppx, self.ppy,
+                                         self.width, self.height, self.source))
+
+
+# Nominal RealSense D435i COLOUR intrinsic at 1280x720, derived from the
+# datasheet field of view (69.4 x 42.5 deg): fx = (W/2)/tan(69.4/2 deg) = 924.5,
+# fy = (H/2)/tan(42.5/2 deg) = 926.0.
+#
+# ⚠️ This is a NOMINAL, not a measurement. Per-device values differ by a percent
+# or so, and the number decides whether the base-to-base crop fits the sensor at
+# all (see XARM_CROP_SIZE), so it is worth a minute with the real camera:
+#     python real_robot/calibration/xarm_hand_to_eye_calib.py --dump-intrinsics
+# writes the real one into the calib YAML, and load_intrinsic() then prefers it.
+XARM_CAM_INTRINSIC_D435I = dict(fx=924.5, fy=926.0, ppx=640.0, ppy=360.0,
+                                width=1280, height=720)
+
+
+def load_intrinsic(yaml_path=None, verbose=True):
+    """The camera intrinsic, measured if we have it -> ``PinholeIntrinsic``.
+
+    Reads an ``intrinsics:`` block out of a hand-eye calibration YAML. Hand-eye
+    only ever saved the EXTRINSIC, so files written before this existed have no
+    such block; those fall back to the D435i nominal above, loudly, because a
+    guessed focal length silently changes how many metres a pixel is worth.
+    """
+    if yaml_path is not None:
+        try:
+            with open(yaml_path, 'r') as f:
+                data = yaml.safe_load(f) or {}
+        except OSError:
+            data = {}
+        block = data.get('intrinsics')
+        if block:
+            return PinholeIntrinsic(source=yaml_path, **{
+                k: block[k] for k in ('fx', 'fy', 'ppx', 'ppy', 'width', 'height')})
+
+    if verbose:
+        print("[xarm-camera] !! no measured intrinsic{} -- using the D435i NOMINAL "
+              "({fx:.0f} px at {width}x{height}). Run xarm_hand_to_eye_calib.py "
+              "--dump-intrinsics to replace it.".format(
+                  " in {}".format(yaml_path) if yaml_path else "",
+                  **XARM_CAM_INTRINSIC_D435I))
+    return PinholeIntrinsic(source='D435i nominal', **XARM_CAM_INTRINSIC_D435I)
 
 
 def base_to_pixel(points, T_cam, intr):
@@ -99,8 +166,10 @@ def crop_window(intr, T_cam, separation=None, table_z=0.0,
     """The square crop centred between the two arm bases.
 
     ``T_cam`` is the camera-to-LEFT-base transform, so the centre is the projection
-    of ``(separation/2, 0, table_z)``. The side comes from the metric constant
-    ``XARM_CROP_SIZE`` and the camera's height above the table.
+    of ``(separation/2, 0, table_z)``. The side defaults to ``separation`` itself,
+    which puts the two arm BASE CENTRES exactly on the left and right edges of the
+    window -- the property the crop is for, expressed as geometry rather than as a
+    number that has to be kept in step with the cell. Pass ``size_m`` to override.
 
     The metric side assumes the camera looks straight DOWN: it converts metres to
     pixels at the table plane through a single scale. That is exact for the
@@ -110,7 +179,7 @@ def crop_window(intr, T_cam, separation=None, table_z=0.0,
     real projection.
     """
     separation = C.XARM_BASE_SEPARATION if separation is None else separation
-    size_m = C.XARM_CROP_SIZE if size_m is None else size_m
+    size_m = separation if size_m is None else size_m
     width, height = _image_size(intr, image_shape)
 
     centre = base_to_pixel([separation / 2.0, C.XARM_CAM_CENTRE_Y, table_z],
@@ -123,7 +192,7 @@ def crop_window(intr, T_cam, separation=None, table_z=0.0,
     if cam_height <= 0:
         raise ValueError("camera is at or below the table plane (height "
                          "{:.3f} m)".format(cam_height))
-    side = int(round(size_m * min(intr.fx, intr.fy) / cam_height))
+    side = int(round(size_m * min(abs(intr.fx), abs(intr.fy)) / cam_height))
 
     clamped = False
     if side > min(width, height):
@@ -138,9 +207,19 @@ def crop_window(intr, T_cam, separation=None, table_z=0.0,
     if clamped:
         # Not cosmetic: a clamped window is no longer centred on the arm midpoint,
         # so every pixel handed to a primitive is offset from where it was clicked.
+        #
+        # The camera HEIGHT is not the knob: it is fixed by hand-eye calibration.
+        # The knob is the field of view. A D435i colour stream at 1280x720 sees
+        # only ~0.65 m along the arm line from the calibrated 0.84 m, which is less
+        # than the 0.75 m base separation, so the base-to-base window cannot fit it;
+        # the depth stream is far wider (~0.93 m) and does.
         print("[xarm-camera] !! crop {} was clamped to fit {}x{} -- it is NO LONGER "
-              "centred between the arms. Lower XARM_CROP_SIZE, or raise the camera."
-              .format(window, width, height))
+              "centred between the arms. It needs {} px of a {} px frame. Use a "
+              "wider stream, or pass a smaller size_m and accept that the arm bases "
+              "sit outside the window.".format(
+                  window, width, height,
+                  int(round(size_m * min(abs(intr.fx), abs(intr.fy)) / cam_height)),
+                  min(width, height)))
     elif verbose:
         print("[xarm-camera] crop {} centred on the arm midpoint at pixel "
               "({:.1f}, {:.1f})".format(window, centre[0], centre[1]))

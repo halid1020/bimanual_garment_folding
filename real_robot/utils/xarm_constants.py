@@ -41,7 +41,7 @@ XARM_WORKSPACE_RADIUS = (0.12, 0.40)   # (min, max) m from the arm base Z-axis
 # 180 deg about z w.r.t. the left. Measured base-to-base centre distance is 0.66 m
 # (i.e. each base is inset ~0.07 m from its long edge), and the arm line sits
 # 0.52 m from the FRONT 80 cm edge -- so the table is asymmetric about the arms:
-# 0.52 m of table in front of them (-y) and 0.68 m behind (+y).
+# 0.52 m of table in front of them (+y) and 0.68 m behind (-y).
 # At the conservative 0.40 m usable radius the two workspaces now genuinely
 # overlap, by 2*0.40 - 0.66 = 0.14 m about the midline, which is what dual-arm
 # grasps on one garment need. The true usable radius is measured by
@@ -60,25 +60,28 @@ XARM_BASE_YAW = np.pi                  # rad, right base yaw relative to the lef
 # frame does not protect anything, it just refuses legitimate motion.
 XARM_GEOMETRY_VERIFIED = False
 XARM_TABLE_SIZE = (0.80, 1.20)         # m, (across the arms, along the arm line)
-# Where the arm line sits on the table, in the LEFT base frame. FRONT IS -y.
+# Where the arm line sits on the table, in the LEFT base frame. FRONT IS +y.
 # Centred ACROSS the 80 cm width (each base inset 0.07 m from its 120 cm edge),
 # but NOT along the length: the arm line is 0.52 m from the front 80 cm edge and
 # 0.68 m from the back one. The walls are therefore asymmetric in y, and the two
 # arms end up with mirrored (not identical) y limits.
 #
-# ⚠️ THE SIGN IS MEASURED, not chosen -- do not flip it to make a view come out
-# right. It was briefly set to +y on 2026-08-02 so that a top-down camera could
-# show the front edge at the top AND the left arm on the left, and the real cell
-# falsified that on 2026-08-04: the fling lays the garment toward base +y (the
-# direction is derived, see XARM_FLING_FORWARD_Y below), and it threw toward the
-# BACK. That agrees with the mounting -- standing at the front edge, the left
-# arm's base +x points across at the right arm, so its +y points away from you.
+# ⚠️ THE SIGN IS MEASURED, and it was misread once. Hand-eye calibration settles
+# it: column 1 of xarm-left-calib.yaml is camera +y (image DOWN) -> base -y, so
+# the top of the frame is base +y, and the mounted camera shows the front table
+# edge at the top with the left arm on the left. Front is +y.
 #
-# The camera coupling that motivated the flip is real but is now handled where it
-# belongs: a down-looking camera cannot show both "left arm on the left" and
-# "front at the top" (right-handed image frame: u -> +x forces v -> -y), so the
-# view is MIRRORED in software instead -- see XARM_VIEW_MIRROR. Nothing about the
-# table geometry bends to the camera any more.
+# It was set to -y on 2026-08-04 on the strength of a fling that threw "toward the
+# back", which looked decisive and was not: that run E-STOPPED mid-motion on the
+# J4 fault, and the FIRST y move in get_base_fling_poses is the wind-up to
+# y = -stroke. What the operator watched go backwards was the wind-up, not the
+# throw. A direction read off a motion that never finished is not a measurement.
+#
+# The consequence of the wrong sign was a plan to MIRROR the camera frame in
+# software, on the argument that a down-looking camera cannot show both "left arm
+# on the left" and "front at the top" (right-handed image frame: u -> +x forces
+# v -> -y). True, but only when front is at -y. With front at +y the physical
+# mounting gives both, and nothing flips the image anywhere.
 XARM_BASE_INSET = (XARM_TABLE_SIZE[0] - XARM_BASE_SEPARATION) / 2.0   # 0.07 m
 XARM_BASE_TO_FRONT = 0.52              # m, arm line to the front 80 cm edge
 
@@ -106,11 +109,11 @@ XARM_WALL_CEILING = 0.50           # m above the table (> the ~0.44 m reach, so
 
 # The table rectangle itself, in the LEFT base frame (metres):
 #   x: across the arms   -- left edge is XARM_BASE_INSET behind the left base
-#   y: along the arm line -- front (-y) is XARM_BASE_TO_FRONT away, back is the rest
-# With the measured cell that is x [-0.07, +0.73], y [-0.52, +0.68].
+#   y: along the arm line -- front (+y) is XARM_BASE_TO_FRONT away, back is the rest
+# With the measured cell that is x [-0.07, +0.73], y [-0.68, +0.52].
 XARM_TABLE_RECT = {
     'x': (-XARM_BASE_INSET, XARM_TABLE_SIZE[0] - XARM_BASE_INSET),
-    'y': (-XARM_BASE_TO_FRONT, XARM_TABLE_SIZE[1] - XARM_BASE_TO_FRONT),
+    'y': (XARM_BASE_TO_FRONT - XARM_TABLE_SIZE[1], XARM_BASE_TO_FRONT),
 }
 
 _m = XARM_WALL_MARGIN
@@ -217,54 +220,53 @@ def for_side(mapping, side, default=None):
 XARM_DOWN_ROTVEC = [np.pi, 0.0, 0.0]
 
 # --- Top-down camera ---------------------------------------------------------
-# PLACEHOLDER until hand-eye calibration. The camera looks straight down at the
-# midpoint of the two arm BASES -- (separation/2, 0) in the left base frame, i.e.
-# on the arm line. Note that is NOT the table's centre: the arm line sits 0.52 m
-# from the front edge and 0.68 m from the back, so the table midline is y = +0.08.
+# ⚠️ THESE TWO ARE FALLBACKS ONLY. The camera pose is MEASURED now, by hand-eye
+# calibration, and lives in real_robot/calibration/xarm-{left,right}-calib.yaml as
+# a 4x4 `camera_to_base` (= T_base_cam, the camera's pose in that arm's base
+# frame, from 39 ChArUco samples). Anything with a calibration file loads it --
+# load_camera_to_base() in scene_utils.py -- and never reads the numbers below.
+# They survive for the synthetic camera in xarm_test_scene.py and for callers on a
+# cell that has not been calibrated yet.
 #
-# ORIENTATION. The camera is mounted the natural way round: image u toward base +x
-# (LEFT arm on the left) and, forced by that, image v toward base -y, which puts
-# the FRONT edge at the BOTTOM of the raw frame. See XARM_VIEW_MIRROR below for
-# how the view then gets the front to the top. describe_orientation() in
-# xarm_camera.py reports what the mounting actually gave you.
+# The calibration says: camera at (+0.3685, -0.0037, +0.8386) m in the LEFT base
+# frame. So the real height is 0.839 m, not the 1.0 m below, and the optical axis
+# is 3.7 mm off the arm line rather than exactly on it. It looks straight down at
+# very nearly the midpoint of the two BASES -- 0.369 m from the left base against
+# a measured half-separation of 0.374, which is an independent consistency check
+# on the 0.749 m separation. Note that point is NOT the table's centre: the arm
+# line sits 0.52 m from the front edge and 0.68 m from the back, so the table
+# midline is y = -0.08.
 #
-# ⚠️ HEIGHT. At 1.0 m the placeholder intrinsic (f = 500 px, 1280x720) sees
-# 2.56 x 1.44 m, so the whole 0.80 x 1.20 m table fits. A real RealSense will NOT:
-# a D435i colour stream at 1280x720 has fx ~ 900 px, which at 1.0 m sees only
-# 1.42 x 0.80 m -- the table's 1.20 m length is clipped. It needs ~1.50 m of
-# height, or the wider depth stream. Check against your actual intrinsics before
-# the bracket goes up.
-XARM_CAM_HEIGHT = 1.0              # m above the table plane
-XARM_CAM_CENTRE_Y = 0.0            # m, optical axis on the arm line
+# ORIENTATION. The camera is mounted the natural way round, and hand-eye
+# calibration confirms it: image u toward base +x (LEFT arm on the left) and,
+# forced by that right-handed frame, image v toward base -y -- which, with the
+# front edge at +y, puts the FRONT at the TOP. Both halves of the intended layout
+# come out of the mounting, so nothing flips the image. describe_orientation() in
+# xarm_camera.py reports what the mounting actually gave you, and now agrees --
+# test_xarm_mujoco_camera.py::t_frame_layout asserts it against the real files.
+#
+# ⚠️ HEIGHT IS NOT A KNOB ANY MORE. It was one while it was a placeholder, and the
+# old note here said "raise the bracket to ~1.50 m so a real RealSense sees the
+# whole table". That advice is dead: the bracket is up, the calibration measured
+# where it is, and 0.839 m is now an input. When the frame is too small the answer
+# is a WIDER STREAM -- see the crop block below, which carries the arithmetic.
+XARM_CAM_HEIGHT = 1.0              # m above the table plane (fallback; measured 0.8386)
+XARM_CAM_CENTRE_Y = 0.0            # m, optical axis on the arm line (measured -0.0037)
 
-# --- View mirror -------------------------------------------------------------
-# ⚠️ THE VIEW IS A REFLECTION OF THE WORLD, ON PURPOSE. A garment in it reads
-# mirrored: what looks like a left sleeve is the right one.
+# NO VIEW MIRROR. A software flip of the frame was designed on 2026-08-04 and is
+# deliberately NOT here. It only existed to rescue the layout from the wrong sign
+# of y (see XARM_TABLE_RECT): with front at -y, a down-looking camera genuinely
+# cannot show "left arm on the left" and "front at the top" at once, and a
+# reflection is the only escape. With front at +y the mounting gives both, and a
+# mirrored view would have been a permanent cost -- every garment reading
+# mirrored, a left sleeve appearing where a right one is -- paid to hide a
+# one-character error. If anyone reaches for a flip again, check the sign of y
+# first.
 #
-# The requirement is that the LEFT arm appear on the left of the frame, the RIGHT
-# arm on the right, AND the FRONT table edge at the top. No camera can do all
-# three. The image frame of a down-looking camera is right-handed with the view
-# direction as camera +z, so once u runs toward base +x (arms on the correct
-# sides) v is forced to run toward base -y -- and the front edge is at -y, so it
-# lands at the BOTTOM. Rolling the camera 180 deg fixes the front and breaks the
-# arms. The two are one choice, and only a reflection escapes it.
-#
-# So the frame is flipped TOP-TO-BOTTOM (rows) before anything sees it. Vertical
-# rather than horizontal because it leaves the columns -- and therefore the arms,
-# which are already correct -- untouched, and because inverting up/down is much
-# less disorienting to click through than inverting left/right.
-#
-# It is carried by ViewMirror in xarm_camera.py, which flips the image and the
-# INTRINSIC together (fy -> -fy, ppy -> (H-1) - ppy). Everything downstream --
-# point_on_table_base, pixels2base_on_table, base_to_pixel, table_xy_to_pixel, the
-# workspace masks -- divides by or multiplies by fy, so it all follows with no
-# change to the maths.
-#
-# ⚠️ NEVER express this in T_cam. That matrix must stay a proper rotation
-# (det = +1); a reflection there would still project the table corners where you
-# expect and then quietly break every handedness-dependent quantity downstream.
-# And hand-eye calibration must be given the PHYSICAL intrinsic, not this one.
-XARM_VIEW_MIRROR = True
+# ⚠️ And if a flip is ever genuinely needed, it belongs in the image and the
+# INTRINSIC together, never in T_cam: that matrix must stay a proper rotation
+# (det = +1). A reflection there still projects the table corners where you expect
+# and then quietly breaks every handedness-dependent quantity downstream.
 
 # --- Perception crop ---------------------------------------------------------
 # Everything downstream sees a SQUARE window of the table, centred on the midpoint
@@ -272,26 +274,36 @@ XARM_VIEW_MIRROR = True
 # crops the frame and shifts its own intrinsic's principal point to match, so the
 # pixel <-> metre mapping keeps working with no change at any call site.
 #
-# ⚠️ THIS IS THE KNOB TO TUNE ON HARDWARE. It is a length on the TABLE, in metres,
-# not a pixel count, so it keeps meaning the same patch of table if the camera
-# height or the lens changes. The default is the base separation: literally the
-# square spanned between the two arms.
+# ⚠️ THIS IS NOT A TUNING KNOB ANY MORE. The window side IS the base separation,
+# so the two arm base centres land exactly on the left and right edges of the
+# crop. crop_window() defaults `size_m` to the separation it is given, so a cell
+# measured at 0.748 m gets a 0.748 m window with nothing to keep in step; this
+# constant is only the fallback for callers that have no measured cell.
 #
-# What that buys, against the measured reach (r_max = 0.41 m from each base):
-#   * at the midline (x = 0.33) the reachable band is only y = +/- 0.24 m,
-#   * near either base it opens out to about +/- 0.39 m,
-# so 0.66 m covers the useful area with a little margin and drops the metre of
-# floor either side of the 0.80 m table that a full frame includes.
+# It is a length on the TABLE, in metres, not a pixel count, so it keeps meaning
+# the same patch of table if the lens changes.
 #
-# What it costs in resolution -- the crop is upsampled to the arena's 512 px:
-#   * sim placeholder (f = 500 px at 1.0 m):        330 px
-#   * RealSense colour (fx ~ 900 px at 1.5 m):     ~396 px
-# Enlarging it past ~1.1 m starts pulling the arms' own bases into frame.
-XARM_CROP_SIZE = 0.66              # m, square side on the table plane
+# ⚠️ WHETHER IT FITS THE SENSOR IS A REAL CONSTRAINT, and at the calibrated camera
+# height it currently does not. Hand-eye puts the camera 0.839 m above the table,
+# and that height is a measurement, not a choice. A D435i COLOUR stream
+# (69.4 x 42.5 deg, fx ~ 925 px at 1280x720) then sees 1.18 m across but only
+# 0.65 m along the arm line -- less than the 0.748 m separation, so a base-to-base
+# square needs 825 px of a 720 px frame and crop_window() will CLAMP, silently
+# de-centring every pixel handed to a primitive.
+#
+# The fix is a wider field of view, not a higher camera: the DEPTH stream is
+# 87 x 58 deg (fx ~ 674, fy ~ 649 at 1280x720), covering 0.93 m along the arm line
+# and making the window 579 px -- still well above the 512 px the arena upsamples
+# to. Aligning colour->depth instead of depth->colour keeps that width, and the
+# hand-eye result survives it: the device reports the colour->depth extrinsic, so
+# T_left_depth = T_left_cam @ T_cam_depth, with no re-calibration.
+#
+# All of the above is against a NOMINAL intrinsic. Dump the real one first.
+XARM_CROP_SIZE = XARM_BASE_SEPARATION   # m, square side on the table plane
 
 # --- Pick-and-fling ----------------------------------------------------------
-# These are NOT free parameters. get_base_fling_poses() builds the swing in a frame
-# centred between the two bases, so with separation S each gripper sits at
+# These are NOT free parameters. xarm_base_fling_poses() builds the swing in a
+# frame centred between the two bases, so with separation S each gripper sits at
 #
 #     x = (S - width) / 2          from its own base,
 #
@@ -301,36 +313,77 @@ XARM_CROP_SIZE = 0.66              # m, square side on the table plane
 #     (1) base keepout:   x >= r_min
 #     (2) reach:          x^2 + stroke^2 + hang^2 <= r_max^2
 #
-# With S = 0.66 and the measured (r_min, r_max) = (0.12, 0.41):
-#     width <= S - 2*r_min = 0.42 m, and at width 0.36 -> x = 0.150 m,
-#     stroke <= sqrt(0.41^2 - 0.150^2 - 0.25^2) = 0.288 m.
-# The values below give a swing radius of 0.363 m, ~11% inside the reach limit.
+# ⚠️ THE TWO CONSTRAINTS PULL IN OPPOSITE DIRECTIONS AS THE CELL WIDENS, which is
+# not obvious. A wider cell moves each gripper FURTHER from its own base, so (1)
+# gets easier and (2) gets HARDER -- it is tempting to read a wider cell as simply
+# more comfortable for the fling, and it is not. Hand-eye then measured the
+# separation at 0.7489 m against the 0.66 m these numbers were derived for:
+#
+#     x = (0.7489 - 0.36)/2 = 0.1945 m,
+#     swing radius = sqrt(0.1945^2 + 0.25^2 + 0.25^2) = 0.4035 m,
+#     against the MEASURED r_max = 0.410 m (xarm-cell.yaml, per arm).
+#
+# So it still fits, by 1.6% -- down from the 11% the assumed 0.66 m gave. The
+# margin is thin enough that the next change to any of these has to be re-derived
+# rather than nudged. Two ways to buy it back if the fling needs room:
+#
+#     XARM_FLING_WIDTH >= 0.375 m   (a wider cell wants a wider stretch, which
+#                                    pulls each gripper back toward its own base)
+#     XARM_FLING_STROKE <= 0.244 m  (a shorter wind-up)
+#
+# ⚠️ Note it does NOT fit against XARM_WORKSPACE_RADIUS's conservative 0.400 m
+# below, which is a stale fallback: --reach measured 0.41. Checking a MEASURED
+# separation against an UNMEASURED reach mixes two different cells and reports a
+# violation that does not exist. test_xarm_walls_offline.py::t_fling_envelope
+# takes both from xarm-cell.yaml for exactly that reason.
 #
 # For scale: the UR cell runs width 0.65, hang 0.35, stroke 0.65 -- but a UR5e
 # reaches ~0.85 m. The Lite 6 fling is about half-size, which is geometry, not a
-# tuning choice. If XARM_BASE_SEPARATION or the measured reach changes, RE-DERIVE
-# these; test_xarm_walls_offline.py asserts the two constraints above.
-# Which way the swing lays the garment down, as a sign on base y in the LEFT base
-# frame. NOT a free parameter and NOT a preference: the swing needs table BEHIND
-# it to wind up into (XARM_FLING_STROKE) and table AHEAD of it to lay onto (the
-# drag), and it has to finish with the garment on the operator's side of the cell.
-# Front is -y, so forward is -y: wind up into the 0.68 m back, lay down into the
-# 0.52 m front. Both fit.
+# tuning choice. If the separation or the measured reach changes, RE-DERIVE these.
+# Which way the swing STROKES, as a sign on base y in the LEFT base frame. NOT a
+# free parameter and NOT a preference: get_base_fling_poses winds up backwards to
+# y = -XARM_FLING_STROKE, then strokes forward through touch-down to the drag, so
+# the swing needs table BEHIND it to wind up into and table AHEAD to lay onto, and
+# it must finish with the garment on the operator's side of the cell.
+#
+# Front is +y, so forward is +y: wind up into the 0.68 m back, stroke and lay down
+# into the 0.52 m front. Both fit.
 #
 # The direction is DERIVED, which is why this is a sign and not an angle:
 # points_to_action_frame takes forward = z_hat x (left_point - right_point), and
-# with our left arm at the smaller base x that comes out as +y. The skill honours
-# this constant by swapping the two points it hands over, which reverses the cross
-# product. Flip this if XARM_BASE_TO_FRONT's sign ever changes -- on 2026-08-04
-# the real cell threw the garment at the back because the two disagreed.
-XARM_FLING_FORWARD_Y = -1.0        # sign on base y; -1 = toward the front edge
+# with our left arm at the smaller base x that comes out as +y -- already correct,
+# so +1.0 is the identity and the skill's swap branch is the untaken one. It stays
+# explicit rather than implicit because the alternative is an unstated assumption,
+# and this file has already been bitten by one of those.
+#
+# ⚠️ This is +1.0 again after a wrong -1.0 on 2026-08-04, which came from reading
+# the throw direction off a fling that E-STOPPED during its wind-up. Keep this in
+# step with XARM_BASE_TO_FRONT's sign: the two must always say the same thing
+# about where the front is.
+XARM_FLING_FORWARD_Y = 1.0         # sign on base y; +1 = strokes toward the front
 
 XARM_FLING_WIDTH = 0.36            # m, gripper separation after the stretch
 XARM_FLING_HANG = 0.25             # m, hang height = swing height above the table
-XARM_FLING_STROKE = 0.25           # m, wind-up stroke of the swing
+XARM_FLING_STROKE = 0.25           # m, FORWARD reach of the swing (toward the front)
 XARM_FLING_ANGLE = np.pi / 4       # rad, wrist pitch at the swing extremes
 XARM_FLING_PLACE_Z = 0.10          # m, touch-down height before the drag
 XARM_FLING_MIN_WIDTH = 0.20        # m, never stretch narrower than this
+
+# ⚠️ THE SWING IS DELIBERATELY ASYMMETRIC, and it did not start that way. The first
+# version wound up to -STROKE and stroked to +STROKE, so half the motion was
+# backwards and the operator watching it read the whole thing as "it flings
+# backwards first". The backward half exists only to load the cloth, so it is now a
+# SMALL fraction of the forward half and is capped here rather than derived from
+# STROKE. Raising this back toward STROKE undoes the fix.
+XARM_FLING_WINDUP = 0.06           # m, backward wind-up (24% of the forward stroke)
+
+# Where the garment is LAID DOWN, as base y in the action frame -- which step 2 of
+# the skill centres on the base-to-base line, so this is "how far behind that line".
+# Slightly behind (negative) on purpose: the arms touch down at +STROKE, out in
+# front, then drag back THROUGH the line and finish just past it, so the cloth ends
+# up flat and stretched under the grippers rather than piled at the far end. It also
+# keeps the release away from the front table edge (0.52 m).
+XARM_FLING_PLACE_Y = -0.05         # m, final drag position, just behind the base line
 # Swing dynamics. The UR uses 3.0 m/s at 7.0 m/s^2; the Lite 6 is a 0.61 kg-payload
 # arm, so this is scaled down. Raise only after the swing looks stable on hardware.
 XARM_FLING_SPEED = 1.5             # m/s

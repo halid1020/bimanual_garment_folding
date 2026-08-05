@@ -5,6 +5,27 @@ cell:
   workspace_radius:
   - 0.12
   - 0.105
+  base_separation: 0.74891
+  base_yaw: 3.118585
+  T_left_right:
+  - - -0.99972848
+    - -0.02309646
+    - -0.00308385
+    - 0.74840812
+  - - 0.02300585
+    - -0.99937755
+    - 0.02674388
+    - -0.02594423
+  - - -0.00369962
+    - 0.02666567
+    - 0.99963756
+    - 0.00905523
+  - - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  base_measured_from: 'hand-eye: T_left_cam @ inv(T_right_cam)'
+  base_measured_at: '2026-08-04'
 arms:
   left:
     table_touch_z: 0.08599

@@ -1,25 +1,21 @@
-# PLACEHOLDER camera-to-base (RIGHT xArm Lite 6). REPLACE before real runs.
-# Produced by real_robot/calibration/hand_to_eye_calib.py (top-down RealSense).
-# The identity below is only a schema placeholder; running on hardware with it
-# WILL command wrong poses. (dry_run: True does not load this file.)
 camera_to_base:
   matrix:
-  - - 1.0
-    - 0.0
-    - 0.0
-    - 0.35
-  - - 0.0
-    - 1.0
-    - 0.0
-    - 0.0
-  - - 0.0
-    - 0.0
-    - 1.0
-    - 1.0
+  - - -0.9999877555430037
+    - -0.0035226598547547817
+    - 0.003475576443514816
+    - 0.37720103944058686
+  - - -0.0035416550288198652
+    - 0.9999787435991314
+    - -0.005474397643537715
+    - 0.008620480543612974
+  - - -0.00345621812446089
+    - -0.00548663990530035
+    - -0.9999789754483971
+    - 0.8310019017238759
   - - 0.0
     - 0.0
     - 0.0
     - 1.0
 meta:
   board_type: charuco
-  note: PLACEHOLDER - recalibrate on hardware
+  samples: 39

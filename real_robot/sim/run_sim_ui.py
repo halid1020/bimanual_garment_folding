@@ -15,10 +15,13 @@ Headless self-check (no window, scripted picks):
 
     python real_robot/sim/run_sim_ui.py --headless --primitive fling --auto
 
-which asserts PyBullet IK reached every commanded pose, no joint limit was
-exceeded, and the arms never touched. The offline checker in
+which asserts the arm reached every commanded pose CONTINUOUSLY, no joint limit
+was exceeded, and the arms never touched. The offline checker in
 ``test_xarm_primitives.py`` only tests a reach SPHERE; this runs a real kinematic
 chain, so it catches joint-limit and self-collision failures the sphere cannot.
+
+The cell is MuJoCo, built from hand-eye calibration: real arm bases, the real
+camera pose and intrinsic, and a real flex-cloth garment.
 """
 import argparse
 import os
@@ -31,9 +34,9 @@ from real_robot.primitives.xarm_pick_and_place import XArmPickAndPlaceSkill
 from real_robot.primitives.xarm_single_arm_pick_and_place import (
     XArmSingleArmPickAndPlaceSkill,
 )
-from real_robot.sim.xarm_cell_sim import XArmSimScene, XArmSimSingleScene
-from real_robot.test.xarm_test_scene import base_to_pixel, table_xy_to_pixel
+from real_robot.sim.xarm_mujoco_cell import XArmMujocoScene, XArmMujocoSingleScene
 from real_robot.utils import xarm_constants as C
+from real_robot.utils.xarm_camera import base_to_pixel
 from real_robot.utils.term import green, red, yellow
 from real_robot.utils.human_utils import (
     click_points_pick_and_fling, click_points_pick_and_place,
@@ -45,6 +48,19 @@ KEEPOUT_COLOUR = (60, 60, 220)
 REACH_COLOUR = (60, 190, 60)
 WALL_COLOUR = (0, 190, 220)
 PATH_L, PATH_R = (255, 160, 40), (40, 160, 255)
+
+
+def table_px(scene, x, y):
+    """A point on the table, in LEFT-base metres -> a pixel in the scene's frame.
+
+    ⚠️ NOT ``xarm_test_scene.table_xy_to_pixel``, which this used to call. That one
+    projects through ``synthetic_T_left_cam`` -- the fabricated camera 1.0 m above
+    the arm midpoint. The cell's camera is now the CALIBRATED one, 0.839 m up and
+    a little off the midline, so the two disagree by tens of pixels: every overlay
+    would be drawn beside the thing it is annotating, and ``--auto`` would aim its
+    scripted picks off the cloth.
+    """
+    return base_to_pixel([x, y, scene.table_z], scene.T_left_cam, scene.intr)
 
 
 def _circle_px(centre_xy, radius, T_cam, intr, table_z, n=180):
@@ -75,13 +91,13 @@ def annotate(rgb, scene):
     rect = C.XARM_TABLE_RECT
     corners = [(rect['x'][0], rect['y'][0]), (rect['x'][1], rect['y'][0]),
                (rect['x'][1], rect['y'][1]), (rect['x'][0], rect['y'][1])]
-    _polyline(img, [table_xy_to_pixel(x, y, S, tz, intr) for x, y in corners],
+    _polyline(img, [table_px(scene, x, y) for x, y in corners],
               TABLE_COLOUR, 2, closed=True)
 
     walls = C.XARM_WALLS
     wcorners = [(walls['x'][0], walls['y'][0]), (walls['x'][1], walls['y'][0]),
                 (walls['x'][1], walls['y'][1]), (walls['x'][0], walls['y'][1])]
-    _polyline(img, [table_xy_to_pixel(x, y, S, tz, intr) for x, y in wcorners],
+    _polyline(img, [table_px(scene, x, y) for x, y in wcorners],
               WALL_COLOUR, 1, closed=True)
 
     for side, base in (('left', (0.0, 0.0)), ('right', (S, 0.0))):
@@ -118,9 +134,7 @@ def path_to_pixels(scene, pts):
     frame; height is not shown, which is the honest trade.
     """
     pts = np.asarray(pts, dtype=float)
-    return np.asarray([table_xy_to_pixel(p[0], p[1], scene.separation,
-                                         scene.table_z, scene.intr)
-                       for p in pts[:, :3]])
+    return np.asarray([table_px(scene, p[0], p[1]) for p in pts[:, :3]])
 
 
 def draw_path(img, scene, traj):
@@ -145,11 +159,74 @@ def draw_path(img, scene, traj):
     return out
 
 
+def snap_to_mask(px, mask, radius=25):
+    """Nudge a scripted pixel onto the cloth, or leave it alone if it already is.
+
+    Only for ``--auto``. A human click is never adjusted -- clicking off the
+    garment is a legitimate thing to do and the primitive's abort path is worth
+    exercising -- but a self-check that silently skips because its scripted pick
+    missed the sheet by two pixels is a test that always passes.
+    """
+    u, v = int(round(px[0])), int(round(px[1]))
+    H, W = mask.shape[:2]
+    if 0 <= v < H and 0 <= u < W and mask[v, u] > 0:
+        return np.asarray(px, dtype=float)
+    ys, xs = np.nonzero(mask)
+    if len(xs) == 0:
+        return np.asarray(px, dtype=float)
+    d = (xs - u) ** 2 + (ys - v) ** 2
+    i = int(np.argmin(d))
+    if d[i] > radius ** 2:
+        return np.asarray(px, dtype=float)          # too far: let it fail honestly
+    return np.array([float(xs[i]), float(ys[i])])
+
+
 def valid_flag(mask, px):
     u, v = int(round(px[0])), int(round(px[1]))
     if not (0 <= v < mask.shape[0] and 0 <= u < mask.shape[1]):
         return 0.0
     return 1.0 if mask[v, u] > 0 else 0.0
+
+
+def _cloth_grasp_xy(scene, which):
+    """A point ON the cloth, as far toward ``which`` arm as the cloth reaches.
+
+    Taken from the cloth's ACTUAL vertex positions rather than from
+    ``garment_pose``: the sheet is simulated now, so by the time anything is
+    clicked it has fallen, spread and possibly been moved by an earlier
+    primitive, and a scripted pick derived from where it was SPAWNED is a pick
+    at bare table. That is not a hypothetical -- placing the --auto picks by
+    reach annulus put both of them off the sheet, both validity flags came back
+    0, and dual-pnp "passed" having moved nothing at all.
+
+    Reachability is still checked, because a point on the cloth that no arm can
+    reach is no better: the vertex is pulled toward that arm's base until it is
+    inside the measured annulus.
+    """
+    verts = scene.cloth_vertices()
+    if len(verts) == 0:                              # no cloth: fall back to spawn
+        gx, gy, _ = scene.garment_pose
+        return np.array([gx, gy])
+    base = np.array([0.0, 0.0] if which == 'left' else [scene.separation, 0.0])
+    order = np.argsort(np.linalg.norm(verts[:, :2] - base, axis=1))
+    r_min, r_max = C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, which)
+    centre = verts[:, :2].mean(axis=0)
+    chosen = None
+    for i in order:
+        r = float(np.linalg.norm(verts[i, :2] - base))
+        if r_min < r < r_max:
+            chosen = verts[i, :2]
+            break
+    if chosen is None:
+        # Nothing on the cloth is reachable; clamp the nearest vertex into the annulus.
+        d = verts[order[0], :2] - base
+        chosen = base + d / max(np.linalg.norm(d), 1e-9) * (r_min + r_max) / 2.0
+    # Step in from the edge. The nearest reachable vertex is by construction on the
+    # cloth's BOUNDARY, and the boundary is exactly where the segmentation mask
+    # stops -- so the projected pixel lands a pixel or two off the mask, the
+    # primitive reads a validity flag of 0, and the whole skill skips while
+    # reporting success. Both the fling and dual-pnp did precisely that.
+    return chosen + 0.2 * (centre - chosen)
 
 
 def auto_picks(scene):
@@ -158,40 +235,29 @@ def auto_picks(scene):
     ``scene.intr`` is the CROPPED intrinsic, so these come back as pixels in the
     frame the primitive will be given -- the same frame a click lands in.
     """
-    gx, gy, _ = scene.garment_pose
-    half = scene.garment_size[0] / 2 * 0.8
-    S, tz = scene.separation, scene.table_z
-    return (table_xy_to_pixel(gx - half, gy, S, tz, scene.intr),
-            table_xy_to_pixel(gx + half, gy, S, tz, scene.intr))
+    left_xy = _cloth_grasp_xy(scene, 'left')
+    right_xy = _cloth_grasp_xy(scene, 'right')
+    return (table_px(scene, left_xy[0], left_xy[1]),
+            table_px(scene, right_xy[0], right_xy[1]))
 
 
 def auto_pnp_points(scene, side=None):
-    """Scripted pick/place pairs inside each arm's measured reach.
+    """Scripted pick/place pairs: on the cloth, inside each arm's measured reach.
 
-    Placed by reach annulus rather than by eye, so --auto keeps working if the
-    separation or the measured radii change.
+    The place is 0.12 m toward the FRONT (+y) of the pick, so a successful run
+    moves cloth in the direction the whole cell is oriented around.
     """
-    S, tz, intr = scene.separation, scene.table_z, scene.intr
-    gx, gy, _ = scene.garment_pose
-
-    def midr(which):
-        lo, hi = C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, which)
-        return (lo + hi) / 2.0
-
     if side is not None:
-        r = midr(side)
-        base_x = 0.0 if side == 'left' else S
-        sign = 1.0 if side == 'left' else -1.0
-        pick = (base_x + sign * r * 0.8, gy)
-        place = (base_x + sign * r * 0.8, gy + 0.12)
-        return (table_xy_to_pixel(*pick, S, tz, intr),
-                table_xy_to_pixel(*place, S, tz, intr))
+        pick = _cloth_grasp_xy(scene, side)
+        return (table_px(scene, pick[0], pick[1]),
+                table_px(scene, pick[0], pick[1] + 0.12))
 
-    rl, rr = midr('left'), midr('right')
-    return (table_xy_to_pixel(rl * 0.8, gy, S, tz, intr),            # pick0 (left)
-            table_xy_to_pixel(rl * 0.8, gy + 0.12, S, tz, intr),     # place0
-            table_xy_to_pixel(S - rr * 0.8, gy, S, tz, intr),        # pick1 (right)
-            table_xy_to_pixel(S - rr * 0.8, gy + 0.12, S, tz, intr))  # place1
+    pick0 = _cloth_grasp_xy(scene, 'left')
+    pick1 = _cloth_grasp_xy(scene, 'right')
+    return (table_px(scene, pick0[0], pick0[1]),          # pick0 (left)
+            table_px(scene, pick0[0], pick0[1] + 0.12),   # place0
+            table_px(scene, pick1[0], pick1[1]),          # pick1 (right)
+            table_px(scene, pick1[0], pick1[1] + 0.12))   # place1
 
 
 def report(scene, traj, label):
@@ -208,6 +274,51 @@ def report(scene, traj, label):
     if q.get('ik_failures'):
         print(yellow("  {} waypoint(s) needed an IK restart or did not converge"
                      .format(q['ik_failures'])))
+
+    # RECONFIGURATIONS ARE FAILURES, not warnings. Every one is a waypoint the
+    # warm-started (continuity-preserving) solve could not reach, so the sim had
+    # to flip the elbow or the wrist to get there. The xArm controller plans a
+    # straight Cartesian line and cannot do that: on 2026-08-04 a path full of
+    # them drove J4 to -363 deg and e-stopped both arms with servo 4, code 23,
+    # while this check printed "no joint-limit violations" and passed.
+    recon = q.get('reconfigurations_left', []) + q.get('reconfigurations_right', [])
+    if recon:
+        print(red("  !! {} waypoint(s) needed the arm RECONFIGURED to be reached."
+                  .format(len(recon))))
+        print(red("     The real controller cannot do this inside a linear move."))
+        for xyz, err in recon[:5]:
+            print(red("       ({:+.3f}, {:+.3f}, {:+.3f})  warm-start residual {:.1f} mm"
+                      .format(xyz[0], xyz[1], xyz[2], err * 1000.0)))
+        if len(recon) > 5:
+            print(red("       ... and {} more".format(len(recon) - 5)))
+    else:
+        print(green("  no reconfigurations -- every pose reachable continuously"))
+
+    # Worst distance to a joint limit. A path can clear every limit and still be
+    # one seed away from error 23; this says by how much it cleared them.
+    for side in ('left', 'right'):
+        m = q.get('joint_margins_{}'.format(side))
+        if m is None:
+            continue
+        line = "  {:<5s} joint margin: {}".format(side, "  ".join(
+            "J{}{:+6.0f}".format(j + 1, np.degrees(m[j])) for j in range(len(m))))
+        print(green(line) if m.min() > 0 else red(line + "   <- OUTSIDE ITS LIMIT"))
+
+    # How far a joint moved in ONE interpolation step. A path can be smooth in
+    # Cartesian space and still lurch, because at a wrist singularity J4 and J6
+    # turn about the same axis and the solver is free to slide between them --
+    # measured at 54 deg in a single step before the null-space term went in.
+    # On hardware that is a judder under load, not a numerical curiosity.
+    JUMP_LIMIT = 5.0        # deg per interpolation step
+    for side in ('left', 'right'):
+        j = q.get('max_joint_jump_{}'.format(side))
+        if j is None or not np.any(j):
+            continue
+        line = "  {:<5s} worst step:   {}".format(side, "  ".join(
+            "J{}{:+6.1f}".format(k + 1, np.degrees(j[k])) for k in range(len(j))))
+        print(green(line) if np.degrees(j).max() < JUMP_LIMIT
+              else red(line + "   <- JUMPS"))
+
     if q['limit_violations']:
         print(red("  !! joint limit exceeded:"))
         for lbl, j, val in q['limit_violations'][:8]:
@@ -218,12 +329,39 @@ def report(scene, traj, label):
         print(red("  !! the arms are in contact ({} points)".format(len(contacts))))
     else:
         print(green("  no arm-arm contact"))
-    return worst < 0.005 and not q['limit_violations'] and not contacts
+    return (worst < 0.005 and not q['limit_violations'] and not contacts
+            and not recon)
+
+
+def report_cloth(scene, before):
+    """Where the garment ended up, in metres and in the frame.
+
+    The fling's whole job is to move cloth, and every other number in the report
+    is about the arms. Front is +y, so a fling that worked moves the centroid
+    toward +y -- and toward the TOP of the frame, which is the same statement in
+    the other coordinate system and is worth printing next to it, because the two
+    disagreeing is exactly the class of bug that put the garment at the back of
+    the table on 2026-08-04.
+    """
+    after = scene.cloth_centroid()
+    if not np.isfinite(after).all() or not np.isfinite(before).all():
+        return
+    d = after - before
+    v_before = table_px(scene, before[0], before[1])[1]
+    v_after = table_px(scene, after[0], after[1])[1]
+    print("  cloth centroid ({:+.3f}, {:+.3f}) -> ({:+.3f}, {:+.3f}) m   "
+          "moved {:+.3f} m in y ({}), {:+.0f} px in v ({})".format(
+              before[0], before[1], after[0], after[1], d[1],
+              "toward the front" if d[1] > 0 else "toward the back",
+              v_after - v_before,
+              "up the frame" if v_after < v_before else "down the frame"))
 
 
 def run_once(args):
     import cv2
-    scene = XArmSimScene(gui=not args.headless, gui_delay=args.delay, seed=args.seed)
+    scene = XArmMujocoScene(gui=not args.headless, gui_delay=args.delay,
+                            seed=args.seed)
+    cloth_before = scene.cloth_centroid()
     try:
         # Out of shot first, exactly as the arena's _process_info does before every
         # frame -- so what you click on is what the robots will actually photograph.
@@ -234,7 +372,7 @@ def run_once(args):
 
         if args.primitive == 'fling':
             if args.auto:
-                p0, p1 = auto_picks(scene)
+                p0, p1 = (snap_to_mask(px, mask) for px in auto_picks(scene))
             else:
                 p0, p1 = click_points_pick_and_fling("xArm sim -- pick & fling", bgr, mask)
             v0, v1 = valid_flag(mask, p0), valid_flag(mask, p1)
@@ -248,6 +386,7 @@ def run_once(args):
         elif args.primitive == 'dual-pnp':
             if args.auto:
                 pk0, pl0, pk1, pl1 = auto_pnp_points(scene)
+                pk0, pk1 = snap_to_mask(pk0, mask), snap_to_mask(pk1, mask)
             else:
                 pk0, pl0, pk1, pl1 = click_points_pick_and_place(
                     "xArm sim -- dual pick & place", bgr, mask)
@@ -261,9 +400,10 @@ def run_once(args):
             traj = scene.last_trajectory or {'ur5e': [], 'ur16e': []}
 
         else:
-            single = XArmSimSingleScene(scene, side=args.arm)
+            single = XArmMujocoSingleScene(scene, side=args.arm)
             if args.auto:
                 pick, place = auto_pnp_points(scene, side=args.arm)
+                pick = snap_to_mask(pick, mask)
             else:
                 pick, place = click_points_single_pick_and_place(
                     "xArm sim -- single pick & place", bgr, mask)
@@ -274,6 +414,7 @@ def run_once(args):
             traj = {'ur5e': [], 'ur16e': []}
 
         ok = report(scene, traj, args.primitive)
+        report_cloth(scene, cloth_before)
 
         if not args.headless and (scene.left.path or scene.right.path):
             scene.go_camera_pos()
@@ -295,7 +436,7 @@ def main():
                     default='fling')
     ap.add_argument('--arm', choices=['left', 'right'], default='left',
                     help="single-pnp only")
-    ap.add_argument('--headless', action='store_true', help="no PyBullet window")
+    ap.add_argument('--headless', action='store_true', help="no viewer window")
     ap.add_argument('--auto', action='store_true',
                     help="scripted picks instead of clicking (fling only)")
     ap.add_argument('--seed', type=int, default=0, help="garment placement")
@@ -310,6 +451,12 @@ def main():
         print(yellow("No DISPLAY; falling back to --headless."))
         args.headless = True
         args.auto = True
+
+    # Pick a GL backend BEFORE anything imports mujoco: the offscreen renderer
+    # binds its context at import time, and on a headless box the windowed
+    # default cannot create one.
+    if args.headless:
+        os.environ.setdefault('MUJOCO_GL', 'egl')
 
     rc = 0
     try:

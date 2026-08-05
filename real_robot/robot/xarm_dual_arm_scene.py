@@ -59,20 +59,33 @@ class XArmDualArmScene:
             self.T_right_cam = load_camera_to_base(self.right_calib_file)
             self.T_left_right = self.T_left_cam @ np.linalg.inv(self.T_right_cam)
 
+            # The two calibrations MEASURE the base separation, and the constant
+            # only assumes it -- 0.749 m against an assumed 0.660 m. This scene has
+            # always used the calibrated transform for right-arm targets while
+            # handing the constant to the crop, so the two halves disagreed about
+            # where the right arm is by 88 mm. Take the number from the transform
+            # that is already here: same source, no new import, cannot drift.
+            self.separation = float(np.linalg.norm(self.T_left_right[:3, 3]))
+            if abs(self.separation - XARM_BASE_SEPARATION) > 0.005:
+                print("[XArmDualArmScene] base separation is {:.3f} m by hand-eye, "
+                      "not the {:.3f} m in xarm_constants.py -- using the measured "
+                      "one. Update XARM_BASE_SEPARATION once a tape agrees."
+                      .format(self.separation, XARM_BASE_SEPARATION))
+
             # Everything downstream sees a square window of the table centred
             # between the two arms, with the principal point shifted to match, so
             # crop pixels invert straight back to the same metres. take_rgbd() is
             # the only place the crop is applied -- self.intr and every image this
             # scene hands out belong to the same frame by construction.
             self.crop = crop_window(self.intr, self.T_left_cam,
-                                    separation=XARM_BASE_SEPARATION,
+                                    separation=self.separation,
                                     table_z=XARM_TABLE_Z, verbose=True)
             self.intr = self.crop.intrinsic(self.intr)
 
             # How the mount actually came out. Reported, not enforced -- see
             # describe_orientation.
             print(describe_orientation(self.T_left_cam, self.intr,
-                                       XARM_BASE_SEPARATION, XARM_TABLE_Z)[1])
+                                       self.separation, XARM_TABLE_Z)[1])
 
             # World frame at the base midpoint, at table height, LEFT-aligned axes.
             self.T_left_world = np.eye(4)
@@ -93,6 +106,7 @@ class XArmDualArmScene:
             self.T_left_cam = np.eye(4); self.T_left_cam[0, 3] = 0.175
             self.T_right_cam = np.eye(4); self.T_right_cam[0, 3] = -0.175
             self.T_left_right = self.T_left_cam @ np.linalg.inv(self.T_right_cam)
+            self.separation = XARM_BASE_SEPARATION
             self.T_cam_world = np.eye(4); self.T_cam_world[2, 3] = 1.0
             self.T_left_world = np.eye(4)
             self.T_right_world = np.eye(4)

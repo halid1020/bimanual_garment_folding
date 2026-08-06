@@ -180,8 +180,8 @@ XARM_OUT_SCENE_JOINT = photo_pose_from_home(XARM_HOME_JOINT)
 # test_xarm_teach.py writes the measured ones into
 # real_robot/calibration/xarm-cell.yaml under arms.<side>.
 XARM_GRIPPER_OFFSET_BY_SIDE = {
-    'left': 0.086,
-    'right': 0.0852,
+    'left': 0.0845,
+    'right': 0.085,
 }
 XARM_TABLE_Z_BY_SIDE = {
     'left': 0,
@@ -397,7 +397,7 @@ XARM_FLING_WIDTH = 0.30            # m, gripper separation after the stretch
 XARM_FLING_HANG = 0.27             # m, hang height = swing height above the table
 XARM_FLING_STROKE = 0.19           # m, FORWARD reach of the swing (toward the front)
 XARM_FLING_ANGLE = np.pi / 4       # rad, wrist pitch at the swing extremes
-XARM_FLING_PLACE_Z = 0.10          # m, touch-down height before the drag
+XARM_FLING_PLACE_Z = 0.15          # m, touch-down height before the drag
 # The floor is only 40 mm below the cap now, so on a garment whose picks land
 # closer together than 0.20 m the stretch has almost nothing to do. That is the
 # intended behaviour for small garments; if it ever needs to clamp harder, lower
@@ -502,7 +502,7 @@ XARM_PROBE_STEP = 0.005            # m, descent increment for the contact probe
 # random per arm, so stepping the whole 0.08 m approach means ~16 of them per arm
 # and a descent that visibly drifts apart. Contact can only happen in the last
 # couple of centimetres anyway, so the metres above it are not worth probing.
-XARM_PROBE_BAND = 0.02             # m above the grasp height where stepping starts
+XARM_PROBE_BAND = 0.01             # m above the grasp height where stepping starts
 # ⚠️ TUNE ON HARDWARE, per arm. The L2 rise in joint effort that counts as "loaded".
 # Too low and the stretch stops immediately; too high and it never fires and the
 # geometric width cap does all the work (which is the safe failure mode).

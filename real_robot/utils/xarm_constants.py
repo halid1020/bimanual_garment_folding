@@ -386,7 +386,7 @@ XARM_CROP_SIZE = XARM_BASE_SEPARATION   # m, square side on the table plane
 # the throw direction off a fling that E-STOPPED during its wind-up. Keep this in
 # step with XARM_BASE_TO_FRONT's sign: the two must always say the same thing
 # about where the front is.
-XARM_FLING_FORWARD_Y = 1.2        # sign on base y; +1 = strokes toward the front
+XARM_FLING_FORWARD_Y = 1.5        # sign on base y; +1 = strokes toward the front
 
 # ⚠️ WIDTH, STROKE AND HANG ARE ONE SET. They are re-derived together and moving
 # any one alone breaks the reach inequality above. History: 0.36/0.25/0.25 ->
@@ -429,7 +429,7 @@ XARM_FLING_WINDUP = 0.1           # m, backward wind-up (32% of the forward stro
 # Must stay in PLACE_Y < LAND_Y <= STROKE. Above STROKE the hands would travel
 # further forward while descending; at or behind PLACE_Y the drag would run forwards.
 # t_fling_envelope pins both.
-XARM_FLING_LAND_Y = 0.05           # m, how far forward the hands touch down
+XARM_FLING_LAND_Y = -0.15           # m, how far forward the hands touch down
 
 # The furthest a swing waypoint may sit from its own base. The measured reach at
 # the HANG height is 0.425 (xarm-cell.yaml, arms.<side>.reach.hang) and this takes
@@ -453,7 +453,7 @@ XARM_FLING_MAX_RADIUS = 0.405      # m, per arm, at the hang height
 # line, then drag back THROUGH it and finish just past it, so the cloth ends up flat
 # and stretched under the grippers rather than piled at the far end. It also keeps
 # the release away from the front table edge (0.52 m).
-XARM_FLING_PLACE_Y = -0.1         # m, final drag position, just behind the base line
+XARM_FLING_PLACE_Y = -0.2         # m, final drag position, just behind the base line
 # Swing dynamics. The UR uses 3.0 m/s at 7.0 m/s^2.
 #
 # ⚠️ 1.0 IS THE CEILING, NOT A CHOICE. The xArm SDK hard-clamps commanded TCP
@@ -463,7 +463,7 @@ XARM_FLING_PLACE_Y = -0.1         # m, final drag position, just behind the base
 # already above the clamp. Writing 1.0 is not slowing it down; it is saying what
 # the arm actually does.
 XARM_FLING_SPEED = 0.99             # m/s -- the SDK clamp, do not raise
-XARM_FLING_ACC = 3.0               # m/s^2 (clamped at 50.0, so this is real)
+XARM_FLING_ACC = 1.0               # m/s^2 (clamped at 50.0, so this is real)
 
 # ⚠️ JERK IS THE KNOB THAT ACTUALLY MAKES THE SWING FASTER, and it is the one
 # nobody was turning. The SDK default is 1000 mm/s^3 = 1 m/s^3, and XArmLite6
@@ -507,8 +507,8 @@ XARM_PROBE_BAND = 0.02             # m above the grasp height where stepping sta
 # Too low and the stretch stops immediately; too high and it never fires and the
 # geometric width cap does all the work (which is the safe failure mode).
 XARM_EFFORT_THRESHOLD = {
-    'left': 2.0,
-    'right': 2.0,
+    'left': 1.2,
+    'right': 1.2,
 }
 # Until the thresholds above are MEASURED, the effort signal is reported and never
 # acted on -- the same doctrine as XARM_GEOMETRY_VERIFIED and the virtual walls: a
@@ -525,7 +525,7 @@ XARM_EFFORT_THRESHOLD = {
 # runs to the geometric width cap, which is exactly the fallback both stages are
 # documented to need when the signal is unreadable. Deltas are still printed, so
 # one run gives you the numbers to set the thresholds from. Then flip this.
-XARM_EFFORT_VERIFIED = False
+XARM_EFFORT_VERIFIED = True
 # Consecutive samples that must exceed the threshold before a stage stops. One
 # sample is a noise spike; this is a load.
 XARM_EFFORT_CONSECUTIVE = 3

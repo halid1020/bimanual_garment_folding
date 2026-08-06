@@ -180,8 +180,8 @@ XARM_OUT_SCENE_JOINT = photo_pose_from_home(XARM_HOME_JOINT)
 # test_xarm_teach.py writes the measured ones into
 # real_robot/calibration/xarm-cell.yaml under arms.<side>.
 XARM_GRIPPER_OFFSET_BY_SIDE = {
-    'left': 0.0845,
-    'right': 0.085,
+    'left': 0.086,
+    'right': 0.086,
 }
 XARM_TABLE_Z_BY_SIDE = {
     'left': 0,
@@ -386,7 +386,7 @@ XARM_CROP_SIZE = XARM_BASE_SEPARATION   # m, square side on the table plane
 # the throw direction off a fling that E-STOPPED during its wind-up. Keep this in
 # step with XARM_BASE_TO_FRONT's sign: the two must always say the same thing
 # about where the front is.
-XARM_FLING_FORWARD_Y = 1.1        # sign on base y; +1 = strokes toward the front
+XARM_FLING_FORWARD_Y = 1.2        # sign on base y; +1 = strokes toward the front
 
 # ⚠️ WIDTH, STROKE AND HANG ARE ONE SET. They are re-derived together and moving
 # any one alone breaks the reach inequality above. History: 0.36/0.25/0.25 ->
@@ -397,7 +397,7 @@ XARM_FLING_WIDTH = 0.30            # m, gripper separation after the stretch
 XARM_FLING_HANG = 0.27             # m, hang height = swing height above the table
 XARM_FLING_STROKE = 0.19           # m, FORWARD reach of the swing (toward the front)
 XARM_FLING_ANGLE = np.pi / 4       # rad, wrist pitch at the swing extremes
-XARM_FLING_PLACE_Z = 0.15          # m, touch-down height before the drag
+XARM_FLING_PLACE_Z = 0.10          # m, touch-down height before the drag
 # The floor is only 40 mm below the cap now, so on a garment whose picks land
 # closer together than 0.20 m the stretch has almost nothing to do. That is the
 # intended behaviour for small garments; if it ever needs to clamp harder, lower
@@ -429,7 +429,7 @@ XARM_FLING_WINDUP = 0.1           # m, backward wind-up (32% of the forward stro
 # Must stay in PLACE_Y < LAND_Y <= STROKE. Above STROKE the hands would travel
 # further forward while descending; at or behind PLACE_Y the drag would run forwards.
 # t_fling_envelope pins both.
-XARM_FLING_LAND_Y = 0.1           # m, how far forward the hands touch down
+XARM_FLING_LAND_Y = 0.05           # m, how far forward the hands touch down
 
 # The furthest a swing waypoint may sit from its own base. The measured reach at
 # the HANG height is 0.425 (xarm-cell.yaml, arms.<side>.reach.hang) and this takes
@@ -462,8 +462,8 @@ XARM_FLING_PLACE_Y = -0.1         # m, final drag position, just behind the base
 # 1.5 and then 3.0, and the swing did not get faster either time -- both were
 # already above the clamp. Writing 1.0 is not slowing it down; it is saying what
 # the arm actually does.
-XARM_FLING_SPEED = 1.0             # m/s -- the SDK clamp, do not raise
-XARM_FLING_ACC = 1.0               # m/s^2 (clamped at 50.0, so this is real)
+XARM_FLING_SPEED = 0.99             # m/s -- the SDK clamp, do not raise
+XARM_FLING_ACC = 3.0               # m/s^2 (clamped at 50.0, so this is real)
 
 # ⚠️ JERK IS THE KNOB THAT ACTUALLY MAKES THE SWING FASTER, and it is the one
 # nobody was turning. The SDK default is 1000 mm/s^3 = 1 m/s^3, and XArmLite6
@@ -502,7 +502,7 @@ XARM_PROBE_STEP = 0.005            # m, descent increment for the contact probe
 # random per arm, so stepping the whole 0.08 m approach means ~16 of them per arm
 # and a descent that visibly drifts apart. Contact can only happen in the last
 # couple of centimetres anyway, so the metres above it are not worth probing.
-XARM_PROBE_BAND = 0.01             # m above the grasp height where stepping starts
+XARM_PROBE_BAND = 0.02             # m above the grasp height where stepping starts
 # ⚠️ TUNE ON HARDWARE, per arm. The L2 rise in joint effort that counts as "loaded".
 # Too low and the stretch stops immediately; too high and it never fires and the
 # geometric width cap does all the work (which is the safe failure mode).

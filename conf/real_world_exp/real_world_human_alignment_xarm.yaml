@@ -1,0 +1,13 @@
+# @package _global_
+# Human-in-the-loop canonicalisation-alignment on the dual xArm Lite 6 cell.
+# Identical to real_world_human_alignment.yaml in every respect except the arena:
+# the same interactive agent and the same task, driving xArms instead of the URs.
+defaults:
+  - /agent/magpie@agent: real_world_human_align
+  - /real_world_arena@arena: xarm_dual_arm_multi_primitives
+  - /task@task: real_world_alignment
+
+
+project_name: 'bimanual_garment_folding'
+exp_name: real_world_human_alignment_xarm
+measure_time: True

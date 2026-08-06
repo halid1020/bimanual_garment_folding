@@ -1,14 +1,30 @@
 name: "real-world-xarm-dual-arm-multi-primitive"
-left_ip: "192.168.1.201"
-right_ip: "192.168.1.202"
+# Follow `source ./setup.sh xarm`, which exports these (and configures the wired
+# NIC) -- rather than disagreeing with it. The literals are the same fallback every
+# xArm test script uses; the 192.168.1.201/.202 that used to be here were never the
+# addresses of these two controllers.
+left_ip: ${oc.env:XARM_LEFT_IP,192.168.1.155}
+right_ip: ${oc.env:XARM_RIGHT_IP,192.168.1.170}
 dry_run: False
 action_horizon: 20
 debug: False
 measure_time: True
-snap_to_cloth_mask: True
-maskout_background: True
+# ⚠️ TEMPORARY -- masking is OFF because sam_vit_h_4b8939.pth is not on this
+# machine (it belongs in $REAL_ROBOT_PATH/models/). The arms behave normally, but
+# the cloth mask is an all-ones placeholder, so coverage, the IoUs and success()
+# are not real numbers. To undo: drop the checkpoint in and delete these three
+# lines -- True/True/True is the shipped configuration.
+use_cloth_mask: False
+# Both of these operate on the cloth mask, so with the placeholder they are silent
+# no-ops. Off rather than pretending.
+snap_to_cloth_mask: False
+maskout_background: False
 use_sim_workspace: False
 track_trajectory: True
 num_eval_trials: 200
-# Annular reach mask (m from each arm base): tune on hardware (Lite6 reach ~0.44 m).
-workspace_radius: [0.12, 0.40]
+# Annular reach mask, in metres from each arm's base. MEASURED -- these are the
+# per-arm numbers in real_robot/calibration/xarm-cell.yaml (test_xarm_teach.py
+# --reach wrote them); the 0.40 that used to be here is the conservative fallback
+# constant. Not cosmetic: the arena builds its reach masks from this, and those
+# masks decide which clicked pixels count as reachable.
+workspace_radius: [0.12, 0.41]

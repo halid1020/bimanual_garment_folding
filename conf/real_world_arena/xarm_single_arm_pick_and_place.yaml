@@ -1,5 +1,8 @@
 name: "real-world-xarm-single-arm-pick-and-place"
-robot_ip: "192.168.1.201"
+# Follows `source ./setup.sh xarm`; the literal is the same fallback every xArm
+# test script uses. The 192.168.1.201 that was here is not an address of either
+# controller. Point this at XARM_RIGHT_IP (and arm_side: right) to run the other arm.
+robot_ip: ${oc.env:XARM_LEFT_IP,192.168.1.155}
 dry_run: False
 action_horizon: 20
 debug: True
@@ -8,8 +11,10 @@ snap_to_cloth_mask: True
 maskout_background: True
 use_sim_workspace: False
 track_trajectory: False
-# Annular reach mask (m from the arm base): tune on hardware (Lite6 reach ~0.44 m).
-radius: [0.12, 0.40]
+# Annular reach mask, in metres from the arm's base. MEASURED -- the per-arm
+# numbers in real_robot/calibration/xarm-cell.yaml, written by
+# test_xarm_teach.py --reach. 0.40 was the conservative fallback constant.
+radius: [0.12, 0.41]
 num_eval_trials: 60
 
 # Rectangular ROI in raw camera pixels for the single-arm crop (top-down view).

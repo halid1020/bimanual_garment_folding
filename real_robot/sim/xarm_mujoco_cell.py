@@ -124,10 +124,10 @@ class XArmMujocoArm:
         # this only the fling could be drawn.
         self.path = []
 
-        # ⚠️ ONE SCRATCH MjData PER ARM, not one per cell. The primitives run the
-        # two arms in PARALLEL THREADS (xarm_pick_and_fling._probe_both), and
-        # MjData is not thread-safe -- two arms solving IK against one scratch
-        # segfaults the interpreter partway through the contact probe.
+        # ⚠️ ONE SCRATCH MjData PER ARM, not one per cell. Every scene both_*
+        # method runs the two arms in PARALLEL THREADS, and MjData is not
+        # thread-safe -- two arms solving IK against one scratch segfaults the
+        # interpreter partway through the contact probe.
         self.ik_data = mujoco.MjData(cell.model)
 
         m = cell.model
@@ -420,7 +420,7 @@ class XArmMujocoScene:
             gripper_offset=self.cell.gripper_offset('left'))
         self.data = mujoco.MjData(self.model)
         self.dt = float(self.model.opt.timestep)
-        # The primitives thread the two arms (both_movel, _probe_both), so every
+        # The primitives thread the two arms (every both_* method), so every
         # mutation of the shared MjData is serialised. Without this the second
         # thread's mj_step lands in the middle of the first one's and takes the
         # interpreter down -- reproducibly, a few hundred steps into the contact
@@ -519,8 +519,8 @@ class XArmMujocoScene:
                     self.data.qpos[getattr(self, side).qpos_adr] = q
             self._mj.mj_forward(self.model, self.data)
             # ⚠️ ONLY FROM THE MAIN THREAD. launch_passive drives GLFW/OpenGL, and
-            # the primitives run the two arms in worker threads
-            # (xarm_pick_and_fling._probe_both) -- calling sync() from one of those
+            # the primitives run the two arms in worker threads (every scene
+            # both_* method) -- calling sync() from one of those
             # is a GL call off the context's thread, which takes the process out
             # with a segfault at some arbitrary later point. Worker-thread motion
             # simply catches up at the next main-thread step.

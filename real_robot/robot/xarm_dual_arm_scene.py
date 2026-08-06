@@ -30,9 +30,15 @@ from real_robot.utils.xarm_constants import (
     XARM_BASE_SEPARATION,
 )
 
+# The addresses `source ./setup.sh xarm` exports, with the same literals every
+# xArm test script falls back to. The 192.168.1.201/.202 that used to sit in this
+# signature were never these controllers' addresses.
+DEFAULT_LEFT_IP = os.environ.get('XARM_LEFT_IP', '192.168.1.155')
+DEFAULT_RIGHT_IP = os.environ.get('XARM_RIGHT_IP', '192.168.1.170')
+
 
 class XArmDualArmScene:
-    def __init__(self, left_robot_ip="192.168.1.201", right_robot_ip="192.168.1.202",
+    def __init__(self, left_robot_ip=DEFAULT_LEFT_IP, right_robot_ip=DEFAULT_RIGHT_IP,
                  dry_run=False, workspace_radius=XARM_WORKSPACE_RADIUS):
         self.dry_run = dry_run
         self.gripper_type = 'lite6'

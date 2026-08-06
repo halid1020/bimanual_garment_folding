@@ -486,16 +486,61 @@ def stage_dual(drivers, delta, speed, acc, auto_yes):
         targets[name] = t
 
     def run(poses):
-        threads = [
-            ThreadWithResult(target=safe_movel,
-                             args=(drivers[name], poses[name], speed, acc, True, False))
-            for name in drivers
-        ]
-        for t in threads:
+        """Jog both arms, and TIME them.
+
+        The timing is the point as much as the motion. `both_movel` threads and
+        then joins, so the two arms are commanded at the same instant and are back
+        in step by the time it returns -- any visible desync during a dual-arm
+        primitive is therefore either the controllers taking different times for
+        the same Cartesian move, or a stage that bypasses `both_movel` (which is
+        what the per-arm contact probe used to do). This stage tells the two apart
+        in ten seconds, with no camera, calibration or garment involved.
+        """
+        stamps = {}          # name -> (dispatch, return) monotonic times
+        samples = {name: [] for name in drivers}    # name -> [(t, z)]
+
+        def timed(name):
+            t0 = time.monotonic()
+            r = safe_movel(drivers[name], poses[name], speed, acc, True, False)
+            stamps[name] = (t0, time.monotonic())
+            return r
+
+        threads = {name: ThreadWithResult(target=timed, args=(name,))
+                   for name in drivers}
+        t_start = time.monotonic()
+        for t in threads.values():
             t.start()
-        for t in threads:
+        # Sample z from THIS thread rather than from the movers: a get_tcp_pose
+        # inside a moving thread would compete with the SDK's own state polling.
+        while any(t.is_alive() for t in threads.values()):
+            for name, d in drivers.items():
+                try:
+                    samples[name].append((time.monotonic() - t_start,
+                                          d.get_tcp_pose()[2]))
+                except Exception:
+                    pass
+            time.sleep(0.05)
+        for t in threads.values():
             t.join()
-        return all(getattr(t, 'result', False) for t in threads)
+
+        if len(stamps) == 2:
+            (n_a, (a0, a1)), (n_b, (b0, b1)) = sorted(stamps.items())
+            print(f"    dispatch skew {abs(a0 - b0) * 1000:6.1f} ms   "
+                  f"finish skew {abs(a1 - b1) * 1000:6.1f} ms   "
+                  f"({n_a} {a1 - a0:.2f} s, {n_b} {b1 - b0:.2f} s)")
+            # Largest gap between the two arms' travelled distance at the same
+            # instant -- the number that matches what the eye sees.
+            worst, when = 0.0, 0.0
+            for t_a, z_a in samples[n_a]:
+                near = min(samples[n_b], key=lambda s: abs(s[0] - t_a), default=None)
+                if near is None or abs(near[0] - t_a) > 0.06:
+                    continue
+                gap = abs((z_a - starts[n_a][2]) - (near[1] - starts[n_b][2]))
+                if gap > worst:
+                    worst, when = gap, t_a
+            print(f"    worst travel gap {worst * 1000:5.1f} mm at t={when:.2f} s "
+                  f"(of a {abs(delta) * 1000:.0f} mm jog)")
+        return all(getattr(t, 'result', False) for t in threads.values())
 
     ok = run(targets)
     time.sleep(0.3)

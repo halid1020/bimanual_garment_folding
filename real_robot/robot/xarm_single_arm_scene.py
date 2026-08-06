@@ -15,9 +15,14 @@ from real_robot.robot.xarm_lite6 import XArmLite6
 from real_robot.robot.realsense_camera import RealsenseCamera
 from real_robot.utils.xarm_constants import XARM_TABLE_Z, XARM_WORKSPACE_RADIUS
 
+# What `source ./setup.sh xarm` exports, with the literal every xArm test script
+# falls back to. The 192.168.1.201 that used to sit in this signature was never an
+# address of either controller.
+DEFAULT_IP = os.environ.get('XARM_LEFT_IP', '192.168.1.155')
+
 
 class XArmSingleArmScene:
-    def __init__(self, robot_ip="192.168.1.201", dry_run=False, radius=XARM_WORKSPACE_RADIUS,
+    def __init__(self, robot_ip=DEFAULT_IP, dry_run=False, radius=XARM_WORKSPACE_RADIUS,
                  side='left'):
         self.dry_run = dry_run
         self.gripper_type = 'lite6'

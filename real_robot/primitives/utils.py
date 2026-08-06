@@ -191,7 +191,8 @@ def points_to_fling_path(
 
 # --- HELPER: the xArm fling swing ---------------------------------------------
 def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
-                          place_height=0.10, windup=0.06, place_y=-0.05):
+                          place_height=0.10, windup=0.06, place_y=-0.05,
+                          land_y=0.10):
     """The Lite 6 fling swing, in the action frame (+y = forward = the FRONT).
 
     ⚠️ SEPARATE FROM ``get_base_fling_poses`` ON PURPOSE. That one is in
@@ -203,17 +204,25 @@ def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
         0  centre, high                     -- where the stretch/shake left it
         1  back a little, high (y=-windup)  -- wind up, JUST enough for momentum
         2  FRONT, high         (y=+stroke)  -- STROKE: the fling itself
-        3  FRONT, low          (y=+stroke)  -- touch down at the far end
+        3  nearer, low         (y=+land_y)  -- touch down, PART WAY back
         4  behind the line, low (y=place_y) -- DRAG BACK to lay the cloth flat
 
                             z
         --------------------^-------------------------> y (front)
         |                                             |
         |            1      0                    2    |  lift_height
-        |                                             |
-        |         4                             <-3   |  place_height
+        |                                          /  |
+        |         4  <---------- 3  <-------------/   |  place_height
         -----------------------------------------------
-                    ^ place_y (just behind y=0, the base-to-base line)
+                    ^ place_y            ^ land_y
+
+    ⚠️ ``land_y`` IS NOT ``stroke``, and it used to be. Waypoint 3 simply reused
+    waypoint 2's y, so the hands came straight down at the far end of the throw
+    and then dragged the whole way back -- which on hardware reads as the arms
+    landing much too far forward. The throw and the landing are separate
+    questions: the cloth wants to be thrown as far as the arm can reach, and the
+    hands want to come down near enough that the drag is a lay-down rather than a
+    haul. Setting land_y = stroke restores the old shape.
 
     ⚠️ THE SHAPE IS ASYMMETRIC AND THAT IS THE POINT. ``windup`` is a small
     fraction of ``stroke``, not its mirror. The first version used ``-stroke``
@@ -225,7 +234,9 @@ def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
     The cloth is thrown FORWARD, lands ahead of the grippers, and is then pulled
     back THROUGH the base-to-base line to ``place_y`` just behind it, so it
     settles flat and stretched under the grippers rather than in a heap at the
-    far end -- and the release stays clear of the front table edge.
+    far end -- and the release stays clear of the front table edge. That pull is
+    the drag from ``land_y`` to ``place_y``, which is what does the laying out, so
+    landing nearer buys a tidier arm posture at the cost of a shorter drag.
 
     Returns (5, 6) poses -- xyz + rotvec -- in the action frame. The absolute
     wrist reference here is meaningless; ``retarget_path_to_grasp`` replaces it
@@ -237,7 +248,7 @@ def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
         [0, 0.0,        lift_height],    # 0: centre, high
         [0, -windup,    lift_height],    # 1: small wind-up, toward the back
         [0, +stroke,    lift_height],    # 2: stroke, toward the front
-        [0, +stroke,    place_height],   # 3: touch down at the far end
+        [0, +land_y,    place_height],   # 3: touch down, part way back
         [0, place_y,    place_height],   # 4: drag back past the line, laying it down
     ], dtype=float)
 
@@ -264,7 +275,7 @@ def xarm_base_fling_poses(stroke=0.25, swing_angle=np.pi / 4, lift_height=0.25,
 def xarm_points_to_fling_path(right_point, left_point, width=None,
                               swing_stroke=0.25, swing_angle=np.pi / 4,
                               lift_height=0.25, place_height=0.10,
-                              windup=0.06, place_y=-0.05):
+                              windup=0.06, place_y=-0.05, land_y=0.10):
     """``xarm_base_fling_poses`` placed in the world -> ``(right_path, left_path)``.
 
     Mirrors ``points_to_fling_path`` exactly, including that ``right_point`` /
@@ -278,7 +289,7 @@ def xarm_points_to_fling_path(right_point, left_point, width=None,
     tx_world_fling_base[2, 3] = 0
     base_fling = xarm_base_fling_poses(
         stroke=swing_stroke, swing_angle=swing_angle, lift_height=lift_height,
-        place_height=place_height, windup=windup, place_y=place_y)
+        place_height=place_height, windup=windup, place_y=place_y, land_y=land_y)
     if width is None:
         width = np.linalg.norm((right_point - left_point)[:2])
     right_path = base_fling.copy()

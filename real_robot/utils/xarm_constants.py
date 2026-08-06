@@ -181,7 +181,7 @@ XARM_OUT_SCENE_JOINT = photo_pose_from_home(XARM_HOME_JOINT)
 # real_robot/calibration/xarm-cell.yaml under arms.<side>.
 XARM_GRIPPER_OFFSET_BY_SIDE = {
     'left': 0.086,
-    'right': 0.0857,
+    'right': 0.0852,
 }
 XARM_TABLE_Z_BY_SIDE = {
     'left': 0,
@@ -307,44 +307,70 @@ XARM_CROP_SIZE = XARM_BASE_SEPARATION   # m, square side on the table plane
 #
 #     x = (S - width) / 2          from its own base,
 #
-# and the wind-up waypoint is at (x, -stroke, hang) in that arm's base frame. Two
-# constraints follow, and both are violated by a naive port of the UR numbers:
+# and the FURTHEST waypoint is the forward stroke, at (x, +stroke, hang) in that
+# arm's base frame. Two constraints follow, and both are violated by a naive port
+# of the UR numbers:
 #
 #     (1) base keepout:   x >= r_min
 #     (2) reach:          x^2 + stroke^2 + hang^2 <= r_max^2
 #
-# ⚠️ THE TWO CONSTRAINTS PULL IN OPPOSITE DIRECTIONS AS THE CELL WIDENS, which is
-# not obvious. A wider cell moves each gripper FURTHER from its own base, so (1)
-# gets easier and (2) gets HARDER -- it is tempting to read a wider cell as simply
-# more comfortable for the fling, and it is not. Hand-eye then measured the
-# separation at 0.7489 m against the 0.66 m these numbers were derived for:
+# (It used to be the WIND-UP at (x, -stroke, hang) that bound, back when the swing
+# was symmetric. The wind-up is XARM_FLING_WINDUP now and is nowhere near binding;
+# the inequality is unchanged because it only sees |y|.)
 #
-#     x = (0.7489 - 0.36)/2 = 0.1945 m,
-#     swing radius = sqrt(0.1945^2 + 0.25^2 + 0.25^2) = 0.4035 m,
-#     against the MEASURED r_max = 0.410 m (xarm-cell.yaml, per arm).
+# ⚠️ THE TWO CONSTRAINTS PULL IN OPPOSITE DIRECTIONS, and not in the direction
+# intuition suggests. NARROWING the stretch moves each gripper FURTHER from its own
+# base, so (1) gets easier and (2) gets HARDER. Widening does the reverse. It is
+# tempting to read "hold the garment less taut" as simply asking less of the arms;
+# it asks more. Hand-eye measured the separation at 0.7489 m, against the 0.66 m
+# the first version of these numbers was derived for:
 #
-# So it still fits, by 1.6% -- down from the 11% the assumed 0.66 m gave. The
-# margin is thin enough that the next change to any of these has to be re-derived
-# rather than nudged. Two ways to buy it back if the fling needs room:
+#     x = (0.7489 - 0.30)/2 = 0.2245 m,
+#     swing radius = sqrt(0.2245^2 + 0.19^2 + 0.27^2) = 0.3992 m,
+#     against the reach MEASURED AT THE HANG HEIGHT, 0.425 m less the same 2 cm
+#     edge margin --reach applies = 0.405 m (xarm-cell.yaml, arms.<side>.reach).
 #
-#     XARM_FLING_WIDTH >= 0.375 m   (a wider cell wants a wider stretch, which
-#                                    pulls each gripper back toward its own base)
-#     XARM_FLING_STROKE <= 0.244 m  (a shorter wind-up)
+# It fits by 5.8 mm, 1.4%.
 #
-# ⚠️ Note it does NOT fit against XARM_WORKSPACE_RADIUS's conservative 0.400 m
-# below, which is a stale fallback: --reach measured 0.41. Checking a MEASURED
-# separation against an UNMEASURED reach mixes two different cells and reports a
-# violation that does not exist. test_xarm_walls_offline.py::t_fling_envelope
-# takes both from xarm-cell.yaml for exactly that reason.
+# ⚠️ USE THE REACH AT THE WAYPOINT'S OWN HEIGHT. XARM_WORKSPACE_RADIUS's 0.41 is a
+# GRASP-height number (0.430 measured, 2 cm margin) and the binding waypoint is at
+# the hang height, where the same sweep measured 0.425 -> 0.405. Checking a
+# hang-height waypoint against the grasp-height radius overstates the margin by
+# 5 mm, which on a margin this thin is most of it. On these arms the reach is
+# 0.430 at grasp (z=0.086), 0.440 at lift (z=0.186), 0.425 at hang (z=0.250): it
+# PEAKS around 0.19 m and falls away above, so a higher hang has LESS reach, not
+# more. Raise XARM_FLING_HANG and the number here stops applying -- re-run
+# `test_xarm_teach.py --arm both --reach`, which probes at table_z + this constant
+# and so follows it automatically.
+#
+# How this set got here, since none of it is arbitrary:
+#   0.36 / 0.25 / 0.25  the original, derived for an assumed 0.66 m separation
+#   0.24 / 0.19 / 0.25  stretch cut to 2/3 (small garments were pulled taut and
+#                       slipped); on its own that put the stroke 25.6 mm out of
+#                       reach, so the stroke paid for it, dropping 0.25 -> 0.19
+#   0.30 / 0.19 / 0.27  hang raised so the garment hangs clear of the table. At
+#                       width 0.24 the maximum hang was 0.251 m -- already there --
+#                       so half the narrowing was given back to buy the 20 mm.
+#
+# The margin is thin enough that the next change to ANY of these has to be
+# re-derived rather than nudged. Three ways to buy room:
+#
+#     XARM_FLING_WIDTH  wider    (pulls each gripper back toward its own base --
+#                                 see the warning above; it is the counter-
+#                                 intuitive direction)
+#     XARM_FLING_STROKE shorter  (a shorter throw)
+#     XARM_FLING_HANG   lower    (costs table clearance, and buys reach twice over
+#                                 since the envelope grows as you come down)
 #
 # For scale: the UR cell runs width 0.65, hang 0.35, stroke 0.65 -- but a UR5e
 # reaches ~0.85 m. The Lite 6 fling is about half-size, which is geometry, not a
 # tuning choice. If the separation or the measured reach changes, RE-DERIVE these.
 # Which way the swing STROKES, as a sign on base y in the LEFT base frame. NOT a
-# free parameter and NOT a preference: get_base_fling_poses winds up backwards to
-# y = -XARM_FLING_STROKE, then strokes forward through touch-down to the drag, so
-# the swing needs table BEHIND it to wind up into and table AHEAD to lay onto, and
-# it must finish with the garment on the operator's side of the cell.
+# free parameter and NOT a preference: xarm_base_fling_poses winds up backwards to
+# y = -XARM_FLING_WINDUP, strokes forward to +XARM_FLING_STROKE, comes down at
+# +XARM_FLING_LAND_Y and drags back to XARM_FLING_PLACE_Y -- so the swing needs
+# table BEHIND it to wind up into and table AHEAD to throw onto, and it must finish
+# with the garment on the operator's side of the cell.
 #
 # Front is +y, so forward is +y: wind up into the 0.68 m back, stroke and lay down
 # into the 0.52 m front. Both fit.
@@ -360,13 +386,22 @@ XARM_CROP_SIZE = XARM_BASE_SEPARATION   # m, square side on the table plane
 # the throw direction off a fling that E-STOPPED during its wind-up. Keep this in
 # step with XARM_BASE_TO_FRONT's sign: the two must always say the same thing
 # about where the front is.
-XARM_FLING_FORWARD_Y = 1.0         # sign on base y; +1 = strokes toward the front
+XARM_FLING_FORWARD_Y = 1.1        # sign on base y; +1 = strokes toward the front
 
-XARM_FLING_WIDTH = 0.36            # m, gripper separation after the stretch
-XARM_FLING_HANG = 0.25             # m, hang height = swing height above the table
-XARM_FLING_STROKE = 0.25           # m, FORWARD reach of the swing (toward the front)
+# ⚠️ WIDTH, STROKE AND HANG ARE ONE SET. They are re-derived together and moving
+# any one alone breaks the reach inequality above. History: 0.36/0.25/0.25 ->
+# 0.24/0.19/0.25 (stretch cut to 2/3 for small garments) -> 0.30/0.19/0.27 (hang
+# raised so the garment hangs clear of the table, paid for by giving half the
+# narrowing back -- a wider stretch pulls each gripper toward its own base).
+XARM_FLING_WIDTH = 0.30            # m, gripper separation after the stretch
+XARM_FLING_HANG = 0.27             # m, hang height = swing height above the table
+XARM_FLING_STROKE = 0.19           # m, FORWARD reach of the swing (toward the front)
 XARM_FLING_ANGLE = np.pi / 4       # rad, wrist pitch at the swing extremes
 XARM_FLING_PLACE_Z = 0.10          # m, touch-down height before the drag
+# The floor is only 40 mm below the cap now, so on a garment whose picks land
+# closer together than 0.20 m the stretch has almost nothing to do. That is the
+# intended behaviour for small garments; if it ever needs to clamp harder, lower
+# this rather than the cap -- a narrower cap costs reach (see above), this does not.
 XARM_FLING_MIN_WIDTH = 0.20        # m, never stretch narrower than this
 
 # ⚠️ THE SWING IS DELIBERATELY ASYMMETRIC, and it did not start that way. The first
@@ -375,19 +410,75 @@ XARM_FLING_MIN_WIDTH = 0.20        # m, never stretch narrower than this
 # backwards first". The backward half exists only to load the cloth, so it is now a
 # SMALL fraction of the forward half and is capped here rather than derived from
 # STROKE. Raising this back toward STROKE undoes the fix.
-XARM_FLING_WINDUP = 0.06           # m, backward wind-up (24% of the forward stroke)
+XARM_FLING_WINDUP = 0.1           # m, backward wind-up (32% of the forward stroke)
+
+# How far forward the hands TOUCH DOWN, as base y in the action frame. Deliberately
+# its own number rather than +STROKE, which is what it used to be: waypoint 3 simply
+# reused the stroke's y, so the hands came straight down at the far end of the throw
+# and dragged the whole way back. Watching that on hardware, the arms land too far
+# forward -- the throw and the landing are different questions and tying them
+# together only ever answered one of them.
+#
+# Half the stroke, so the arms still throw out to +STROKE at the hang height and then
+# come down nearer. It costs nothing in reach (a smaller |y| shrinks the radius: the
+# touch-down goes from 0.333 m out to 0.291 m, against a 0.410 m limit that the
+# forward stroke still binds at 0.404 m). What it does cost is DRAG: the drag from
+# here back to PLACE_Y is what lays the garment out flat and stretched under the
+# grippers, and it is now 0.15 m rather than 0.24 m.
+#
+# Must stay in PLACE_Y < LAND_Y <= STROKE. Above STROKE the hands would travel
+# further forward while descending; at or behind PLACE_Y the drag would run forwards.
+# t_fling_envelope pins both.
+XARM_FLING_LAND_Y = 0.1           # m, how far forward the hands touch down
+
+# The furthest a swing waypoint may sit from its own base. The measured reach at
+# the HANG height is 0.425 (xarm-cell.yaml, arms.<side>.reach.hang) and this takes
+# the same 2 cm edge margin --reach applies, because IK near the boundary is
+# singular. Re-derive if XARM_FLING_HANG moves -- the reach falls off with height.
+#
+# ⚠️ THIS IS CHECKED AGAINST THE ACTUAL GRASP WIDTH, NOT XARM_FLING_WIDTH. The
+# swing is built at the distance between the two points the operator picked
+# (xarm_points_to_fling_path is called with width=None), which step 2 clamps to
+# [MIN_WIDTH, cap] but does not otherwise control. So a narrow pick pair puts each
+# gripper FURTHER from its own base than the derivation above assumes, and the
+# stroke waypoint can be out of reach even though the constants are self-
+# consistent. At hang 0.27 the arms must end up >= 0.280 m apart for the swing to
+# fit; at hang 0.25 it was 0.237 m. The skill now shrinks the swing to fit rather
+# than having the controller refuse it -- see _fit_swing.
+XARM_FLING_MAX_RADIUS = 0.405      # m, per arm, at the hang height
 
 # Where the garment is LAID DOWN, as base y in the action frame -- which step 2 of
 # the skill centres on the base-to-base line, so this is "how far behind that line".
-# Slightly behind (negative) on purpose: the arms touch down at +STROKE, out in
-# front, then drag back THROUGH the line and finish just past it, so the cloth ends
-# up flat and stretched under the grippers rather than piled at the far end. It also
-# keeps the release away from the front table edge (0.52 m).
-XARM_FLING_PLACE_Y = -0.05         # m, final drag position, just behind the base line
-# Swing dynamics. The UR uses 3.0 m/s at 7.0 m/s^2; the Lite 6 is a 0.61 kg-payload
-# arm, so this is scaled down. Raise only after the swing looks stable on hardware.
-XARM_FLING_SPEED = 1.5             # m/s
-XARM_FLING_ACC = 3.0               # m/s^2
+# Slightly behind (negative) on purpose: the arms touch down at +LAND_Y, ahead of the
+# line, then drag back THROUGH it and finish just past it, so the cloth ends up flat
+# and stretched under the grippers rather than piled at the far end. It also keeps
+# the release away from the front table edge (0.52 m).
+XARM_FLING_PLACE_Y = -0.1         # m, final drag position, just behind the base line
+# Swing dynamics. The UR uses 3.0 m/s at 7.0 m/s^2.
+#
+# ⚠️ 1.0 IS THE CEILING, NOT A CHOICE. The xArm SDK hard-clamps commanded TCP
+# speed at 1000 mm/s (xarm/x3/xarm.py: `min(max(float(speed), min), 1000)`), so
+# anything above 1.0 here is a number that never reaches the controller. This was
+# 1.5 and then 3.0, and the swing did not get faster either time -- both were
+# already above the clamp. Writing 1.0 is not slowing it down; it is saying what
+# the arm actually does.
+XARM_FLING_SPEED = 1.0             # m/s -- the SDK clamp, do not raise
+XARM_FLING_ACC = 1.0               # m/s^2 (clamped at 50.0, so this is real)
+
+# ⚠️ JERK IS THE KNOB THAT ACTUALLY MAKES THE SWING FASTER, and it is the one
+# nobody was turning. The SDK default is 1000 mm/s^3 = 1 m/s^3, and XArmLite6
+# never called set_tcp_jerk, so that default was in force for every fling. At
+# 1 m/s^3 the arm needs FIVE SECONDS to ramp up to the 5 m/s^2 above -- over a
+# 0.25 m swing it never gets close to either the acceleration or the speed cap,
+# which is why raising speed changed nothing you could see.
+#
+# These are set on every connect because the controller forgets them on reboot
+# (the SDK's own note on set_tcp_jerk). Tune UPWARD while watching: 10x the
+# default is a large change on a 0.61 kg arm, and the reach margin at the swing
+# extremes is under 6 mm. If the swing still feels slow, this is the number to
+# raise, not XARM_FLING_SPEED.
+XARM_TCP_JERK = 10000              # mm/s^3 (SDK default 1000)
+XARM_TCP_MAXACC = 20000            # mm/s^2 (SDK clamps commands at 50000)
 
 # Vertical shake after the stretch, to loosen folds (UR: 3 x 0.03 m, speed 2, acc 4).
 XARM_SHAKE_COUNT = 3
@@ -401,6 +492,17 @@ XARM_STRETCH_MAX_TIME = 5.0        # s, matches the UR's stretch_max_time
 XARM_STRETCH_SPEED = 0.10          # m/s, slow -- this is pulling on fabric
 XARM_RELEASE_DIST = 0.03           # m, inward move to slacken the cloth before opening
 XARM_PROBE_STEP = 0.005            # m, descent increment for the contact probe
+# Only the LAST band of the descent is stepped; the rest is one move.
+#
+# Not an optimisation -- it is what keeps the two arms in step. Every blocking
+# waypoint costs 0.1-0.5 s inside the SDK's wait_move (it polls at 20 Hz and wants
+# two consecutive idle samples, or TEN -- half a second -- if the arm had not yet
+# reported "moving" when the wait began, which is the usual case for a move this
+# short). That overhead is larger than the 5 mm step itself and is independently
+# random per arm, so stepping the whole 0.08 m approach means ~16 of them per arm
+# and a descent that visibly drifts apart. Contact can only happen in the last
+# couple of centimetres anyway, so the metres above it are not worth probing.
+XARM_PROBE_BAND = 0.02             # m above the grasp height where stepping starts
 # ⚠️ TUNE ON HARDWARE, per arm. The L2 rise in joint effort that counts as "loaded".
 # Too low and the stretch stops immediately; too high and it never fires and the
 # geometric width cap does all the work (which is the safe failure mode).

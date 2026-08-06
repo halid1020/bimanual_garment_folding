@@ -19,6 +19,7 @@ Usage
     python real_robot/test/test_xarm_walls_offline.py
 """
 import contextlib
+import os
 import sys
 import types
 
@@ -50,6 +51,11 @@ class FakeXArmAPI:
         self.warn_code = 0
         self.state = 0
         self.mode = 0
+        # Scripted joint EFFORT, consumed one value per get_joint_states call, the
+        # last value repeating for ever. None (the default) stands for firmware
+        # that cannot report effort at all, which is what every other check here
+        # wants -- get_joint_effort then returns None and nothing is gated on it.
+        self.effort_values = None
         self.version = 'v2.3.0'
         self.joints = [0.0] * 6
         # Where the fake arm currently is, and where FK says a joint target lands
@@ -65,6 +71,10 @@ class FakeXArmAPI:
     def set_state(self, state): self.state = state; return 0
     def set_collision_sensitivity(self, v): return 0
     def set_self_collision_detection(self, v): return 0
+    # Motion smoothness. The real controller FORGETS these on reboot, so the driver
+    # has to set them on every connect -- recorded here so a test can prove it does.
+    def set_tcp_jerk(self, jerk): self.tcp_jerk = jerk; return 0
+    def set_tcp_maxacc(self, acc): self.tcp_maxacc = acc; return 0
     # Tool DO lines: DO0 = open solenoid, DO1 = close solenoid.
     def open_lite6_gripper(self): self.tgpio = [1, 0]; self.gripper_calls.append('open'); return 0
     def close_lite6_gripper(self): self.tgpio = [0, 1]; self.gripper_calls.append('close'); return 0
@@ -101,6 +111,16 @@ class FakeXArmAPI:
 
     def get_servo_angle(self, is_radian=True):
         return 0, list(self.joints)
+
+    def get_joint_states(self, is_radian=True, num=3):
+        # (position, velocity, effort), which is the shape XArmLite6.get_joint_effort
+        # reads states[2] out of. A non-zero code is how the real SDK says "this
+        # firmware does not have it".
+        if self.effort_values is None:
+            return -1, None
+        v = (self.effort_values[0] if len(self.effort_values) == 1
+             else self.effort_values.pop(0))
+        return 0, [list(self.joints), [0.0] * 6, [float(v)] + [0.0] * 5]
 
     def get_forward_kinematics(self, angles, input_is_radian=None, return_is_radian=None):
         return 0, list(self.fk_result_mm)
@@ -349,24 +369,49 @@ def _measured_cell():
     UNmeasured reach mixes the two cells and reports a violation that does not
     exist -- which is exactly what this check did on its first run.
 
-    Returns (separation, {side: (r_min, r_max)}, measured?).
+    ⚠️ AND THE REACH DEPENDS ON HEIGHT, which this check originally ignored.
+    workspace_radius is derived from the GRASP-height sweep with a 2 cm edge
+    margin (0.430 -> 0.410). The fling's binding waypoint is at the HANG height,
+    where the same sweep measured 0.425, so the comparable limit is 0.405 -- five
+    millimetres TIGHTER, not looser. Checking a hang-height waypoint against a
+    grasp-height radius overstates the margin, which is exactly the mistake this
+    file already warns about in the other direction.
+
+    Reach on these arms: 0.430 at grasp (z=0.086), 0.440 at lift (z=0.186), 0.425
+    at hang (z=0.250). It peaks around 0.19 m and falls away above that, so a
+    HIGHER hang has less reach, not more -- and the numbers here were measured at
+    whatever XARM_FLING_HANG was at the time. Change the hang height and re-run
+    `test_xarm_teach.py --arm both --reach`; sweep_reach probes at
+    `table_z + C.XARM_FLING_HANG`, so it follows the constant automatically.
+
+    Returns (separation, {side: (r_min, r_max)}, {side: hang_r_max}, measured?).
     """
     import os
-    from real_robot.test.xarm_test_scene import load_cell
+    import yaml
     from real_robot.utils.scene_utils import cell_geometry_from_calibration
     d = "{}/real_robot/calibration".format(os.environ.get('MP_FOLD_PATH', '.'))
     radius = {s: C.for_side(C.XARM_WORKSPACE_RADIUS_BY_SIDE, s)
               for s in ('left', 'right')}
+    hang = {s: radius[s][1] for s in ('left', 'right')}
     try:
         _, separation, _ = cell_geometry_from_calibration(
             os.path.join(d, 'xarm-left-calib.yaml'),
             os.path.join(d, 'xarm-right-calib.yaml'))
     except Exception:
-        return float(C.XARM_BASE_SEPARATION), radius, False
-    cal = load_cell(os.path.join(d, 'xarm-cell.yaml'))
-    if cal.calibrated:
-        radius = {s: tuple(cal.workspace_radius(s)) for s in ('left', 'right')}
-    return float(separation), radius, True
+        return float(C.XARM_BASE_SEPARATION), radius, hang, False
+
+    try:
+        cell = yaml.safe_load(open(os.path.join(d, 'xarm-cell.yaml')))
+        for s in ('left', 'right'):
+            arm = cell['arms'][s]
+            radius[s] = tuple(arm['workspace_radius'])
+            r_hang = (arm.get('reach') or {}).get('hang')
+            # The same 2 cm margin sweep_reach takes off the measured grasp edge,
+            # because IK solutions near the boundary are singular at any height.
+            hang[s] = round(r_hang[1] - 0.02, 3) if r_hang else radius[s][1]
+    except Exception:
+        return float(separation), radius, hang, False
+    return float(separation), radius, hang, True
 
 
 @check("the fling constants satisfy their own geometric derivation")
@@ -380,26 +425,30 @@ def t_fling_envelope():
     edit to the separation or the measured reach fails on a laptop, not on the arm.
 
     (The furthest waypoint used to be the WIND-UP, at (x, -stroke, hang), back when
-    the swing was symmetric. The wind-up is XARM_FLING_WINDUP now -- a quarter of
-    the stroke -- so it is nowhere near binding, but the radius is the same because
-    the constraint only sees |y|.)
+    the swing was symmetric. The wind-up is XARM_FLING_WINDUP now -- a third of the
+    stroke -- so it is nowhere near binding, but the radius is the same because the
+    constraint only sees |y|.)
 
     ⚠️ S and the reach are both the MEASURED ones, not the constants. The two
-    constraints move in OPPOSITE directions as the cell widens -- the base keepout
-    gets easier (each gripper is further from its own base) and the reach gets
-    HARDER (for the same reason). It was tempting to assume a wider cell is simply
-    more comfortable for the fling; it is not. At the measured 0.7489 m the swing
-    radius is 0.4035 m, which clears the measured 0.410 m reach by 1.6% -- down
-    from the 11% the assumed 0.66 m gave, and it would FAIL against the constants'
-    conservative 0.400 m. That is why both numbers have to come from the same cell.
+    constraints move in OPPOSITE directions, and not the way intuition suggests:
+    NARROWING the stretch pushes each gripper further from its own base, so the
+    keepout gets easier and the reach gets HARDER. "Hold the garment less taut"
+    asks more of the arms, not less. At the measured 0.7489 m with the 0.24 m
+    stretch the swing radius is 0.4042 m, clearing the measured 0.410 m reach by
+    1.4% -- and only because the stroke came down to 0.19 m in the same edit; at
+    the old 0.25 m stroke that same stretch is 0.4356 m, 25.6 mm out of reach. It
+    would also FAIL against the constants' conservative 0.400 m, which is why both
+    numbers have to come from the same cell.
     """
-    S, radius, measured = _measured_cell()
+    S, radius, hang_reach, measured = _measured_cell()
     width, hang = C.XARM_FLING_WIDTH, C.XARM_FLING_HANG
     stroke = C.XARM_FLING_STROKE
     x = (S - width) / 2.0
 
     for side in ('left', 'right'):
-        r_min, r_max = radius[side]
+        r_min, r_grasp = radius[side]
+        # Hang-height waypoints get the hang-height limit. See _measured_cell.
+        r_max = hang_reach[side]
         assert x >= r_min, (
             "{}: stretch puts the gripper {:.3f} m from its base, inside the {:.3f} m "
             "keepout. Reduce XARM_FLING_WIDTH to <= {:.3f} m.".format(
@@ -415,14 +464,18 @@ def t_fling_envelope():
                 np.sqrt(max(r_max ** 2 - x ** 2 - hang ** 2, 0.0))))
         # Every other waypoint of the swing, checked rather than assumed. The
         # wind-up and the lay-down are both small in y now, and the last two are
-        # lower, so none should bind -- but "should not" is not a check.
-        for label, y, z in (('wind-up', -C.XARM_FLING_WINDUP, hang),
-                            ('touch-down', stroke, C.XARM_FLING_PLACE_Z),
-                            ('lay-down', C.XARM_FLING_PLACE_Y, C.XARM_FLING_PLACE_Z)):
+        # lower, so none should bind -- but "should not" is not a check. Each is
+        # measured against the reach at ITS OWN height: the two low waypoints sit
+        # near the grasp height, where the arm reaches further than at the hang.
+        for label, y, z, limit in (
+                ('wind-up', -C.XARM_FLING_WINDUP, hang, r_max),
+                ('touch-down', C.XARM_FLING_LAND_Y, C.XARM_FLING_PLACE_Z, r_grasp),
+                ('lay-down', C.XARM_FLING_PLACE_Y, C.XARM_FLING_PLACE_Z, r_grasp)):
             r = float(np.sqrt(x ** 2 + y ** 2 + z ** 2))
-            assert r <= r_max, (
+            assert r <= limit, (
                 "{}: the {} waypoint at ({:+.3f}, {:+.3f}) is {:.3f} m out, beyond "
-                "the {:.3f} m reach".format(side, label, y, z, r, r_max))
+                "the {:.3f} m reach at that height".format(
+                    side, label, y, z, r, limit))
 
     # The asymmetry is the operator's instruction, not a tuning accident: the swing
     # must read as "forward" to someone watching it. Pin the ratio so a later edit
@@ -437,6 +490,19 @@ def t_fling_envelope():
     assert abs(C.XARM_FLING_PLACE_Y) < 0.5 * stroke, (
         "the lay-down at y={:+.3f} is a long way behind the line, which drags the "
         "garment back off the flung-out area".format(C.XARM_FLING_PLACE_Y))
+
+    # The four y waypoints have to stay in order, or the swing quietly inverts.
+    # Landing BEYOND the stroke means the hands travel further forward while
+    # descending -- which is what the shape did before land_y existed, waypoint 3
+    # having simply reused the stroke's y. Landing at or behind place_y makes the
+    # drag run forwards instead of back, so nothing gets laid out.
+    assert C.XARM_FLING_LAND_Y <= stroke, (
+        "the hands land at y={:+.3f}, beyond the {:+.3f} m stroke, so they move "
+        "FURTHER forward as they come down".format(C.XARM_FLING_LAND_Y, stroke))
+    assert C.XARM_FLING_PLACE_Y < C.XARM_FLING_LAND_Y, (
+        "the lay-down at y={:+.3f} is not behind the touch-down at y={:+.3f}, so "
+        "the drag runs forwards and lays nothing out".format(
+            C.XARM_FLING_PLACE_Y, C.XARM_FLING_LAND_Y))
 
     assert C.XARM_FLING_MIN_WIDTH <= width, "min stretch width exceeds the cap"
     assert C.XARM_FLING_PLACE_Z < hang, "touch-down must be below the hang height"
@@ -782,6 +848,482 @@ def t_overlay_drops_to_table():
     assert np.linalg.norm(persp - want) > 20.0, (
         "perspective and table projections differ by only {:.1f} px here, so this "
         "check is not testing what it claims".format(np.linalg.norm(persp - want)))
+
+
+# ----------------------------------------------------------------------
+# The contact probe: does it act on effort it is not allowed to act on, and do
+# the two arms descend TOGETHER?
+# ----------------------------------------------------------------------
+class _ProbeScene:
+    """The minimum ``_probe_both`` touches: two drivers and a recording both_movel.
+
+    Recording is the assertion vehicle for ``t_probe_is_synchronised``: if the
+    probe ever went back to driving one arm at a time, the pairs would not be here
+    to inspect.
+    """
+
+    def __init__(self, left, right):
+        self.left, self.right = left, right
+        self.commands = []           # [(z_left, z_right)] -- one entry per step
+
+    def both_movel(self, left_pose, right_pose, speed, acc, blocking=True,
+                   record=False):
+        self.commands.append((float(left_pose[2]), float(right_pose[2])))
+        a = self.left.movel(left_pose, speed=speed, acceleration=acc,
+                            blocking=blocking)
+        b = self.right.movel(right_pose, speed=speed, acceleration=acc,
+                             blocking=blocking)
+        return a and b
+
+
+@contextlib.contextmanager
+def _effort_verified(value):
+    """Flip the gate. The primitive imports the constant BY VALUE, so patching
+    xarm_constants would change nothing -- the module's own global is the one that
+    is read."""
+    from real_robot.primitives import xarm_pick_and_fling as F
+    was = F.XARM_EFFORT_VERIFIED
+    F.XARM_EFFORT_VERIFIED = value
+    try:
+        yield F
+    finally:
+        F.XARM_EFFORT_VERIFIED = was
+
+
+# Floors deliberately a fraction of a millimetre apart, as the measured per-side
+# gripper offsets are (0.0860 vs 0.0857), so "the arms track each other" is being
+# checked rather than "the two numbers are literally identical".
+_FLOOR_L, _FLOOR_R = 0.0860, 0.0857
+
+
+def _probe(effort_l, effort_r, verified, baseline=0.0):
+    """Run one descent and hand back (skill, scene, reached poses)."""
+    from real_robot.primitives.xarm_pick_and_fling import XArmPickAndFlingSkill
+    left = _driver('left', walls=False)
+    right = _driver('right', walls=False)
+    # effort_baseline() consumes 10 samples before the descent starts.
+    left.arm.effort_values = [baseline] * 10 + list(effort_l)
+    right.arm.effort_values = [baseline] * 10 + list(effort_r)
+
+    scene = _ProbeScene(left, right)
+    skill = XArmPickAndFlingSkill(scene, {'speed': 0.10, 'acc': 0.30})
+    grasp_l = np.array([0.30, 0.00, _FLOOR_L, np.pi, 0.0, 0.0])
+    grasp_r = np.array([0.30, 0.00, _FLOOR_R, np.pi, 0.0, 0.0])
+    app_l, app_r = grasp_l.copy(), grasp_r.copy()
+    app_l[2] += C.XARM_APPROACH_DIST
+    app_r[2] += C.XARM_APPROACH_DIST
+
+    with _effort_verified(verified):
+        reached = skill._probe_both(app_l, app_r, grasp_l, grasp_r)
+    return skill, scene, reached
+
+
+@check("contact probe ignores effort while XARM_EFFORT_VERIFIED is False")
+def t_probe_ignores_unverified_effort():
+    # The 2026-08-04 fault, reproduced: the right arm's noise floor sits above the
+    # placeholder threshold and the left arm's does not. Acting on that stops the
+    # right arm high, the left arm grasps normally, and both report success.
+    spike = [C.XARM_EFFORT_THRESHOLD['right'] + 5.0] * 20
+    _, scene, (reached_l, reached_r) = _probe(
+        effort_l=[0.0] * 20, effort_r=spike, verified=False)
+
+    assert abs(reached_l[2] - _FLOOR_L) < 1e-9 and abs(reached_r[2] - _FLOOR_R) < 1e-9, (
+        "an unverified effort reading stopped the descent early: left reached "
+        "{:.4f} (floor {:.4f}), right {:.4f} (floor {:.4f})".format(
+            reached_l[2], _FLOOR_L, reached_r[2], _FLOOR_R))
+    # And it should have taken ONE synchronised move to get there: with nothing
+    # able to interrupt, stepping would only burn controller round trips.
+    assert len(scene.commands) == 1, (
+        "the descent took {} moves; with effort inert it is a single "
+        "synchronised move".format(len(scene.commands)))
+
+
+@check("contact probe needs XARM_EFFORT_CONSECUTIVE samples, not one spike")
+def t_probe_needs_consecutive_samples():
+    over = C.XARM_EFFORT_THRESHOLD['left'] + 5.0
+    # One sample over the line, then quiet. A noise spike must not be a grasp.
+    _, _, (reached_l, reached_r) = _probe(
+        effort_l=[over] + [0.0] * 20, effort_r=[over] + [0.0] * 20, verified=True)
+    assert abs(reached_l[2] - _FLOOR_L) < 1e-9 and abs(reached_r[2] - _FLOOR_R) < 1e-9, (
+        "a single effort spike latched contact: left stopped at {:.4f}, right at "
+        "{:.4f}".format(reached_l[2], reached_r[2]))
+
+    # XARM_EFFORT_CONSECUTIVE in a row IS a load, and must stop the descent above
+    # the calibrated floor.
+    n = C.XARM_EFFORT_CONSECUTIVE
+    _, _, (reached_l, reached_r) = _probe(
+        effort_l=[over] * 20, effort_r=[over] * 20, verified=True)
+    assert reached_l[2] > _FLOOR_L + 1e-6 and reached_r[2] > _FLOOR_R + 1e-6, (
+        "{} consecutive over-threshold samples did not stop the descent (left "
+        "reached the floor at {:.4f})".format(n, reached_l[2]))
+    # First sample is taken at the top of the band, so the nth lands n-1 steps in.
+    want = C.XARM_PROBE_BAND - (n - 1) * C.XARM_PROBE_STEP
+    assert abs((reached_l[2] - _FLOOR_L) - want) < 1e-6, (
+        "latched {:.4f} m above the floor, expected {:.4f} m".format(
+            reached_l[2] - _FLOOR_L, want))
+
+
+@check("contact probe descends both arms in lock step")
+def t_probe_is_synchronised():
+    _, scene, _ = _probe(effort_l=[0.0] * 40, effort_r=[0.0] * 40, verified=True)
+
+    # Every command is a PAIR -- the probe never drives one arm on its own. This
+    # is what stops the two descents drifting apart: both_movel joins, so the arms
+    # are level again at every waypoint.
+    assert len(scene.commands) == 1 + int(round(C.XARM_PROBE_BAND / C.XARM_PROBE_STEP)), (
+        "expected one coarse move plus {} steps inside the band, got {}".format(
+            int(round(C.XARM_PROBE_BAND / C.XARM_PROBE_STEP)), len(scene.commands)))
+    for i, (z_l, z_r) in enumerate(scene.commands):
+        gap = abs((z_l - _FLOOR_L) - (z_r - _FLOOR_R))
+        assert gap <= C.XARM_PROBE_STEP + 1e-9, (
+            "step {}: the arms are {:.4f} m apart, more than one probe step "
+            "({:.4f} m)".format(i, gap, C.XARM_PROBE_STEP))
+    # Both controllers got the same number of waypoints, which is the other half
+    # of "together" -- equal spacing is no use if one arm gets extra moves.
+    assert len(scene.left.arm.positions) == len(scene.right.arm.positions), (
+        "left got {} waypoints, right got {}".format(
+            len(scene.left.arm.positions), len(scene.right.arm.positions)))
+
+
+class _RecordingSkill:
+    def __init__(self):
+        self.action = None
+
+    def reset(self):
+        pass
+
+    def step(self, action, record_debug=False):
+        self.action = np.asarray(action, dtype=float)
+        return {'ur5e': [], 'ur16e': []}
+
+
+def _bare_arena(reach_masks, crop_size):
+    """An XArmDualArmArena with only the attributes step() touches.
+
+    Built with object.__new__ rather than the constructor on purpose: the real
+    __init__ connects two controllers and a RealSense. What is under test is the
+    action pipeline -- click -> pixels -> skill payload -- and that is pure
+    arithmetic over the calibration.
+    """
+    from real_robot.robot.xarm_dual_arm_arena import XArmDualArmArena
+
+    class _Scene:
+        def get_workspace_masks(self):
+            return reach_masks
+
+        def restart_camera(self):
+            pass
+
+    a = object.__new__(XArmDualArmArena)
+    a.measure_time = False
+    a.crop_size, a.x1, a.y1 = crop_size, 0, 0
+    a.snap_to_cloth_mask = False
+    a.mask_generator = None                 # masking off -> angles are 0.0
+    a.cloth_mask = np.ones((crop_size, crop_size), np.uint8)
+    a.dual_arm = _Scene()
+    a.pick_and_fling_skill = _RecordingSkill()
+    a.pick_and_place_skill = _RecordingSkill()
+    a.track_trajectory = False
+    a.action_step = 0
+    a.all_infos = []
+    a._process_info = lambda info, **kw: info
+    return a
+
+
+@check("the arena hands the skill the picks that were CLICKED")
+def t_arena_keeps_the_clicked_picks():
+    """The regression for "every fling aborts on a collision".
+
+    DualArmArena.step sorts the two picks by PIXEL x and snaps each into one arm's
+    reach annulus. That rule encodes the UR camera roll; on this cell the left arm
+    sits at SMALLER pixel x, so each pick was snapped into the FAR arm's annulus.
+    The annuli overlap in a band 0.07 m deep, so both picks landed in it: clicks
+    0.25 m apart arrived 0.07 m apart, the 0.12 m collision check fired, and the
+    fling aborted every time (the pick-and-place skill instead fell back to
+    "executing sequentially", with both arms grasping in the middle).
+
+    So: whatever the operator clicks is what the skill must receive. Assignment is
+    the skill's job, from TABLE x, which is roll-independent.
+    """
+    from real_robot.utils.transform_utils import pixels2base_on_table
+    from real_robot.utils.xarm_camera import base_to_pixel, crop_window, load_intrinsic
+    from real_robot.utils.scene_utils import load_camera_to_base
+
+    d = "{}/real_robot/calibration".format(os.environ['MP_FOLD_PATH'])
+    T_l = load_camera_to_base(os.path.join(d, 'xarm-left-calib.yaml'))
+    T_r = load_camera_to_base(os.path.join(d, 'xarm-right-calib.yaml'))
+    S = float(np.linalg.norm((T_l @ np.linalg.inv(T_r))[:3, 3]))
+    full = load_intrinsic(os.path.join(d, 'xarm-left-calib.yaml'))
+    intr = crop_window(full, T_l, separation=S, table_z=C.XARM_TABLE_Z).intrinsic(full)
+    side = int(intr.width)
+
+    uu, vv = np.meshgrid(np.arange(side), np.arange(side))
+    flat = np.stack([uu.ravel(), vv.ravel()], axis=1)
+    masks = []
+    for T in (T_l, T_r):
+        r = np.linalg.norm(pixels2base_on_table(flat, intr, T, C.XARM_TABLE_Z)[:, :2], axis=1)
+        masks.append(((r >= 0.12) & (r <= 0.41)).reshape(side, side))
+
+    # Two picks a garment apart, either side of the midline, both reachable.
+    want = [base_to_pixel([x, 0.0, C.XARM_TABLE_Z], T_l, intr) for x in (0.30, 0.45)]
+    norm = np.array([[(p[1] / side) * 2 - 1, (p[0] / side) * 2 - 1] for p in want])
+
+    arena = _bare_arena(tuple(masks), side)
+    arena.step({'norm-pixel-pick-and-fling': norm.flatten()})
+    got = arena.pick_and_fling_skill.action
+
+    assert got is not None and len(got) == 8, (
+        "the fling skill got {} values, expected 8".format(
+            None if got is None else len(got)))
+    for i, w in enumerate(want):
+        assert np.allclose(got[2 * i:2 * i + 2], np.round(w), atol=1.5), (
+            "pick {} was clicked at {} but reached the skill as {}".format(
+                i, np.round(w, 1), got[2 * i:2 * i + 2]))
+    assert got[6] == 1.0 and got[7] == 1.0, (
+        "both picks are inside the reach annuli but the flags say {}".format(got[6:8]))
+
+    # And the separation must survive: this is the number the 0.12 m collision
+    # check sees, and the whole failure was it arriving as 0.07.
+    base = [pixels2base_on_table(np.array([got[2 * i:2 * i + 2]]), intr, T_l,
+                                 C.XARM_TABLE_Z)[0] for i in (0, 1)]
+    sep = float(np.linalg.norm(base[0][:2] - base[1][:2]))
+    assert sep > C.XARM_COLLISION_THRESHOLD, (
+        "picks 0.15 m apart on the table reached the skill {:.3f} m apart, under "
+        "the {:.2f} m collision threshold -- they have been collapsed again".format(
+            sep, C.XARM_COLLISION_THRESHOLD))
+
+
+@check("the driver sets TCP jerk and max acceleration at connect")
+def t_motion_limits_applied():
+    """The knob that actually makes the swing fast, and it was never turned.
+
+    The SDK's default TCP jerk is 1000 mm/s^3 = 1 m/s^3, so the arm takes seconds
+    to ramp up to a commanded acceleration and a 0.25 m swing ends long before it
+    gets there. Commanded SPEED is separately clamped at 1000 mm/s inside the SDK
+    (xarm/x3/xarm.py), so raising that past 1 m/s does nothing at all -- which is
+    why two rounds of raising XARM_FLING_SPEED changed nothing visible.
+
+    The controller forgets both on reboot, so "set once by hand in UFACTORY
+    Studio" is not a fix; the driver has to do it on every connect.
+    """
+    d = _driver('left', walls=False)
+    assert getattr(d.arm, 'tcp_jerk', None) == C.XARM_TCP_JERK, (
+        "TCP jerk was not set at connect (controller has {}, expected {})".format(
+            getattr(d.arm, 'tcp_jerk', None), C.XARM_TCP_JERK))
+    assert getattr(d.arm, 'tcp_maxacc', None) == C.XARM_TCP_MAXACC, (
+        "TCP max acceleration was not set at connect (controller has {}, "
+        "expected {})".format(getattr(d.arm, 'tcp_maxacc', None), C.XARM_TCP_MAXACC))
+
+    # And the commanded speed must not be a fiction: the SDK clamps at 1000 mm/s.
+    assert C.XARM_FLING_SPEED <= 1.0, (
+        "XARM_FLING_SPEED is {} m/s, but the SDK clamps commanded TCP speed at "
+        "1.0 m/s -- the excess never reaches the controller".format(
+            C.XARM_FLING_SPEED))
+
+
+@check("dual pick-and-place keeps picks and places in their roles")
+def t_arena_dual_pnp_ordering():
+    """pick0, pick1, place0, place1 -- in, and out.
+
+    The raw CLICK order is pick0, place0, pick1, place1, but the human policy
+    reorders before building the action, so the arena receives picks-then-places.
+    Reading it in click order sends place0 as pick1: every point is a real,
+    reachable place on the table, so nothing errors -- the arms just grasp where
+    they should have released. That is a transposition you can only catch by
+    asserting the roles, which is what this does.
+    """
+    side = 512
+    reach = np.ones((side, side), bool)
+    arena = _bare_arena((reach, reach), side)
+
+    # Four distinct points, so a transposition cannot hide behind symmetry.
+    pts = np.array([[100, 120], [400, 130], [150, 380], [430, 390]], float)
+    norm = np.stack([(pts[:, 1] / side) * 2 - 1, (pts[:, 0] / side) * 2 - 1], axis=1)
+    arena.step({'norm-pixel-dual-pick-and-place': norm.flatten()})
+    got = arena.pick_and_place_skill.action
+
+    assert got is not None and len(got) == 12, (
+        "the pick-and-place skill got {} values, expected 12".format(
+            None if got is None else len(got)))
+    names = ['pick0', 'pick1', 'place0', 'place1']
+    for i, name in enumerate(names):
+        assert np.allclose(got[2 * i:2 * i + 2], pts[i], atol=1.5), (
+            "{} should be {} but the skill got {} -- picks and places have been "
+            "transposed".format(name, pts[i], got[2 * i:2 * i + 2]))
+
+
+@check("single pick-and-place reaches the arm on the pick's side")
+def t_arena_single_pnp_arm_choice():
+    """A click on the right of the table must move the RIGHT arm.
+
+    The skill picks the arm by sorting the two pairs on table x, whole dicts
+    travelling, active flag included. The arena used to hand it the SAME pick in
+    both slots, which makes that comparison a tie -- and `base_x(p0) <= base_x(p1)`
+    is True on a tie, so the active pair always landed on the left arm however far
+    right you clicked. Duplicated points do not carry the answer, so the arena has
+    to choose the arm and then make the sort agree with it.
+    """
+    from real_robot.primitives.utils import sort_pairs_by_table_x
+    from real_robot.utils.transform_utils import pixels2base_on_table
+    from real_robot.utils.xarm_camera import base_to_pixel, crop_window, load_intrinsic
+    from real_robot.utils.scene_utils import load_camera_to_base
+
+    d = "{}/real_robot/calibration".format(os.environ['MP_FOLD_PATH'])
+    T_l = load_camera_to_base(os.path.join(d, 'xarm-left-calib.yaml'))
+    T_r = load_camera_to_base(os.path.join(d, 'xarm-right-calib.yaml'))
+    T_lr = T_l @ np.linalg.inv(T_r)
+    S = float(np.linalg.norm(T_lr[:3, 3]))
+    full = load_intrinsic(os.path.join(d, 'xarm-left-calib.yaml'))
+    intr = crop_window(full, T_l, separation=S, table_z=C.XARM_TABLE_Z).intrinsic(full)
+    side = int(intr.width)
+
+    uu, vv = np.meshgrid(np.arange(side), np.arange(side))
+    flat = np.stack([uu.ravel(), vv.ravel()], axis=1)
+    masks = []
+    for T in (T_l, T_r):
+        r = np.linalg.norm(pixels2base_on_table(flat, intr, T, C.XARM_TABLE_Z)[:, :2], axis=1)
+        masks.append(((r >= 0.12) & (r <= 0.41)).reshape(side, side))
+
+    # x = 0.20 m is deep in the left arm's half; x = 0.55 m is deep in the right's.
+    for x_pick, want_left in ((0.20, True), (0.55, False)):
+        arena = _bare_arena(tuple(masks), side)
+        arena.dual_arm.intr = intr
+        arena.dual_arm.T_left_cam = T_l
+        arena.dual_arm.T_left_right = T_lr
+        pts = [base_to_pixel([x, 0.0, C.XARM_TABLE_Z], T_l, intr)
+               for x in (x_pick, x_pick + 0.05)]
+        norm = np.array([[(p[1] / side) * 2 - 1, (p[0] / side) * 2 - 1] for p in pts])
+        arena.step({'norm-pixel-single-pick-and-place': norm.flatten()})
+        got = arena.pick_and_place_skill.action
+        assert got is not None and len(got) == 12, "single-pnp payload is not 12 long"
+
+        # Now ask the SKILL's own sorter which arm ends up active -- the arena's
+        # intent is only correct if the sort agrees with it.
+        pair_l, pair_r = sort_pairs_by_table_x(
+            {'pick': got[0:2], 'active': got[10]},
+            {'pick': got[2:4], 'active': got[11]},
+            intr, T_l, C.XARM_TABLE_Z)
+        active_left = bool(pair_l['active']) and not bool(pair_r['active'])
+        active_right = bool(pair_r['active']) and not bool(pair_l['active'])
+        assert active_left or active_right, (
+            "exactly one arm must be active; flags sorted to L={} R={}".format(
+                pair_l['active'], pair_r['active']))
+        assert active_left == want_left, (
+            "a pick at table x={:.2f} m (midline {:.3f}) should drive the {} arm, "
+            "but the {} arm came out active".format(
+                x_pick, S / 2, "LEFT" if want_left else "RIGHT",
+                "LEFT" if active_left else "RIGHT"))
+
+
+@check("a narrow pick pair shrinks the swing instead of losing it")
+def t_fling_fits_narrow_picks():
+    """The swing is built at the ACTUAL grasp width, not XARM_FLING_WIDTH.
+
+    xarm_points_to_fling_path is called with width=None, so the two points the
+    operator picked set the geometry. Close picks push BOTH grippers further from
+    their own bases -- the counter-intuitive direction -- and at hang 0.27 the arms
+    must end up 0.280 m apart for the stroke waypoint to be reachable at all.
+
+    Before _fit_swing, a closer pair made the controller refuse the swing, and the
+    refusal was discarded: the arms grasped, stretched, and then just put the
+    garment down. "It is not flinging any more", with nothing in the log.
+    """
+    from real_robot.primitives.utils import (
+        retarget_path_to_grasp, xarm_points_to_fling_path)
+    from real_robot.primitives.xarm_pick_and_fling import XArmPickAndFlingSkill
+    from real_robot.utils.transform_utils import transform_pose
+    from scipy.spatial.transform import Rotation
+
+    S, _, _, _ = _measured_cell()
+    T_lr = np.eye(4)
+    T_lr[:3, :3] = Rotation.from_euler('z', np.pi).as_matrix()
+    T_lr[0, 3] = S
+
+    skill = object.__new__(XArmPickAndFlingSkill)
+    skill.swing_stroke = C.XARM_FLING_STROKE
+    skill.hang_height = C.XARM_FLING_HANG
+    skill.place_height = C.XARM_FLING_PLACE_Z
+    skill.swing_windup = C.XARM_FLING_WINDUP
+    skill.place_y = C.XARM_FLING_PLACE_Y
+    skill.land_y = C.XARM_FLING_LAND_Y
+
+    def builder(width):
+        """The same path build dual_arm_stretch_and_fling does, at a given width."""
+        centre = S / 2.0
+        p_l = np.array([centre - width / 2.0, 0.0, C.XARM_FLING_HANG])
+        p_r_in_l = np.array([centre + width / 2.0, 0.0, C.XARM_FLING_HANG])
+        ident = Rotation.identity()
+
+        def build(stroke, hang):
+            a, b = xarm_points_to_fling_path(
+                right_point=p_l, left_point=p_r_in_l, width=None,
+                swing_stroke=stroke, swing_angle=C.XARM_FLING_ANGLE,
+                lift_height=hang, place_height=skill.place_height,
+                windup=skill.swing_windup, place_y=skill.place_y,
+                land_y=skill.land_y)
+            l_path = retarget_path_to_grasp(a, ident)
+            r_path = retarget_path_to_grasp(b, ident)
+            l_path[0][:3] = p_l
+            r_path[0][:3] = p_r_in_l
+            return l_path, r_path, transform_pose(np.linalg.inv(T_lr), r_path)
+        return build
+
+    # Wide enough: the configured swing must survive untouched.
+    _, _, stroke, hang = skill._fit_swing(builder(C.XARM_FLING_WIDTH))
+    assert (stroke, hang) == (C.XARM_FLING_STROKE, C.XARM_FLING_HANG), (
+        "at the configured {:.2f} m stretch the swing was shrunk to stroke {:.3f} "
+        "hang {:.3f} -- the constants no longer fit their own derivation".format(
+            C.XARM_FLING_WIDTH, stroke, hang))
+
+    # Narrow pair: it must shrink, and the result must actually fit.
+    narrow = 0.22
+    l_path, r_path, stroke, hang = skill._fit_swing(builder(narrow))
+    assert stroke < C.XARM_FLING_STROKE or hang < C.XARM_FLING_HANG, (
+        "a {:.2f} m grasp width needs more reach than {:.3f} m but the swing was "
+        "not shrunk".format(narrow, C.XARM_FLING_MAX_RADIUS))
+    r_own = transform_pose(np.linalg.inv(T_lr), r_path)
+    worst = max(skill._path_radius(l_path), skill._path_radius(r_own))
+    assert worst <= C.XARM_FLING_MAX_RADIUS + 1e-9, (
+        "after shrinking, the furthest waypoint is still {:.4f} m out against a "
+        "{:.3f} m limit".format(worst, C.XARM_FLING_MAX_RADIUS))
+    # And it must still be a fling: forwards, and not a token one.
+    assert stroke >= 0.08, "the swing was shrunk to a {:.3f} m stroke".format(stroke)
+
+
+@check("get_mask_v2(None, rgb) is an all-ones placeholder of the right shape")
+def t_mask_passthrough():
+    """Masking off must not change the SHAPE of anything downstream.
+
+    The arenas hand this straight to cv2.resize, cv2.erode and calculate_iou.
+    A bool array, a float array or a (w, h) instead of (h, w) would all sail
+    through construction and fail on hardware, mid-episode, with the arms live.
+    """
+    from real_robot.utils.mask_utils import get_mask_v2
+    rgb = np.zeros((480, 640, 3), dtype=np.uint8)
+    m = get_mask_v2(None, rgb)
+
+    assert m.shape == rgb.shape[:2], (
+        "placeholder mask is {}, expected {} -- cv2.resize and calculate_iou both "
+        "assume it matches the image".format(m.shape, rgb.shape[:2]))
+    assert m.dtype == np.uint8, (
+        "placeholder mask dtype is {}, expected uint8 -- cv2.erode rejects bool "
+        "arrays".format(m.dtype))
+    assert m.min() == 1 and m.max() == 1, "the placeholder must be all ones"
+
+    # Put it through exactly what the arenas do with it, in order, rather than
+    # asserting properties and hoping those were the right ones.
+    import cv2
+    from real_robot.utils.mask_utils import calculate_iou
+    resized = cv2.resize(m, (512, 512))                       # _process_info
+    eroded = cv2.erode(m, np.ones((3, 3), np.uint8), iterations=5)   # snap_to_cloth_mask
+    iou = calculate_iou(m, m)                                 # the task's evaluate()
+    assert resized.shape == (512, 512), "resize of the placeholder went wrong"
+    assert np.sum(eroded) > 0, (
+        "eroding the placeholder empties it, which sends snap_to_cloth_mask down "
+        "its 'erosion removed entire mask' branch on every action")
+    assert abs(iou - 1.0) < 1e-9, (
+        "IoU of the placeholder against itself is {:.3f}, not 1.0 -- the reason "
+        "success() is not to be trusted while masking is off".format(iou))
 
 
 # ----------------------------------------------------------------------

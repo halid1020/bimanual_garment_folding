@@ -140,38 +140,55 @@ def show_and_click(title, rgb, scene, masks, clicker):
         return None
 
 
-def confirm_motion(dry_run):
+def confirm_motion(dry_run, auto_yes=False):
+    """The one gate before anything energises.
+
+    ⚠️ Enter means GO, matching ``test_xarm_lite6_bringup.confirm``. An earlier
+    version here demanded the literal word 'go' and treated everything else --
+    including a bare Enter -- as an abort, which is the opposite of what the rest
+    of the repo trains your fingers to do. Two real-arm scripts must not disagree
+    about what the Enter key does.
+    """
     if dry_run:
         print("\n[dry-run] Nothing is energised; no arm will move.")
+        return True
+    if auto_yes:
+        print("\n⚠️  Driving the REAL arms  [--yes]")
         return True
     print("\n" + "=" * 68)
     print("⚠️  This drives the REAL arms. Clear the cell, keep the e-stop in hand.")
     print("=" * 68)
     try:
-        return input("Type 'go' to continue (anything else aborts): ").strip() == 'go'
+        reply = input("[Enter = go, 'q' = quit] ").strip().lower()
     except EOFError:
         return False
+    return reply not in ('q', 'n', 'no', 'quit')
 
 
 def describe_fling():
     """Print the swing the skill is about to run, in metres, before it runs it.
 
-    The shape is asymmetric -- a short wind-up, a long forward stroke, a drag back
-    to just behind the base line -- and the whole point of printing it is that the
-    operator can check the numbers against what they then watch happen.
+    The shape is asymmetric -- a short wind-up, a long forward stroke, a touch-down
+    part way back and then a drag to just behind the base line -- and the whole
+    point of printing it is that the operator can check the numbers against what
+    they then watch happen. The touch-down is worth reading in particular: it is
+    the one the arms were landing too far forward on before it got its own number.
     """
     from real_robot.primitives.utils import xarm_base_fling_poses
     p = xarm_base_fling_poses(stroke=C.XARM_FLING_STROKE, swing_angle=C.XARM_FLING_ANGLE,
                               lift_height=C.XARM_FLING_HANG,
                               place_height=C.XARM_FLING_PLACE_Z,
                               windup=C.XARM_FLING_WINDUP,
-                              place_y=C.XARM_FLING_PLACE_Y)
+                              place_y=C.XARM_FLING_PLACE_Y,
+                              land_y=C.XARM_FLING_LAND_Y)
     names = ['centre', 'wind up (back)', 'STROKE (front)', 'touch down', 'lay down']
     print("\n  the swing, in the action frame (+y = front, toward you):")
     for name, w in zip(names, p):
         print("    {:<16} y {:+.3f}   z {:+.3f}".format(name, w[1], w[2]))
-    print("    -> {:.0f} mm back, {:.0f} mm forward, laid down {:.0f} mm behind "
-          "the base line".format(-p[1, 1] * 1000, p[2, 1] * 1000, -p[4, 1] * 1000))
+    print("    -> {:.0f} mm back, {:.0f} mm forward, landing {:.0f} mm out, then "
+          "{:.0f} mm of drag to {:.0f} mm behind the base line".format(
+              -p[1, 1] * 1000, p[2, 1] * 1000, p[3, 1] * 1000,
+              (p[3, 1] - p[4, 1]) * 1000, -p[4, 1] * 1000))
 
 
 # ----------------------------------------------------------------------
@@ -329,7 +346,10 @@ class _StubArm:
         return False
 
     def effort_delta(self, baseline):
-        return 0.0
+        # None, not 0.0 -- the real driver returns None when it has no baseline to
+        # measure against, and a dry run that answers 0.0 reports a confident
+        # "max effort delta 0.00" for a signal it never read.
+        return None if baseline is None else 0.0
 
     def get_joint_effort(self):
         return None
@@ -448,6 +468,9 @@ def main():
                          "so a --dry-run --auto pass works over ssh")
     ap.add_argument('--once', action='store_true',
                     help="one action then exit, instead of looping")
+    ap.add_argument('--yes', action='store_true',
+                    help="skip the are-you-sure prompt (same flag name as "
+                         "test_xarm_primitives.py)")
     ap.add_argument('--skip-probe', action='store_true',
                     help="fling: skip the effort-gated contact probe")
     ap.add_argument('--skip-shake', action='store_true',
@@ -456,7 +479,7 @@ def main():
                     help="fling: skip the inward tension release")
     args = ap.parse_args()
 
-    if not confirm_motion(args.dry_run):
+    if not confirm_motion(args.dry_run, args.yes):
         print("Aborted.")
         return 1
 

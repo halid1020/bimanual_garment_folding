@@ -16,6 +16,13 @@ camera_to_base:
     - 0.0
     - 0.0
     - 1.0
+intrinsics:
+  fx: 906.6981201171875
+  fy: 906.1298828125
+  height: 720
+  ppx: 644.382568359375
+  ppy: 370.8415222167969
+  width: 1280
 meta:
   board_type: charuco
   samples: 39

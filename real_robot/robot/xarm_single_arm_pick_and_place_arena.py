@@ -14,7 +14,8 @@ import numpy as np
 from actoris_harena import Arena
 
 from real_robot.robot.single_arm_pick_and_place_arena import SingleArmPickAndPlaceArena
-from real_robot.robot.xarm_single_arm_scene import XArmSingleArmScene
+from real_robot.robot.xarm_dual_arm_arena import _warn_no_cloth_mask
+from real_robot.robot.xarm_single_arm_scene import XArmSingleArmScene, DEFAULT_IP
 from real_robot.primitives.xarm_single_arm_pick_and_place import XArmSingleArmPickAndPlaceSkill
 from real_robot.loggers.single_arm_pixel_logger import SingleArmPixelLogger
 from real_robot.utils.mask_utils import get_mask_generator
@@ -30,7 +31,7 @@ class XArmSingleArmPickAndPlaceArena(SingleArmPickAndPlaceArena):
 
         dry_run = config.get("dry_run", False)
         self.single_arm = XArmSingleArmScene(
-            robot_ip=config.get("robot_ip", config.get("xarm_ip", "192.168.1.201")),
+            robot_ip=config.get("robot_ip", config.get("xarm_ip", DEFAULT_IP)),
             dry_run=dry_run,
             radius=config.get('radius', XARM_WORKSPACE_RADIUS),
             side=config.get('arm_side', 'left'),
@@ -38,7 +39,12 @@ class XArmSingleArmPickAndPlaceArena(SingleArmPickAndPlaceArena):
 
         self.pick_and_place_skill = XArmSingleArmPickAndPlaceSkill(self.single_arm)
         self.logger = SingleArmPixelLogger()
-        self.mask_generator = get_mask_generator()
+        # See XArmDualArmArena: None means "no segmenter", and get_mask_v2 answers
+        # with an all-ones placeholder. Default True.
+        self.use_cloth_mask = config.get("use_cloth_mask", True)
+        self.mask_generator = get_mask_generator() if self.use_cloth_mask else None
+        if self.mask_generator is None:
+            _warn_no_cloth_mask()
 
         self.num_train_trials = config.get("num_train_trials", 100)
         self.num_val_trials = config.get("num_val_trials", 10)

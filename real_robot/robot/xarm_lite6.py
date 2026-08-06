@@ -53,6 +53,7 @@ from real_robot.utils.xarm_constants import (
     XARM_HOME_JOINT, XARM_HOME_JOINT_BY_SIDE, photo_pose_from_home, for_side,
     XARM_JOINT_SPEED, XARM_JOINT_ACC, XARM_BLEND_RADIUS,
     XARM_COLLISION_SENSITIVITY, XARM_GEOMETRY_VERIFIED,
+    XARM_TCP_JERK, XARM_TCP_MAXACC,
 )
 from real_robot.utils.xarm_walls import (
     AXES, walls_for_side, check_pose, to_sdk_boundary_mm, describe,
@@ -171,6 +172,17 @@ class XArmLite6:
             self.arm.set_self_collision_detection(True)
         except Exception as e:
             print(f"[XArmLite6] Collision-detection setup warning: {e}")
+
+        # ⚠️ MOTION SMOOTHNESS LIMITS, set on EVERY connect because the controller
+        # forgets them on reboot (see the SDK's note on set_tcp_jerk).
+        #
+        # Leaving them at the defaults is why the fling looked slow no matter what
+        # speed it was given: the SDK's default TCP jerk is 1000 mm/s^3 = 1 m/s^3,
+        # so the arm takes seconds to ramp up to a commanded acceleration, and a
+        # 0.25 m swing is over long before it gets there. The commanded speed is
+        # separately clamped at 1000 mm/s inside the SDK, so raising THAT past
+        # 1 m/s does nothing at all -- jerk is the knob.
+        self._set_motion_limits()
 
         # The fence is CONTROLLER-side state: it survives disconnect, process exit
         # and power cycles. Reconcile it to this driver's configuration on every
@@ -419,6 +431,33 @@ class XArmLite6:
             return True
         pose_m = np.asarray(pose_mm[:3], dtype=float) / 1000.0
         return self._check_bounds(pose_m, what)
+
+    def _set_motion_limits(self):
+        """TCP jerk and max acceleration, reported rather than assumed.
+
+        Both are optional on older firmware, so a failure here is a warning, not a
+        fault -- but it is a LOUD warning, because a silent failure puts the swing
+        back on the 1 m/s^3 default and the only symptom is "the fling feels slow",
+        which is exactly the symptom that took a trip through the SDK source to
+        explain the first time.
+        """
+        for name, value, unit in (('set_tcp_jerk', XARM_TCP_JERK, 'mm/s^3'),
+                                  ('set_tcp_maxacc', XARM_TCP_MAXACC, 'mm/s^2')):
+            fn = getattr(self.arm, name, None)
+            if fn is None:
+                print(f"[XArmLite6] !! {name} is not available on this firmware; "
+                      f"the swing will run at the controller default.")
+                continue
+            try:
+                code = fn(value)
+                code = code[0] if isinstance(code, (list, tuple)) else code
+                if code:
+                    print(f"[XArmLite6] !! {name}({value}) returned code {code} -- "
+                          f"the limit was NOT applied.")
+                else:
+                    print(f"[XArmLite6] {name} = {value} {unit}")
+            except Exception as e:
+                print(f"[XArmLite6] !! {name}({value}) failed: {e}")
 
     def _check_bounds(self, poses, what):
         """Reject (never clamp) any waypoint outside the walls."""

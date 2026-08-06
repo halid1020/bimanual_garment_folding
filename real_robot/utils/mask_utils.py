@@ -20,7 +20,36 @@ def get_mask_generator():
     sam.to(device=DEVICE)
     return SamAutomaticMaskGenerator(sam)
 
-def get_mask_v2(mask_generator, rgb, 
+_PLACEHOLDER_WARNED = False
+
+
+def _placeholder_mask(rgb):
+    """"Everything is cloth" -- what you get when there is no segmenter.
+
+    Same shape and dtype as the real return path, because callers resize it,
+    erode it and hand it to calculate_iou; a bool array or a transposed shape
+    would only fail on hardware.
+
+    ⚠️ Every mask-derived NUMBER is meaningless while this is in use, and one of
+    them is actively misleading. arena.coverage becomes the whole frame, so
+    normalised_coverage pins at 1.0; and if the cached flattened reference was
+    captured in the same session then it is all-ones too, so
+    calculate_iou(cur, goal) is also 1.0 -- which makes GarmentAlignmentTask's
+    `IoU > threshold and coverage > threshold` read SUCCESS from step 0. The
+    motion is unaffected; only the metrics are.
+    """
+    global _PLACEHOLDER_WARNED
+    if not _PLACEHOLDER_WARNED:
+        _PLACEHOLDER_WARNED = True
+        print("[mask_utils] !! NO SEGMENTER -- using an all-ones placeholder mask. "
+              "Coverage, the IoUs and success() are NOT real numbers while this is "
+              "on (success may read True immediately). Put "
+              "sam_vit_h_4b8939.pth in $REAL_ROBOT_PATH/models/ and set "
+              "use_cloth_mask: True to get the real thing back.")
+    return np.ones(rgb.shape[:2], dtype=np.uint8)
+
+
+def get_mask_v2(mask_generator, rgb,
                 mask_threshold_min=5000,   # Lowered min size slightly
                 mask_threshold_max=800000, 
                 min_saturation=10,         # NEW: Filter out white/grey things
@@ -31,7 +60,15 @@ def get_mask_v2(mask_generator, rgb,
                 save_dir="./tmp"):
     """
     Select the best mask likely to be the cloth based on Color Saturation.
+
+    ``mask_generator=None`` means MASKING IS OFF: this returns an all-ones
+    placeholder instead of segmenting. See ``_placeholder_mask`` for what that
+    costs. The branch is unreachable from the UR arenas, which build a generator
+    unconditionally in ``__init__`` and so can never pass None.
     """
+    if mask_generator is None:
+        return _placeholder_mask(rgb)
+
     save_dir = f"{save_dir}/cloth_masks"
     
     # --- NEW: Remove the old directory if it exists ---

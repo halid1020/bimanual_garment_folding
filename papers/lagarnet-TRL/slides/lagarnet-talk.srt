@@ -1,0 +1,606 @@
+1
+00:00:00,000 --> 00:00:00,979
+Hello everyone.
+
+2
+00:00:00,979 --> 00:00:03,395
+Today, I will be presenting LaGarNet:
+
+3
+00:00:03,395 --> 00:00:08,748
+a latent world model designed for quasi-static,
+pick-and-place garment flattening.
+
+4
+00:00:08,748 --> 00:00:14,100
+We show that a single policy trained
+entirely in simulation flattens four distinct
+
+5
+00:00:14,100 --> 00:00:16,124
+garment types on real hardware,
+
+6
+00:00:16,124 --> 00:00:17,952
+with no further fine-tuning.
+
+7
+00:00:18,302 --> 00:00:20,674
+Our primary task is garment flattening,
+
+8
+00:00:20,674 --> 00:00:25,602
+a critical prerequisite for downstream
+tasks like folding, ironing, and pressing.
+
+9
+00:00:25,602 --> 00:00:30,712
+This task is inherently challenging because
+cloth possesses vast degrees of freedom,
+
+10
+00:00:30,712 --> 00:00:33,206
+undergoes severe non-linear deformations,
+
+11
+00:00:33,206 --> 00:00:36,917
+and exhibits high self-occlusion
+from a top-down perspective.
+
+12
+00:00:36,917 --> 00:00:42,027
+To rigorously evaluate the underlying
+representation rather than relying on hardware
+
+13
+00:00:42,027 --> 00:00:42,696
+complexity,
+
+14
+00:00:42,696 --> 00:00:46,894
+we deliberately constrain our physical
+setup to a single robotic arm,
+
+15
+00:00:46,894 --> 00:00:50,726
+a single pick-and-place primitive,
+and one top-down RGB camera.
+
+16
+00:00:51,076 --> 00:00:55,001
+Existing data-driven flatteners
+generally fall into three families.
+
+17
+00:00:55,001 --> 00:00:57,931
+Behaviour cloning is
+conceptually straightforward,
+
+18
+00:00:57,931 --> 00:01:02,794
+but adequately covering the vast state
+space of crumpled configurations requires an
+
+19
+00:01:02,794 --> 00:01:05,313
+impractical volume of
+human demonstrations,
+
+20
+00:01:05,313 --> 00:01:07,481
+often necessitating scripted oracles.
+
+21
+00:01:07,481 --> 00:01:11,172
+Model-free reinforcement learning
+explores this space directly,
+
+22
+00:01:11,172 --> 00:01:12,812
+yielding general flatteners,
+
+23
+00:01:12,812 --> 00:01:17,558
+but suffers from poor sample efficiency
+and cannot predict the forward effects of
+
+24
+00:01:17,558 --> 00:01:18,027
+actions.
+
+25
+00:01:18,027 --> 00:01:21,308
+Model-based methods remain
+rare in garment manipulation;
+
+26
+00:01:21,308 --> 00:01:25,760
+standard latent models tend to produce
+blurred reconstructions that lose the
+
+27
+00:01:25,760 --> 00:01:29,041
+critical edge and corner
+features necessary for shaping.
+
+28
+00:01:29,041 --> 00:01:31,443
+This leads to our core research question:
+
+29
+00:01:31,443 --> 00:01:36,306
+can latent world models built for continuous
+control still function in quasi-static
+
+30
+00:01:36,306 --> 00:01:37,302
+primitive setups,
+
+31
+00:01:37,302 --> 00:01:40,876
+where consecutive observations
+are not temporally continuous?
+
+32
+00:01:41,226 --> 00:01:46,108
+Our solution is LaGarNet, built upon a
+goal-conditioned recurrent state-space model.
+
+33
+00:01:46,108 --> 00:01:50,816
+The fundamental design choice here is the
+direct integration of goal-conditioning
+
+34
+00:01:50,816 --> 00:01:53,199
+into the latent inference process itself.
+
+35
+00:01:53,199 --> 00:01:57,791
+Both the prior and posterior distributions
+over the latent state are explicitly
+
+36
+00:01:57,791 --> 00:01:58,430
+goal-aware.
+
+37
+00:01:58,430 --> 00:02:02,964
+A recurrent backbone maintains a belief
+state over the occluded regions of the
+
+38
+00:02:02,964 --> 00:02:03,429
+garment,
+
+39
+00:02:03,429 --> 00:02:07,730
+while a joint decoder predicts both
+the top-down mask and the task reward.
+
+40
+00:02:07,730 --> 00:02:11,043
+During inference, we plan
+using the cross-entropy method,
+
+41
+00:02:11,043 --> 00:02:15,751
+sampling candidate pick-and-place actions
+and ranking them based on the predicted
+
+42
+00:02:15,751 --> 00:02:16,158
+reward.
+
+43
+00:02:16,158 --> 00:02:20,866
+Ablation studies reveal that removing
+goal-conditioning from the latent inference
+
+44
+00:02:20,866 --> 00:02:24,469
+costs twenty-two and a half
+percentage points of success rate,
+
+45
+00:02:24,469 --> 00:02:27,666
+from seventy-five percent
+down to fifty-two and a half.
+
+46
+00:02:28,016 --> 00:02:31,383
+Our second contribution is
+the data collection paradigm.
+
+47
+00:02:31,383 --> 00:02:35,592
+We train a Diffusion Policy expert
+on just fifty human demonstrations,
+
+48
+00:02:35,592 --> 00:02:40,643
+allowing it to reliably reach near-flattened
+states that a random exploration policy
+
+49
+00:02:40,643 --> 00:02:41,966
+would rarely discover.
+
+50
+00:02:41,966 --> 00:02:46,896
+We then mix this expert's rollouts in a
+one-to-one ratio with a mask-biased random
+
+51
+00:02:46,896 --> 00:02:47,317
+policy,
+
+52
+00:02:47,317 --> 00:02:52,188
+which drives state exploration by uniformly
+sampling pick points exclusively from
+
+53
+00:02:52,188 --> 00:02:54,112
+the garment's segmentation mask.
+
+54
+00:02:54,112 --> 00:02:59,042
+This approach yields a robust dataset of
+five thousand episodes without relying on
+
+55
+00:02:59,042 --> 00:03:00,546
+complex scripted oracles,
+
+56
+00:03:00,546 --> 00:03:05,476
+creating a paradigm that is agnostic to
+cloth dynamics and likely to generalise to
+
+57
+00:03:05,476 --> 00:03:07,280
+other deformable object tasks.
+
+58
+00:03:07,630 --> 00:03:11,333
+Our third contribution is a
+novel coverage-alignment reward.
+
+59
+00:03:11,333 --> 00:03:14,974
+This metric jointly evaluates
+state coverage and alignment,
+
+60
+00:03:14,974 --> 00:03:18,553
+computed entirely from top-down
+binary segmentation masks.
+
+61
+00:03:18,553 --> 00:03:19,171
+Crucially,
+
+62
+00:03:19,171 --> 00:03:24,108
+it eliminates the need for privileged
+particle-level state or learned smoothness
+
+63
+00:03:24,108 --> 00:03:24,787
+estimators.
+
+64
+00:03:24,787 --> 00:03:29,909
+This allows the exact same continuous and
+linear reward function to be evaluated in
+
+65
+00:03:29,909 --> 00:03:32,686
+simulation and directly
+on physical hardware,
+
+66
+00:03:32,686 --> 00:03:35,710
+making it highly amenable
+to predictive learning.
+
+67
+00:03:36,060 --> 00:03:39,184
+In simulation, LaGarNet
+achieves parity with MEDOR,
+
+68
+00:03:39,184 --> 00:03:41,635
+the state-of-the-art mesh-based planner,
+
+69
+00:03:41,635 --> 00:03:46,536
+whilst outperforming both PlaNet-ClothPick
+and Diffusion Policy across short and
+
+70
+00:03:46,536 --> 00:03:48,067
+medium planning horizons.
+
+71
+00:03:48,067 --> 00:03:49,415
+Furthermore, a single,
+
+72
+00:03:49,415 --> 00:03:53,520
+unified policy trained across all
+garments outperforms specialised,
+
+73
+00:03:53,520 --> 00:03:54,990
+single-garment variants,
+
+74
+00:03:54,990 --> 00:03:59,462
+suggesting that morphological diversity
+acts as a beneficial regulariser.
+
+75
+00:03:59,462 --> 00:04:00,136
+Ultimately,
+
+76
+00:04:00,136 --> 00:04:05,282
+the policy exceeds ninety-five percent
+normalised coverage across all four simulated
+
+77
+00:04:05,282 --> 00:04:08,100
+garment categories within
+twenty action steps.
+
+78
+00:04:08,450 --> 00:04:12,099
+This comparison also has a
+crucial computational dimension.
+
+79
+00:04:12,099 --> 00:04:17,171
+LaGarNet requires five times fewer parameters
+than MEDOR and plans seventeen times
+
+80
+00:04:17,171 --> 00:04:17,604
+faster,
+
+81
+00:04:17,604 --> 00:04:19,769
+with no loss in flattening quality.
+
+82
+00:04:19,769 --> 00:04:24,037
+Six seconds of planning per action
+is affordable on a physical robot,
+
+83
+00:04:24,037 --> 00:04:26,697
+where one hundred and
+three seconds is not.
+
+84
+00:04:26,697 --> 00:04:31,831
+We are careful not to overstate this: with
+perception and robot execution included,
+
+85
+00:04:31,831 --> 00:04:36,160
+a single real manipulation step still
+takes about twenty-four seconds,
+
+86
+00:04:36,160 --> 00:04:40,490
+so the full perception-action cycle
+remains the deployment bottleneck.
+
+87
+00:04:40,840 --> 00:04:45,919
+We subsequently transferred this
+simulation-trained policy directly to a physical
+
+88
+00:04:45,919 --> 00:04:46,985
+UR5e robotic arm,
+
+89
+00:04:46,985 --> 00:04:49,995
+achieving this with zero
+real-world fine-tuning.
+
+90
+00:04:49,995 --> 00:04:54,322
+The videos shown here demonstrate
+rollouts on all four garment types,
+
+91
+00:04:54,322 --> 00:04:56,579
+accelerated to ten times real speed.
+
+92
+00:04:56,579 --> 00:05:01,094
+The policy operates solely on a
+top-down observation and the goal image,
+
+93
+00:05:01,094 --> 00:05:05,922
+and the reward is computed from the
+exact same segmentation masks utilised in
+
+94
+00:05:05,922 --> 00:05:06,612
+simulation.
+
+95
+00:05:06,612 --> 00:05:11,628
+This consistency is precisely what enables
+successful zero-shot transfer without
+
+96
+00:05:11,628 --> 00:05:15,328
+requiring a highly tuned digital
+twin of the physical cell.
+
+97
+00:05:15,678 --> 00:05:19,695
+Quantitatively, across forty physical
+trials of twenty actions each,
+
+98
+00:05:19,695 --> 00:05:23,535
+LaGarNet achieves ninety point
+three percent normalised coverage,
+
+99
+00:05:23,535 --> 00:05:26,489
+eighty point seven percent
+normalised improvement,
+
+100
+00:05:26,489 --> 00:05:30,507
+and an eighty-one point one percent
+maximum intersection over union.
+
+101
+00:05:30,507 --> 00:05:33,992
+It successfully completes
+twenty-seven out of forty trials,
+
+102
+00:05:33,992 --> 00:05:37,537
+against nine out of forty for
+the PlaNet-ClothPick baseline,
+
+103
+00:05:37,537 --> 00:05:41,318
+though a human operator still
+reaches thirty-eight out of forty.
+
+104
+00:05:41,318 --> 00:05:46,104
+Success here means reaching eighty-five
+percent coverage and seventy-five percent
+
+105
+00:05:46,104 --> 00:05:50,475
+maximum intersection over union at any
+point within a twenty-step episode;
+
+106
+00:05:50,475 --> 00:05:55,379
+we relax these thresholds from their
+simulation values to allow for the sim-to-real
+
+107
+00:05:55,379 --> 00:05:55,615
+gap.
+
+108
+00:05:55,615 --> 00:05:57,860
+We also stress-tested a fifth garment,
+
+109
+00:05:57,860 --> 00:06:02,764
+a soft long-sleeved dress whose topology
+is absent from the simulated training set.
+
+110
+00:06:02,764 --> 00:06:07,667
+Evaluated separately over ten further
+trials, the policy recovers most of its area,
+
+111
+00:06:07,667 --> 00:06:11,980
+at seventy-seven percent coverage,
+but never meets the success criterion,
+
+112
+00:06:11,980 --> 00:06:13,398
+scoring zero out of ten.
+
+113
+00:06:13,748 --> 00:06:16,431
+We draw two primary
+lessons from this work.
+
+114
+00:06:16,431 --> 00:06:16,805
+First,
+
+115
+00:06:16,805 --> 00:06:21,859
+latent world models can be highly effective
+in quasi-static manipulation regimes,
+
+116
+00:06:21,859 --> 00:06:26,850
+provided that goal-conditioning is
+integrated directly into the latent inference
+
+117
+00:06:26,850 --> 00:06:27,349
+process.
+
+118
+00:06:27,349 --> 00:06:31,404
+Second, greedy, one-step planning
+yields the highest performance.
+
+119
+00:06:31,404 --> 00:06:36,021
+Because a single manipulation primitive
+induces massive state deformation,
+
+120
+00:06:36,021 --> 00:06:41,199
+predictive error compounds faster than
+extended lookahead can provide value—success
+
+121
+00:06:41,199 --> 00:06:44,943
+drops from seventy-three point
+three percent at horizon one,
+
+122
+00:06:44,943 --> 00:06:47,064
+to thirty percent at horizon five.
+
+123
+00:06:47,064 --> 00:06:52,180
+The principal limitation of our current
+system is the lack of an explicit stopping
+
+124
+00:06:52,180 --> 00:06:52,804
+criterion.
+
+125
+00:06:52,804 --> 00:06:57,670
+Immediate future work includes integrating
+a learned termination condition and
+
+126
+00:06:57,670 --> 00:07:00,727
+extending the framework
+to goal-directed folding.
+
+127
+00:07:00,727 --> 00:07:01,600
+Looking ahead,
+
+128
+00:07:01,600 --> 00:07:06,592
+we view this formulation as a promising
+pathway toward general deformable-object
+
+129
+00:07:06,592 --> 00:07:07,403
+manipulation.
+
+130
+00:07:07,403 --> 00:07:08,900
+Thank you for listening.

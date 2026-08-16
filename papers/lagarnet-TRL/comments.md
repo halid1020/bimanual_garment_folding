@@ -5,7 +5,7 @@ text, numbered in the order they appeared. Every revision made in response is hi
 blue** in `main.tex` via the `\rev{}` macro; setting `\showrevfalse` in the preamble produces an
 identical but unhighlighted camera-ready copy.
 
-**Status counts: 23 resolved, 4 partially resolved, 0 not resolved, 1 not planned.**
+**Status counts: 21 resolved, 6 partially resolved, 0 not resolved, 1 not planned.**
 
 ---
 
@@ -62,7 +62,7 @@ corrupts the hyperref PDF bookmarks. The renames are recorded here instead.
 | 11 | Figure 9 shows (r_n, rf) = 0.7 m, 0.2 m — inverted, and notation | Figure 9 lists (r_n, rf = 0.7m, 0.2m), which appears inverted because the far radius should normally be larger than the near radius, and the notation should be r_f. The authors should check this parameter table carefully. | Resolved | Figure 8(c) |
 | 12 | Table III is dense; put final-step metrics next to the maxima | Table III is dense and hard to parse. The authors should explicitly state that the rows correspond to evaluation horizons and clarify whether the metrics are cumulative maxima or exact-step values. If max-over-trajectory metrics are retained, final-step metrics should be placed next to them. | Resolved | Figure 3(a); Table II caption |
 | 13 | Verify every citation number, author list, venue and year | There are several apparent citation-numbering or metadata inconsistencies. For example, the text refers to VCD and MEDOR in ways that do not always match the listed reference numbers. Before publication, the authors should systematically verify that every citation number, author list, title, venue, and year is correct. | Resolved | Done in reference |
-| 14 | Provide a video with uncut rollouts | If the authors intend to provide a video, it would be useful to include uncut rollouts showing both successes and failures, especially near-success disturbance cases, one-step action selection behavior, and real-robot timing. A video would be particularly important because the paper's main claims concern real-world garment flattening quality and deployment. | Resolved | Performance videos already submitted, narrated slide video to follow; the PDF now points to them via a first-page `\thanks` footnote and a sentence at the end of §I |
+| 14 | Provide a video with uncut rollouts | If the authors intend to provide a video, it would be useful to include uncut rollouts showing both successes and failures, especially near-success disturbance cases, one-step action selection behavior, and real-robot timing. A video would be particularly important because the paper's main claims concern real-world garment flattening quality and deployment. | **Partial** | Videos submitted and the narrated slide video built; §I points to them. The first-page `\thanks` footnote is **not** in the manuscript, and the footage is a 10x highlight cut rather than the uncut real-speed rollouts asked for — see comment 14 below |
 | 15 | Component novelty is limited; the work is system integration | The novelty of the individual components is limited. RSSM-style latent dynamics, goal conditioning, CEM planning, diffusion policy data collection, and coverage-based rewards are all natural extensions of existing methods. The paper's main effort is system integration rather than a clearly new algorithmic principle. | Resolved | Same as #1 |
 | 16 | Weaken the "human-level" claim in title and abstract | The claim of 'human-level' garment flattening is also not well supported. In real-world experiments, human operators still substantially outperform LaGarNet in success rate and final metrics. The method also performs poorly on more challenging out-of-distribution garments. Therefore, the title and abstract should be significantly weakened. | Resolved | Title; abstract; §I ¶5 |
 | 17 | Separate architecture, reward, data and heuristics | The manuscript still overstates the contribution in several places. The authors should more clearly separate what is due to the model architecture, the reward design, the data collection strategy, and the workspace/action-sampling heuristics. | Resolved | §IV-C closing paragraph; §V |
@@ -74,7 +74,7 @@ corrupts the hyperref PDF bookmarks. The renames are recorded here instead.
 | 23 | Discuss runtime more critically | The runtime should also be discussed more critically. Although LaGarNet is faster than MEDOR, the full real-world execution time per step is still high, which limits practical deployment. | Resolved | §IV-D closing paragraph; Table I |
 | 24 | "Human-level" is an overclaim against the Human Policy | The term 'human-level' is an overclaim. In Table VI, LaGarNet performs substantially worse than the Human Policy. Therefore, I do not think the results can be described as human-level. | Resolved | Same as #16 |
 | 25 | Hybrid-primitive complexity claim is unquantified | In the Related Work section, the paper claims that 'the incorporation of these hybrid strategies introduces additional complexity to the action space for data collection and control itself.' However, the paper does not quantitatively analyze the trade-off between such complexity and performance, nor does it compare against these methods. | Resolved | §II ¶2: the unsupported complexity claim is removed and replaced by an explicit scope statement |
-| 26 | Clarify how GC-RSSM differs from prior goal-conditioned RSSMs | GC-RSSM can be viewed as adding goal conditioning to an existing RSSM framework, while the coverage-alignment reward is a linear combination of coverage improvement and Max-IoU improvement. However, the paper does not sufficiently clarify the essential differences between the proposed method and related prior methods. | Resolved | §II-D; contribution 1; §II-B |
+| 26 | Clarify how GC-RSSM differs from prior goal-conditioned RSSMs | GC-RSSM can be viewed as adding goal conditioning to an existing RSSM framework, while the coverage-alignment reward is a linear combination of coverage improvement and Max-IoU improvement. However, the paper does not sufficiently clarify the essential differences between the proposed method and related prior methods. | **Partial** | §II-D; contribution 1; §II-B. The distinction is drawn, but in one sentence rather than the explicit GC-Dreamer/GCP contrast the comment invites — see comment 26 below |
 | 27 | Reliance on a pre-captured goal image | The method depends on the target state of the garment, which is a relatively strong assumption in practical scenarios. In general, the system would not have access to a pre-captured flattened goal image. The paper should discuss how performance would be affected when using a canonical goal or a goal image generated by a generative model, which would make the method more practically useful. | Resolved | §IV preamble (the goal is canonical, captured once per garment, augmented in training); §IV-D limitation (generated goals out of scope) |
 | 28 | Table I lists MPC horizon 1 but the paper claims long-horizon | Table I states that LaGarNet uses an MPC horizon of 1. However, the experimental conclusions claim that LaGarNet has advantages for long-horizon dynamics and tasks. The paper lacks comparison experiments with different MPC horizons. | Resolved | Same as #4 and #18 |
 
@@ -109,8 +109,9 @@ metric definitions at the head of §IV.
 ### 4. Horizon ablation
 > The paper should either add an ablation over MPC horizons, e.g., (H=1,2,3,5), reporting both performance and runtime, or explicitly justify why (H=1) is chosen. Possible explanations might include compounding model error, the dense step-wise reward, quasi-static PnP dynamics, or computational constraints. Without such evidence or explanation, claims about multi-step planning or long-horizon reasoning should be weakened.
 
-**Resolved.** Figure 5(f) sweeps exactly H ∈ {1, 2, 3, 5}. Success falls monotonically — 50.0 %,
-40.0 %, 26.7 %, 20.0 % — while mean planning time rises from 4.10 s to 5.18 s. §IV-C gives the
+**Resolved.** Figure 5(f) sweeps H ∈ {1, 2, 3, 4, 5}. Success falls monotonically — 73.3 %, 63.3 %,
+53.3 %, 36.7 %, 30.0 % — while mean planning time rises from 4.17 s at H = 1 to 5.33 s at H = 5
+(4.53, 4.78 and 5.06 s at H = 2, 3, 4). §IV-C gives the
 reviewer's own explanation: one primitive causes one large deformation, so prediction error
 compounds along multi-step rollouts and lookahead costs more than it buys. The appendix adds a
 second reason: mask rejection constrains only the first action of a plan, because the cloth state
@@ -147,13 +148,15 @@ inlined in §IV-A1, so there is no longer a separate MEDOR column implying a dif
 ### 7. Table III caption and the 20-versus-30-step discrepancy
 > Table III reports blocks for 5, 10, 20, and 30 steps, but the caption does not clearly state whether SR means success exactly at that step or success achieved at least once within the first (N) actions. Based on the metric definition, the intended interpretation seems to be cumulative performance up to the horizon, but this should be explicitly stated. The paper should also clarify why dataset trajectories are described as up to 20 steps while Table III reports 30-step evaluation.
 
-**Resolved.** Both captions now state the rule. Figure 3(a): the columns pair "the cumulative *Max*
-(the best value reached within the first N actions, and for SR the fraction of trials succeeding at
-any step up to N) with the *Last* value at step N itself". Table II carries the equivalent sentence.
+**Resolved.** Both captions now state the rule. Figure 3(a): "Each horizon $N \in \{5, 10, 20, 30\}$
+spans two columns: *Max* (the highest value achieved within $N$ steps, representing cumulative
+success for SR) and *Last* (the exact value at step $N$)". Table II carries the equivalent sentence
+for the cumulative reading, and states that it reports no final-step column (see comment 6).
 
 On the horizons, §IV now explains the choice: a human operator comfortably flattens every garment
-type well within 20 actions, and 20 steps already separate LaGarNet from the baselines, so a longer
-headline horizon would add evaluation time without changing the ranking. Simulated episodes run on
+type well within 20 actions, which is "already sufficient to show the difference between LaGarNet
+and the baselines", so a longer headline horizon would add evaluation time without changing the
+ranking. Simulated episodes run on
 to 30 steps because that costs almost nothing in an automated simulator and shows how each policy
 behaves once the easy gains are exhausted. Real-world trials stop at 20 because a physical step
 costs about 25 s plus a manual reset.
@@ -172,8 +175,8 @@ that makes this position defensible.
 > The ablations examine latent dynamics, reward design, data size, and data composition, but they do not test the planning horizon. Given that the central distinction of the paper is the use of a learned world model for action selection, this is a major omission. A horizon ablation would also help determine whether the learned latent dynamics are actually useful for multi-step prediction/control or mainly useful as a one-step action scorer.
 
 **Resolved.** The planning ablation is now the sixth ablation axis (Figure 5(f)) and also includes
-an **unconstrained** variant at H = 1 that removes mask rejection. That variant collapses to 6.7 %
-success and 33.8 final IoU, which answers the underlying question directly: the constrained action
+an **unconstrained** variant at H = 1 that removes mask rejection. That variant collapses to 0.0 %
+success and 51.0 final IoU, which answers the underlying question directly: the constrained action
 space matters far more than lookahead depth. §IV-C states this conclusion rather than hiding it.
 
 ### 10. Test-time procedure
@@ -223,22 +226,30 @@ published record. BibTeX now runs with zero warnings.
 ### 14. Video
 > If the authors intend to provide a video, it would be useful to include uncut rollouts showing both successes and failures, especially near-success disturbance cases, one-step action selection behavior, and real-robot timing. A video would be particularly important because the paper's main claims concern real-world garment flattening quality and deployment.
 
-**Resolved.** Performance videos have been submitted and a narrated slide video will follow, and
-the PDF now tells the reader they exist. Two additions:
+**Partially resolved.** Performance videos have been submitted and a narrated slide video is built
+(`slides/lagarnet-talk.mp4`), and the manuscript now tells the reader the material exists. What is
+actually in `main.tex` is one sentence, at the end of §I after the contributions:
 
-- First-page `\thanks` footnote, IEEE house style: "This paper has supplementary downloadable
-  material provided by the authors. The material consists of several videos of real-world
-  garment-flattening rollouts with LaGarNet." 
-- End of §I, after the four contributions: "Supplementary video material accompanies this paper,
-  showing real-world rollouts of LaGarNet flattening the four garment types."
+> "We submit a supplementary document covering the full architecture, hyperparameters, planning
+> procedure and real-robot setup, together with video material showing real-world rollouts of
+> LaGarNet flattening the four garment types."
+
+**Still outstanding, two items.**
+
+1. There is **no first-page `\thanks` footnote** announcing the supplementary material. IEEE house
+   style wants one, and it is the first place an editor looks. Suggested text: *"This paper has
+   supplementary downloadable material provided by the authors. The material consists of several
+   videos of real-world garment-flattening rollouts with LaGarNet."*
+2. The footage on hand is **10× sped-up highlight rollouts**, not what the comment asked for. The
+   reviewer specifically pre-empted a highlight reel: they asked for uncut rollouts at true speed,
+   including failures and near-success disturbances. Until that footage is cut, the §I sentence
+   above must stay as it is — do **not** promote it to the stronger wording:
 
 > "Supplementary video material accompanies this paper, showing uncut real-world rollouts of
 > LaGarNet flattening the four garment types at true speed, including failure cases and the
 > near-success disturbances analysed in Section V."
 
-Trim whichever clause the footage does not support. If the current cut is a highlight reel rather
-than uncut rollouts, a re-cut is cheaper than arguing the point — a highlight reel is precisely
-what this reviewer pre-empted.
+A re-cut from the raw captures is cheaper than arguing the point.
 
 ### 15. Limited component novelty
 > The novelty of the individual components is limited. RSSM-style latent dynamics, goal conditioning, CEM planning, diffusion policy data collection, and coverage-based rewards are all natural extensions of existing methods. The paper's main effort is system integration rather than a clearly new algorithmic principle.
@@ -256,7 +267,7 @@ Goal-Conditioned Recurrent State-Space Models" to "LaGarNet: Latent World Models
 Pick-and-Place Garment Flattening". The abstract was rewritten and makes no human comparison at
 all; it now claims only parity with mesh-based methods at five times fewer parameters. §I says
 LaGarNet "is also competitive with human operators under the same single-arm constraint, although
-humans retain the highest success rate at long horizons".
+humans succeed more often at long horizons".
 
 ### 17. Attribution of the gains
 > The manuscript still overstates the contribution in several places. The authors should more clearly separate what is due to the model architecture, the reward design, the data collection strategy, and the workspace/action-sampling heuristics.
@@ -346,11 +357,10 @@ evidence, so the assertion is gone. §II ¶2 no longer says hybrids "complicate 
 and control"; it now states the scope decision instead:
 
 > "Hybrids of these three primitives are highly effective for diverse garment manipulation. We
-> neither evaluate nor compare against them and make no claim about their cost: our question is
-> whether a latent world model learns useful dynamics under quasi-static primitives, and fixing a
-> single primitive isolates that question from the additional design choices a hybrid action space
-> introduces. […] We therefore focus on PnP primitives and on the learning aspects of the latent
-> dynamic model, leaving hybrid primitives to future work."
+> adopt a single-arm pick-and-place setup, which isolates our research question from the additional
+> design choices and challenges introduced by a hybrid action space with a dual-arm setup. We
+> therefore neither evaluate nor compare our method against more complex setups, leaving hybrid
+> primitives to future work."
 
 **Response-letter line.** Hybrid primitives are outside the scope of this paper. The question we
 set out to answer is whether latent world models function in a complex quasi-static setup, and
@@ -361,11 +371,11 @@ unsupported complexity claim rather than defend it with a study the paper does n
 ### 26. GC-RSSM versus prior goal-conditioned RSSMs
 > GC-RSSM can be viewed as adding goal conditioning to an existing RSSM framework, while the coverage-alignment reward is a linear combination of coverage improvement and Max-IoU improvement. However, the paper does not sufficiently clarify the essential differences between the proposed method and related prior methods.
 
-**Resolved.** §II-D now draws the distinction in one place: "We instead condition the goal directly
-on the RSSM's latent state inference, so it enters both the posterior and the prior and the world
-model itself becomes goal-aware. This is the essential difference from other methods — GC-Dreamer
-keeps a goal-agnostic world model and shows the goal only to the policy, whilst GCP feeds it to a
-separate subgoal predictor rather than to the dynamics." Contribution 1 repeats the delta, and the
+**Partially resolved.** §II-D describes both prior methods and then draws the distinction in a single
+sentence: "Duan et al. present the goal-directed exploration algorithm MUN and devise GC-Dreamer as a
+baseline, but condition the goal on its actor-critic networks instead of the world model. Unlike the
+above methods, we condition the RSSM's latent inference on the goal directly; Section IV-C isolates
+this choice against other goal-conditioning variants." Contribution 1 repeats the delta, and the
 ablation backs it empirically: RSSM-GC-I and RSSM-GC-IO concatenate the goal image to the input
 without changing the dynamics, and are separated from GC-RSSM by prior reconstruction quality.
 
@@ -381,14 +391,15 @@ goal, not a per-trial capture, and the manuscript never said so. §IV now states
 explicitly:
 
 > "This goal is canonical rather than trial-specific: one image per garment, captured once and
-> reused across every initial state and every trial, never re-captured during an episode. Training
-> augments the goal observation independently of the current one (Appendix B-B), so the policy
-> conditions on a canonical flattened configuration rather than on a pixel-exact target."
+> reused across every trial."
+
+with the independent goal augmentation stated in the same paragraph ("due to the independent
+augmentation on the goal and current images during training").
 
 The §IV-D limitations paragraph adds the honest boundary:
 
 > "LaGarNet also assumes access to a canonical flattened image of each garment; this is a one-off
-> capture rather than a per-trial demonstration, and the goal augmentation of Appendix B-B keeps
+> capture rather than a per-trial demonstration, and our goal augmentation during training keeps
 > the policy from depending on its exact pose, but removing the assumption altogether — for
 > instance by synthesising the goal with a generative model — is outside the scope of this study."
 
@@ -427,10 +438,12 @@ compares the configurations as published and is not a controlled model-size stud
 inference-time argument carry the efficiency claim. Optionally soften "five times fewer parameters"
 to a joint statement about parameters *and* inference cost, which is what the evidence supports.
 
-### Comment 14 — video is now pointed in the manuscript
-The PDF now announces the supplementary material (first-page footnote plus a sentence at the end
-of §I), so the manuscript side is done. §4, comment 14 holds a sharper §I sentence ready
-to drop in once that is confirmed.
+### Comment 14 — the video is pointed at, but two things are still open
+§I announces the supplementary material, so the reader is told it exists. Two gaps remain: there is
+no first-page `\thanks` footnote (IEEE house style, and the first place an editor looks), and the
+footage is a 10x sped-up highlight cut rather than the uncut real-speed rollouts with failures that
+the reviewer explicitly pre-empted. §4, comment 14 holds both the footnote text and the stronger §I
+sentence, ready to drop in once the re-cut exists.
 
 ### Comments 25 and 27 — closed by scoping, not by new experiments
 Both are now addressed in the manuscript, but neither is answered with an experiment, so the

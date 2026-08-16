@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2024.7.6)  14 AUG 2026 17:42
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2024.7.6)  16 AUG 2026 17:18
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1096,24 +1096,24 @@ File: l3backend-pdftex.def 2024-01-04 L3 backend support: PDF output (pdfTeX)
 (./main.aux)
 \openout1 = `main.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 195.
-LaTeX Font Info:    ... okay on input line 195.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 201.
+LaTeX Font Info:    ... okay on input line 201.
 
 -- Lines per column: 58 (exact).
 (/usr/share/texlive/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
@@ -1139,7 +1139,7 @@ File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Liv
 e
 ))
 \c@lstlisting=\count355
-Package hyperref Info: Link coloring OFF on input line 195.
+Package hyperref Info: Link coloring OFF on input line 201.
 
 (./main.out) (./main.out
 pdfTeX warning (Object streams): \pdfobjcompresslevel > 0 requires PDF-1.5 or g
@@ -1151,13 +1151,13 @@ reater. Object streams disabled now.
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: float package is loaded.
 Package caption Info: End \AtBeginDocument code.
-LaTeX Font Info:    Calculating math sizes for size <11> on input line 198.
-LaTeX Font Info:    Trying to load font information for U+msa on input line 198
+LaTeX Font Info:    Calculating math sizes for size <11> on input line 204.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 204
 .
  (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 198
+LaTeX Font Info:    Trying to load font information for U+msb on input line 204
 .
 
 (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
@@ -1167,24 +1167,24 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 File: plots/combined_garments_4x4_with_goals.png Graphic file (type png)
 <use plots/combined_garments_4x4_with_goals.png>
 Package pdftex.def Info: plots/combined_garments_4x4_with_goals.png  used on in
-put line 213.
+put line 219.
 (pdftex.def)             Requested size: 154.80157pt x 154.13875pt.
 <plots/lagarnet-real-garments.jpg, id=181, 4172.58875pt x 3023.295pt>
 File: plots/lagarnet-real-garments.jpg Graphic file (type jpg)
 <use plots/lagarnet-real-garments.jpg>
 Package pdftex.def Info: plots/lagarnet-real-garments.jpg  used on input line 2
-20.
+26.
 (pdftex.def)             Requested size: 214.13654pt x 155.14093pt.
 <plots/lagarnet-real-setup.jpg, id=182, 899.36pt x 1204.5pt>
 File: plots/lagarnet-real-setup.jpg Graphic file (type jpg)
 <use plots/lagarnet-real-setup.jpg>
-Package pdftex.def Info: plots/lagarnet-real-setup.jpg  used on input line 227.
+Package pdftex.def Info: plots/lagarnet-real-setup.jpg  used on input line 233.
 
 (pdftex.def)             Requested size: 114.55206pt x 153.4109pt.
 <plots/episode_4_combined.png, id=183, 3034.8582pt x 433.62pt>
 File: plots/episode_4_combined.png Graphic file (type png)
 <use plots/episode_4_combined.png>
-Package pdftex.def Info: plots/episode_4_combined.png  used on input line 239.
+Package pdftex.def Info: plots/episode_4_combined.png  used on input line 245.
 (pdftex.def)             Requested size: 508.26031pt x 72.61607pt.
 CUTED [- LAST -]
 Extra skip:0.0pt
@@ -1203,7 +1203,8 @@ CUTED [rightcolumn badness]: 0
 
 
  <./plots/combined_garments_4x4_with_goals.png> <./plots/lagarnet-real-garments
-.jpg> <./plots/lagarnet-real-setup.jpg> <./plots/episode_4_combined.png>] [2]
+.jpg> <./plots/lagarnet-real-setup.jpg> <./plots/episode_4_combined.png>] [2] [
+3] [4]
 Missing character: There is no ; in font nullfont!
 Missing character: There is no ; in font nullfont!
 Missing character: There is no ; in font nullfont!
@@ -1246,172 +1247,170 @@ Missing character: There is no ; in font nullfont!
 Missing character: There is no ; in font nullfont!
 Missing character: There is no ; in font nullfont!
 Missing character: There is no ; in font nullfont!
-<plots/reward_sensitivity_3x5.png, id=341, 1025.7522pt x 781.2387pt>
+<plots/reward_sensitivity_3x5.png, id=394, 1025.7522pt x 781.2387pt>
 File: plots/reward_sensitivity_3x5.png Graphic file (type png)
 <use plots/reward_sensitivity_3x5.png>
-Package pdftex.def Info: plots/reward_sensitivity_3x5.png  used on input line 4
-73.
+Package pdftex.def Info: plots/reward_sensitivity_3x5.png  used on input line 5
+50.
 (pdftex.def)             Requested size: 165.12378pt x 125.76367pt.
-<plots/goal.jpg, id=342, 46.2528pt x 46.2528pt>
+<plots/goal.jpg, id=395, 46.2528pt x 46.2528pt>
 File: plots/goal.jpg Graphic file (type jpg)
 <use plots/goal.jpg>
-Package pdftex.def Info: plots/goal.jpg  used on input line 642.
+Package pdftex.def Info: plots/goal.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-<plots/input.jpg, id=343, 46.2528pt x 46.2528pt>
+<plots/input.jpg, id=396, 46.2528pt x 46.2528pt>
 File: plots/input.jpg Graphic file (type jpg)
 <use plots/input.jpg>
-Package pdftex.def Info: plots/input.jpg  used on input line 642.
+Package pdftex.def Info: plots/input.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-<plots/recon.jpg, id=344, 46.2528pt x 46.2528pt>
+<plots/recon.jpg, id=397, 46.2528pt x 46.2528pt>
 File: plots/recon.jpg Graphic file (type jpg)
 <use plots/recon.jpg>
-Package pdftex.def Info: plots/recon.jpg  used on input line 642.
+Package pdftex.def Info: plots/recon.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-<plots/output.jpg, id=345, 46.2528pt x 46.2528pt>
+<plots/output.jpg, id=398, 46.2528pt x 46.2528pt>
 File: plots/output.jpg Graphic file (type jpg)
 <use plots/output.jpg>
-Package pdftex.def Info: plots/output.jpg  used on input line 642.
+Package pdftex.def Info: plots/output.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-<plots/original_obs.jpg, id=346, 46.2528pt x 46.2528pt>
+<plots/original_obs.jpg, id=399, 46.2528pt x 46.2528pt>
 File: plots/original_obs.jpg Graphic file (type jpg)
 <use plots/original_obs.jpg>
-Package pdftex.def Info: plots/original_obs.jpg  used on input line 642.
+Package pdftex.def Info: plots/original_obs.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-<plots/original_goal.jpg, id=347, 46.2528pt x 46.2528pt>
+<plots/original_goal.jpg, id=400, 46.2528pt x 46.2528pt>
 File: plots/original_goal.jpg Graphic file (type jpg)
 <use plots/original_goal.jpg>
-Package pdftex.def Info: plots/original_goal.jpg  used on input line 642.
+Package pdftex.def Info: plots/original_goal.jpg  used on input line 719.
 (pdftex.def)             Requested size: 51.2177pt x 51.2177pt.
-
-LaTeX Warning: `!h' float specifier changed to `!ht'.
-
-[3] [4 <./plots/reward_sensitivity_3x5.png> <./plots/goal.jpg> <./plots/input.j
-pg> <./plots/recon.jpg> <./plots/output.jpg> <./plots/original_obs.jpg> <./plot
-s/original_goal.jpg>] [5]
-<plots/lagarnet_flattening_heatmap.png, id=432, 1204.2591pt x 910.3611pt>
+[5 <./plots/reward_sensitivity_3x5.png> <./plots/goal.jpg> <./plots/input.jpg> 
+<./plots/recon.jpg> <./plots/output.jpg> <./plots/original_obs.jpg> <./plots/or
+iginal_goal.jpg>]
+<plots/lagarnet_flattening_heatmap.png, id=427, 1245.2121pt x 1009.6119pt>
 File: plots/lagarnet_flattening_heatmap.png Graphic file (type png)
 <use plots/lagarnet_flattening_heatmap.png>
 Package pdftex.def Info: plots/lagarnet_flattening_heatmap.png  used on input l
-ine 787.
-(pdftex.def)             Requested size: 314.76031pt x 237.93849pt.
-<plots/multi_arena_radar_2x2.png, id=433, 722.2182pt x 874.2261pt>
+ine 781.
+(pdftex.def)             Requested size: 309.60315pt x 251.01587pt.
+<plots/multi_arena_radar_2x2.png, id=428, 722.2182pt x 874.2261pt>
 File: plots/multi_arena_radar_2x2.png Graphic file (type png)
 <use plots/multi_arena_radar_2x2.png>
-Package pdftex.def Info: plots/multi_arena_radar_2x2.png  used on input line 79
-0.
-(pdftex.def)             Requested size: 196.08252pt x 237.35149pt.
-<plots/progression_nc_vs_iou.png, id=467, 578.16pt x 433.62pt>
+Package pdftex.def Info: plots/multi_arena_radar_2x2.png  used on input line 78
+4.
+(pdftex.def)             Requested size: 206.39685pt x 249.83734pt.
+<plots/progression_nc_vs_iou.png, id=462, 578.16pt x 433.62pt>
 File: plots/progression_nc_vs_iou.png Graphic file (type png)
 <use plots/progression_nc_vs_iou.png>
-Package pdftex.def Info: plots/progression_nc_vs_iou.png  used on input line 84
-0.
+Package pdftex.def Info: plots/progression_nc_vs_iou.png  used on input line 83
+4.
 (pdftex.def)             Requested size: 134.15717pt x 100.61711pt.
-<plots/metrics_radar.png, id=468, 433.62pt x 433.62pt>
+<plots/metrics_radar.png, id=463, 433.62pt x 433.62pt>
 File: plots/metrics_radar.png Graphic file (type png)
 <use plots/metrics_radar.png>
-Package pdftex.def Info: plots/metrics_radar.png  used on input line 844.
+Package pdftex.def Info: plots/metrics_radar.png  used on input line 838.
 (pdftex.def)             Requested size: 100.62378pt x 100.62372pt.
  [6] [7 <./plots/lagarnet_flattening_heatmap.png> <./plots/multi_arena_radar_2x
 2.png>]
-<plots/ablation_latent_bar.png, id=491, 553.3473pt x 408.5664pt>
+<plots/ablation_latent_bar.png, id=486, 553.3473pt x 408.5664pt>
 File: plots/ablation_latent_bar.png Graphic file (type png)
 <use plots/ablation_latent_bar.png>
-Package pdftex.def Info: plots/ablation_latent_bar.png  used on input line 899.
+Package pdftex.def Info: plots/ablation_latent_bar.png  used on input line 893.
 
 (pdftex.def)             Requested size: 108.35953pt x 80.00365pt.
-<plots/ablation_reward_bar.png, id=492, 553.3473pt x 408.5664pt>
+<plots/ablation_reward_bar.png, id=487, 553.3473pt x 408.5664pt>
 File: plots/ablation_reward_bar.png Graphic file (type png)
 <use plots/ablation_reward_bar.png>
-Package pdftex.def Info: plots/ablation_reward_bar.png  used on input line 902.
+Package pdftex.def Info: plots/ablation_reward_bar.png  used on input line 896.
 
 (pdftex.def)             Requested size: 108.35953pt x 80.00365pt.
-<plots/ablation_data_size_line.png, id=493, 550.6974pt x 406.8801pt>
+<plots/ablation_data_size_line.png, id=488, 550.6974pt x 406.8801pt>
 File: plots/ablation_data_size_line.png Graphic file (type png)
 <use plots/ablation_data_size_line.png>
 Package pdftex.def Info: plots/ablation_data_size_line.png  used on input line 
-908.
+902.
 (pdftex.def)             Requested size: 108.35953pt x 80.05838pt.
-<plots/ablation_data_ratio_bar.png, id=494, 553.3473pt x 408.5664pt>
+<plots/ablation_data_ratio_bar.png, id=489, 553.3473pt x 408.5664pt>
 File: plots/ablation_data_ratio_bar.png Graphic file (type png)
 <use plots/ablation_data_ratio_bar.png>
 Package pdftex.def Info: plots/ablation_data_ratio_bar.png  used on input line 
-911.
+905.
 (pdftex.def)             Requested size: 108.35953pt x 80.00365pt.
-<plots/recon-all-garments.png, id=495, 688.0104pt x 585.1461pt>
+<plots/recon-all-garments.png, id=490, 688.0104pt x 585.1461pt>
 File: plots/recon-all-garments.png Graphic file (type png)
 <use plots/recon-all-garments.png>
-Package pdftex.def Info: plots/recon-all-garments.png  used on input line 920.
+Package pdftex.def Info: plots/recon-all-garments.png  used on input line 914.
 (pdftex.def)             Requested size: 227.04126pt x 193.0988pt.
-<plots/ablation_mpc_horizon.png, id=496, 714.0276pt x 427.3566pt>
+<plots/ablation_mpc_horizon.png, id=491, 714.0276pt x 427.3566pt>
 File: plots/ablation_mpc_horizon.png Graphic file (type png)
 <use plots/ablation_mpc_horizon.png>
-Package pdftex.def Info: plots/ablation_mpc_horizon.png  used on input line 932
+Package pdftex.def Info: plots/ablation_mpc_horizon.png  used on input line 926
 .
-(pdftex.def)             Requested size: 208.05174pt x 124.52364pt.
- [8 <./plots/progression_nc_vs_iou.png> <./plots/metrics_radar.png>] [9 <./plot
-s/ablation_latent_bar.png> <./plots/ablation_reward_bar.png> <./plots/ablation_
-data_size_line.png> <./plots/ablation_data_ratio_bar.png> <./plots/recon-all-ga
-rments.png> <./plots/ablation_mpc_horizon.png>]
-<plots/lagarnet-failure.jpg, id=544, 1335.99126pt x 1217.54875pt>
+(pdftex.def)             Requested size: 163.47084pt x 97.84pt.
+ [8 <./plots/progression_nc_vs_iou.png> <./plots/metrics_radar.png>]
+<plots/lagarnet-failure.jpg, id=526, 1335.99126pt x 1217.54875pt>
 File: plots/lagarnet-failure.jpg Graphic file (type jpg)
 <use plots/lagarnet-failure.jpg>
-Package pdftex.def Info: plots/lagarnet-failure.jpg  used on input line 1028.
+Package pdftex.def Info: plots/lagarnet-failure.jpg  used on input line 1022.
 (pdftex.def)             Requested size: 188.24052pt x 171.55177pt.
 
-Package subcaption Warning: `subtable' is treated as `subfigure'
-(subcaption)                 on input line 1037.
-
 
 Package subcaption Warning: `subtable' is treated as `subfigure'
-(subcaption)                 on input line 1063.
+(subcaption)                 on input line 1031.
 
 
 Package subcaption Warning: `subtable' is treated as `subfigure'
-(subcaption)                 on input line 1080.
+(subcaption)                 on input line 1057.
 
-[10 <./plots/lagarnet-failure.jpg>] [11] (./refs-main.tex [12])
-Overfull \hbox (3.19011pt too wide) in paragraph at lines 1202--1202
+
+Package subcaption Warning: `subtable' is treated as `subfigure'
+(subcaption)                 on input line 1074.
+
+[9 <./plots/ablation_latent_bar.png> <./plots/ablation_reward_bar.png> <./plots
+/ablation_data_size_line.png> <./plots/ablation_data_ratio_bar.png> <./plots/re
+con-all-garments.png> <./plots/ablation_mpc_horizon.png>] [10 <./plots/lagarnet
+-failure.jpg>] (./refs-main.tex [11]) [12]
+Overfull \hbox (3.19011pt too wide) in paragraph at lines 1196--1196
 []|\OT1/ptm/b/n/8 Hyperparameter|  
  []
 
-[13] [14]
-<plots/normalized_coverage_distribution.png, id=635, 554.07pt x 409.2891pt>
+[13]
+<plots/normalized_coverage_distribution.png, id=620, 554.07pt x 409.2891pt>
 File: plots/normalized_coverage_distribution.png Graphic file (type png)
 <use plots/normalized_coverage_distribution.png>
 Package pdftex.def Info: plots/normalized_coverage_distribution.png  used on in
-put line 1281.
+put line 1275.
 (pdftex.def)             Requested size: 190.91748pt x 141.03001pt.
-<plots/max_iou_distribution.png, id=636, 554.07pt x 408.8073pt>
+<plots/max_iou_distribution.png, id=621, 554.07pt x 408.8073pt>
 File: plots/max_iou_distribution.png Graphic file (type png)
 <use plots/max_iou_distribution.png>
 Package pdftex.def Info: plots/max_iou_distribution.png  used on input line 128
-7.
+1.
 (pdftex.def)             Requested size: 190.91748pt x 140.864pt.
-<plots/colour_distribution.png, id=637, 604.659pt x 697.6464pt>
+<plots/colour_distribution.png, id=622, 604.659pt x 697.6464pt>
 File: plots/colour_distribution.png Graphic file (type png)
 <use plots/colour_distribution.png>
-Package pdftex.def Info: plots/colour_distribution.png  used on input line 1293
+Package pdftex.def Info: plots/colour_distribution.png  used on input line 1287
 .
 (pdftex.def)             Requested size: 123.84283pt x 142.88004pt.
-<plots/tightest_cropped_plot.png, id=644, 1795.70876pt x 1477.52pt>
+<plots/tightest_cropped_plot.png, id=629, 1795.70876pt x 1477.52pt>
 File: plots/tightest_cropped_plot.png Graphic file (type png)
 <use plots/tightest_cropped_plot.png>
 Package pdftex.def Info: plots/tightest_cropped_plot.png  used on input line 13
-10.
+04.
 (pdftex.def)             Requested size: 154.80157pt x 127.35733pt.
-<plots/transfer-hueristic-single.jpg, id=645, 1284.8pt x 702.625pt>
+<plots/transfer-hueristic-single.jpg, id=630, 1284.8pt x 702.625pt>
 File: plots/transfer-hueristic-single.jpg Graphic file (type jpg)
 <use plots/transfer-hueristic-single.jpg>
 Package pdftex.def Info: plots/transfer-hueristic-single.jpg  used on input lin
-e 1317.
+e 1311.
 (pdftex.def)             Requested size: 232.19843pt x 126.98166pt.
 LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 1
-348.
+342.
  (/usr/share/texlive/texmf-dist/tex/latex/psnfss/ot1pcr.fd
 File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
-) [15 <./plots/normalized_coverage_distribution.png> <./plots/max_iou_distribut
-ion.png> <./plots/colour_distribution.png>] [16 <./plots/tightest_cropped_plot.
-png> <./plots/transfer-hueristic-single.jpg>] (./refs-appendix.tex)
+) [14] [15 <./plots/normalized_coverage_distribution.png> <./plots/max_iou_dist
+ribution.png> <./plots/colour_distribution.png> <./plots/tightest_cropped_plot.
+png> <./plots/transfer-hueristic-single.jpg>] (./refs-appendix.tex [16])
 \tf@thm=\write5
 \openout5 = `main.thm'.
 
@@ -1426,13 +1425,13 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: FE45B2943ABE32343D5B41780C6D6F7F;7909.
  ) 
 Here is how much of TeX's memory you used:
- 33804 strings out of 476106
- 660701 string characters out of 5793934
- 1996975 words of memory out of 5000000
- 55112 multiletter control sequences out of 15000+600000
+ 33802 strings out of 476106
+ 660663 string characters out of 5793934
+ 1993975 words of memory out of 5000000
+ 55113 multiletter control sequences out of 15000+600000
  614019 words of font info for 155 fonts, out of 8000000 for 9000
  59 hyphenation exceptions out of 8191
- 102i,18n,107p,2028b,1479s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 102i,18n,107p,2028b,1477s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></us
 r/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx8.pfb></usr/share
 /texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texliv
@@ -1463,9 +1462,9 @@ ve/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/f
 onts/type1/urw/times/utmbi8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw
 /times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.
 pfb>
-Output written on main.pdf (17 pages, 13159155 bytes).
+Output written on main.pdf (17 pages, 13303781 bytes).
 PDF statistics:
- 853 PDF objects out of 1000 (max. 8388607)
- 147 named destinations out of 1000 (max. 500000)
+ 844 PDF objects out of 1000 (max. 8388607)
+ 144 named destinations out of 1000 (max. 500000)
  476 words of extra memory for PDF output out of 10000 (max. 10000000)
 

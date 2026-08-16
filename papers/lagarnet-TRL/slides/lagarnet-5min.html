@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LaGarNet — conference talk</title>
+<style>
+:root{
+  --bg:#ffffff; --panel:#f5f7fa; --line:#d8dde5;
+  --ink:#1a1a1a; --dim:#4a4a4a; --faint:#8a94a3;
+  --accent:#1b4b8f; --accent2:#8a5a00; --good:#1f7a4d; --bad:#a33232;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);overflow:hidden;
+  font-family:"Helvetica Neue",Helvetica,Arial,"Liberation Sans",sans-serif;color:var(--ink);
+  -webkit-font-smoothing:antialiased}
+
+/* ---- fixed design surface, scaled to the viewport ---- */
+#stage{position:fixed;inset:0;display:grid;place-items:center}
+#deck{width:1280px;height:720px;position:relative;transform-origin:center center}
+
+.slide{position:absolute;inset:0;display:none;flex-direction:column;
+  padding:52px 64px 64px;background:var(--bg)}
+.slide.active{display:flex}
+
+h1{font-size:60px;font-weight:700;letter-spacing:-1.2px;line-height:1.05}
+h2{font-size:34px;font-weight:650;letter-spacing:-.4px;margin-bottom:6px}
+.kicker{font-size:13px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;
+  color:var(--accent);margin-bottom:14px}
+.rule{height:2px;width:60px;background:var(--accent);margin:14px 0 26px}
+p,li{font-size:21px;line-height:1.5;color:var(--dim)}
+strong{color:var(--ink);font-weight:650}
+em{color:var(--accent);font-style:normal;font-weight:650}
+.cite{font-size:.82em;color:var(--faint);white-space:nowrap}
+ul{list-style:none;display:flex;flex-direction:column;gap:14px}
+li{position:relative;padding-left:24px}
+li:before{content:"";position:absolute;left:0;top:12px;width:7px;height:7px;
+  border-radius:50%;background:var(--accent)}
+
+.body{flex:1;display:flex;gap:44px;align-items:center;min-height:0}
+.col{flex:1;min-width:0}
+.figcard{background:#fff;border:1px solid var(--line);border-radius:6px;
+  position:relative;overflow:hidden}
+/* absolute inset so the image box resolves against a definite height; a percentage
+   height on a static child silently falls back to auto and clips tall figures */
+.figcard img{position:absolute;left:12px;top:12px;
+  width:calc(100% - 24px);height:calc(100% - 24px);object-fit:contain}
+.figlabel{font-size:15px;color:var(--faint);text-align:center;margin-top:8px}
+.caption{font-size:15px;color:var(--faint);margin-top:10px;text-align:center;line-height:1.4}
+
+/* ---- title slide ---- */
+#s1{justify-content:center}
+#s1 .sub{font-size:25px;color:var(--dim);margin-top:16px;max-width:960px;line-height:1.35}
+#s1 .hook{font-size:21px;color:var(--ink);margin-top:26px;max-width:940px;line-height:1.4;
+  padding-left:18px;border-left:3px solid var(--accent)}
+.authors{margin-top:44px;display:flex;gap:44px;flex-wrap:wrap}
+.author{font-size:17px;color:var(--ink);font-weight:650}
+.author span{display:block;font-size:13px;color:var(--faint);font-weight:400;margin-top:3px}
+body.hide-authors .authors{display:none} /* Toggle to optionally hide authors */
+
+/* ---- three-up cards ---- */
+.cards{display:flex;gap:20px;width:100%}
+.card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:6px;
+  padding:20px}
+.card h3{font-size:19px;margin-bottom:10px;color:var(--ink);font-weight:650}
+.card p{font-size:16px;line-height:1.45}
+.card.hot{border-color:var(--accent);background:#eef3fa}
+
+.question{margin-top:24px;padding:18px 24px;border:1px solid var(--accent);
+  border-left-width:4px;border-radius:0 6px 6px 0;background:#f4f8fd}
+.question .qlabel{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+  color:var(--accent);margin-bottom:6px}
+.question p{font-size:20px;color:var(--ink);line-height:1.45}
+
+/* ---- equation ---- */
+.eq{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+  padding:24px;text-align:center;font-size:29px;color:var(--ink);
+  font-family:"Cambria Math",Cambria,Georgia,serif}
+.eq .an{color:var(--accent)}
+.eqnote{font-size:16px;color:var(--faint);margin-top:12px;text-align:center}
+
+/* ---- table ---- */
+table{width:100%;border-collapse:collapse;font-size:20px}
+th{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--faint);
+  text-align:right;padding:0 16px 12px;font-weight:700}
+th:first-child{text-align:left}
+td{padding:15px 16px;border-top:1px solid var(--line);text-align:right;color:var(--dim)}
+td:first-child{text-align:left;color:var(--ink);font-weight:650}
+tr.ours td{background:#eef3fa;color:var(--ink)}
+tr.ours td:first-child{color:var(--accent)}
+
+/* ---- video wall ---- */
+.wall{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
+  gap:16px;min-height:0}
+.tile{position:relative;background:#000;border-radius:6px;overflow:hidden;
+  border:1px solid var(--line)}
+/* contain, not cover: the garment can end up anywhere in frame, so never crop */
+.tile video{width:100%;height:100%;object-fit:contain;display:block}
+/* bottom-left: the source clips carry a burned-in "10x Speed" badge top-centre */
+/* fully opaque, not rgba(...,.9): build_video.py lifts these plates off the ?rects
+   capture, and any transparency would blend the magenta backing into the lift */
+.tile .tag{position:absolute;left:10px;bottom:10px;padding:5px 11px;border-radius:3px;
+  background:#fff;font-size:14px;font-weight:650;color:#1a1a1a}
+/* ?rects debug view: solid fills whose bounding boxes give the compositor exact tile
+   rectangles, so build_video.py never has to guess pixel offsets. The name plates stay
+   visible on purpose — anything inside a tile that is *not* magenta is a plate, which
+   gives the compositor an exact alpha mask for the overlay layer. */
+body.rects .tile video{visibility:hidden}
+body.rects .tile{background:#ff00ff;border-color:#ff00ff;border-radius:0}
+
+/* ---- stats ---- */
+.stats{display:flex;gap:20px;width:100%}
+.stat{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:6px;
+  padding:22px;text-align:center}
+.stat .n{font-size:50px;font-weight:700;color:var(--accent);letter-spacing:-1.5px}
+.stat .l{font-size:15px;color:var(--dim);margin-top:6px;line-height:1.35}
+.srrow{display:flex;gap:14px;margin-top:22px;align-items:stretch}
+.sr{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:15px 18px}
+.sr .who{font-size:15px;color:var(--dim)}
+.sr .val{font-size:29px;font-weight:700;margin-top:4px}
+.sr.us{border-color:var(--accent);background:#eef3fa} .sr.us .val{color:var(--accent)}
+.sr.hum .val{color:var(--good)} .sr.base .val{color:var(--bad)}
+.bar{height:6px;border-radius:3px;background:#e3e8ef;margin-top:11px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px}
+
+/* ---- references ---- */
+.reflist{flex:1;min-height:0;overflow:hidden}
+.reflist ol{list-style:decimal;padding-left:26px;columns:2;column-gap:38px}
+.reflist li{font-size:16px;line-height:1.38;color:var(--dim);padding-left:0;
+  margin-bottom:11px;break-inside:avoid}
+.reflist li:before{content:none}
+.reflist em{color:var(--dim);font-weight:400;font-style:italic}
+
+/* ---- chrome ---- */
+#prog{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);
+  transition:width .25s ease;z-index:5}
+#num{position:absolute;right:22px;bottom:16px;font-size:13px;color:var(--faint);z-index:5}
+#clock{position:absolute;left:22px;bottom:14px;font-size:15px;font-variant-numeric:tabular-nums;
+  color:var(--faint);display:none;z-index:5}
+#clock.on{display:block} #clock.warn{color:var(--accent2)} #clock.over{color:var(--bad)}
+#budget{position:absolute;right:22px;top:18px;font-size:13px;color:var(--faint);
+  display:none;z-index:5}
+#budget.on{display:block}
+#hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;
+  color:var(--faint);opacity:.7;z-index:5}
+body.rects #prog,body.rects #num,body.rects #hint{display:none}
+/* the recorded video uses ?hide-authors; the keyboard legend must not burn into it */
+body.hide-authors #hint{display:none}
+
+/* ---- overview grid ----
+   Each slide keeps its real 1280x720 box, is scaled to 25%, and the negative
+   margins reclaim the 75% the transform no longer paints, so the grid sees
+   320x180 tiles. Anything simpler (zoom, width:100%) reflows the slide. */
+body.overview #stage{place-items:start center;overflow:auto}
+body.overview #deck{display:grid;grid-template-columns:repeat(4,320px);gap:14px;
+  width:auto;height:auto;padding:18px;justify-content:center;background:var(--bg)}
+body.overview .slide{position:relative;inset:auto;display:flex;
+  width:1280px;height:720px;margin:0 -960px -540px 0;
+  transform:scale(.25);transform-origin:top left;
+  outline:1px solid var(--line);cursor:pointer}
+body.overview .slide.active{outline:2px solid var(--accent)}
+</style>
+</head>
+<body>
+<div id="stage"><div id="deck">
+
+<!-- 1 ─ title ─────────────────────────────────────────────── -->
+<section class="slide active" id="s1" data-budget="18">
+  <div class="kicker">IEEE Transactions on Robot Learning · submission</div>
+  <h1>LaGarNet</h1>
+  <p class="sub">Latent world models for quasi-static pick-and-place garment flattening</p>
+  <p class="hook">A single, simulation-trained policy successfully flattens four distinct garment types in the real world without further fine-tuning—achieving zero-shot transfer.</p>
+  
+  <!-- Add class "hide-authors" to body tag or append ?hide-authors to URL to hide this block -->
+  <div class="authors">
+    <div class="author">Halid Abdulrahim Kadi<span>University of York · University of St Andrews</span></div>
+    <div class="author">John Oyekan<span>University of York · Loughborough University</span></div>
+    <div class="author">Kasim Terzić<span>University of St Andrews</span></div>
+  </div>
+</section>
+
+<!-- 2 ─ task ─────────────────────────────────────────────── -->
+<section class="slide" data-budget="32">
+  <div class="kicker">The task</div>
+  <h2>Flattening a crumpled garment</h2>
+  <div class="rule" style="margin:12px 0 18px"></div>
+  <div class="body" style="gap:26px">
+    <div class="col" style="flex:.92">
+      <ul style="gap:12px">
+        <li style="font-size:19px">Necessary precursor to downstream tasks (folding, ironing, pressing) <span class="cite">[Doumanoglou et al., 2016]</span>.</li>
+        <li style="font-size:19px">High degrees of freedom, severe non-linear deformations, and top-down self-occlusion.</li>
+        <li style="font-size:19px">Constrained physical setup (single arm, discrete primitive, one RGB camera) for representation-focused evaluation.</li>
+      </ul>
+    </div>
+    <div class="col" style="flex:.6;display:flex;flex-direction:column">
+      <div class="figcard" style="height:340px">
+        <img src="assets/combined_garments_4x4_with_goals.png"
+             alt="Simulated garments: initial crumpled states with their flattened goal states">
+      </div>
+      <div class="figlabel">Simulation <span class="cite">[Bertiche et al., 2020]</span></div>
+    </div>
+    <div class="col" style="flex:.6;display:flex;flex-direction:column">
+      <div class="figcard" style="height:340px">
+        <img src="assets/lagarnet-real-garments.jpg"
+             alt="The four real garments used for physical evaluation">
+      </div>
+      <div class="figlabel">Real garments</div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 ─ related work + research question ─────────────────── -->
+<section class="slide" data-budget="50">
+  <div class="kicker">Related work</div>
+  <h2>Three families of data-driven flatteners</h2>
+  <div class="rule"></div>
+  <div class="body" style="flex-direction:column;align-items:stretch;justify-content:center;gap:0">
+  <div class="cards">
+    <div class="card">
+      <h3>Behaviour cloning</h3>
+      <p>Conceptually straightforward, but the vast state space of crumpled configurations demands an impractical volume of human demonstrations. Consequently, these methods often rely on scripted oracles or are restricted to a single garment type
+        <span class="cite">[Weng et al., 2022; Lips et al., 2024]</span>.</p>
+    </div>
+    <div class="card">
+      <h3>Model-free RL</h3>
+      <p>Directly explores this state distribution in simulation, yielding the most general flatteners currently available. However, this comes at the cost of poor sample efficiency and an inability to predict the forward effects of actions
+        <span class="cite">[Canberk et al., 2023; Gu et al., 2024]</span>.</p>
+    </div>
+    <div class="card hot">
+      <h3>Model-based RL</h3>
+      <p>Rarely applied to garments. Standard latent models often produce blurred reconstructions, losing the critical edge and corner features necessary for shaping. To date, no mesh-free planner has matched the performance of a mesh-based equivalent
+        <span class="cite">[Lin et al., 2022; Huang et al., 2022]</span>.</p>
+    </div>
+  </div>
+  <div class="question">
+    <div class="qlabel">Research question</div>
+    <p>Can latent world models built for continuous control still function in quasi-static primitive setups, where consecutive observations are not temporally continuous?</p>
+  </div>
+  </div>
+</section>
+
+<!-- 4 ─ GC-RSSM ──────────────────────────────────────────── -->
+<section class="slide" data-budget="50">
+  <div class="kicker">Contribution 1</div>
+  <h2>A goal-conditioned recurrent state-space model</h2>
+  <div class="rule" style="margin:12px 0 18px"></div>
+  <div class="figcard" style="height:350px;width:100%">
+    <img src="assets/architecture.png"
+         alt="LaGarNet network architecture: encoders, goal-conditioned transition model, decoder and reward head">
+  </div>
+  <div class="body" style="flex:0 0 auto;margin-top:18px;gap:34px">
+    <div class="col"><ul style="gap:8px">
+      <li style="font-size:17px">Direct integration of goal-conditioning into latent inference for prior <em>p(z̃ | h, g)</em> and posterior <em>q(ẑ | h, x, g)</em>.</li>
+      <li style="font-size:17px">Recurrent backbone for occluded state belief and dual mask/reward decoding.</li>
+    </ul></div>
+    <div class="col"><ul style="gap:8px">
+      <li style="font-size:17px">Cross-entropy method for action sampling and reward-based ranking <span class="cite">[Hafner et al., 2019]</span>.</li>
+      <li style="font-size:17px">Removing latent goal-conditioning costs 22.5% points of success rate (75.0% → 52.5%).</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- 5 ─ data ─────────────────────────────────────────────── -->
+<section class="slide" data-budget="39">
+  <div class="kicker">Contribution 2</div>
+  <h2>Data collection without a scripted oracle</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="col">
+      <ul>
+        <li>Diffusion Policy expert <span class="cite">[Chi et al., 2023]</span> trained on 50 human demonstrations for reaching near-flattened states.</li>
+        <li>Mask-biased random policy for uniform pick-point exploration.</li>
+        <li>1:1 policy mixture yielding 5,000 episodes (100k transitions) without scripted oracles.</li>
+        <li>Cloth-agnostic paradigm for broader deformable object generalisation.</li>
+      </ul>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column">
+      <div class="figcard" style="height:400px">
+        <img src="assets/datacollect.png"
+             alt="Data collection procedure mixing a diffusion policy with a mask-biased random policy">
+      </div>
+      <div class="figlabel">Data collection procedure</div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 ─ reward ───────────────────────────────────────────── -->
+<section class="slide" data-budget="28">
+  <div class="kicker">Contribution 3</div>
+  <h2>A coverage-alignment reward</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="col">
+      <div class="eq">𝓡<sub>CA</sub> = <span class="an">α</span>·Δ<span class="an">NC</span> + (1−<span class="an">α</span>)·Δ<span class="an">MaxIoU</span></div>
+      <p class="eqnote">α = 0.3 &nbsp;·&nbsp; both terms lie in [−1, 1], so 𝓡<sub>CA</sub> ∈ [−1, 1]</p>
+      <ul style="margin-top:24px;gap:12px">
+        <li style="font-size:19px">Joint evaluation of state coverage and alignment via top-down binary masks.</li>
+        <li style="font-size:19px">Elimination of privileged particle-level state <span class="cite">[Canberk et al., 2023]</span> and learned smoothness estimators <span class="cite">[Avigal et al., 2022]</span>.</li>
+        <li style="font-size:19px">Continuous and linear formulation for predictive learning compatibility.</li>
+      </ul>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column">
+      <div class="figcard" style="height:400px">
+        <img src="assets/reward_sensitivity_3x5.png"
+             alt="Sensitivity of the coverage-alignment reward to the interpolation coefficient">
+      </div>
+      <div class="figlabel">Sensitivity to the interpolation coefficient α</div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 ─ simulation ──────────────────────────────────────── -->
+<section class="slide" data-budget="32">
+  <div class="kicker">Results · simulation</div>
+  <h2>Comparable to mesh-based planning</h2>
+  <div class="rule" style="margin:12px 0 18px"></div>
+  <div class="body" style="gap:24px">
+    <div class="col figcard" style="height:460px;flex:1.15">
+      <img src="assets/lagarnet_flattening_heatmap.png"
+           alt="Per-horizon longsleeve flattening performance against baselines">
+    </div>
+    <div class="col" style="flex:1;display:flex;flex-direction:column;gap:14px">
+      <div class="figcard" style="height:322px">
+        <img src="assets/multi_arena_radar_2x2.png"
+             alt="All-garment generalisation at action step 20">
+      </div>
+      <ul style="gap:8px">
+        <li style="font-size:16px">Parity with state-of-the-art mesh-based planner MEDOR <span class="cite">[Huang et al., 2022]</span>.</li>
+        <li style="font-size:16px">Superiority of a single, unified policy over single-garment variants via morphological regularisation.</li>
+        <li style="font-size:16px">>95% normalised coverage across all garment categories within 20 steps.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 8 ─ computational cost ──────────────────────────────── -->
+<section class="slide" data-budget="32">
+  <div class="kicker">Results · computational cost</div>
+  <h2>Comparable quality at a deployable cost</h2>
+  <div class="rule"></div>
+  <div class="body" style="flex-direction:column;align-items:stretch;justify-content:center;gap:0">
+    <table>
+      <tr><th>Method</th><th>Parameters</th><th>Inference per action</th><th>Approach</th></tr>
+      <tr><td>MEDOR <span class="cite">[Huang et al., 2022]</span></td><td>37.5 M</td><td>~103 s</td><td>mesh reconstruction and planning</td></tr>
+      <tr><td>Diffusion Policy <span class="cite">[Chi et al., 2023]</span></td><td>83.7 M</td><td>~1.5 s</td><td>behaviour cloning</td></tr>
+      <tr class="ours"><td>LaGarNet (ours)</td><td>7.11 M</td><td>~6 s</td><td>latent planning</td></tr>
+    </table>
+    <p style="margin-top:28px;font-size:22px">
+      LaGarNet requires five times fewer parameters than MEDOR and plans seventeen times faster, with no loss in flattening quality. Six seconds of planning per action is affordable on a physical robot where a hundred is not, though the full perception–action cycle (about 24.5 s per step) remains the deployment bottleneck.
+    </p>
+  </div>
+</section>
+
+<!-- 9 ─ real-world video wall ────────────────────────────── -->
+<section class="slide" data-budget="34">
+  <div class="kicker">Results · real world</div>
+  <h2>Zero-shot transfer to a UR5e</h2>
+  <div class="rule" style="margin:12px 0 16px"></div>
+  <div class="wall">
+    <div class="tile"><span class="tag">Longsleeved T-shirt</span>
+      <video src="assets/longsleeved-Tshirt_fast.mp4" muted loop playsinline preload="auto"></video></div>
+    <div class="tile"><span class="tag">Trousers</span>
+      <video src="assets/trousers_fast.mp4" muted loop playsinline preload="auto"></video></div>
+    <div class="tile"><span class="tag">Dress</span>
+      <video src="assets/dress_fast.mp4" muted loop playsinline preload="auto"></video></div>
+    <div class="tile"><span class="tag">Skirt</span>
+      <video src="assets/skirt_fast.mp4" muted loop playsinline preload="auto"></video></div>
+  </div>
+  <p class="caption">Rollouts are shown at 10× real speed. A single, unified policy—trained exclusively in simulation—manipulates all four physical garment types without any real-world fine-tuning.</p>
+</section>
+
+<!-- 10 ─ real-world numbers ─────────────────────────────── -->
+<section class="slide" data-budget="58">
+  <div class="kicker">Results · real world</div>
+  <h2>Forty physical trials, twenty actions each</h2>
+  <div class="rule"></div>
+  <div class="body" style="flex-direction:column;align-items:stretch;justify-content:center;gap:0">
+    <div class="stats">
+      <div class="stat"><div class="n">90.3%</div><div class="l">normalised coverage</div></div>
+      <div class="stat"><div class="n">80.7%</div><div class="l">normalised improvement</div></div>
+      <div class="stat"><div class="n">81.1%</div><div class="l">maximum IoU</div></div>
+    </div>
+    <div class="srrow">
+      <div class="sr base"><div class="who">PlaNet-ClothPick <span class="cite">[Kadi &amp; Terzić, 2024]</span></div><div class="val">9 / 40</div>
+        <div class="bar"><i style="width:22.5%;background:var(--bad)"></i></div></div>
+      <div class="sr us"><div class="who">LaGarNet (ours)</div><div class="val">27 / 40</div>
+        <div class="bar"><i style="width:67.5%;background:var(--accent)"></i></div></div>
+      <div class="sr hum"><div class="who">Human operator</div><div class="val">38 / 40</div>
+        <div class="bar"><i style="width:95%;background:var(--good)"></i></div></div>
+    </div>
+    <p style="margin-top:24px;font-size:19px">
+      Success means reaching NC ≥ 85% <em>and</em> Max IoU ≥ 75% at any point within a 20-step episode — thresholds relaxed from simulation to allow for the sim-to-real gap. A fifth, <strong>out-of-distribution</strong> garment (a soft long-sleeved dress) was evaluated separately over 10 further trials: it recovers most of the area (77.2% NC) but never meets the criterion, scoring <strong>0 / 10</strong>.
+    </p>
+  </div>
+</section>
+
+<!-- 11 ─ lessons and future work ────────────────────────── -->
+<section class="slide" data-budget="55">
+  <div class="kicker">Conclusion</div>
+  <h2>Lessons and future work</h2>
+  <div class="rule"></div>
+  <div class="body" style="gap:34px">
+    <div class="col">
+      <ul>
+        <li>Efficacy of latent world models in quasi-static regimes via direct latent goal-conditioning.</li>
+        <li>Superiority of greedy, one-step planning due to rapid predictive error compounding (73.3% at H=1 vs. 30.0% at H=5).</li>
+      </ul>
+    </div>
+    <div class="col">
+      <ul>
+        <li>Absence of an explicit stopping criterion as the principal system limitation.</li>
+        <li>Future integration of learned termination conditions and extension to goal-directed folding.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="question" style="margin-top:0">
+    <div class="qlabel">Outlook</div>
+    <p>A compact latent space capable of encoding high-dimensional, deformable dynamics is not restricted to garments. This formulation provides a promising pathway toward general deformable-object manipulation—such as dough, clay, or cables—where explicit state representations remain computationally prohibitive.</p>
+  </div>
+</section>
+
+<!-- 12 ─ references ────────────────────────────────────── -->
+<section class="slide" data-budget="12">
+  <div class="kicker">References</div>
+  <h2>Works cited in this talk</h2>
+  <div class="rule" style="margin:12px 0 16px"></div>
+  <div class="reflist">
+    <ol>
+      <li>Y. Avigal, L. Berscheid, T. Asfour, T. Kröger and K. Goldberg. SpeedFolding: learning efficient bimanual folding of garments. <em>IROS</em>, 2022.</li>
+      <li>H. Bertiche, M. Madadi and S. Escalera. CLOTH3D: clothed 3D humans. <em>ECCV</em>, 2020, pp. 344–359.</li>
+      <li>A. Canberk, C. Chi, H. Ha, B. Burchfiel, E. Cousineau, S. Feng and S. Song. Cloth Funnels: canonicalized-alignment for multi-purpose garment manipulation. <em>ICRA</em>, 2023, pp. 5872–5879.</li>
+      <li>C. Chi, S. Feng, Y. Du, Z. Xu, E. Cousineau, B. Burchfiel and S. Song. Diffusion Policy: visuomotor policy learning via action diffusion. <em>RSS</em>, 2023.</li>
+      <li>A. Doumanoglou, J. Stria, G. Peleka, I. Mariolis, V. Petrik, A. Kargakos, L. Wagner, V. Hlaváč, T.-K. Kim and S. Malassiotis. Folding clothes autonomously: a complete pipeline. <em>IEEE T-RO</em>, 32(6):1461–1478, 2016.</li>
+      <li>Y. Duan, W. Mao and H. Zhu. Learning world models for unconstrained goal navigation. <em>NeurIPS</em>, 37:59236–59265, 2024.</li>
+      <li>N.-Q. Gu, R. He and L. Yu. Learning to unfold garment effectively into oriented direction. <em>IEEE RA-L</em>, 9(2):1051–1058, 2024.</li>
+      <li>D. Hafner, T. Lillicrap, I. Fischer, R. Villegas, D. Ha, H. Lee and J. Davidson. Learning latent dynamics for planning from pixels. <em>ICML</em>, 2019, pp. 2555–2565.</li>
+      <li>Z. Huang, X. Lin and D. Held. Mesh-based dynamics with occlusion reasoning for cloth manipulation. <em>RSS</em>, 2022.</li>
+      <li>H. A. Kadi and K. Terzić. PlaNet-ClothPick: effective fabric flattening based on latent dynamic planning. <em>IEEE/SICE SII</em>, 2024, pp. 972–979.</li>
+      <li>X. Lin, Y. Wang, Z. Huang and D. Held. Learning visible connectivity dynamics for cloth smoothing. <em>CoRL</em>, 2022, pp. 256–266.</li>
+      <li>T. Lips, V.-L. De Gusseme and F. wyffels. Learning keypoints for robotic cloth manipulation using synthetic data. <em>IEEE RA-L</em>, 2024.</li>
+      <li>T. Weng, S. M. Bajracharya, Y. Wang, K. Agrawal and D. Held. FabricFlowNet: bimanual cloth manipulation with a flow-based policy. <em>CoRL</em>, 2022, pp. 192–202.</li>
+    </ol>
+  </div>
+</section>
+
+<div id="prog"></div>
+<div id="num"></div>
+<div id="clock">0:00</div>
+<div id="budget"></div>
+<div id="hint">← → navigate · f fullscreen · o overview · p timer</div>
+
+</div></div>
+
+<script>
+(function(){
+  const deck   = document.getElementById('deck');
+  const slides = Array.from(deck.querySelectorAll('.slide'));
+  const prog   = document.getElementById('prog');
+  const num    = document.getElementById('num');
+  const clock  = document.getElementById('clock');
+  const budget = document.getElementById('budget');
+  let i = 0, t0 = null, timerOn = false;
+
+  function fit(){
+    if (document.body.classList.contains('overview')) { deck.style.transform = ''; return; }
+    const s = Math.min(innerWidth / 1280, innerHeight / 720);
+    deck.style.transform = 'scale(' + s + ')';
+  }
+  addEventListener('resize', fit);
+
+  function show(n){
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    prog.style.width = ((i + 1) / slides.length * 100) + '%';
+    num.textContent = (i + 1) + ' / ' + slides.length;
+    budget.textContent = 'target ' + (slides[i].dataset.budget || '—') + 's';
+    // only the visible slide's videos run
+    deck.querySelectorAll('video').forEach(v => {
+      if (slides[i].contains(v)) { v.currentTime = 0; v.play().catch(()=>{}); }
+      else v.pause();
+    });
+  }
+
+  function tick(){
+    if (!timerOn || t0 === null) return;
+    const e = Math.floor((Date.now() - t0) / 1000);
+    clock.textContent = Math.floor(e / 60) + ':' + String(e % 60).padStart(2, '0');
+    clock.classList.toggle('warn', e >= 390 && e < 420);
+    clock.classList.toggle('over', e >= 420);
+  }
+  setInterval(tick, 250);
+
+  addEventListener('keydown', e => {
+    const k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { show(i + 1); e.preventDefault(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') show(i - 1);
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+    else if (k === 'f') { document.fullscreenElement ? document.exitFullscreen()
+                                                     : document.documentElement.requestFullscreen(); }
+    else if (k === 'o') { document.body.classList.toggle('overview'); fit(); }
+    else if (k === 'p') {
+      timerOn = !timerOn;
+      clock.classList.toggle('on', timerOn);
+      budget.classList.toggle('on', timerOn);
+      if (timerOn) { t0 = Date.now(); tick(); }
+    }
+    else if (k === 'r' && timerOn) { t0 = Date.now(); tick(); }
+    else if (k === 'Escape' && document.body.classList.contains('overview')) {
+      document.body.classList.remove('overview'); fit();
+    }
+  });
+
+  addEventListener('click', e => {
+    if (document.body.classList.contains('overview')) {
+      const s = e.target.closest('.slide');
+      if (s) { document.body.classList.remove('overview'); fit(); show(slides.indexOf(s)); }
+      return;
+    }
+    show(i + 1);
+  });
+
+  // deep-link / reload safety: #7 opens slide 7; ?overview opens the grid;
+  // ?rects paints the video tiles so build_video.py can measure them
+  const h = parseInt(location.hash.slice(1), 10);
+  if (location.search.indexOf('overview') !== -1) document.body.classList.add('overview');
+  if (location.search.indexOf('rects')    !== -1) document.body.classList.add('rects');
+  
+  // optionally hide the authors block if URL parameter is present
+  if (location.search.indexOf('hide-authors') !== -1) document.body.classList.add('hide-authors');
+
+  fit(); show(Number.isFinite(h) ? h - 1 : 0);
+})();
+</script>
+</body>
+</html>

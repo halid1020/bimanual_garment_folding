@@ -1,0 +1,143 @@
+[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Talk,Arial,38,&H00FFFFFF,&H00000000,&H80000000,0,0,1,2,1,2,180,180,54,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.98,Talk,,0,0,0,,Hello everyone.
+Dialogue: 0,0:00:00.98,0:00:03.39,Talk,,0,0,0,,Today, I will be presenting LaGarNet:
+Dialogue: 0,0:00:03.39,0:00:08.75,Talk,,0,0,0,,a latent world model designed for quasi-static,\Npick-and-place garment flattening.
+Dialogue: 0,0:00:08.75,0:00:14.10,Talk,,0,0,0,,We show that a single policy trained\Nentirely in simulation flattens four distinct
+Dialogue: 0,0:00:14.10,0:00:16.12,Talk,,0,0,0,,garment types on real hardware,
+Dialogue: 0,0:00:16.12,0:00:17.95,Talk,,0,0,0,,with no further fine-tuning.
+Dialogue: 0,0:00:18.30,0:00:20.67,Talk,,0,0,0,,Our primary task is garment flattening,
+Dialogue: 0,0:00:20.67,0:00:25.60,Talk,,0,0,0,,a critical prerequisite for downstream\Ntasks like folding, ironing, and pressing.
+Dialogue: 0,0:00:25.60,0:00:30.71,Talk,,0,0,0,,This task is inherently challenging because\Ncloth possesses vast degrees of freedom,
+Dialogue: 0,0:00:30.71,0:00:33.21,Talk,,0,0,0,,undergoes severe non-linear deformations,
+Dialogue: 0,0:00:33.21,0:00:36.92,Talk,,0,0,0,,and exhibits high self-occlusion\Nfrom a top-down perspective.
+Dialogue: 0,0:00:36.92,0:00:42.03,Talk,,0,0,0,,To rigorously evaluate the underlying\Nrepresentation rather than relying on hardware
+Dialogue: 0,0:00:42.03,0:00:42.70,Talk,,0,0,0,,complexity,
+Dialogue: 0,0:00:42.70,0:00:46.89,Talk,,0,0,0,,we deliberately constrain our physical\Nsetup to a single robotic arm,
+Dialogue: 0,0:00:46.89,0:00:50.73,Talk,,0,0,0,,a single pick-and-place primitive,\Nand one top-down RGB camera.
+Dialogue: 0,0:00:51.08,0:00:55.00,Talk,,0,0,0,,Existing data-driven flatteners\Ngenerally fall into three families.
+Dialogue: 0,0:00:55.00,0:00:57.93,Talk,,0,0,0,,Behaviour cloning is\Nconceptually straightforward,
+Dialogue: 0,0:00:57.93,0:01:02.79,Talk,,0,0,0,,but adequately covering the vast state\Nspace of crumpled configurations requires an
+Dialogue: 0,0:01:02.79,0:01:05.31,Talk,,0,0,0,,impractical volume of\Nhuman demonstrations,
+Dialogue: 0,0:01:05.31,0:01:07.48,Talk,,0,0,0,,often necessitating scripted oracles.
+Dialogue: 0,0:01:07.48,0:01:11.17,Talk,,0,0,0,,Model-free reinforcement learning\Nexplores this space directly,
+Dialogue: 0,0:01:11.17,0:01:12.81,Talk,,0,0,0,,yielding general flatteners,
+Dialogue: 0,0:01:12.81,0:01:17.56,Talk,,0,0,0,,but suffers from poor sample efficiency\Nand cannot predict the forward effects of
+Dialogue: 0,0:01:17.56,0:01:18.03,Talk,,0,0,0,,actions.
+Dialogue: 0,0:01:18.03,0:01:21.31,Talk,,0,0,0,,Model-based methods remain\Nrare in garment manipulation;
+Dialogue: 0,0:01:21.31,0:01:25.76,Talk,,0,0,0,,standard latent models tend to produce\Nblurred reconstructions that lose the
+Dialogue: 0,0:01:25.76,0:01:29.04,Talk,,0,0,0,,critical edge and corner\Nfeatures necessary for shaping.
+Dialogue: 0,0:01:29.04,0:01:31.44,Talk,,0,0,0,,This leads to our core research question:
+Dialogue: 0,0:01:31.44,0:01:36.31,Talk,,0,0,0,,can latent world models built for continuous\Ncontrol still function in quasi-static
+Dialogue: 0,0:01:36.31,0:01:37.30,Talk,,0,0,0,,primitive setups,
+Dialogue: 0,0:01:37.30,0:01:40.88,Talk,,0,0,0,,where consecutive observations\Nare not temporally continuous?
+Dialogue: 0,0:01:41.23,0:01:46.11,Talk,,0,0,0,,Our solution is LaGarNet, built upon a\Ngoal-conditioned recurrent state-space model.
+Dialogue: 0,0:01:46.11,0:01:50.82,Talk,,0,0,0,,The fundamental design choice here is the\Ndirect integration of goal-conditioning
+Dialogue: 0,0:01:50.82,0:01:53.20,Talk,,0,0,0,,into the latent inference process itself.
+Dialogue: 0,0:01:53.20,0:01:57.79,Talk,,0,0,0,,Both the prior and posterior distributions\Nover the latent state are explicitly
+Dialogue: 0,0:01:57.79,0:01:58.43,Talk,,0,0,0,,goal-aware.
+Dialogue: 0,0:01:58.43,0:02:02.96,Talk,,0,0,0,,A recurrent backbone maintains a belief\Nstate over the occluded regions of the
+Dialogue: 0,0:02:02.96,0:02:03.43,Talk,,0,0,0,,garment,
+Dialogue: 0,0:02:03.43,0:02:07.73,Talk,,0,0,0,,while a joint decoder predicts both\Nthe top-down mask and the task reward.
+Dialogue: 0,0:02:07.73,0:02:11.04,Talk,,0,0,0,,During inference, we plan\Nusing the cross-entropy method,
+Dialogue: 0,0:02:11.04,0:02:15.75,Talk,,0,0,0,,sampling candidate pick-and-place actions\Nand ranking them based on the predicted
+Dialogue: 0,0:02:15.75,0:02:16.16,Talk,,0,0,0,,reward.
+Dialogue: 0,0:02:16.16,0:02:20.87,Talk,,0,0,0,,Ablation studies reveal that removing\Ngoal-conditioning from the latent inference
+Dialogue: 0,0:02:20.87,0:02:24.47,Talk,,0,0,0,,costs twenty-two and a half\Npercentage points of success rate,
+Dialogue: 0,0:02:24.47,0:02:27.67,Talk,,0,0,0,,from seventy-five percent\Ndown to fifty-two and a half.
+Dialogue: 0,0:02:28.02,0:02:31.38,Talk,,0,0,0,,Our second contribution is\Nthe data collection paradigm.
+Dialogue: 0,0:02:31.38,0:02:35.59,Talk,,0,0,0,,We train a Diffusion Policy expert\Non just fifty human demonstrations,
+Dialogue: 0,0:02:35.59,0:02:40.64,Talk,,0,0,0,,allowing it to reliably reach near-flattened\Nstates that a random exploration policy
+Dialogue: 0,0:02:40.64,0:02:41.97,Talk,,0,0,0,,would rarely discover.
+Dialogue: 0,0:02:41.97,0:02:46.90,Talk,,0,0,0,,We then mix this expert's rollouts in a\None-to-one ratio with a mask-biased random
+Dialogue: 0,0:02:46.90,0:02:47.32,Talk,,0,0,0,,policy,
+Dialogue: 0,0:02:47.32,0:02:52.19,Talk,,0,0,0,,which drives state exploration by uniformly\Nsampling pick points exclusively from
+Dialogue: 0,0:02:52.19,0:02:54.11,Talk,,0,0,0,,the garment's segmentation mask.
+Dialogue: 0,0:02:54.11,0:02:59.04,Talk,,0,0,0,,This approach yields a robust dataset of\Nfive thousand episodes without relying on
+Dialogue: 0,0:02:59.04,0:03:00.55,Talk,,0,0,0,,complex scripted oracles,
+Dialogue: 0,0:03:00.55,0:03:05.48,Talk,,0,0,0,,creating a paradigm that is agnostic to\Ncloth dynamics and likely to generalise to
+Dialogue: 0,0:03:05.48,0:03:07.28,Talk,,0,0,0,,other deformable object tasks.
+Dialogue: 0,0:03:07.63,0:03:11.33,Talk,,0,0,0,,Our third contribution is a\Nnovel coverage-alignment reward.
+Dialogue: 0,0:03:11.33,0:03:14.97,Talk,,0,0,0,,This metric jointly evaluates\Nstate coverage and alignment,
+Dialogue: 0,0:03:14.97,0:03:18.55,Talk,,0,0,0,,computed entirely from top-down\Nbinary segmentation masks.
+Dialogue: 0,0:03:18.55,0:03:19.17,Talk,,0,0,0,,Crucially,
+Dialogue: 0,0:03:19.17,0:03:24.11,Talk,,0,0,0,,it eliminates the need for privileged\Nparticle-level state or learned smoothness
+Dialogue: 0,0:03:24.11,0:03:24.79,Talk,,0,0,0,,estimators.
+Dialogue: 0,0:03:24.79,0:03:29.91,Talk,,0,0,0,,This allows the exact same continuous and\Nlinear reward function to be evaluated in
+Dialogue: 0,0:03:29.91,0:03:32.69,Talk,,0,0,0,,simulation and directly\Non physical hardware,
+Dialogue: 0,0:03:32.69,0:03:35.71,Talk,,0,0,0,,making it highly amenable\Nto predictive learning.
+Dialogue: 0,0:03:36.06,0:03:39.18,Talk,,0,0,0,,In simulation, LaGarNet\Nachieves parity with MEDOR,
+Dialogue: 0,0:03:39.18,0:03:41.63,Talk,,0,0,0,,the state-of-the-art mesh-based planner,
+Dialogue: 0,0:03:41.63,0:03:46.54,Talk,,0,0,0,,whilst outperforming both PlaNet-ClothPick\Nand Diffusion Policy across short and
+Dialogue: 0,0:03:46.54,0:03:48.07,Talk,,0,0,0,,medium planning horizons.
+Dialogue: 0,0:03:48.07,0:03:49.42,Talk,,0,0,0,,Furthermore, a single,
+Dialogue: 0,0:03:49.42,0:03:53.52,Talk,,0,0,0,,unified policy trained across all\Ngarments outperforms specialised,
+Dialogue: 0,0:03:53.52,0:03:54.99,Talk,,0,0,0,,single-garment variants,
+Dialogue: 0,0:03:54.99,0:03:59.46,Talk,,0,0,0,,suggesting that morphological diversity\Nacts as a beneficial regulariser.
+Dialogue: 0,0:03:59.46,0:04:00.14,Talk,,0,0,0,,Ultimately,
+Dialogue: 0,0:04:00.14,0:04:05.28,Talk,,0,0,0,,the policy exceeds ninety-five percent\Nnormalised coverage across all four simulated
+Dialogue: 0,0:04:05.28,0:04:08.10,Talk,,0,0,0,,garment categories within\Ntwenty action steps.
+Dialogue: 0,0:04:08.45,0:04:12.10,Talk,,0,0,0,,This comparison also has a\Ncrucial computational dimension.
+Dialogue: 0,0:04:12.10,0:04:17.17,Talk,,0,0,0,,LaGarNet requires five times fewer parameters\Nthan MEDOR and plans seventeen times
+Dialogue: 0,0:04:17.17,0:04:17.60,Talk,,0,0,0,,faster,
+Dialogue: 0,0:04:17.60,0:04:19.77,Talk,,0,0,0,,with no loss in flattening quality.
+Dialogue: 0,0:04:19.77,0:04:24.04,Talk,,0,0,0,,Six seconds of planning per action\Nis affordable on a physical robot,
+Dialogue: 0,0:04:24.04,0:04:26.70,Talk,,0,0,0,,where one hundred and\Nthree seconds is not.
+Dialogue: 0,0:04:26.70,0:04:31.83,Talk,,0,0,0,,We are careful not to overstate this: with\Nperception and robot execution included,
+Dialogue: 0,0:04:31.83,0:04:36.16,Talk,,0,0,0,,a single real manipulation step still\Ntakes about twenty-four seconds,
+Dialogue: 0,0:04:36.16,0:04:40.49,Talk,,0,0,0,,so the full perception-action cycle\Nremains the deployment bottleneck.
+Dialogue: 0,0:04:40.84,0:04:45.92,Talk,,0,0,0,,We subsequently transferred this\Nsimulation-trained policy directly to a physical
+Dialogue: 0,0:04:45.92,0:04:46.99,Talk,,0,0,0,,UR5e robotic arm,
+Dialogue: 0,0:04:46.99,0:04:49.99,Talk,,0,0,0,,achieving this with zero\Nreal-world fine-tuning.
+Dialogue: 0,0:04:49.99,0:04:54.32,Talk,,0,0,0,,The videos shown here demonstrate\Nrollouts on all four garment types,
+Dialogue: 0,0:04:54.32,0:04:56.58,Talk,,0,0,0,,accelerated to ten times real speed.
+Dialogue: 0,0:04:56.58,0:05:01.09,Talk,,0,0,0,,The policy operates solely on a\Ntop-down observation and the goal image,
+Dialogue: 0,0:05:01.09,0:05:05.92,Talk,,0,0,0,,and the reward is computed from the\Nexact same segmentation masks utilised in
+Dialogue: 0,0:05:05.92,0:05:06.61,Talk,,0,0,0,,simulation.
+Dialogue: 0,0:05:06.61,0:05:11.63,Talk,,0,0,0,,This consistency is precisely what enables\Nsuccessful zero-shot transfer without
+Dialogue: 0,0:05:11.63,0:05:15.33,Talk,,0,0,0,,requiring a highly tuned digital\Ntwin of the physical cell.
+Dialogue: 0,0:05:15.68,0:05:19.70,Talk,,0,0,0,,Quantitatively, across forty physical\Ntrials of twenty actions each,
+Dialogue: 0,0:05:19.70,0:05:23.54,Talk,,0,0,0,,LaGarNet achieves ninety point\Nthree percent normalised coverage,
+Dialogue: 0,0:05:23.54,0:05:26.49,Talk,,0,0,0,,eighty point seven percent\Nnormalised improvement,
+Dialogue: 0,0:05:26.49,0:05:30.51,Talk,,0,0,0,,and an eighty-one point one percent\Nmaximum intersection over union.
+Dialogue: 0,0:05:30.51,0:05:33.99,Talk,,0,0,0,,It successfully completes\Ntwenty-seven out of forty trials,
+Dialogue: 0,0:05:33.99,0:05:37.54,Talk,,0,0,0,,against nine out of forty for\Nthe PlaNet-ClothPick baseline,
+Dialogue: 0,0:05:37.54,0:05:41.32,Talk,,0,0,0,,though a human operator still\Nreaches thirty-eight out of forty.
+Dialogue: 0,0:05:41.32,0:05:46.10,Talk,,0,0,0,,Success here means reaching eighty-five\Npercent coverage and seventy-five percent
+Dialogue: 0,0:05:46.10,0:05:50.48,Talk,,0,0,0,,maximum intersection over union at any\Npoint within a twenty-step episode;
+Dialogue: 0,0:05:50.48,0:05:55.38,Talk,,0,0,0,,we relax these thresholds from their\Nsimulation values to allow for the sim-to-real
+Dialogue: 0,0:05:55.38,0:05:55.62,Talk,,0,0,0,,gap.
+Dialogue: 0,0:05:55.62,0:05:57.86,Talk,,0,0,0,,We also stress-tested a fifth garment,
+Dialogue: 0,0:05:57.86,0:06:02.76,Talk,,0,0,0,,a soft long-sleeved dress whose topology\Nis absent from the simulated training set.
+Dialogue: 0,0:06:02.76,0:06:07.67,Talk,,0,0,0,,Evaluated separately over ten further\Ntrials, the policy recovers most of its area,
+Dialogue: 0,0:06:07.67,0:06:11.98,Talk,,0,0,0,,at seventy-seven percent coverage,\Nbut never meets the success criterion,
+Dialogue: 0,0:06:11.98,0:06:13.40,Talk,,0,0,0,,scoring zero out of ten.
+Dialogue: 0,0:06:13.75,0:06:16.43,Talk,,0,0,0,,We draw two primary\Nlessons from this work.
+Dialogue: 0,0:06:16.43,0:06:16.81,Talk,,0,0,0,,First,
+Dialogue: 0,0:06:16.81,0:06:21.86,Talk,,0,0,0,,latent world models can be highly effective\Nin quasi-static manipulation regimes,
+Dialogue: 0,0:06:21.86,0:06:26.85,Talk,,0,0,0,,provided that goal-conditioning is\Nintegrated directly into the latent inference
+Dialogue: 0,0:06:26.85,0:06:27.35,Talk,,0,0,0,,process.
+Dialogue: 0,0:06:27.35,0:06:31.40,Talk,,0,0,0,,Second, greedy, one-step planning\Nyields the highest performance.
+Dialogue: 0,0:06:31.40,0:06:36.02,Talk,,0,0,0,,Because a single manipulation primitive\Ninduces massive state deformation,
+Dialogue: 0,0:06:36.02,0:06:41.20,Talk,,0,0,0,,predictive error compounds faster than\Nextended lookahead can provide value—success
+Dialogue: 0,0:06:41.20,0:06:44.94,Talk,,0,0,0,,drops from seventy-three point\Nthree percent at horizon one,
+Dialogue: 0,0:06:44.94,0:06:47.06,Talk,,0,0,0,,to thirty percent at horizon five.
+Dialogue: 0,0:06:47.06,0:06:52.18,Talk,,0,0,0,,The principal limitation of our current\Nsystem is the lack of an explicit stopping
+Dialogue: 0,0:06:52.18,0:06:52.80,Talk,,0,0,0,,criterion.
+Dialogue: 0,0:06:52.80,0:06:57.67,Talk,,0,0,0,,Immediate future work includes integrating\Na learned termination condition and
+Dialogue: 0,0:06:57.67,0:07:00.73,Talk,,0,0,0,,extending the framework\Nto goal-directed folding.
+Dialogue: 0,0:07:00.73,0:07:01.60,Talk,,0,0,0,,Looking ahead,
+Dialogue: 0,0:07:01.60,0:07:06.59,Talk,,0,0,0,,we view this formulation as a promising\Npathway toward general deformable-object
+Dialogue: 0,0:07:06.59,0:07:07.40,Talk,,0,0,0,,manipulation.
+Dialogue: 0,0:07:07.40,0:07:08.90,Talk,,0,0,0,,Thank you for listening.

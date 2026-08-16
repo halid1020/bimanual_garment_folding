@@ -4,8 +4,8 @@
 Standalone MPC-horizon ablation for LaGarNet.
 
 Loads the best checkpoint of a trained LaGarNet experiment and evaluates it on
-the configured arenas across the planning variants below (horizons H = 1, 2,
-3, 5 plus an unconstrained-CEM variant at H = 1), reporting both task
+the configured arenas across the planning variants below (horizons H = 1-5
+plus an unconstrained-CEM variant at H = 1), reporting both task
 performance (via the standard arena logger -> performance.csv) and per-step
 planning runtime (runtime.csv). Results land in
 <save_root>/<eval_name>_<tag>/<arena>/eval_checkpoint_-2/ so the analysis

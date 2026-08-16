@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1786725750.6523 "main.tex" "main.pdf" "main" 1786725759.19749 0
+["pdflatex"] 1786897139.2179 "main.tex" "main.pdf" "main" 1786897147.74687 0
   "/etc/texmf/web2c/texmf.cnf" 1719051094.59597 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -270,13 +270,13 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1720295055.80154 165012 f177baa1c39a3ebd62c3096a43521a0d ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1720295072 6830986 950dc122fe7c536ea59a7ac9f6133315 ""
   "IEEEtran.cls" 1783947314.16548 281957 5b2e4fa15b0f7eabb840ebf67df4c0f7 ""
-  "main.aux" 1786725759.04007 53165 695ce77237c749ab22730f3943faf210 "pdflatex"
-  "main.out" 1786725759.04507 7909 fe45b2943abe32343d5b41780c6d6f7f "pdflatex"
-  "main.tex" 1786725732.00261 131958 0dac4b9aa9bcb2ebde65b2709f365886 ""
+  "main.aux" 1786897147.59774 51561 69f5ba1623339c7e753e93c7703cb990 "pdflatex"
+  "main.out" 1786897147.60174 7909 fe45b2943abe32343d5b41780c6d6f7f "pdflatex"
+  "main.tex" 1786893602.96337 131379 dc76abbc4677fdcb4ec73315a090a4af ""
   "plots/ablation_data_ratio_bar.png" 1783947314.16895 128447 3f93822fcc173c7e09840ec19efa8395 ""
   "plots/ablation_data_size_line.png" 1783947314.17048 184860 a465e37452b3a062981f8dc4cdd79669 ""
   "plots/ablation_latent_bar.png" 1783947314.17148 137063 27e3bad65b47ee0efbfad709afe238e2 ""
-  "plots/ablation_mpc_horizon.png" 1786546883.9293 285208 52cec81871ba415b2c4b95f1552b0ab2 ""
+  "plots/ablation_mpc_horizon.png" 1786885106.48012 292979 666e352bfd38fff21340c6f4f4d5c02a ""
   "plots/ablation_reward_bar.png" 1783947314.17001 115842 5ed874fc74e0c8d885c8a453781160cb ""
   "plots/colour_distribution.png" 1783947314.20048 1252617 e50799e098b58357abf03bdf71290994 ""
   "plots/combined_garments_4x4_with_goals.png" 1783947314.22048 228787 5135998e0bb916c8deb06dba6935d886 ""
@@ -286,7 +286,7 @@
   "plots/lagarnet-failure.jpg" 1783947314.22748 401332 4842ae6ce659fe1b14824a50f8ef3662 ""
   "plots/lagarnet-real-garments.jpg" 1783947314.19148 3103337 b5e897999dd47572e488297f3be7e1af ""
   "plots/lagarnet-real-setup.jpg" 1783947314.20648 195544 f9e383d1dd345ae3f9b4d77a69717e03 ""
-  "plots/lagarnet_flattening_heatmap.png" 1786705193.78186 1094182 225fcd627b2976ae9981877b4eba7157 ""
+  "plots/lagarnet_flattening_heatmap.png" 1786876858.21332 1265513 ba7d1dbf1ea6f166cc9d658cd32ef64e ""
   "plots/max_iou_distribution.png" 1783947314.20148 312763 e8f14df1a492de2dff714282394df0a7 ""
   "plots/metrics_radar.png" 1783947314.21548 517683 1747e56f0c36d1a8221e4b999d70a44b ""
   "plots/multi_arena_radar_2x2.png" 1785436856.87196 1336581 a51b3a6fb6a63c4b098b4937267e22c0 ""

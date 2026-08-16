@@ -1,6 +1,6 @@
 # conf/transfer_eval/lagarnet/final_lagarnet_reward_v2_alpha_0_3_horizon_ablation.yaml
 # Consumed by tool/hydra_horizon_ablation.py, which fixes the planning
-# horizons (H = 1, 2, 3, 5) plus an unconstrained-CEM variant in code; this
+# horizons (H = 1-5) plus an unconstrained-CEM variant in code; this
 # file only selects the trained experiment and the evaluation arena.
 #
 # The script loads the best checkpoint (model_best.pth) of `train_exp_config`

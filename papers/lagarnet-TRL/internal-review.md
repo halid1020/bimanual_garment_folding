@@ -2,11 +2,20 @@
 
 This is a working document for the T-RL resubmission, separate from `comments.md` (which tracks the
 28 external reviewer comments). The 30 comments below come from the co-author's internal read of
-the manuscript and are numbered in the order they appeared. Every revision made in response is
-highlighted **in blue** in `main.tex` via the `\rev{}` macro; setting `\showrevfalse` in the
-preamble produces an identical but unhighlighted camera-ready copy.
+the manuscript and are numbered in the order they appeared.
 
-**Status counts: 25 resolved, 4 partially resolved, 1 blocked.**
+`main.tex` carries two independent highlight layers. **Blue** (`\rev{}`) marks everything that is
+new relative to the T-RO submission; **green** (`\irev{}`) marks the revisions made in answer to
+*this* internal review, so a green span inside a blue paragraph is a change made for you. Setting
+`\showrevfalse` and `\showirevfalse` in the preamble produces an identical but unhighlighted
+camera-ready copy; the two toggles are independent.
+
+Colour marks additions, so a handful of resolutions have no green: the `\noindent` deletion (§II),
+the redundant "nat" removed from $c = 1$, Table II's stripped shading, and the comma added to
+Equation 5 (a green comma would be illegible). Rewordings made only to pull short last lines back
+are deliberately left black.
+
+**Status counts: 26 resolved, 4 partially resolved, 0 blocked.**
 
 ---
 
@@ -27,6 +36,7 @@ since:
 |---|---|
 | Author block | Halid: York **and** St Andrews; John: York **and** Loughborough; Kasim: St Andrews. Three `\thanks` markers |
 | New reference | `klein1983predressing` — Klein, *Pre-Dressing Skills*, Communication Skill Builders, 1983. Bibliography regenerated to 45 + 9 |
+| Redrawn | Figure 3(a): marker shapes per method row, text column labels, no colour-only encoding. Drawing code moved to `analysis/lagarnet/replot_flattening_heatmap.py` |
 | Removed | Table II's `\cellcolor` shading (×4) and the caption's `\colorbox` highlights (×4) |
 | Removed | The stray `\noindent` opening §II |
 | Renamed | $\gamma_{klo}, \mathcal{L}_{klo} \to \gamma_{KLo}, \mathcal{L}_{KLo}$; $\mathcal{R}_{du} \to \mathcal{R}_{dU}$ |
@@ -64,9 +74,9 @@ runt lines are clear.
 | 21 | "if two checkpoints both exceed 1.9/2.0" is unclear | what is being measured here? | Resolved | §IV opening: "score above 1.9 out of the maximum 2.0" |
 | 22 | "driven by their superior Max IoU" | what does it mean that humans have a "Max IoU" that is superior to something else? Maybe rephrase it in more natural language rather than the language used to define computational rewards? | Resolved | §IV-A3: "because they align the garment more precisely with its flattened shape" |
 | 23 | All-Garment > Task-Specific warrants analysis | This is a really interesting and warrants highlighting and analysis. If this is analysed later, I would reference that section here. | **Partial** | §IV-A3 now points to Figure 3(b) and §V. There is no dedicated analysis to point at — see comment 23 below |
-| 24 | Figure 3(a) encodes information by colour | This will not work when printing BW (as many people do for reading papers), but more importantly, it presents problems for people with disabilities, especially disabilities relating to colour. Simply numbering the methods would be easier to parse and will occupy the same amount of space. | **Blocked** | Agreed, but the figure cannot be re-rendered — see comment 24 below |
+| 24 | Figure 3(a) encodes information by colour | This will not work when printing BW (as many people do for reading papers), but more importantly, it presents problems for people with disabilities, especially disabilities relating to colour. Simply numbering the methods would be easier to parse and will occupy the same amount of space. | **Resolved** | Figure redrawn: marker shapes for the rows, text `Max`/`Last` and `N = …` labels for the columns — see comment 24 below |
 | 25 | Figure 3(a) caption still unclear | "columns pair, at each of 5, 10, 20 and 30 steps..." -- I'm afraid that this is a bit unclear still. | Resolved | Figure 3(a) caption rewritten around "Each horizon N contributes two adjacent columns" |
-| 26 | The horizon sweep needs motivation | "The planning ablation sweeps H ≡ Tf ∈ {1, 2, 3, 5}" -- this might need a bit of motivation, you are comparing the case where Tf = 4? | Resolved | §IV-C baselines: "covering short horizons densely and probing longer lookahead at H = 5". H = 4 is not evaluated |
+| 26 | The horizon sweep needs motivation | "The planning ablation sweeps H ≡ Tf ∈ {1, 2, 3, 5}" -- this might need a bit of motivation, you are comparing the case where Tf = 4? | Resolved | H = 4 has since been **run**, so the gap the reviewer spotted no longer exists: §IV-C now sweeps $\{1,2,3,4,5\}$, Figure 5(f) plots five points, and the results sentence quotes 36.7 % at H = 4 — see §5 |
 | 27 | Table II's yellow/grey shading is unexplained | Are these meant as comparisons to previously published mesh baselines? I would think that mentioning these in text would be easier to understand, leaving the table for reporting the results you measured in experiment only. | Resolved | All shading removed; the caption now says the VCD/MEDOR figures come from those papers and the table reports only our own trials |
 | 28 | Figure 6(b)'s "as-if-manipulating-other-object" is not glossed | I can see it later in the main text (p10) but you do not describe it in the caption (and you do describe other cases). | Resolved | Figure 6 caption |
 | 29 | Figure 6(d)'s 0/10 success rate is hard to defend | what it seems to show is that the method does not work on out-of-sample pieces. This could be used to question the ability to do zero-shot transfer like you claimed earlier. The NC, NU and IoU results are interesting, but 0/10 SR will lead someone to simply say "it does not work". | **Partial** | Figure 6(d)'s sub-caption now reports the 77.2 NC alongside the 0/10 — see comment 29 below |
@@ -125,17 +135,26 @@ is beyond a revision. Flagged here so it is a deliberate omission rather than an
 ### 24. Figure 3(a)'s colour-only encoding
 > Fig3a is problematic because you are using colours to encode information... Simply numbering the methods would be easier to parse and will occupy the same amount of space.
 
-**Blocked, and the criticism is correct.** Figure 3(a) identifies each of the 8 method rows by a
-coloured dot and each of the 8 column pairs by a coloured square, both resolved only through a
-legend. That fails in greyscale printing and for readers with colour-vision deficiency, and numbered
-or text row labels would indeed cost no space.
+**Resolved.** The old figure identified each of the 8 method rows by a coloured dot and each of the
+8 column pairs by a coloured square, both resolved only through a legend — unusable in greyscale
+and for readers with colour-vision deficiency. The figure has been redrawn:
 
-It cannot be fixed right now: `plot_lagarnet_metrics_heatmap` in
-`analysis/lagarnet/flattening_comparison_for_lagarnet_new.ipynb` (cell 4) reads
-`/media/halid/T7/garment_folding_data/lagarnet_data`, and the T7 drive is not mounted. The same
-blocker applies to Figure 5(a)–(d). The fix is roughly ten lines in that cell — replace the dot/square
-legend with text row labels and `Max`/`Last` column headers, keeping colour only for the heatmap
-cells themselves — and should be run the next time the drive is available.
+- **Rows** now carry a distinct marker *shape* (`o s ^ D v P * X`, star for our method). The
+  per-method colours are kept, but they are redundant: shape alone identifies the row.
+- **Columns** are labelled in text — `Max` / `Last` under each column of the bottom two panels,
+  with `N = 5`, `N = 10`, `N = 20`, `N = 30` centred beneath each pair, plus a white rule between
+  pairs. The "Action Steps" colour legend is gone, which pays back the space the text costs.
+- Cell shading stays, but every cell prints its own value, so nothing is encoded by colour alone.
+
+The data drive was still unavailable, so the 256 values were transcribed off the previous render
+rather than recomputed. Each panel was read twice at native resolution with identical results, and
+two of the values are independently asserted in the manuscript and match (the Diffusion Policy's SR
+of 43.3 % at 20 steps rising to 80.0 % at 30, and LaGarNet's 76.7 % SR within 20 steps against
+13.3 % at the final step, `main.tex:1129`). The transcription lives in `FIGURE_VALUES` in
+`analysis/lagarnet/replot_flattening_heatmap.py`; the drawing code moved there too, and notebook
+cell 4 now imports it, so re-running the notebook against the CSVs reproduces exactly this figure.
+
+Figure 5(a)–(d) is a separate figure and was not part of this comment; it still needs the drive.
 
 ⚠ Related: `analysis/lagarnet/ablation_{latent_bar,reward_bar,data_size_line}.png` are newer than
 the copies in `plots/` but **empty** — every bar renders at zero because they were regenerated
@@ -172,16 +191,27 @@ orientation and does not support this specific claim.
 
 ## 5. Changes made in this pass that the review did not ask for
 
-**The §IV-C horizon numbers are now verified against the run logs, not read off the figure.**
-`/home/halid/lagarnet_data` holds all five horizon evaluations and the stored notebook output
-reproduces them exactly: SR 73.3 / 63.3 / 53.3 / 30.0 at H = 1, 2, 3, 5, unconstrained SR 0.0 and
-final IoU 51.0 (the text said 50.9). The caveat carried since the previous pass is discharged.
+**The §IV-C horizon numbers are verified against the run logs, not read off the figure, and H = 4
+is now included.** `/home/halid/lagarnet_data` holds all six evaluations (H = 1–5 plus the
+unconstrained variant) and notebook cell 4 of `analysis/lagarnet/flattening_comparison_for_lagarnet_new.ipynb`
+reproduces the figure exactly:
+
+| H | 1 | 2 | 3 | 4 | 5 | unconstrained H = 1 |
+|---|---|---|---|---|---|---|
+| SR | 73.3 | 63.3 | 53.3 | **36.7** | 30.0 | 0.0 |
+| Final SR | 23.3 | 16.7 | 6.7 | 6.7 | 0.0 | 0.0 |
+| Final IoU | 71.5 | 70.8 | 68.5 | 64.6 | 60.6 | **51.0** |
+| Plan time (s) | 4.17 | 4.53 | 4.78 | 5.06 | 5.33 | 4.12 |
+
+SR still falls monotonically with H = 4 spliced in, so the §IV-C wording holds. The caveat carried
+since the previous pass is discharged, and the H = 4 gap flagged as internal comment 26 is closed.
 
 **The planning-time measurement is restored** with correct values — mean per action rises from
 4.17 s at H = 1 to 5.33 s at H = 5. External reviewer comment 4 explicitly asked for *performance
 and runtime*, so dropping this in the previous pass was a regression against an already-resolved
-comment. ⚠ `comments.md` §4 comment 4 still quotes the superseded figures (50.0 / 40.0 / 26.7 /
-20.0 % and 4.10 → 5.18 s) and needs updating.
+comment. ✔ `comments.md` §4 comment 4 has been updated to the figures above; it previously quoted
+the superseded 50.0 / 40.0 / 26.7 / 20.0 % and 4.10 → 5.18 s. Its comment 9 has likewise been
+corrected from "6.7 % success and 33.8 final IoU" to 0.0 % and 51.0 for the unconstrained variant.
 
 **The horizon ablation's protocol is corrected.** §IV-C claimed the 20-step protocol; the stored run
 used `max_steps=30`, so the text now says the planning ablation evaluates over 30 action steps.
@@ -197,11 +227,15 @@ report on a single garment type."
 ## 6. Open items
 
 - Equations 5 and 6 still use unparameterised `p` and `q` (comment 14).
-- Figure 3(a) and Figure 5(a)–(d) await the T7 drive (comment 24).
-- `comments.md` comment 4 quotes superseded horizon numbers (§5 above).
+- Figure 3(a) is redrawn but from values transcribed off the old render; re-run notebook cell 4
+  against the CSVs when the T7 drive is next mounted, which should reproduce it byte-for-byte
+  bar antialiasing (comment 24). Figure 5(a)–(d) still awaits the drive.
 - Symbol collisions carried over from earlier passes: `$H$` is both the MPC horizon and the image
   height; `$K$` is the CEM iteration count, the diffusion step count, and the number of SAM
   candidate masks.
+- No first-page `\thanks` footnote announces the supplementary material, and the submitted footage
+  is a 10× highlight cut rather than the uncut real-speed rollouts external comment 14 asked for
+  (`comments.md` §5).
 
 ## 7. Verification
 

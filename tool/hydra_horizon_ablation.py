@@ -34,6 +34,7 @@ VARIANTS = [
     ('H1', 1, True),
     ('H2', 2, True),
     ('H3', 3, True),
+    ('H4', 4, True),
     ('H5', 5, True),
     ('H1_unconstrained', 1, False),  # CEM without cloth/workspace mask rejection
 ]

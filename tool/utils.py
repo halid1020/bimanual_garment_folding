@@ -1,3 +1,4 @@
+import os
 import socket
 
 # utils.py
@@ -5,7 +6,15 @@ def resolve_save_root(default_root):
     """
     Returns the machine-specific save root based on the hostname.
     Falls back to default_root if the host is not recognized.
+
+    SAVE_ROOT overrides the hostname mapping entirely, so a run can point at a
+    checkpoint tree on an external drive without editing this table.
     """
+    override = os.environ.get('SAVE_ROOT', '').strip()
+    if override:
+        print(f"[tool.utils, resolve_save_root] SAVE_ROOT override: {override}")
+        return override
+
     hostname = socket.gethostname()
     print(f"[tool.utils, resolve_save_root] Detected Host: {socket.gethostname()}")
     if "pc282" in hostname:

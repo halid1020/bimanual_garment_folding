@@ -29,14 +29,23 @@ from registration.task import build_sim_task
 from tool.utils import resolve_save_root
 
 # The ablations this script exists for; edit here, not in the config.
-# (tag, planning_horizon, constrain_actions)
+# (tag, planning_horizon, constrain_actions, constrain_all_steps)
+#
+# constrain_all_steps additionally constrains planned actions k >= 1 to the
+# cloth mask the model predicts for that step, instead of leaving them
+# unconstrained as the default planner does. It separates the effect of
+# planning depth from the effect of the sampler; see the *_allstep variants.
 VARIANTS = [
-    ('H1', 1, True),
-    ('H2', 2, True),
-    ('H3', 3, True),
-    ('H4', 4, True),
-    ('H5', 5, True),
-    ('H1_unconstrained', 1, False),  # CEM without cloth/workspace mask rejection
+    ('H1', 1, True, False),
+    ('H2', 2, True, False),
+    ('H3', 3, True, False),
+    ('H4', 4, True, False),
+    ('H5', 5, True, False),
+    ('H1_unconstrained', 1, False, False),  # CEM without cloth/workspace mask rejection
+    ('H2_allstep', 2, True, True),
+    ('H3_allstep', 3, True, True),
+    ('H4_allstep', 4, True, True),
+    ('H5_allstep', 5, True, True),
 ]
 
 
@@ -51,10 +60,12 @@ def _unwrap(cfg: DictConfig, marker_keys) -> DictConfig:
     return cfg
 
 
-def _append_runtime_row(runtime_csv, episode_config, horizon, constrained, durations):
+def _append_runtime_row(runtime_csv, episode_config, horizon, constrained,
+                        durations, all_steps=False):
     row = pd.DataFrame([{
         'tier': episode_config['tier'],
         'episode_id': episode_config['eid'],
+        'constrain_all_steps': all_steps,
         'planning_horizon': horizon,
         'constrain_actions': constrained,
         'num_steps': len(durations),
@@ -86,13 +97,27 @@ def main(cfg: DictConfig) -> None:
     source_save_dir = os.path.join(save_root, train_cfg.exp_name)
     print(f"[horizon_ablation] Checkpoint dir: {source_save_dir}")
 
-    for tag, horizon, constrained in VARIANTS:
+    # Optional filter so a re-run can target new variants only, e.g.
+    # HORIZON_VARIANTS=H2_allstep,H3_allstep,H4_allstep,H5_allstep
+    only = os.environ.get('HORIZON_VARIANTS', '').strip()
+    wanted = {t for t in only.split(',') if t} if only else None
+    if wanted is not None:
+        unknown = wanted - {v[0] for v in VARIANTS}
+        if unknown:
+            raise ValueError(f"Unknown HORIZON_VARIANTS entries: {sorted(unknown)}")
+        print(f"[horizon_ablation] Restricted to variants: {sorted(wanted)}")
+
+    for tag, horizon, constrained, all_steps in VARIANTS:
+        if wanted is not None and tag not in wanted:
+            continue
         print(f"\n{'='*60}\n[horizon_ablation] Variant {tag}: H = {horizon}, "
-              f"constrain_actions = {constrained}\n{'='*60}")
+              f"constrain_actions = {constrained}, "
+              f"constrain_all_steps = {all_steps}\n{'='*60}")
 
         agent_cfg = copy.deepcopy(train_cfg.agent)
         agent_cfg.policy.params.planning_horizon = horizon
         agent_cfg.policy.params.constrain_actions = constrained
+        agent_cfg.policy.params.constrain_all_steps = all_steps
         # Ablation arenas define no robot workspace (no 'robot0_mask' in obs);
         # the horizon ablation isolates planning depth, so drop the workspace
         # constraint. No-op for policies that already leave it False.
@@ -151,7 +176,8 @@ def main(cfg: DictConfig) -> None:
                     continue
                 os.makedirs(os.path.dirname(runtime_csv), exist_ok=True)
                 _append_runtime_row(runtime_csv, episode_config, horizon,
-                                    constrained, res['action_durations'])
+                                    constrained, res['action_durations'],
+                                    all_steps=all_steps)
 
             arena.close()  # release the PyFlex/OpenGL context between runs
 

@@ -10,7 +10,9 @@ No author names and no institutions are spoken — the deck is recorded with `?h
 The closing references slide has no section here on purpose: any deck slide past the last
 script section is held silently at the end of the video.
 
-Voice: `en-GB-RyanNeural` (edge-tts). Running time ~6:40.
+Voice: the author's own recording, `my_narration/slide-N.ogg`, one file per section below.
+Running time ~8:27. `build_video.py --voice tts` re-synthesises the script with edge-tts
+(`en-GB-RyanNeural`) instead, which is how the earlier 7:26 cut was made.
 
 ---
 

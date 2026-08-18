@@ -3,7 +3,8 @@
 
 Pipeline (deterministic; not a screen recording, so audio and slides cannot drift):
 
-  script.md  --edge-tts-->  narration/NN.mp3  --ffprobe-->  true per-slide durations
+  my_narration/slide-N.ogg (the author's own recording; --voice tts synthesises
+      script.md to narration/NN.mp3 instead)  --ffprobe-->  true per-slide durations
   lagarnet-5min.html  --headless Chrome-->  1920x1080 stills (authors hidden)
   still + narration  --ffmpeg-->  one segment per slide, exactly as long as its narration
   slide 9 additionally composites the four rollout clips into their real tile rectangles,
@@ -11,7 +12,11 @@ Pipeline (deterministic; not a screen recording, so audio and slides cannot drif
   segments  --concat-->  lagarnet-talk.mp4   (+ .srt and .ass sidecars)
   deck slides past the last script section are held silently at the end
 
-Run:  <venv-with-edge-tts>/bin/python build_video.py [--skip-tts]
+Needs numpy + Pillow (the slide-9 tile measurement), ffmpeg and Chrome/Chromium.
+The `magpie` conda env has all of them; --voice tts additionally needs edge-tts.
+
+Run:  conda activate magpie && python build_video.py    # the recorded narration
+      <venv-with-edge-tts>/bin/python build_video.py --voice tts [--skip-tts]
 """
 
 from __future__ import annotations
@@ -28,7 +33,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DECK = HERE / "lagarnet-5min.html"
 SCRIPT = HERE / "script.md"
-NARR_DIR = HERE / "narration"
+NARR_SOURCES = {                    # voice -> (directory, filename pattern)
+    "mine": (HERE / "my_narration", "slide-{num}.ogg"),   # the author's own recording
+    "tts":  (HERE / "narration",    "{num:02d}.mp3"),     # edge-tts, kept reproducible
+}
 OUT_MP4 = HERE / "lagarnet-talk.mp4"
 OUT_SRT = HERE / "lagarnet-talk.srt"
 OUT_ASS = HERE / "lagarnet-talk.ass"
@@ -41,7 +49,7 @@ WORK = Path(
     )
 )
 
-VOICE = "en-GB-RyanNeural"
+VOICE = "en-GB-RyanNeural"          # --voice tts only
 RATE = os.environ.get("LAGARNET_RATE", "+0%")   # e.g. "-5%" to slow the narrator down
 W, H, FPS = 1920, 1080, 30
 GAP = 0.35            # silence appended after each slide's narration
@@ -56,6 +64,10 @@ SUB_MAX_CHARS = 84             # per cue, wrapped onto at most two ~42-char line
 SUB_MAX_SECS = 6.0
 
 SILENT_HOLD = 8.0              # seconds to hold each deck slide that has no narration
+
+# The recorded narration peaks at 0 dBFS and drifts a few dB between slides, so it is
+# levelled on the way in; edge-tts already comes out consistent and is left alone.
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
 
 CHROME = next(
     (c for c in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
@@ -99,20 +111,22 @@ def parse_script() -> list[dict]:
 
 # ------------------------------------------------------------------- tts -----
 
-def synthesise(sections, skip=False):
-    NARR_DIR.mkdir(exist_ok=True)
+def synthesise(sections, narr_dir, pattern, skip=False):
+    narr_dir.mkdir(exist_ok=True)
+    todo = [s for s in sections
+            if not (skip and (narr_dir / pattern.format(num=s["num"])).exists())]
+    if not todo:
+        # edge-tts is imported lazily, so --skip-tts works in any environment
+        print(f"  all {len(sections)} clips already present in {narr_dir.name}/")
+        return
+
     import asyncio
     import edge_tts
 
-    async def one(sec):
-        out = NARR_DIR / f"{sec['num']:02d}.mp3"
-        if skip and out.exists():
-            return
-        await edge_tts.Communicate(sec["text"], VOICE, rate=RATE).save(str(out))
-
     async def all_():
-        for sec in sections:          # serial: the endpoint dislikes bursts
-            await one(sec)
+        for sec in todo:              # serial: the endpoint dislikes bursts
+            out = narr_dir / pattern.format(num=sec["num"])
+            await edge_tts.Communicate(sec["text"], VOICE, rate=RATE).save(str(out))
             print(f"  narrated {sec['num']:02d} — {sec['title']}")
 
     asyncio.run(all_())
@@ -192,7 +206,8 @@ def tag_overlay(rects_png, rects, out_png):
 # -------------------------------------------------------------- segments -----
 
 V_ENC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-         "-r", str(FPS), "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart"]
+         "-r", str(FPS), "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+         "-movflags", "+faststart"]
 
 
 def deck_slide_count() -> int:
@@ -207,10 +222,11 @@ def silent_segment(png, dur, out):
          "-map", "[v]", "-map", "1:a", "-t", f"{dur:.3f}", *V_ENC, str(out)])
 
 
-def static_segment(png, mp3, dur, out):
+def static_segment(png, mp3, dur, out, afilt=""):
     run(["ffmpeg", "-y", "-loop", "1", "-i", str(png), "-i", str(mp3),
          "-filter_complex",
-         f"[0:v]scale={W}:{H},fps={FPS},format=yuv420p[v];[1:a]apad=pad_dur={GAP}[a]",
+         f"[0:v]scale={W}:{H},fps={FPS},format=yuv420p[v];"
+         f"[1:a]{afilt}apad=pad_dur={GAP}[a]",
          "-map", "[v]", "-map", "[a]", "-t", f"{dur + GAP:.3f}", *V_ENC, str(out)])
 
 
@@ -219,7 +235,7 @@ def tile_video_width(tile_h: int) -> int:
     return int(round(tile_h * CLIP_W / CLIP_H)) // 2 * 2
 
 
-def wall_segment(png, tags_png, clips, rects, mp3, dur, out):
+def wall_segment(png, tags_png, clips, rects, mp3, dur, out, afilt=""):
     inputs = ["-loop", "1", "-i", str(png)]
     for c in clips:
         inputs += ["-stream_loop", "-1", "-i", str(c)]
@@ -242,7 +258,7 @@ def wall_segment(png, tags_png, clips, rects, mp3, dur, out):
         fc.append(f"[{prev}][c{i}]overlay={ox}:{y}:shortest=0[{nxt}]")
         prev = nxt
     fc.append(f"[{prev}][{tag_idx}:v]overlay=0:0,format=yuv420p[v]")
-    fc.append(f"[{tag_idx + 1}:a]apad=pad_dur={GAP}[a]")   # the mp3 is the last input
+    fc.append(f"[{tag_idx + 1}:a]{afilt}apad=pad_dur={GAP}[a]")   # audio is the last input
 
     run(["ffmpeg", "-y", *inputs, "-i", str(mp3), "-filter_complex", ";".join(fc),
          "-map", "[v]", "-map", "[a]", "-t", f"{dur + GAP:.3f}", *V_ENC, str(out)])
@@ -361,20 +377,38 @@ def write_subs(sections, durs):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--voice", choices=sorted(NARR_SOURCES), default="mine",
+                    help="'mine' = the recordings in my_narration/ (default); "
+                         "'tts' = synthesise the script with edge-tts")
     ap.add_argument("--skip-tts", action="store_true",
-                    help="reuse narration/*.mp3 instead of re-synthesising")
+                    help="--voice tts only: reuse narration/*.mp3 instead of re-synthesising")
     args = ap.parse_args()
     if CHROME is None:
         raise SystemExit("no Chrome/Chromium on PATH")
     WORK.mkdir(parents=True, exist_ok=True)
 
+    narr_dir, pattern = NARR_SOURCES[args.voice]
+    afilt = f"{LOUDNORM}," if args.voice == "mine" else ""
+
     sections = parse_script()
     print(f"script.md: {len(sections)} sections, "
           f"{sum(len(s['text'].split()) for s in sections)} words")
 
-    print("synthesising narration…")
-    synthesise(sections, skip=args.skip_tts)
-    durs = [duration(NARR_DIR / f"{s['num']:02d}.mp3") for s in sections]
+    def narration_of(sec):
+        return narr_dir / pattern.format(num=sec["num"])
+
+    if args.voice == "tts":
+        print("synthesising narration…")
+        synthesise(sections, narr_dir, pattern, skip=args.skip_tts)
+    else:
+        missing = [s["num"] for s in sections if not narration_of(s).exists()]
+        if missing:
+            raise SystemExit(
+                f"no recording for script section(s) {missing} in {narr_dir} "
+                f"(expected {pattern}); record them or run with --voice tts")
+        print(f"using recorded narration from {narr_dir.name}/, levelled with {LOUDNORM}")
+
+    durs = [duration(narration_of(s)) for s in sections]
     for s, d in zip(sections, durs):
         print(f"  {s['num']:02d} {d:6.2f}s  {s['title']}")
     total = sum(durs) + GAP * len(durs)
@@ -406,11 +440,11 @@ def main():
     for s, d in zip(sections, durs):
         out = WORK / f"seg{s['num']:02d}.mp4"
         png = WORK / f"s{s['num']:02d}.png"
-        mp3 = NARR_DIR / f"{s['num']:02d}.mp3"
+        aud = narration_of(s)
         if s["num"] == VIDEO_SLIDE:
-            wall_segment(png, WORK / "tags.png", clips, rects, mp3, d, out)
+            wall_segment(png, WORK / "tags.png", clips, rects, aud, d, out, afilt)
         else:
-            static_segment(png, mp3, d, out)
+            static_segment(png, aud, d, out, afilt)
         segs.append(out)
         print(f"  seg {s['num']:02d} ok")
 

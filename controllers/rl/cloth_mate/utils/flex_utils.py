@@ -207,7 +207,7 @@ def set_to_flatten(config, cloth_particle_radius=0.00625):
     py = np.linspace(
         0, cloth_dimz * cloth_particle_radius, cloth_dimz)
     xx, yy = np.meshgrid(px, py)
-    new_pos = np.empty(shape=(N, 4), dtype=np.float)
+    new_pos = np.empty(shape=(N, 4), dtype=float)
     new_pos[:, 0] = xx.flatten()
     new_pos[:, 1] = cloth_particle_radius
     new_pos[:, 2] = yy.flatten()

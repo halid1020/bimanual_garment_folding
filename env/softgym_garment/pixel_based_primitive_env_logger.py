@@ -9,6 +9,7 @@ from .draw_utils import *
 # Make sure to import your NumpyEncoder from wherever it lives in your project
 from real_robot.utils.save_utils import NumpyEncoder
 from .step_data_utils import save_step_data, save_final_state
+from .action_primitives.hybrid_action_primitive import as_primitive_action
 
 class PixelBasedPrimitiveEnvLogger(VideoLogger):
 
@@ -94,6 +95,7 @@ class PixelBasedPrimitiveEnvLogger(VideoLogger):
         for i, act in enumerate(actions):
             info = result["information"][i]
             obs = info["observation"]
+            act = as_primitive_action(act)
             key = list(act.keys())[0]
             val = act[key]
 

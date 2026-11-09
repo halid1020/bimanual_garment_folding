@@ -2,7 +2,7 @@
 #         source ./setup.sh xarm     # env + configure the wired NIC for the Lite 6 arms
 _MP_SETUP_FLAG="${1:-}"   # captured first: sourcing softgym's setup.sh can clobber $1
 
-conda activate magpie
+conda activate "${MAGPIE_CONDA_ENV:-magpie}"
 if [ -d "../softgym" ]; then
   cd ../softgym
   . ./setup.sh

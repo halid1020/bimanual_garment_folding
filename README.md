@@ -30,7 +30,7 @@
 
 Before proceeding, please ensure you have already installed and tested the following:
 * Install the `py3.10` branch of the [`softgym`](https://github.com/halid1020/softgym/tree/py3.10) repository (only required for simulation experiments).
-* Checkout the `develop` branch of the [`actoris_harena`](https://github.com/halid1020/actoris_harena/tree/develop) repository.
+* Checkout the `main` branch of the [`actoris_harena`](https://github.com/st-cortex-lab/actoris_harena) repository.
 * Install `realsense-viewer` for real-world experiments.
 
 Please put `softgym`, `actoris_harena` and this `bimanual_garment_foling` repository at the same level in parallel under the same direcotry.
@@ -49,27 +49,25 @@ conda deactivate
 conda remove -n magpie --all
 ```
 
-### Step 2: Install the `actoris_harena` package
-Navigate to your `actoris_harena` directory and install it with the Torch dependencies:
+### Step 2: Install the pinned requirements and `actoris_harena`
+`actoris_harena` (`main` branch) carries the tested, pinned environment for MAGPIE:
 ```bash
-cd <path-to-actoris-harena>
-pip install -e ".[torch]"
+pip install -r ../actoris_harena/requirements/magpie.txt
+pip install -e ../actoris_harena --no-deps
 ```
+`setup.sh` activates `magpie`; set `MAGPIE_CONDA_ENV` to use another environment.
 
-### Step 3: Install additional required packages
-Install the remaining dependencies required for this repository:
-> **TODO:** Make this part installation from toml with fine-grained installation control.
-
+### Step 3: Baselines that need more
+The VCD baseline (`controllers/rl/vcd`) also needs PyG. Its wheels require glibc >= 2.32, so they do
+not load on an EL8 cluster such as Viking:
 ```bash
-pip install pycurl
-pip install segment_anything==1.0
-pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.4.1+cu121.html
-pip install torch_geometric
-
-# To enable running ClothMate:
-pip install trimesh
-pip install OpenEXR
+pip install torch-geometric torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.12.1+cu126.html
 ```
+UniFolding has its own environment (see below).
+
+On a hybrid-GPU laptop or a cluster node, `export __GLX_VENDOR_LIBRARY_NAME=nvidia __NV_PRIME_RENDER_OFFLOAD=1`
+before running, or pyflex falls back to Mesa and crashes at start-up (the Viking job generator
+already does this).
 
 ### Step 4: Setup Assets (Simulation Only)
 Download and unzip the [`assets.zip`](https://drive.google.com/file/d/1Pwqvu1bGxKbL7Qpt_ots3vQJbzCEBsIa/view?usp=sharing) file into the root directory of this repository (`bimanual_garment_folding`). This folder contains the meshes, goal states, and semantic keypoint configurations required for garment folding. 

@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 
 from statistics import mean
@@ -158,6 +159,11 @@ class GarmentFlatteningTask(GarmentTask):
     def _get_algn_IoU_to_flattened(self, arena):
         cur_mask = arena.cloth_mask
         goal_mask = arena.get_flattened_obs()['observation']['mask']
+        if cur_mask.shape[:2] != goal_mask.shape[:2]:
+            # cloth_mask is the camera-resolution crop; the goal is at the
+            # observation resolution, which differs on e.g. the resol_64 arenas.
+            cur_mask = cv2.resize(cur_mask.astype(np.uint8), goal_mask.shape[:2][::-1],
+                                  interpolation=cv2.INTER_NEAREST) > 0
         IoU = calculate_iou(cur_mask, goal_mask)
         return IoU
     

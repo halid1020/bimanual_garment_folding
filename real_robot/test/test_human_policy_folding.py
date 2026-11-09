@@ -5,7 +5,7 @@ from bimanual_garment_folding.controllers.human.real_world_human_policy import H
 from dotmap import DotMap
 import time
 import numpy as np
-from agent_arena.api import run
+from actoris_harena.api import run
 
 from real_robot.tasks.garment_folding_task import RealWorldGarmentFoldingTask
 

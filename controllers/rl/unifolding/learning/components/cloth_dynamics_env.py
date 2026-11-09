@@ -166,7 +166,7 @@ class ClothDynamicsEnv(RFUniverseBaseEnv):
 
     def receive_best_grasp_points(self, msg: IncomingMessage):
         best_grasp_points = np.array(msg.read_float32_list()).reshape(-1, 3).astype(np.float32)  # (K, 3)
-        is_valid = np.array(msg.read_float32_list()).astype(np.bool)  # (k, )
+        is_valid = np.array(msg.read_float32_list()).astype(bool)  # (k, )
         valid_grasp_points = best_grasp_points[is_valid, :]  # (N', 3)
         invalid_grasp_points = best_grasp_points[~is_valid, :]  # (N'', 3)
         if valid_grasp_points.shape[0] < 2:

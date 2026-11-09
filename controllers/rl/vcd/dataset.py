@@ -82,7 +82,7 @@ class ClothDataset(Dataset):
         downsample_observable_idx = get_observable_particle_index_old(world_coordinates, position[downsample_idx], rgb, depth)
         # TODO Try new way of getting observable index
         observable_idx = get_observable_particle_index(world_coordinates, position, rgb, depth)
-        # all_idx = np.zeros(shape=(len(position)), dtype=np.int)
+        # all_idx = np.zeros(shape=(len(position)), dtype=int)
         # all_idx[observable_idx] = 1
         # downsample_observable_idx = np.where(all_idx[downsample_idx] > 0)[0]
 
@@ -216,7 +216,7 @@ class ClothDataset(Dataset):
         cloth_xdim, cloth_ydim = int(cloth_xdim), int(cloth_ydim)
         all_idx = np.arange(cloth_xdim * cloth_ydim).reshape([cloth_ydim, cloth_xdim])
         if observable_particle_idx is not None:
-            observable_mask = np.zeros(cloth_xdim * cloth_ydim, dtype=np.int)
+            observable_mask = np.zeros(cloth_xdim * cloth_ydim, dtype=int)
             observable_mask[observable_particle_idx] = 1
             # the observable particle index is in the downsample range, e.g., downsample_particle_pos[observable_particle_idx],
             # need to change this to be in the range [0, len(observable_particle_idx) - 1]
@@ -263,8 +263,8 @@ class ClothDataset(Dataset):
 
             senders = [edge_map[x] for x in obsverable_senders]
             receivers = [edge_map[x] for x in observable_receivers]
-            senders = np.array(senders, dtype=np.long).reshape((-1, 1))
-            receivers = np.array(receivers, dtype=np.long).reshape((-1, 1))
+            senders = np.array(senders, dtype=np.int64).reshape((-1, 1))
+            receivers = np.array(receivers, dtype=np.int64).reshape((-1, 1))
 
         new_senders = np.concatenate([senders, receivers], axis=0)
         new_receivers = np.concatenate([receivers, senders], axis=0)

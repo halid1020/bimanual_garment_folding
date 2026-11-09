@@ -4,6 +4,24 @@ from gym.spaces import Dict
 from .pixel_pick_and_fling import PixelPickAndFling
 from .pixel_pick_and_place import PixelPickAndPlace
 
+
+def as_primitive_action(action):
+    """The {primitive name: parameters} dict this primitive dispatches on.
+
+    A bare array -- what the heuristic folding policies return when run on
+    their own rather than inside a stitching policy -- names its primitive by
+    size: 8 is a dual pick-and-place, 4 a single one.
+    """
+    if not isinstance(action, np.ndarray):
+        return action
+    flat = action.reshape(-1)
+    if flat.size == 8:
+        return {'norm-pixel-dual-pick-and-place': flat}
+    if flat.size == 4:
+        return {'norm-pixel-single-pick-and-place': flat}
+    raise ValueError(f'Action not recognized: array of size {flat.size}')
+
+
 class HybridActionPrimitive():
     """
     An orchestrator class that maps higher-level hybrid actions to specific 
@@ -71,6 +89,7 @@ class HybridActionPrimitive():
         If the sub-action is provided as a flat np.ndarray (num_picker, 2, 3), 
         it formats it into the expected key-value pairs before passing it down.
         """
+        action = as_primitive_action(action)
         if 'norm-pixel-pick-and-fling' in action:
             act = action['norm-pixel-pick-and-fling']
             if isinstance(act, np.ndarray):
